@@ -47,7 +47,7 @@ globalThis.__usai_sdk = {
     return app.workloads[index](JSON.parse(inputJson));
   },
 };
-export default { workloads: ids.map((id) => workloads[id]), ids };
+globalThis.__usai_app = { workloads: ids.map((id) => workloads[id]), ids };
 "#;
 
 fn task(id: &str) -> WorkloadSpec {
@@ -118,7 +118,7 @@ fn config() -> RuntimeConfig {
 }
 
 async fn runtime() -> Arc<Runtime> {
-    let engine = QuickJsEngine::new(QuickJsConfig::default());
+    let engine = usai_runtime::engine::from_env(64).unwrap();
     let rt = Runtime::with_env(engine, config(), |_| None);
     let rev = rt.install(definition("t")).await.unwrap();
     rt.activate(rev.id).await.unwrap();
@@ -246,7 +246,7 @@ async fn cancelled_world_leaves_no_stale_execution_rights() {
 
 #[tokio::test]
 async fn deadline_ends_the_world_and_ownership_returns() {
-    let engine = QuickJsEngine::new(QuickJsConfig::default());
+    let engine = usai_runtime::engine::from_env(64).unwrap();
     let rt = Runtime::with_env(
         engine,
         RuntimeConfig {
@@ -338,7 +338,7 @@ async fn concurrent_worlds_do_not_share_state() {
 
 #[tokio::test]
 async fn admission_is_refused_at_the_boundary_when_budget_is_exhausted() {
-    let engine = QuickJsEngine::new(QuickJsConfig::default());
+    let engine = usai_runtime::engine::from_env(64).unwrap();
     let rt = Runtime::with_env(
         engine,
         RuntimeConfig {

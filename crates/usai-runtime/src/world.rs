@@ -221,7 +221,12 @@ impl WorldDriver {
             max_logs: 1_000,
         });
         let bindings: Arc<dyn HostBindings> = Arc::clone(&shared) as Arc<dyn HostBindings>;
+        let t_inst = std::time::Instant::now();
         let instance = engine.instantiate(&spec.compiled, bindings).await?;
+        tracing::debug!(
+            engine_instantiate_ms = t_inst.elapsed().as_secs_f64() * 1000.0,
+            "driver create"
+        );
         // Every fallible step is done: the live-world gauge rises only once
         // the driver that lowers it exists.
         let gauges = Arc::clone(&ledger.gauges);

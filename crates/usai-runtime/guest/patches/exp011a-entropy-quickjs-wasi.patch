@@ -1,0 +1,25 @@
+diff --git a/c/interface.c b/c/interface.c
+index d29c3af22..6da7d69ab 100644
+--- a/c/interface.c
++++ b/c/interface.c
+@@ -547,6 +547,20 @@ void qjs_set_max_stack_size(size_t size) {
+     if (rt) JS_SetMaxStackSize(rt, size);
+ }
+ 
++/*
++ * Usai EXP-011A: give this instance its own Math.random stream.
++ *
++ * A pre-initialized image carries the random_state that was seeded when the
++ * context was created at build time, so every restored instance would otherwise
++ * produce the same sequence. The host calls this exactly once per fresh
++ * instance, before any application code runs. It does not rebuild the context
++ * and does not touch the internal hash seed.
++ */
++__attribute__((export_name("qjs_reseed_math_random")))
++void qjs_reseed_math_random(uint64_t seed) {
++    if (ctx) JS_UsaiSetRandomSeed(ctx, seed);
++}
++
+ __attribute__((export_name("qjs_run_gc")))
+ void qjs_run_gc(void) {
+     if (rt) JS_RunGC(rt);

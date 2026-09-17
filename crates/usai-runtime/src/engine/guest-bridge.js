@@ -15,6 +15,12 @@
   let cancelled = null;
   let stopping = null;
   let outcome = null;
+  // On the Wasm substrate the core installs `__usai_test_op` (C): it owns the
+  // pending promises and allocates ids sequentially from 1; the bridge mirrors
+  // the counter so timers can be cancelled by id. On the native substrate the
+  // host installs `__usai_host_start` instead.
+  const nativeOp = typeof globalThis.__usai_test_op === "function" ? globalThis.__usai_test_op : null;
+  let nextNativeId = 1;
 
   function bridgeError(code, message) {
     const error = new Error(message);
@@ -23,7 +29,38 @@
     return error;
   }
 
+  function errorFromPayload(payload) {
+    try {
+      const parsed = JSON.parse(payload);
+      const error = new Error(parsed.message || "operation failed");
+      error.name = parsed.name || "UsaiOperationError";
+      error.usai = parsed.usai || { code: parsed.code || "operation_failed", status: parsed.status || 500 };
+      return error;
+    } catch (_) {
+      return bridgeError("operation_failed", String(payload));
+    }
+  }
+
   function startOp(kind, payload) {
+    const text = payload === undefined ? "" : String(payload);
+    if (nativeOp) {
+      if (cancelled !== null) {
+        return { id: -1, promise: Promise.reject(bridgeError("cancelled", "work was cancelled: " + cancelled)) };
+      }
+      const id = nextNativeId++;
+      pending.set(id, { kind: String(kind), native: true });
+      const promise = nativeOp(0, String(kind) + "\u0000" + text).then(
+        (value) => { pending.delete(id); return value; },
+        (error) => {
+          pending.delete(id);
+          if (error && error.code === "EXP011C_CANCELLED") throw bridgeError("cancelled", String(error.message));
+          if (error && error.code === "EXP011C_START_REJECTED") throw bridgeError("op_refused", "host refused operation " + kind);
+          if (error && error.code === "EXP011C_HOST_ERROR") throw errorFromPayload(error.message);
+          throw error;
+        },
+      );
+      return { id, promise };
+    }
     let id = -1;
     const promise = new Promise((resolve, reject) => {
       if (cancelled !== null) {
@@ -59,7 +96,16 @@
     },
     startOp,
     cancelOp(id) {
-      if (pending.delete(id)) __usai_host_cancel(id);
+      if (!pending.has(id)) return;
+      if (nativeOp) {
+        // A control operation the host answers synchronously (refused, so
+        // the core drops its promise); the pending entry clears on rejection.
+        nextNativeId++;
+        nativeOp(0, "__cancel\u0000" + id).catch(() => {});
+        return;
+      }
+      pending.delete(id);
+      __usai_host_cancel(id);
     },
     // Called by the host. Returns true only when the completion reached a
     // live pending operation; anything else is the host's fault to account.
@@ -68,18 +114,7 @@
       if (!entry) return false;
       pending.delete(id);
       if (ok) entry.resolve(payload);
-      else {
-        let error;
-        try {
-          const parsed = JSON.parse(payload);
-          error = new Error(parsed.message || "operation failed");
-          error.name = parsed.name || "UsaiOperationError";
-          error.usai = parsed.usai || { code: parsed.code || "operation_failed", status: parsed.status || 500 };
-        } catch (_) {
-          error = bridgeError("operation_failed", String(payload));
-        }
-        entry.reject(error);
-      }
+      else entry.reject(errorFromPayload(payload));
       return true;
     },
     pendingCount() {
@@ -104,6 +139,8 @@
       for (const fn of cancelListeners) {
         try { fn(cancelled); } catch (_) {}
       }
+      // Native core: the host rejects outstanding operations itself.
+      if (nativeOp) return;
       const entries = Array.from(pending.values());
       pending.clear();
       for (const entry of entries) {
@@ -121,6 +158,8 @@
       for (const fn of listeners) {
         try { fn(stopping); } catch (_) {}
       }
+      // Native core: the host resolves outstanding timers itself.
+      if (nativeOp) return;
       for (const [id, entry] of Array.from(pending.entries())) {
         if (entry.kind === "timer") {
           pending.delete(id);
@@ -135,7 +174,8 @@
     invoke(index, inputJson) {
       outcome = null;
       const sdk = globalThis.__usai_sdk;
-      const app = globalThis.__usai_app;
+      const ns = globalThis.__usai_app_ns;
+      const app = globalThis.__usai_app !== undefined ? globalThis.__usai_app : ns && ns.default;
       let promise;
       try {
         if (!sdk || typeof sdk.invoke !== "function") {
@@ -255,11 +295,14 @@
   function safeStringify(value) {
     try { return JSON.stringify(value); } catch (_) { return String(value); }
   }
+  const log = nativeOp
+    ? (level, message) => { nextNativeId++; nativeOp(0, "__log\u0000" + level + "\u0000" + message).catch(() => {}); }
+    : (level, message) => __usai_host_log(level, message);
   globalThis.console = {
-    log: (...a) => __usai_host_log("info", fmt(a)),
-    info: (...a) => __usai_host_log("info", fmt(a)),
-    debug: (...a) => __usai_host_log("debug", fmt(a)),
-    warn: (...a) => __usai_host_log("warn", fmt(a)),
-    error: (...a) => __usai_host_log("error", fmt(a)),
+    log: (...a) => log("info", fmt(a)),
+    info: (...a) => log("info", fmt(a)),
+    debug: (...a) => log("debug", fmt(a)),
+    warn: (...a) => log("warn", fmt(a)),
+    error: (...a) => log("error", fmt(a)),
   };
 })();

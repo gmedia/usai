@@ -721,6 +721,7 @@ impl Runtime {
             });
             merged
         };
+        let t_create = std::time::Instant::now();
         let driver = WorldDriver::create(
             self.engine.as_ref(),
             Arc::clone(&self.ledger),
@@ -739,7 +740,11 @@ impl Runtime {
             },
         )
         .await?;
+        let create_ms = t_create.elapsed().as_secs_f64() * 1000.0;
+        let t_run = std::time::Instant::now();
         let result = driver.run(&input).await;
+        let run_ms = t_run.elapsed().as_secs_f64() * 1000.0;
+        tracing::debug!(create_ms, run_ms, "world phases");
         crate::observability::trace_world(&result, &revision.id.to_string());
         drop(in_flight);
         Ok(result)

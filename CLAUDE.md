@@ -39,7 +39,9 @@ cargo run -p usai-cli -- --root <project> test [files]             # node --test
 cargo run -p usai-cli -- --log-format json run --status ...       # JSON logs; /_usai/status + /_usai/metrics
 cargo run -p usai-cli -- --root <project> run --artifact .usai/build --control 127.0.0.1:3900   # orchestrator surface (USAI_CONTROL_TOKEN)
 cargo run --release -p usai-cli -- --root examples/hello bench --path /hello/x -c 16 -d 10   # engineering load test (release build!)
-cargo test --release -p usai-runtime --test profile_world -- --ignored --nocapture   # per-world cost breakdown
+cargo test --release -p usai-runtime --test profile_bundles -- --ignored --nocapture # per-world / per-request cost, both engines (USAI_ENGINE=wasm|quickjs)
+USAI_ENGINE=quickjs cargo test -p usai-runtime --test lifecycle                        # run a suite on the reference engine
+crates/usai-runtime/guest/build.sh                                                     # rebuild the core (-O3); OPT=-Oz reproduces the research core
 ```
 
 Single tests:
@@ -60,7 +62,7 @@ Toolchain pins: Rust 1.98.1 (`rust-toolchain.toml`), Node ≥ 24, pnpm 12.3.4 (`
 
 ## Architecture in one screen
 
-Five lifetimes, always distinct in code (`docs/LIFECYCLE-CONTRACTS.md` C1). In `crates/usai-runtime/src`: `runtime.rs` (persistent, revisions) → `definition.rs` (immutable) → `world.rs` (`WorldDriver`, one routing gate) → `host_ops.rs` (operation owners) / `resource/` (leases, terminal proof; `postgres.rs` is the C5 reference implementation); `ownership.rs` is the bounded ledger; `engine/` is the substrate boundary (only `engine/quickjs.rs` may import `rquickjs`); `engine/guest-bridge.js` + `docs/GUEST-ABI.md` is the host↔guest contract; `http/` is the request pipeline (route → decode → validate → admit → world → encode; `stream.rs` and `socket.rs` are the connection-bound attachments); `workloads/` is tasks (invoke/dispatch ops + `TaskQueue`), cron (per-revision schedulers), services (supervisor + graceful stop), queue (PostgreSQL-backed consumers); `control.rs` is the orchestrator surface (install/activate/drain/remove/stop); `build.rs` is the build phase (esbuild via the SDK's `build/bundle.mjs`, then manifest extraction in a capability-less world). The TypeScript side is `packages/usai/src`: declarations → `manifest.ts` (`describe`) and `runtime/sdk.ts` (`invoke`) must agree on workload ordinals via `flatten()`.
+Five lifetimes, always distinct in code (`docs/LIFECYCLE-CONTRACTS.md` C1). In `crates/usai-runtime/src`: `runtime.rs` (persistent, revisions) → `definition.rs` (immutable) → `world.rs` (`WorldDriver`, one routing gate) → `host_ops.rs` (operation owners) / `resource/` (leases, terminal proof; `postgres.rs` is the C5 reference implementation); `ownership.rs` is the bounded ledger; `engine/` is the substrate boundary (`engine/wasm.rs` = Wasmtime + Wizer image + pooling/COW, the default, ADR-0016; `engine/quickjs.rs` = native reference, ADR-0015; only those files may import `wasmtime`/`rquickjs`); `guest/build.sh` rebuilds the core from pinned sources; `engine/guest-bridge.js` + `docs/GUEST-ABI.md` is the host↔guest contract; `http/` is the request pipeline (route → decode → validate → admit → world → encode; `stream.rs` and `socket.rs` are the connection-bound attachments); `workloads/` is tasks (invoke/dispatch ops + `TaskQueue`), cron (per-revision schedulers), services (supervisor + graceful stop), queue (PostgreSQL-backed consumers); `control.rs` is the orchestrator surface (install/activate/drain/remove/stop); `build.rs` is the build phase (esbuild via the SDK's `build/bundle.mjs`, then manifest extraction in a capability-less world). The TypeScript side is `packages/usai/src`: declarations → `manifest.ts` (`describe`) and `runtime/sdk.ts` (`invoke`) must agree on workload ordinals via `flatten()`.
 
 ```text
 persistent runtime state  →  immutable ApplicationDefinition  →  execution world

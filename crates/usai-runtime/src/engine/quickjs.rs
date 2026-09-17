@@ -118,14 +118,14 @@ impl Engine for QuickJsEngine {
         &self,
         compiled: &Arc<dyn Compiled>,
     ) -> Result<serde_json::Value, EngineError> {
-        self.eval_in(compiled, "(() => { const s = globalThis.__usai_sdk; if (!s || typeof s.describe !== 'function') return null; return JSON.stringify(s.describe(globalThis.__usai_app)); })()", "the application bundle did not register __usai_sdk.describe; is `usai` imported?").await
+        self.eval_in(compiled, "(() => { const s = globalThis.__usai_sdk; const ns = globalThis.__usai_app_ns; const app = globalThis.__usai_app !== undefined ? globalThis.__usai_app : ns && ns.default; if (!s || typeof s.describe !== 'function') return null; return JSON.stringify(s.describe(app)); })()", "the application bundle did not register __usai_sdk.describe; is `usai` imported?").await
     }
 
     async fn export_default(
         &self,
         compiled: &Arc<dyn Compiled>,
     ) -> Result<serde_json::Value, EngineError> {
-        self.eval_in(compiled, "(() => { const v = globalThis.__usai_app; return v === undefined ? null : JSON.stringify(v); })()", "the module has no default export").await
+        self.eval_in(compiled, "(() => { const ns = globalThis.__usai_app_ns; const v = globalThis.__usai_app !== undefined ? globalThis.__usai_app : ns && ns.default; return v === undefined ? null : JSON.stringify(v); })()", "the module has no default export").await
     }
 
     async fn compile_code(&self, code: &Code) -> Result<Arc<dyn Compiled>, EngineError> {
@@ -211,9 +211,10 @@ impl Engine for QuickJsEngine {
                 promise.finish::<Value>().catch(&ctx).map_err(|e| {
                     EngineError::Instantiate(format!("module evaluation failed: {e}"))
                 })?;
-                let namespace = module.namespace().map_err(|e| fail(&ctx, e))?;
-                let app: Value = namespace.get("default").map_err(|e| fail(&ctx, e))?;
-                globals.set("__usai_app", app).map_err(|e| fail(&ctx, e))?;
+                // The bundle is a global-style script (IIFE) that leaves the
+                // application namespace on `__usai_app_ns`; the bridge reads
+                // its default export. Nothing else to bind.
+                let _ = module;
                 Ok(())
             })
             .await?;

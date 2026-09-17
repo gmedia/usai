@@ -38,7 +38,7 @@ fn out_dir(tag: &str) -> PathBuf {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn config_and_module_metadata_compose_deterministically() {
     let Some(root) = root() else { return };
-    let engine = QuickJsEngine::new(QuickJsConfig::default());
+    let engine = usai_runtime::engine::from_env(64).unwrap();
     let config = load_config(engine.as_ref(), &root).await.unwrap();
     assert_eq!(config.app.source, "usai.config.ts");
     assert_eq!(
@@ -122,7 +122,7 @@ async fn config_and_module_metadata_compose_deterministically() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn typed_env_fails_activation_on_shape_not_first_request() {
     let Some(root) = root() else { return };
-    let engine = QuickJsEngine::new(QuickJsConfig::default());
+    let engine = usai_runtime::engine::from_env(64).unwrap();
     let config = load_config(engine.as_ref(), &root).await.unwrap();
     let out = build(
         engine.as_ref(),
@@ -198,7 +198,7 @@ async fn migrations_seeders_and_typed_env_end_to_end() {
         return;
     };
     let url = support::fresh_database(&server).await;
-    let engine = QuickJsEngine::new(QuickJsConfig::default());
+    let engine = usai_runtime::engine::from_env(64).unwrap();
     let config = load_config(engine.as_ref(), &root).await.unwrap();
     let options = BuildOptions {
         out_dir: out_dir("e2e"),

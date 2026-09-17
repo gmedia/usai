@@ -21,6 +21,7 @@ lint:
 
 test:
 	cargo test --workspace
+	USAI_ENGINE=quickjs cargo test -p usai-runtime --test lifecycle --test http --test workloads
 	cargo build -p usai-cli
 	USAI_BIN=$(CURDIR)/target/debug/usai pnpm -r run test
 

@@ -36,7 +36,7 @@ async fn start() -> Option<Server> {
         eprintln!("skipping: fixture not installed (run `pnpm install`)");
         return None;
     }
-    let engine = QuickJsEngine::new(QuickJsConfig::default());
+    let engine = usai_runtime::engine::from_env(64).unwrap();
     // Tests run concurrently; each builds into its own directory.
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let out_dir = std::env::temp_dir().join(format!(
@@ -575,7 +575,7 @@ async fn status_and_metrics_derive_from_runtime_truth() {
         .json()
         .await
         .unwrap();
-    assert_eq!(status["engine"], "quickjs");
+    assert!(status["engine"] == "quickjs" || status["engine"] == "wasm");
     assert_eq!(status["http"]["responses_2xx"], 1);
     assert_eq!(status["http"]["responses_4xx"], 1);
     assert_eq!(status["http"]["rejected_before_world"], 1);

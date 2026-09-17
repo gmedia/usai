@@ -1,6 +1,6 @@
-# ADR-0015: v0 execution substrate is QuickJS-ng (native, via rquickjs) behind an engine boundary
+# ADR-0015: The bootstrap execution substrate is native QuickJS-ng (via rquickjs) behind an engine boundary
 
-**Status:** accepted (v0, interim)
+**Status:** accepted for functional scaffolding and as the reference/bootstrap engine; **not** accepted as the production economic substrate — superseded for production by ADR-0016
 **Date:** 2026-09-17
 **Closes:** —
 

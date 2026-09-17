@@ -1,0 +1,36 @@
+diff --git a/quickjs.c b/quickjs.c
+index 9908e0934..072596ce0 100644
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2894,6 +2894,15 @@ JSContext *JS_NewContextRaw(JSRuntime *rt)
+     return ctx;
+ }
+ 
++/* Usai EXP-011A: see the declaration in quickjs.h. The state must be non-zero,
++   the same invariant JS_NewContextRaw enforces at seeding time. */
++void JS_UsaiSetRandomSeed(JSContext *ctx, uint64_t seed)
++{
++    if (seed == 0)
++        seed = 1;
++    ctx->random_state = seed;
++}
++
+ JSContext *JS_NewContext(JSRuntime *rt)
+ {
+     JSContext *ctx;
+diff --git a/quickjs.h b/quickjs.h
+index a78077989..d20e7b4af 100644
+--- a/quickjs.h
++++ b/quickjs.h
+@@ -533,6 +533,11 @@ JS_EXTERN void JS_RunGC(JSRuntime *rt);
+ JS_EXTERN bool JS_IsLiveObject(JSRuntime *rt, JSValueConst obj);
+ 
+ JS_EXTERN JSContext *JS_NewContext(JSRuntime *rt);
++/* Usai EXP-011A: replace the Math.random state of an existing context.
++   Deliberately narrow. It does not touch ctx->hash_seed, which seeds internal
++   Map/Set hashing and under which structures already inside a pre-initialized
++   image were built. */
++JS_EXTERN void JS_UsaiSetRandomSeed(JSContext *ctx, uint64_t seed);
+ JS_EXTERN void JS_FreeContext(JSContext *s);
+ JS_EXTERN JSContext *JS_DupContext(JSContext *ctx);
+ JS_EXTERN void *JS_GetContextOpaque(JSContext *ctx);

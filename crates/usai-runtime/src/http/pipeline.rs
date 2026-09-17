@@ -291,10 +291,19 @@ impl HttpHost {
     pub async fn handle(self: Arc<Self>, request: Request<Incoming>) -> HttpResponse {
         // Runtime-owned surfaces are not application traffic.
         let internal = request.uri().path().starts_with("/_usai/");
+        let started = std::time::Instant::now();
         match self.pipeline(request).await {
-            Ok(response) => {
+            Ok(mut response) => {
                 if !internal {
                     self.stats.record(response.status().as_u16(), false);
+                }
+                if self.config.expose_diagnostics
+                    && let Ok(value) = HeaderValue::from_str(&format!(
+                        "{:.3}",
+                        started.elapsed().as_secs_f64() * 1000.0
+                    ))
+                {
+                    response.headers_mut().insert("x-usai-server-ms", value);
                 }
                 response
             }
@@ -532,6 +541,7 @@ impl HttpHost {
         let cancel = CancellationToken::new();
         // Dropping the request future (client gone) cancels the world.
         let _guard = cancel.clone().drop_guard();
+        let t_execute = std::time::Instant::now();
         let result = self
             .runtime
             .execute(admission, input, cancel)
@@ -545,6 +555,11 @@ impl HttpHost {
                 )
             })?;
 
+        tracing::debug!(
+            execute_ms = t_execute.elapsed().as_secs_f64() * 1000.0,
+            world_ms = result.duration.as_secs_f64() * 1000.0,
+            "pipeline timing"
+        );
         // 6. encode / commit
         Ok(self.encode(&workload.id, result))
     }

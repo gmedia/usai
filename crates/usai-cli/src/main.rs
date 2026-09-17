@@ -22,6 +22,9 @@ struct Cli {
     /// Log format: text (default) or json
     #[arg(long, global = true, default_value = "text")]
     log_format: String,
+    /// Execution substrate: wasm (default) or quickjs; $USAI_ENGINE also works
+    #[arg(long, global = true)]
+    engine: Option<String>,
     #[command(subcommand)]
     command: Command,
 }
@@ -171,6 +174,10 @@ async fn main() {
         .compact()
         .init();
     let cli = Cli::parse();
+    if let Some(engine) = &cli.engine {
+        // SAFETY: no other thread exists yet; the runtime reads it later.
+        unsafe { std::env::set_var("USAI_ENGINE", engine) };
+    }
     let root = cli
         .root
         .map(|r| std::path::absolute(&r).unwrap_or(r))

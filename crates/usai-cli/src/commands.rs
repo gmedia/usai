@@ -11,8 +11,14 @@ use usai_runtime::*;
 
 use crate::display;
 
-fn engine() -> Arc<QuickJsEngine> {
-    QuickJsEngine::new(QuickJsConfig::default())
+fn engine() -> Arc<dyn usai_runtime::engine::Engine> {
+    match usai_runtime::engine::from_env(RuntimeConfig::default().max_worlds) {
+        Ok(engine) => engine,
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(2);
+        }
+    }
 }
 
 pub async fn build(root: &Path) -> Result<()> {
@@ -37,7 +43,10 @@ pub async fn build(root: &Path) -> Result<()> {
 async fn definition_for(
     root: &Path,
     artifact: Option<PathBuf>,
-) -> Result<(Arc<ApplicationDefinition>, Arc<QuickJsEngine>)> {
+) -> Result<(
+    Arc<ApplicationDefinition>,
+    Arc<dyn usai_runtime::engine::Engine>,
+)> {
     let engine = engine();
     let config = load_config(engine.as_ref(), root).await?;
     let dir = artifact.unwrap_or_else(|| config.out_dir.value.clone());
@@ -262,10 +271,7 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
     let config = load_config(engine.as_ref(), root).await?;
     let options = BuildOptions::from_config(&config);
     let first = usai_runtime::build::build(engine.as_ref(), &options).await?;
-    let runtime = Runtime::new(
-        Arc::clone(&engine) as Arc<dyn usai_runtime::engine::Engine>,
-        RuntimeConfig::default(),
-    );
+    let runtime = Runtime::new(Arc::clone(&engine), RuntimeConfig::default());
     let revision = runtime.install(first.definition).await?;
     runtime.activate(revision.id).await?;
 
@@ -539,7 +545,7 @@ pub async fn db_seed(root: &Path, name: Option<&str>) -> Result<()> {
     for seeder in selected {
         let out = build_seeder(engine.as_ref(), &options, &seeder.path, &seeder.name).await?;
         let runtime = Runtime::new(
-            Arc::clone(&engine) as Arc<dyn usai_runtime::engine::Engine>,
+            Arc::clone(&engine),
             RuntimeConfig {
                 cron_scheduler: false,
                 ..RuntimeConfig::default()
@@ -644,7 +650,22 @@ pub async fn bench(root: &Path, path: &str, concurrency: usize, duration: Durati
                         let _ = r.bytes().await;
                         latencies.push(t.elapsed().as_micros() as u64);
                     }
-                    _ => errors += 1,
+                    Ok(r) => {
+                        if errors == 0 {
+                            eprintln!(
+                                "first error: {} {}",
+                                r.status(),
+                                r.text().await.unwrap_or_default()
+                            );
+                        }
+                        errors += 1;
+                    }
+                    Err(e) => {
+                        if errors == 0 {
+                            eprintln!("first error: {e}");
+                        }
+                        errors += 1;
+                    }
                 }
             }
             (latencies, errors)

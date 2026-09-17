@@ -29,6 +29,7 @@ pub mod world;
 
 pub use definition::{ApplicationDefinition, Code, Manifest};
 pub use engine::quickjs::{QuickJsConfig, QuickJsEngine};
+pub use engine::wasm::{WasmConfig, WasmEngine};
 pub use ownership::{OpId, WorldId};
 pub use runtime::{Revision, RevisionId, RevisionState, Runtime, RuntimeConfig, RuntimeError};
 pub use world::{LifecycleViolation, Termination, WorkResult};

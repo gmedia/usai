@@ -2,11 +2,33 @@
 
 > Where the project is right now. Update this in the same change that moves it.
 
-**Last updated:** 2026-09-17
+**Last updated:** 2026-09-18
 
-## Current milestone
+## Where things stand
 
-**Developer preview groundwork done (D0–D15 each have a first implementation).** Remaining work is listed under Next; the largest item is per-world cost (see Measured).
+```text
+D0–D15                      FIRST IMPLEMENTATION PRESENT (each has acceptance tests)
+Product breadth             ESTABLISHED — stop broadening; depth now
+Milestone acceptance        PARTIAL — needs an item-by-item audit against GOAL.md §53
+Production substrate        Wasm image + pooling/COW implemented (ADR-0016); economics measured on one
+                            machine only; production-shaped evidence still required
+Developer preview           NOT YET (no published packages/binaries, artifact format not final, no PG TLS)
+Production ready            NO
+```
+
+Current phase (after the 2026-09-18 review): **depth, not breadth.**
+
+```text
+execution substrate recovery   ← ADR-0016 first pass done; measure on a real VM next
+end-to-end correctness audit
+realistic application
+performance / soak / multi-core
+alpha
+```
+
+## Measured — substrate (2026-09-18, release, WSL2; engineering numbers)
+
+See ADR-0016 for the full table. Per-world instantiate: Wasm image 0.01–0.03 ms flat across bundle sizes vs native 1.1–7.2 ms. Hello request via `Runtime::invoke`: Wasm 5.3 ms (create+retire 0.55, world run 4.8) vs native 7.9–18 ms (create+retire dominates). Wasm world run is bounded by Cranelift interpreter speed (2.3× native with the `-O3` core) and ~200 minor page faults per request that WSL2 makes expensive; both need measuring on the research VM before any economic claim.
 
 ## Done
 
@@ -20,15 +42,16 @@
 - **D7 project model.** Module contributions (`migrations:`/`seeders:` globs, resources declared by several modules dedupe when identical and error when they conflict); migration discovery from `usai.config.ts` includes + module globs (root-relative, ordered by file name); `usai db migrate` applies each SQL file in its own transaction on a leased connection with a `usai_migrations` ledger row in the same transaction, refuses tampered applied files, never runs at startup; `usai db status`; seeders are `seeder(...)` default exports discovered by glob and run by `usai db seed [name]` as `command:seed:<name>` in a synthetic definition that borrows the app's resources and env; typed env validated for shape at activation (url/int/bool/enum) and delivered typed in `ctx.env`; `execute()` always injects the revision env. Fixture `tests/fixtures/project-app` uses colocated and centralized layouts at once. 3 acceptance tests in `tests/project.rs`.
 - **D8 API metadata + OpenAPI.** `openapi.rs` generates OpenAPI 3.1 from the ApplicationDefinition: paths from HTTP triggers, path/query/header parameters from the extracted JSON Schemas, request bodies, responses by declared status, declared errors and the standard error envelope, security schemes from auth declarations, module names as tags; raw endpoints are opaque (`x-usai-raw`), in-world-only contracts are flagged (`x-usai-validated-in-world`). `usai generate openapi [--out]`; the dev server serves `/_usai/openapi.json` and a dependency-free `/_usai/docs`. 1 acceptance test (served document == generated document; not served on a production host).
 - **D9 service workload.** `service("name", handler)` starts one persistent world per revision at activation (`workloads/services.rs` supervisor); state persists because the service is alive; finite worlds cannot see it. Drain stops services first: graceful (`__usai.stop` — `ctx.signal` fires, pending `sleep`s resolve, the loop exits and the handler's return is the service's outcome), hard cancel after `drain_timeout`. Service state in `RuntimeStatus.revisions[].services` and the `usai dev` banner. No restart policy yet (D13). 1 acceptance test.
-- **D10 queue / message workload.** `queue.consume("topic", { message, concurrency, retry, database }, handler)` + `ctx.queue.publish(topic, message, { delayMs })`. v0 substrate: a PostgreSQL table (`usai_queue`) claimed with `FOR UPDATE SKIP LOCKED` — persistent consumer loops per revision (`workloads/queue.rs`), fresh world per message, concurrency from the declaration, message JSON Schema validated before the world exists (invalid → dead, no world), explicit retry with fixed/exponential backoff and a dead-letter state (ADR-0014; delivery is at-least-once and says so), consumers stop at drain; `RuntimeConfig.queue_consumers`. 1 acceptance test (publish from HTTP world → four messages processed once, retry-then-success across three fresh worlds, dead letter, invalid message never gets a world).
+- **D10 queue / message workload.** `queue.consume("topic", { message, concurrency, retry, database }, handler)` + `ctx.queue.publish(topic, message, { delayMs })`. the workload interface is substrate-independent (topic, message contract, concurrency, retry); the v0 *substrate* is a PostgreSQL table (`usai_queue`) claimed with `FOR UPDATE SKIP LOCKED` — persistent consumer loops per revision (`workloads/queue.rs`), fresh world per message, concurrency from the declaration, message JSON Schema validated before the world exists (invalid → dead, no world), explicit retry with fixed/exponential backoff and a dead-letter state (ADR-0014; delivery is at-least-once and says so), consumers stop at drain; `RuntimeConfig.queue_consumers`. 1 acceptance test (publish from HTTP world → four messages processed once, retry-then-success across three fresh worlds, dead letter, invalid message never gets a world).
 - **D11 WebSocket + stream workloads.** Streams: `http.stream(path, { params, query, auth }, (ctx, stream) => …)` — the response commits at the first `stream.start`/`send`/`event` (SSE helper) and the body ends when the handler returns (`headers sent != work complete`); a handler that never sends is an ordinary response; a client disconnect cancels the world through the body's drop guard; drain stops the loop gracefully. Sockets: `socket(path, { incoming, outgoing }, { open, message, close })` — HTTP upgrade (hyper `with_upgrades` + tungstenite), one world per connection, frames delivered as host completions (`socket.recv`), `ctx.state` connection-local, contract violations reported to the client without closing, application or client close runs `close`, drain sends 1012 and runs `close`. Per-revision `connections_stop`. Server rewritten with per-connection tasks + `TaskTracker` drain. 5 acceptance tests in `tests/connection.rs`.
-- **D12 observability + graph.** `observability.rs`: per-world trace record at `debug` (world, workload, revision, termination, outcome, duration, completions, children, violations) gated by `tracing::enabled!` so the disabled path builds nothing; HTTP class-level counters (2xx/3xx/4xx/5xx, rejected-before-world, upgrades, streams); `/_usai/status` (runtime status JSON incl. gauges, revisions, services, tasks, resources, http) and `/_usai/metrics` (Prometheus text) as runtime-owned surfaces (`HttpConfig.serve_status`; `usai run --status`, on in `usai dev`); `usai graph` renders workload → resource [lease] / dispatch → task edges from the definition; `--log-format json`. 1 acceptance test + 1 unit test.
+- **D12 observability + graph.** `observability.rs`: per-world trace record at `debug` (world, workload, revision, termination, outcome, duration, completions, children, violations) with a disabled fast path (`tracing::enabled!` short-circuit) — implemented, its cost when disabled not yet measured; HTTP class-level counters (2xx/3xx/4xx/5xx, rejected-before-world, upgrades, streams); `/_usai/status` (runtime status JSON incl. gauges, revisions, services, tasks, resources, http) and `/_usai/metrics` (Prometheus text) as runtime-owned surfaces (`HttpConfig.serve_status`; `usai run --status`, on in `usai dev`); `usai graph` renders workload → resource [lease] / dispatch → task edges from the definition; `--log-format json`. 1 acceptance test + 1 unit test.
 - **D13 hardening (first pass).** Service restart policy (`restart: { mode: never|on-failure|always, backoffMs, maxRestarts }`, doubling backoff, stop always wins). Graceful shutdown drains with a bound; a second SIGINT forces exit and reports live worlds/ops. `usai bench` (engineering measurement, prints percentiles, req/s, RSS high-water, and asserts ownership returned to baseline). Connection-loss SQLSTATEs (`08*`, `57P0x`) quarantine the connection instead of returning it. `docs/THREAT-MODEL.md`. 6 tests in `tests/hardening.rs`: memory limit faults cleanly and the runtime continues; failing service restarts per policy then settles; revision replacement under 8 concurrent clients loses no request; tampered/unsupported/missing artifacts are refused with clear errors; budget exhaustion refuses at once (503) and recovers; killed PostgreSQL backend → quarantine → recovery on a replacement connection.
 - **D14 developer preview groundwork.** `docs/GUIDE.md` (install → concepts → every workload kind → resources → operate); `create-usai <dir>` scaffolds a runnable project from a template (tested). Not yet an alpha: see Next.
 - **D15 control surface.** `usai run --control 127.0.0.1:3900` serves a generic JSON API (`control.rs`): `GET /health`, `GET /status`, `GET /revisions`, `POST /revisions {artifact}` (install from an artifact directory), `POST /revisions/{id}/activate`, `POST /revisions/{id}/drain`, `DELETE /revisions/{id}` (installed/retired only), `POST /stop`. Bearer token from `USAI_CONTROL_TOKEN`; binding off loopback without a token is refused. `Runtime::remove`. 2 tests. Sakala is one client of this protocol, never a dependency.
 - **`usai/test` harness** (`GOAL.md` §36): `testApp({ root })` spawns `usai run --port 0 --control 127.0.0.1:0 --announce`, drives HTTP, and invokes tasks / cron ticks / commands deterministically through the control surface's `POST /invoke`. Tested against `examples/hello` with the repository binary.
 - `usai test` runs the project's `node --test` files with `USAI_BIN` set to the running binary and the `usai` export condition (workspace checkouts need no `dist/`). OpenAPI describes streams (`x-usai-stream`) and sockets (`x-usai-socket`, 101/426) explicitly. WebSocket idle timeout (`HttpConfig.socket_idle_timeout`, 300 s default, close 1008; tested). ADR-0015 records the measured per-world numbers and states that its revisit trigger has fired.
 - Measured bundle composition (release): SDK only 1.0 ms/world, `zod/mini` 1.3 ms/world, `zod` 6.6 ms/world (`tests/profile_bundles.rs`). `zod/mini` lacks Standard JSON Schema, so before-world validation and OpenAPI degrade with it; documented in the guide.
+- **P0 substrate (ADR-0016).** `engine/wasm.rs`: Wasmtime 48 + core built from pinned sources (`guest/build.sh`, `-O3`; `-Oz` reproduces the research core byte for byte) + Wizer image per definition + pooling/COW/pagemap_scan; guest ABI unchanged (bridge routes through the core's `__usai_test_op`); one artifact (IIFE bundle) serves both engines; compilation cache; epoch-based CPU slice. `wasm` is the default engine, `quickjs` selectable. All 71 acceptance tests pass on both. Profiling harness: `tests/profile_bundles.rs` (`--ignored`, release).
 - Design review closed 14 of 16 open questions as ADR-0001…0014; ADR-0015 records the engine decision.
 
 ## In progress
@@ -52,16 +75,17 @@ hello bundle (765 KB, zod evaluated per world) 6.52 ms/world
 
 ~90% of per-world cost is **application module evaluation per world** — exactly the "definition-level work rebuilt per world" the research removed with a pre-initialized image (Wizer) + copy-on-write memory (C13, EXP-011B/012B). The native QuickJS substrate (ADR-0015) has no snapshot mechanism, so this cost is structural to v0's engine choice, not to the lifecycle model. This is the concrete trigger ADR-0015 named for revisiting the substrate.
 
-## Next (D13 continued, then D14)
+## Next
 
-1. **Per-world cost**: either (a) the Wasmtime + QuickJS-Wasm + Wizer image substrate behind the existing engine boundary (research path; needs a toolchain), or (b) a native mitigation such as reusing a pre-evaluated *runtime* with fresh *contexts* — which must be measured for isolation before it is trusted (contexts share a heap; that is a stop-and-surface decision). Decide with numbers, not preference.
-2. Long soak (≥ 1 h at c=16) watching RSS and gauge baseline; run with `usai bench --duration 3600`.
+1. **Measure the Wasm substrate on a real Linux VM** (the research VM if available) with the bundle matrix — engine floor / SDK only / zod-mini / zod / a representative CRUD app — and the metrics: world creation, request p50/p95/p99, CPU/request, throughput, RSS/PSS, idle memory, concurrency scaling. Attribute the ~200 minor faults per request (heap growth beyond the image?) and decide whether to pre-grow the image heap.
+2. Audit D0–D15 acceptance criteria item by item against `GOAL.md` §53; record gaps here.
+3. Long soak (≥ 1 h at c=16) watching RSS and gauge baseline; run with `usai bench --duration 3600`.
 3. Per-world CPU accounting (threat model "Open").
 4. D14 alpha checklist still open: publish `usai` / `create-usai` to npm and a `usai` binary (today the CLI is `cargo run -p usai-cli`); artifact byte format + signing (ADR-0005 follow-up); OpenAPI for stream/socket endpoints; PostgreSQL TLS.
 
 ## Known gaps / debt
 
-- The QuickJS substrate is native, not the Wasmtime pooling+COW representation the research measured (ADR-0015). Do not cite EXP-012B economics for it. Measured cost above: ~6.5 ms/world for a Zod-using bundle.
+- The Wasm substrate is the research representation (ADR-0016) but its economics here are one machine's; do not cite EXP-012B numbers for this codebase until it is measured production-shaped. The native QuickJS engine stays as reference; do not use it for economics.
 - Boundary contracts are validated twice when a JSON Schema exists (host before the world, provider inside it to obtain parsed values). Acceptable for v0; `GOAL.md` §13 asks to collapse this later.
 - Auth resolvers run inside the world (after structural validation); `inspect` says so.
 - `create-usai` is a placeholder; `examples/hello` is the onboarding path for now.

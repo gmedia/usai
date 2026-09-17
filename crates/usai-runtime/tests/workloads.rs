@@ -34,7 +34,7 @@ async fn runtime_with(cron_scheduler: bool) -> Option<Arc<Runtime>> {
         std::process::id(),
         SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     ));
-    let engine = QuickJsEngine::new(QuickJsConfig::default());
+    let engine = usai_runtime::engine::from_env(64).unwrap();
     let out = build(
         engine.as_ref(),
         &BuildOptions {

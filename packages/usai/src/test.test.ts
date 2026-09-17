@@ -21,7 +21,7 @@ test("usai/test drives the application through the real runtime", { skip: !exist
     const invalid = await app.http.get("/hello/" + "x".repeat(50));
     assert.equal(invalid.status, 400);
     const status = await app.status();
-    assert.equal(status["engine"], "quickjs");
+    assert.ok(status["engine"] === "wasm" || status["engine"] === "quickjs");
     await assert.rejects(app.task("does-not-exist").invoke(), /unknown workload/);
   } finally {
     await app.close();

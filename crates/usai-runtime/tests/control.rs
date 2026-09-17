@@ -31,7 +31,7 @@ async fn setup() -> Option<(
     if !hello.join("node_modules/usai").exists() || !fixture.join("node_modules/usai").exists() {
         return None;
     }
-    let engine = QuickJsEngine::new(QuickJsConfig::default());
+    let engine = usai_runtime::engine::from_env(64).unwrap();
     let tag = format!(
         "{}-{}",
         std::process::id(),
@@ -220,7 +220,7 @@ async fn orchestrator_lifecycle_install_activate_drain_remove() {
         .json()
         .await
         .unwrap();
-    assert_eq!(status["engine"], "quickjs");
+    assert!(status["engine"] == "quickjs" || status["engine"] == "wasm");
     let r = auth(client.post(format!("{base}/stop")))
         .send()
         .await
@@ -234,7 +234,7 @@ async fn orchestrator_lifecycle_install_activate_drain_remove() {
 fn non_loopback_bind_requires_a_token() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime.block_on(async {
-        let engine = QuickJsEngine::new(QuickJsConfig::default());
+        let engine = usai_runtime::engine::from_env(64).unwrap();
         let rt = Runtime::with_env(engine, RuntimeConfig::default(), |_| None);
         let err = ControlHost::new(
             rt,

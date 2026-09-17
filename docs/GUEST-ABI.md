@@ -57,3 +57,8 @@ The world's work is terminal when `outcome()` is non-null. For finite workloads 
 ## Errors
 
 An error thrown by application code with a `usai: { code, status, details? }` property is an application error contract; the runtime maps it to a stable transport response. Any other error is an unexpected failure: sanitized at the boundary, fully logged.
+
+
+## Substrates
+
+The same ABI is served by two engines. **Wasm (default, ADR-0016):** the core installs `__usai_test_op(kind, payload) -> Promise`; the bridge routes every operation through it as `kind\0payload`, mirrors the core's sequential op ids so timers can be cancelled, and the host answers the core's `usai_op_start` import. Control operations `__cancel\0<id>` and `__log\0<level>\0<message>` are refused by the host so the core drops their promises. Cancel/stop are driven by the host completing outstanding core ops (status 2 / status 0). **Native QuickJS (ADR-0015):** the host installs `__usai_host_start/cancel/log` and the bridge keeps its own pending map.

@@ -14,6 +14,43 @@ use serde::{Deserialize, Serialize};
 use crate::definition::{ApplicationDefinition, Code};
 
 pub mod quickjs;
+pub mod wasm;
+
+/// Builds an engine by name: `wasm` (ADR-0016) or `quickjs` (ADR-0015).
+pub fn by_name(name: &str, capacity: u32) -> Result<Arc<dyn Engine>, EngineError> {
+    match name {
+        "wasm" => {
+            let mut config = wasm::WasmConfig {
+                capacity,
+                ..wasm::WasmConfig::default()
+            };
+            // Tuning knobs for profiling; not application configuration.
+            if let Some(bytes) = std::env::var("USAI_WASM_KEEP_RESIDENT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+            {
+                config.linear_memory_keep_resident = bytes;
+            }
+            if std::env::var("USAI_WASM_PAGEMAP_SCAN").as_deref() == Ok("0") {
+                config.pagemap_scan = false;
+            }
+            Ok(wasm::WasmEngine::new(config)? as Arc<dyn Engine>)
+        }
+        "quickjs" | "native" => {
+            Ok(quickjs::QuickJsEngine::new(quickjs::QuickJsConfig::default()) as Arc<dyn Engine>)
+        }
+        other => Err(EngineError::Instantiate(format!(
+            "unknown engine {other}; use wasm or quickjs"
+        ))),
+    }
+}
+
+/// The engine named by `USAI_ENGINE`, defaulting to `wasm` (ADR-0016);
+/// `quickjs` remains the bootstrap/reference substrate (ADR-0015).
+pub fn from_env(capacity: u32) -> Result<Arc<dyn Engine>, EngineError> {
+    let name = std::env::var("USAI_ENGINE").unwrap_or_else(|_| "wasm".into());
+    by_name(&name, capacity)
+}
 
 /// The guest bridge script. Its contract is documented at the top of the file
 /// and in `docs/GUEST-ABI.md`.
@@ -53,7 +90,7 @@ pub struct GuestError {
     pub usai: Option<serde_json::Value>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Pending {
     pub count: u32,
     pub kinds: Vec<String>,

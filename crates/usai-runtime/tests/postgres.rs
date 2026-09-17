@@ -92,7 +92,7 @@ async fn fixture_with(queue_consumers: bool) -> Option<Fixture> {
         std::process::id(),
         SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     ));
-    let engine = QuickJsEngine::new(QuickJsConfig::default());
+    let engine = usai_runtime::engine::from_env(64).unwrap();
     let out = build(
         engine.as_ref(),
         &BuildOptions {
@@ -318,7 +318,7 @@ async fn unreachable_database_fails_activation_not_the_first_request() {
         return;
     }
     let out_dir = std::env::temp_dir().join(format!("usai-pg-unreachable-{}", std::process::id()));
-    let engine = QuickJsEngine::new(QuickJsConfig::default());
+    let engine = usai_runtime::engine::from_env(64).unwrap();
     let out = build(
         engine.as_ref(),
         &BuildOptions {

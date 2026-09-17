@@ -1,0 +1,271 @@
+diff --git a/c/interface.c b/c/interface.c
+index 6da7d69..8064996 100644
+--- a/c/interface.c
++++ b/c/interface.c
+@@ -8,6 +8,7 @@
+  */
+ 
+ #include "quickjs.h"
++#include <stdint.h>
+ #include <malloc.h>
+ #include <stdlib.h>
+ #include <string.h>
+@@ -17,6 +18,125 @@
+ static JSRuntime *rt = NULL;
+ static JSContext *ctx = NULL;
+ 
++/* ---- Usai EXP-011C split-phase operation bridge ---- */
++
++__attribute__((import_module("env"), import_name("usai_op_start")))
++extern int32_t usai_op_start(uint32_t op_id, uint32_t kind,
++                             const uint8_t *payload_ptr,
++                             uint32_t payload_len);
++
++typedef struct UsaiPendingOp {
++    uint32_t op_id;
++    JSValue resolve;
++    JSValue reject;
++    struct UsaiPendingOp *next;
++} UsaiPendingOp;
++
++static UsaiPendingOp *usai_pending_ops = NULL;
++static uint32_t usai_pending_op_count = 0;
++static uint32_t usai_next_op_id = 1;
++static uint32_t usai_bridge_install_count = 0;
++static JSValue usai_outer_promise = JS_UNDEFINED;
++
++static UsaiPendingOp *usai_remove_pending(uint32_t op_id)
++{
++    UsaiPendingOp **cursor = &usai_pending_ops;
++    while (*cursor) {
++        if ((*cursor)->op_id == op_id) {
++            UsaiPendingOp *found = *cursor;
++            *cursor = found->next;
++            usai_pending_op_count--;
++            return found;
++        }
++        cursor = &(*cursor)->next;
++    }
++    return NULL;
++}
++
++static JSValue usai_error(const char *code, const uint8_t *message,
++                          size_t message_len)
++{
++    JSValue error = JS_NewError(ctx);
++    if (JS_IsException(error))
++        return error;
++    if (JS_SetPropertyStr(ctx, error, "code", JS_NewString(ctx, code)) < 0) {
++        JS_FreeValue(ctx, error);
++        return JS_EXCEPTION;
++    }
++    if (JS_SetPropertyStr(ctx, error, "message",
++                          JS_NewStringLen(ctx, (const char *)message,
++                                          message_len)) < 0) {
++        JS_FreeValue(ctx, error);
++        return JS_EXCEPTION;
++    }
++    return error;
++}
++
++static JSValue usai_test_op(JSContext *callback_ctx, JSValueConst this_val,
++                            int argc, JSValueConst *argv)
++{
++    (void)this_val;
++    uint32_t kind = 0;
++    size_t payload_len = 0;
++    const char *payload = NULL;
++    JSValue resolving_funcs[2];
++    JSValue promise = JS_UNDEFINED;
++    UsaiPendingOp *pending = NULL;
++
++    if (argc < 2 || JS_ToUint32(callback_ctx, &kind, argv[0]) < 0)
++        return JS_ThrowTypeError(callback_ctx,
++                                 "__usai_test_op(kind, payload) requires a kind");
++    payload = JS_ToCStringLen(callback_ctx, &payload_len, argv[1]);
++    if (!payload)
++        return JS_EXCEPTION;
++    if (payload_len > UINT32_MAX) {
++        JS_FreeCString(callback_ctx, payload);
++        return JS_ThrowRangeError(callback_ctx, "operation payload is too large");
++    }
++
++    promise = JS_NewPromiseCapability(callback_ctx, resolving_funcs);
++    if (JS_IsException(promise)) {
++        JS_FreeCString(callback_ctx, payload);
++        return promise;
++    }
++
++    pending = malloc(sizeof(*pending));
++    if (!pending) {
++        JSValue error = JS_ThrowOutOfMemory(callback_ctx);
++        JS_FreeValue(callback_ctx, resolving_funcs[0]);
++        JS_FreeValue(callback_ctx, resolving_funcs[1]);
++        JS_FreeValue(callback_ctx, promise);
++        JS_FreeCString(callback_ctx, payload);
++        return error;
++    }
++    pending->op_id = usai_next_op_id++;
++    pending->resolve = resolving_funcs[0];
++    pending->reject = resolving_funcs[1];
++    pending->next = usai_pending_ops;
++    usai_pending_ops = pending;
++    usai_pending_op_count++;
++
++    int32_t start_status = usai_op_start(
++        pending->op_id, kind, (const uint8_t *)payload, (uint32_t)payload_len);
++    JS_FreeCString(callback_ctx, payload);
++
++    if (start_status != 0) {
++        UsaiPendingOp *rejected = usai_remove_pending(pending->op_id);
++        static const uint8_t message[] = "operation start rejected";
++        JSValue error = usai_error("EXP011C_START_REJECTED", message,
++                                   sizeof(message) - 1);
++        JSValue call_result = JS_Call(callback_ctx, rejected->reject,
++                                      JS_UNDEFINED, 1, &error);
++        JS_FreeValue(callback_ctx, call_result);
++        JS_FreeValue(callback_ctx, error);
++        JS_FreeValue(callback_ctx, rejected->resolve);
++        JS_FreeValue(callback_ctx, rejected->reject);
++        free(rejected);
++    }
++
++    return promise;
++}
++
+ /* ---- Helper: heap-allocate a JSValue so it can cross the WASM boundary ---- */
+ 
+ static JSValue *jsvalue_to_heap(JSValue val) {
+@@ -1269,6 +1389,132 @@ JSValue *qjs_new_promise(JSValue **resolve_out, JSValue **reject_out) {
+     return jsvalue_to_heap(promise);
+ }
+ 
++/* ---- Usai EXP-011C stackless operation exports ---- */
++
++__attribute__((export_name("qjs_usai_install_async_bridge")))
++int32_t qjs_usai_install_async_bridge(void)
++{
++    if (!ctx || usai_bridge_install_count != 0)
++        return 1;
++    JSValue global = JS_GetGlobalObject(ctx);
++    JSValue function = JS_NewCFunction(ctx, usai_test_op, "__usai_test_op", 2);
++    int status = JS_SetPropertyStr(ctx, global, "__usai_test_op", function);
++    JS_FreeValue(ctx, global);
++    if (status < 0)
++        return 2;
++    usai_bridge_install_count++;
++    return 0;
++}
++
++__attribute__((export_name("qjs_usai_pending_op_count")))
++uint32_t qjs_usai_pending_op_count_export(void)
++{
++    return usai_pending_op_count;
++}
++
++__attribute__((export_name("qjs_usai_bridge_install_count")))
++uint32_t qjs_usai_bridge_install_count_export(void)
++{
++    return usai_bridge_install_count;
++}
++
++__attribute__((export_name("qjs_usai_next_op_id_for_test")))
++uint32_t qjs_usai_next_op_id_for_test(void)
++{
++    return usai_next_op_id;
++}
++
++__attribute__((export_name("qjs_usai_start_handler")))
++int32_t qjs_usai_start_handler(const char *scenario, uint32_t scenario_len)
++{
++    if (!ctx || !JS_IsUndefined(usai_outer_promise))
++        return 1;
++    JSValue global = JS_GetGlobalObject(ctx);
++    JSValue handler = JS_GetPropertyStr(ctx, global, "__usai_stage_a_handler");
++    JSValue argument = JS_NewStringLen(ctx, scenario, scenario_len);
++    JSValue result = JS_Call(ctx, handler, global, 1, &argument);
++    JS_FreeValue(ctx, argument);
++    JS_FreeValue(ctx, handler);
++    JS_FreeValue(ctx, global);
++    if (JS_IsException(result))
++        return 2;
++    if (!JS_IsPromise(result)) {
++        JS_FreeValue(ctx, result);
++        return 3;
++    }
++    usai_outer_promise = result;
++    return 0;
++}
++
++__attribute__((export_name("qjs_usai_outer_promise_state")))
++int32_t qjs_usai_outer_promise_state(void)
++{
++    if (!ctx || JS_IsUndefined(usai_outer_promise))
++        return JS_PROMISE_NOT_A_PROMISE;
++    return (int32_t)JS_PromiseState(ctx, usai_outer_promise);
++}
++
++__attribute__((export_name("qjs_usai_outer_result_string")))
++char *qjs_usai_outer_result_string(void)
++{
++    if (!ctx || JS_IsUndefined(usai_outer_promise))
++        return NULL;
++    JSPromiseStateEnum state = JS_PromiseState(ctx, usai_outer_promise);
++    if (state != JS_PROMISE_FULFILLED && state != JS_PROMISE_REJECTED)
++        return NULL;
++    JSValue result = JS_PromiseResult(ctx, usai_outer_promise);
++    JSValue rendered = result;
++    bool rejected_object = state == JS_PROMISE_REJECTED && JS_IsObject(result);
++    if (rejected_object) {
++        rendered = JS_GetPropertyStr(ctx, result, "code");
++        JS_FreeValue(ctx, result);
++    }
++    size_t len = 0;
++    const char *text = JS_ToCStringLen(ctx, &len, rendered);
++    if (rejected_object)
++        JS_FreeValue(ctx, rendered);
++    else
++        JS_FreeValue(ctx, result);
++    if (!text)
++        return NULL;
++    char *copy = malloc(len + 1);
++    if (copy)
++        memcpy(copy, text, len + 1);
++    JS_FreeCString(ctx, text);
++    return copy;
++}
++
++__attribute__((export_name("qjs_usai_op_complete")))
++int32_t qjs_usai_op_complete(uint32_t op_id, uint32_t status,
++                             const uint8_t *result_ptr, uint32_t result_len)
++{
++    if (!ctx)
++        return 1;
++    UsaiPendingOp *pending = usai_remove_pending(op_id);
++    if (!pending)
++        return 2;
++
++    JSValue value;
++    JSValue function;
++    if (status == 0) {
++        value = JS_NewStringLen(ctx, (const char *)result_ptr, result_len);
++        function = pending->resolve;
++    } else {
++        const char *code = status == 2 ? "EXP011C_CANCELLED" :
++                                         "EXP011C_HOST_ERROR";
++        value = usai_error(code, result_ptr, result_len);
++        function = pending->reject;
++    }
++    JSValue call_result = JS_Call(ctx, function, JS_UNDEFINED, 1, &value);
++    int32_t call_failed = JS_IsException(call_result) ? 3 : 0;
++    JS_FreeValue(ctx, call_result);
++    JS_FreeValue(ctx, value);
++    JS_FreeValue(ctx, pending->resolve);
++    JS_FreeValue(ctx, pending->reject);
++    free(pending);
++    return call_failed;
++}
++
+ __attribute__((export_name("qjs_promise_state")))
+ int qjs_promise_state(JSValue *promise) {
+     return (int)JS_PromiseState(ctx, *promise);

@@ -37,12 +37,9 @@ fn out_dir(tag: &str) -> PathBuf {
     ))
 }
 
-async fn http_runtime() -> Option<(Arc<Runtime>, Arc<QuickJsEngine>)> {
+async fn http_runtime() -> Option<(Arc<Runtime>, Arc<dyn usai_runtime::engine::Engine>)> {
     let root = fixture_root("http-app")?;
-    let engine = QuickJsEngine::new(QuickJsConfig {
-        memory_limit: 16 * 1024 * 1024,
-        ..QuickJsConfig::default()
-    });
+    let engine = usai_runtime::engine::from_env(64).unwrap();
     let out = build(
         engine.as_ref(),
         &BuildOptions {
@@ -229,7 +226,7 @@ async fn malformed_artifacts_are_refused_with_clear_errors() {
     let Some(root) = fixture_root("http-app") else {
         return;
     };
-    let engine = QuickJsEngine::new(QuickJsConfig::default());
+    let engine = usai_runtime::engine::from_env(64).unwrap();
     let dir = out_dir("artifact");
     build(
         engine.as_ref(),
@@ -266,7 +263,7 @@ async fn budget_exhaustion_refuses_promptly_and_recovers() {
     let Some(root) = fixture_root("http-app") else {
         return;
     };
-    let engine = QuickJsEngine::new(QuickJsConfig::default());
+    let engine = usai_runtime::engine::from_env(64).unwrap();
     let out = build(
         engine.as_ref(),
         &BuildOptions {
@@ -359,7 +356,7 @@ async fn database_backend_loss_is_quarantined_and_recovered() {
         return;
     };
     let url = support::fresh_database(&server).await;
-    let engine = QuickJsEngine::new(QuickJsConfig::default());
+    let engine = usai_runtime::engine::from_env(64).unwrap();
     let out = build(
         engine.as_ref(),
         &BuildOptions {

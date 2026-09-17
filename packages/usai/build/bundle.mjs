@@ -16,7 +16,11 @@ try {
     entryPoints: [entry],
     outfile,
     bundle: true,
-    format: "esm",
+    format: "iife",
+    globalName: "__usai_app_ns",
+    // Evaluated as a module (native engine) `var` is module-scoped; publish
+    // the namespace explicitly so both substrates find it.
+    footer: { js: "globalThis.__usai_app_ns = __usai_app_ns;" },
     platform: "neutral",
     target: "es2022",
     mainFields: ["module", "main"],
