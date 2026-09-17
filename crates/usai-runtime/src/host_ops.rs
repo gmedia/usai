@@ -69,6 +69,25 @@ pub struct Completion {
 
 pub type OpFuture = Pin<Box<dyn Future<Output = OpOutcome> + Send>>;
 
+/// A child unit of work the world started: an owned invocation or a
+/// transferred dispatch. Recorded for observability (`GOAL.md` §44).
+#[derive(Clone, Debug, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChildRecord {
+    pub workload: String,
+    pub relation: ChildRelation,
+    pub id: String,
+}
+
+#[derive(Clone, Copy, Debug, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ChildRelation {
+    /// The parent owned and awaited it.
+    Owned,
+    /// Ownership was transferred to the task runtime.
+    Transferred,
+}
+
 /// Everything an operation may need from the world that started it.
 #[derive(Clone)]
 pub struct OpContext {
@@ -77,6 +96,10 @@ pub struct OpContext {
     pub cancel: CancellationToken,
     pub resources: Arc<BoundResources>,
     pub extensions: Arc<OpExtensions>,
+    /// The revision the world belongs to, so child work runs the same
+    /// definition.
+    pub revision: Option<Arc<crate::runtime::Revision>>,
+    pub children: Arc<std::sync::Mutex<Vec<ChildRecord>>>,
 }
 
 /// Hooks other subsystems (tasks, cron) register so the op layer does not

@@ -20,6 +20,7 @@ pub mod http;
 pub mod ownership;
 pub mod resource;
 pub mod runtime;
+pub mod workloads;
 pub mod world;
 
 pub use definition::{ApplicationDefinition, Code, Manifest};

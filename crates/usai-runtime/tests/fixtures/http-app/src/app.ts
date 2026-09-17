@@ -58,10 +58,59 @@ declare global {
   var __mutable: unknown;
 }
 
+
+// ---- D4/D5: tasks, cron, commands -------------------------------------
+import { cron, command, dispatches } from "usai";
+
+const audit = cache.local("audit");
+type Audit = { increment(k: string): Promise<number>; get(k: string): Promise<number | null> };
+
+export const record = task("record", { input: z.object({ what: z.string() }), resources: [audit] }, async (ctx) => {
+  await (ctx.resources["audit"] as Audit).increment(ctx.input.what);
+  return { recorded: ctx.input.what, sawParent: globalThis.__mutable ?? null };
+});
+export const slowTask = task("slow", {}, async (ctx) => { await ctx.sleep("5s"); return { done: true }; });
+export const failingTask = task("failing", {}, async () => { throw errors.conflict("nope"); });
+export const invokesSlow = task("invokes-slow", {}, async (ctx) => ctx.tasks.invoke(slowTask));
+
+export const order = dispatches(
+  http.post("/orders", { body: z.object({ id: z.string() }), resources: [audit] }, async (ctx) => {
+    globalThis.__mutable = "parent-secret";
+    const owned = await ctx.tasks.invoke(record, { what: `owned:${ctx.body.id}` });
+    const { id } = await ctx.tasks.dispatch(record, { what: `dispatched:${ctx.body.id}` });
+    return { owned, dispatched: id };
+  }),
+  record,
+);
+export const auditRead = http.get("/audit/:key", { resources: [audit] }, async (ctx) => ({
+  value: await (ctx.resources["audit"] as Audit).get(ctx.params["key"]!),
+}));
+export const badDispatch = http.get("/bad-dispatch", {}, async (ctx) => {
+  try { await ctx.tasks.dispatch({ name: "does-not-exist" } as never); return { ok: true }; } catch (e) { return { code: (e as { usai: { code: string } }).usai.code }; }
+});
+
+export const everySecond = cron("every-second", { schedule: "* * * * * *", resources: [audit] }, async (ctx) => {
+  await (ctx.resources["audit"] as Audit).increment("cron:every-second");
+  return ctx.scheduledAt;
+});
+export const overlapping = cron("overlapping", { schedule: "* * * * * *", overlap: "skip", resources: [audit] }, async (ctx) => {
+  await (ctx.resources["audit"] as Audit).increment("cron:overlapping");
+  await ctx.sleep("2500ms");
+});
+export const nightly = cron("nightly", { schedule: "0 3 * * *", timeout: "5m" }, async () => ({ ran: true }));
+
+export const reconcile = command("reconcile", { resources: [audit] }, async (ctx) => {
+  await (ctx.resources["audit"] as Audit).increment("command:reconcile");
+  return { args: ctx.args };
+});
+
 export default defineApp({
   name: "http-fixture",
   modules: [defineModule({ name: "users", workloads: [getUser, createUser, noContent] })],
-  workloads: [counter, persistent, me, boom, badShape, detach, slow, echoQuery, webhook, sendReceipt],
-  resources: [hits],
+  workloads: [
+    counter, persistent, me, boom, badShape, detach, slow, echoQuery, webhook, sendReceipt,
+    record, slowTask, failingTask, invokesSlow, order, auditRead, badDispatch, everySecond, overlapping, nightly, reconcile,
+  ],
+  resources: [hits, audit],
   env: env({ GREETING: env.optional(env.string()) }),
 });

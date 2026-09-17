@@ -17,7 +17,7 @@ use crate::definition::{ApplicationDefinition, LifetimeFamily, WorkloadSpec};
 use crate::engine::{
     Compiled, Engine, EngineError, GuestError, HostBindings, Outcome, WorldInstance,
 };
-use crate::host_ops::{Completion, OpContext, OpExtensions, spawn_operation};
+use crate::host_ops::{ChildRecord, Completion, OpContext, OpExtensions, spawn_operation};
 use crate::ownership::{Gauges, Ledger, OpId, WorldId, dec, inc};
 use crate::resource::BoundResources;
 
@@ -86,6 +86,8 @@ pub struct WorkResult {
     pub completions_delivered: u32,
     pub completions_dropped: u32,
     pub logs: Vec<LogLine>,
+    /// Child work this world started (owned invocations, transferred dispatches).
+    pub children: Vec<ChildRecord>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -103,6 +105,8 @@ pub struct WorldShared {
     resources: Arc<BoundResources>,
     extensions: Arc<OpExtensions>,
     completions: mpsc::Sender<Completion>,
+    revision: Option<Arc<crate::runtime::Revision>>,
+    children: Arc<Mutex<Vec<ChildRecord>>>,
     logs: Mutex<Vec<LogLine>>,
     accepting_ops: AtomicBool,
     max_logs: usize,
@@ -120,6 +124,8 @@ impl HostBindings for WorldShared {
             cancel: self.cancel.child_token(),
             resources: Arc::clone(&self.resources),
             extensions: Arc::clone(&self.extensions),
+            revision: self.revision.clone(),
+            children: Arc::clone(&self.children),
         };
         match spawn_operation(
             &self.ledger,
@@ -166,6 +172,7 @@ pub struct WorldSpec {
     /// Hard bound on one uninterrupted synchronous guest run.
     pub cpu_slice: Duration,
     pub cancel: CancellationToken,
+    pub revision: Option<Arc<crate::runtime::Revision>>,
 }
 
 pub struct WorldDriver {
@@ -200,6 +207,8 @@ impl WorldDriver {
             resources: spec.resources,
             extensions: spec.extensions,
             completions: tx,
+            revision: spec.revision,
+            children: Arc::new(Mutex::new(Vec::new())),
             logs: Mutex::new(Vec::new()),
             accepting_ops: AtomicBool::new(true),
             max_logs: 1_000,
@@ -326,6 +335,8 @@ impl WorldDriver {
         }
 
         let logs = std::mem::take(&mut *self.shared.logs.lock().expect("logs poisoned"));
+        let children =
+            std::mem::take(&mut *self.shared.children.lock().expect("children poisoned"));
         let result = WorkResult {
             world: self.id,
             workload: workload_id,
@@ -336,6 +347,7 @@ impl WorldDriver {
             completions_delivered: self.delivered,
             completions_dropped: self.dropped,
             logs,
+            children,
         };
         self.retire("finished");
         result

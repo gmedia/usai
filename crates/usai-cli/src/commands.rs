@@ -292,3 +292,63 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
     )
     .await
 }
+
+/// Runs one finite world against the built artifact and reports its
+/// outcome. Shared by `usai app`, `usai cron run`, and `usai task run`.
+async fn one_shot(
+    root: &Path,
+    run: impl AsyncFnOnce(&Runtime) -> Result<WorkResult, RuntimeError>,
+) -> Result<()> {
+    let (definition, engine) = definition_for(root, None).await?;
+    let runtime = Runtime::new(
+        engine,
+        RuntimeConfig {
+            cron_scheduler: false,
+            ..RuntimeConfig::default()
+        },
+    );
+    let revision = runtime.install(definition).await?;
+    runtime.activate(revision.id).await?;
+    let result = run(&runtime).await;
+    runtime.shutdown().await;
+    let result = result?;
+    for line in &result.logs {
+        eprintln!("[{}] {}", line.level, line.message);
+    }
+    for violation in &result.violations {
+        eprintln!("\nlifecycle: {}\n", violation.message);
+    }
+    match (&result.termination, &result.outcome) {
+        (Termination::Completed, Some(Ok(value))) => {
+            let value = value.get("value").unwrap_or(value);
+            println!("{}", serde_json::to_string_pretty(value)?);
+            Ok(())
+        }
+        (Termination::Completed, Some(Err(error))) => {
+            anyhow::bail!(
+                "{}: {}{}",
+                error.name,
+                error.message,
+                error
+                    .usai
+                    .as_ref()
+                    .map(|u| format!(" ({u})"))
+                    .unwrap_or_default()
+            )
+        }
+        (termination, _) => anyhow::bail!("work ended without a result: {termination:?}"),
+    }
+}
+
+pub async fn app(root: &Path, name: &str, args: Vec<String>) -> Result<()> {
+    one_shot(root, async |rt| rt.run_command(name, args).await).await
+}
+
+pub async fn cron_run(root: &Path, name: &str) -> Result<()> {
+    one_shot(root, async |rt| rt.run_cron(name).await).await
+}
+
+pub async fn task_run(root: &Path, name: &str, input: &str) -> Result<()> {
+    let input: serde_json::Value = serde_json::from_str(input).context("--input must be JSON")?;
+    one_shot(root, async |rt| rt.run_task(name, input).await).await
+}

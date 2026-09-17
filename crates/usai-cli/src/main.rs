@@ -53,6 +53,40 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Run a user-defined command in a fresh finite world
+    App {
+        /// Command name as declared with `command("<name>", …)`
+        name: String,
+        /// Arguments passed to the command
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Cron utilities
+    Cron {
+        #[command(subcommand)]
+        action: CronAction,
+    },
+    /// Task utilities
+    Task {
+        #[command(subcommand)]
+        action: TaskAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum CronAction {
+    /// Run one invocation now, without waiting for the schedule
+    Run { name: String },
+}
+
+#[derive(Subcommand)]
+enum TaskAction {
+    /// Run a task once with a JSON input
+    Run {
+        name: String,
+        #[arg(long, default_value = "null")]
+        input: String,
+    },
 }
 
 #[tokio::main]
@@ -80,6 +114,13 @@ async fn main() {
         Command::Dev { host, port } => commands::dev(&root, &host, port).await,
         Command::Inspect { json } => commands::inspect(&root, json).await,
         Command::Config { json } => commands::config(&root, json).await,
+        Command::App { name, args } => commands::app(&root, &name, args).await,
+        Command::Cron {
+            action: CronAction::Run { name },
+        } => commands::cron_run(&root, &name).await,
+        Command::Task {
+            action: TaskAction::Run { name, input },
+        } => commands::task_run(&root, &name, &input).await,
     };
     if let Err(error) = result {
         eprintln!("error: {error:#}");

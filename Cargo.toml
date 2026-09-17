@@ -33,6 +33,8 @@ notify = "9.0.0-rc.5"
 form_urlencoded = "1"
 base64 = "0.22"
 http = "1"
+croner = "4"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 async-trait = "0.1"
 
 [profile.release]

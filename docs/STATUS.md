@@ -6,7 +6,7 @@
 
 ## Current milestone
 
-**D4 — Tasks + Explicit Ownership Transfer** (next). D0–D3 are done.
+**D6 — PostgreSQL Capability** (next). D0–D5 are done.
 
 ## Done
 
@@ -14,18 +14,19 @@
 - **D1 lifecycle core** (`usai-runtime`): immutable `ApplicationDefinition`; engine boundary + QuickJS-ng substrate (ADR-0015) + guest bridge ABI (`docs/GUEST-ABI.md`); `WorldDriver` with one identity-first completion gate; bounded ownership `Ledger` + gauges; host operations with independent owners; `ResourceManager`/`ResourceIdentity`/`cache.local`; hierarchical `Budget`; revisions `installed → active → draining → retired`. 17 acceptance tests in `tests/lifecycle.rs`.
 - **D2 HTTP contract workload.** `usai` SDK (`defineApp`, `defineModule`, `http.*`, `http.raw`, `auth.*`, `errors`, `env`, `cache.local`, `task`/`cron`/`command`/`service` declarations, Standard Schema interop, manifest `describe`, in-world dispatcher). Runtime HTTP host: `matchit` router built once per revision, decode, JSON Schema validation **before** world creation (Zod 4 describes itself via `~standard.jsonSchema`), scalar coercion for string transports, admission, world, response contract, error mapping (C11), raw escape hatch, client-disconnect cancellation, deadline → 504. Build pipeline: esbuild via the SDK's `build/bundle.mjs` + manifest extraction in a capability-less world (ADR-0009). 13 acceptance tests in `tests/http.rs` against a real server and the real SDK.
 - **D3 developer loop.** `usai build`, `usai run`, `usai dev` (watch → rebuild → install → activate → drain previous; failed builds keep the previous revision serving), `usai inspect` (+`--json`), `usai config` (effective values with sources; `usai.config.ts` evaluated declaratively). `examples/hello` runs.
+- **D4 tasks + explicit ownership transfer.** `ctx.tasks.invoke` = owned child world (cancelled with the parent, outcome returned as a contract); `ctx.tasks.dispatch` = ownership transferred to the runtime-owned, bounded, non-durable `TaskQueue` (ADR-0010; losses at shutdown are counted). Child records on `WorkResult`; dispatch is not detached work; draining waits for dispatched tasks; parent globals invisible in the child world.
+- **D5 cron + commands.** Per-revision cron schedulers (croner, 5/6-field), fresh world per tick, overlap `skip`/`allow`, invalid schedules fail at install, schedulers stop at drain; `RuntimeConfig.cron_scheduler` for instances that must not tick. `Runtime::run_cron` / `run_command` / `run_task` for deterministic invocation; CLI `usai cron run`, `usai app <cmd> [args]`, `usai task run --input`. 9 acceptance tests in `tests/workloads.rs`.
 - Design review closed 14 of 16 open questions as ADR-0001…0014; ADR-0015 records the engine decision.
 
 ## In progress
 
 - nothing
 
-## Next (D4 acceptance: HTTP request can dispatch a task and end safely; task gets a separate world; parent state does not leak; ownership transfer explicit and observable; dangling async work rejected/cancelled/diagnosed)
+## Next (D6 acceptance: connection reuse only after terminal knowledge; no connection-state leak across worlds; cancellation covered; abandoned-world behaviour covered; recovery request succeeds after abnormal cases)
 
-1. Runtime task subsystem: `task.invoke` op (owned, awaited child world) and `task.dispatch` op (ownership transferred to a runtime-owned task queue with its own budget; non-durable, ADR-0010).
-2. Task world input `{kind:"task", input}` already supported by the SDK dispatcher; add runtime-side input validation from the manifest's `input` schema.
-3. Observability: dispatch recorded in the parent's `WorkResult` (children), task outcomes logged.
-4. Tests: HTTP → dispatch → task runs after the response; invoke → parent waits; parent globals invisible in task world; budgets; cancel semantics.
+1. `postgres` resource provider (`tokio-postgres` + `deadpool-postgres`): per-operation lease; normal/SQL-error → terminal → return; cooperative cancel → `CancelRequest` then await 57014 → return; hard abandonment → `Ambiguous` → quarantine (remove from pool); backend identity per physical connection.
+2. SDK `postgres("main", { url: env ref })` declaration and in-world handle (`query`, `one`, `execute`, `transaction` later).
+3. Tests against a docker PostgreSQL (gated on `USAI_TEST_DATABASE_URL`); all four C5 paths plus recovery.
 
 ## Known gaps / debt
 

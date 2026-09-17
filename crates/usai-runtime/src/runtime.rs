@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -18,6 +18,7 @@ use crate::engine::{Compiled, Engine, EngineError};
 use crate::host_ops::{OpExtensions, OpHandler};
 use crate::ownership::{GaugeSnapshot, Ledger};
 use crate::resource::{BoundResources, ResourceError, ResourceRegistry, ResourceStatus};
+use crate::workloads::{cron, tasks};
 use crate::world::{WorkResult, WorldDriver, WorldSpec};
 
 /// Where the runtime reads deployment configuration from (`GOAL.md` §30).
@@ -35,6 +36,13 @@ pub struct RuntimeConfig {
     pub cpu_slice: Duration,
     /// How long `drain` waits before giving up on a revision.
     pub drain_timeout: Duration,
+    /// Dispatched tasks that may run at once (ADR-0012).
+    pub task_concurrency: u32,
+    /// Dispatched tasks that may wait in the queue.
+    pub task_queue_capacity: usize,
+    /// Whether this instance runs cron schedulers. A deployment concern:
+    /// only one instance of an application should tick its crons.
+    pub cron_scheduler: bool,
 }
 
 impl Default for RuntimeConfig {
@@ -45,6 +53,9 @@ impl Default for RuntimeConfig {
             default_timeout: Duration::from_secs(30),
             cpu_slice: Duration::from_secs(5),
             drain_timeout: Duration::from_secs(30),
+            task_concurrency: 64,
+            task_queue_capacity: 10_000,
+            cron_scheduler: true,
         }
     }
 }
@@ -88,6 +99,8 @@ pub struct Revision {
     workload_budgets: Vec<Option<Arc<Budget>>>,
     in_flight: AtomicU64,
     settled: Notify,
+    cron_stop: Mutex<Option<CancellationToken>>,
+    pub cron_stats: Arc<cron::CronStats>,
 }
 
 impl Revision {
@@ -111,6 +124,22 @@ impl Revision {
 
     fn set_state(&self, state: RevisionState) {
         *self.state.write().expect("state poisoned") = state;
+        if matches!(state, RevisionState::Draining | RevisionState::Retired)
+            && let Some(stop) = self.cron_stop.lock().expect("cron poisoned").take()
+        {
+            stop.cancel();
+        }
+    }
+
+    /// Counts a queued child (a dispatched task) so draining waits for it.
+    pub(crate) fn retain_for_child(&self) {
+        self.in_flight.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub(crate) fn release_child(&self) {
+        if self.in_flight.fetch_sub(1, Ordering::SeqCst) == 1 {
+            self.settled.notify_waiters();
+        }
     }
 }
 
@@ -151,6 +180,8 @@ pub enum RuntimeError {
     MissingEnv(String),
     #[error("revision {0} did not drain within {1:?}")]
     DrainTimeout(RevisionId, Duration),
+    #[error("invalid definition: {0}")]
+    InvalidDefinition(String),
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -158,6 +189,7 @@ pub enum RuntimeError {
 pub struct RuntimeStatus {
     pub engine: &'static str,
     pub gauges: GaugeSnapshot,
+    pub tasks: serde_json::Value,
     pub revisions: Vec<RevisionStatus>,
     pub resources: Vec<ResourceStatus>,
     pub worlds_in_use: u32,
@@ -175,6 +207,7 @@ pub struct RevisionStatus {
 }
 
 pub struct Runtime {
+    self_ref: Weak<Runtime>,
     config: RuntimeConfig,
     engine: Arc<dyn Engine>,
     ledger: Arc<Ledger>,
@@ -186,6 +219,7 @@ pub struct Runtime {
     next_revision: AtomicU64,
     env: EnvSource,
     shutdown: CancellationToken,
+    tasks: Arc<tasks::TaskQueue>,
 }
 
 impl Runtime {
@@ -200,19 +234,38 @@ impl Runtime {
         config: RuntimeConfig,
         env: impl Fn(&str) -> Option<String> + Send + Sync + 'static,
     ) -> Arc<Self> {
-        Arc::new(Self {
-            world_budget: Budget::new("runtime.worlds", config.max_worlds),
-            config,
-            engine,
-            ledger: Ledger::new(),
-            resources: ResourceRegistry::new(),
-            extensions: Mutex::new(OpExtensions::default()),
-            revisions: RwLock::new(BTreeMap::new()),
-            active: RwLock::new(None),
-            next_revision: AtomicU64::new(1),
-            env: Box::new(env),
-            shutdown: CancellationToken::new(),
+        let shutdown = CancellationToken::new();
+        Arc::new_cyclic(|weak: &Weak<Runtime>| {
+            let tasks = tasks::TaskQueue::start(
+                weak.clone(),
+                config.task_queue_capacity,
+                config.task_concurrency,
+                shutdown.clone(),
+            );
+            let mut extensions = OpExtensions::default();
+            for (kind, handler) in tasks::handlers(weak.clone(), Arc::clone(&tasks)) {
+                extensions.handlers.insert(kind.to_owned(), handler);
+            }
+            Self {
+                self_ref: weak.clone(),
+                world_budget: Budget::new("runtime.worlds", config.max_worlds),
+                config,
+                engine,
+                ledger: Ledger::new(),
+                resources: ResourceRegistry::new(),
+                extensions: Mutex::new(extensions),
+                revisions: RwLock::new(BTreeMap::new()),
+                active: RwLock::new(None),
+                next_revision: AtomicU64::new(1),
+                env: Box::new(env),
+                shutdown,
+                tasks,
+            }
         })
+    }
+
+    pub fn tasks(&self) -> &Arc<tasks::TaskQueue> {
+        &self.tasks
     }
 
     pub fn config(&self) -> &RuntimeConfig {
@@ -278,7 +331,10 @@ impl Runtime {
             workload_budgets,
             in_flight: AtomicU64::new(0),
             settled: Notify::new(),
+            cron_stop: Mutex::new(None),
+            cron_stats: Arc::new(cron::CronStats::default()),
         });
+        cron::validate(&revision).map_err(|e| RuntimeError::InvalidDefinition(e.to_string()))?;
         self.revisions
             .write()
             .expect("revisions poisoned")
@@ -320,6 +376,14 @@ impl Runtime {
             previous
         };
         tracing::info!(revision = %id, "revision active");
+        if self.config.cron_scheduler {
+            let stop = cron::start(
+                self.self_ref.clone(),
+                Arc::clone(&revision),
+                Arc::clone(&revision.cron_stats),
+            );
+            *revision.cron_stop.lock().expect("cron poisoned") = Some(stop);
+        }
         if let Some(previous) = previous
             && previous != id
             && let Ok(old) = self.revision(previous)
@@ -417,6 +481,85 @@ impl Runtime {
         })
     }
 
+    /// Admission for child work (tasks, cron ticks) that belongs to a revision
+    /// which may already be draining: the revision still owns it and drain
+    /// waits for it. Runtime and application budgets still apply.
+    pub fn admit_child(
+        &self,
+        revision: &Arc<Revision>,
+        workload_id: &str,
+    ) -> Result<Admission, RuntimeError> {
+        match revision.state() {
+            RevisionState::Active | RevisionState::Draining => {}
+            state => return Err(RuntimeError::NotActive(revision.id, state)),
+        }
+        let (index, _) = revision
+            .definition
+            .workload(workload_id)
+            .ok_or_else(|| RuntimeError::UnknownWorkload(workload_id.to_owned()))?;
+        let runtime_permit = self.world_budget.try_acquire()?;
+        let app_permit = revision.app_budget.try_acquire()?;
+        let workload_permit = match &revision.workload_budgets[index] {
+            Some(budget) => Some(budget.try_acquire()?),
+            None => None,
+        };
+        revision.in_flight.fetch_add(1, Ordering::SeqCst);
+        Ok(Admission {
+            revision: Arc::clone(revision),
+            workload_index: index,
+            in_flight: InFlight {
+                revision: Arc::clone(revision),
+                _runtime_permit: runtime_permit,
+                _app_permit: app_permit,
+                _workload_permit: workload_permit,
+            },
+        })
+    }
+
+    /// Runs one cron invocation now, in a fresh world, without waiting for
+    /// the wall clock (tests, `usai cron run`).
+    pub async fn run_cron(&self, name: &str) -> Result<WorkResult, RuntimeError> {
+        let revision = self.active()?;
+        cron::run_tick(
+            self,
+            &revision,
+            &format!("cron:{name}"),
+            chrono::Utc::now(),
+            CancellationToken::new(),
+        )
+        .await
+        .map_err(RuntimeError::InvalidDefinition)
+    }
+
+    /// Runs a user-defined command in a fresh finite world (`usai app <name>`).
+    pub async fn run_command(
+        &self,
+        name: &str,
+        args: Vec<String>,
+    ) -> Result<WorkResult, RuntimeError> {
+        let revision = self.active()?;
+        let admission = self.admit(&revision, &format!("command:{name}"))?;
+        let input =
+            crate::workloads::input(&revision, "command", serde_json::json!({ "args": args }));
+        self.execute(admission, input, CancellationToken::new())
+            .await
+    }
+
+    /// Runs a task directly (tests, tooling). Equivalent to an owned invoke
+    /// with no parent.
+    pub async fn run_task(
+        &self,
+        name: &str,
+        input: serde_json::Value,
+    ) -> Result<WorkResult, RuntimeError> {
+        let revision = self.active()?;
+        let admission = self.admit(&revision, &format!("task:{name}"))?;
+        let input =
+            crate::workloads::input(&revision, "task", serde_json::json!({ "input": input }));
+        self.execute(admission, input, CancellationToken::new())
+            .await
+    }
+
     /// Creates a world for admitted work and drives it to its terminal state.
     pub async fn execute(
         &self,
@@ -465,6 +608,7 @@ impl Runtime {
                 deadline,
                 cpu_slice: self.config.cpu_slice,
                 cancel,
+                revision: Some(Arc::clone(&revision)),
             },
         )
         .await?;
@@ -503,6 +647,7 @@ impl Runtime {
         RuntimeStatus {
             engine: self.engine.name(),
             gauges: self.ledger.gauges.snapshot(),
+            tasks: self.tasks.status(),
             revisions,
             resources: self.resources.statuses(),
             worlds_in_use: self.world_budget.in_use(),

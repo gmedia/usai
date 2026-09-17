@@ -113,6 +113,7 @@ fn config() -> RuntimeConfig {
         default_timeout: Duration::from_secs(5),
         cpu_slice: Duration::from_millis(300),
         drain_timeout: Duration::from_secs(5),
+        ..RuntimeConfig::default()
     }
 }
 
