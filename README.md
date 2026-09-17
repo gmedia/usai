@@ -150,7 +150,10 @@ export default defineApp({ name: "hello", workloads: [hello] });
 
 Each request runs in a fresh execution world; invalid params are rejected
 before a world exists; `usai inspect` shows exactly what the runtime
-understood. See `docs/STATUS.md` for what is implemented and what is not.
+understood. `docs/GUIDE.md` walks through every workload kind (HTTP, tasks,
+cron, commands, PostgreSQL, queue, streams, WebSockets, services);
+`docs/STATUS.md` says what is implemented, what is measured, and what is
+not.
 
 The developer surface is TypeScript and will change before the first
 developer preview.

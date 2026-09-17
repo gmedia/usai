@@ -7,6 +7,7 @@
 | Read | When |
 |---|---|
 | [`STATUS.md`](STATUS.md) | every session — current milestone and next steps |
+| [`GUIDE.md`](GUIDE.md) | to build an application on the runtime as it is today |
 | [`../GOAL.md`](../GOAL.md) | before proposing structure, API, or scope |
 | [`LIFECYCLE-CONTRACTS.md`](LIFECYCLE-CONTRACTS.md) | before writing or reviewing runtime code |
 | [`GLOSSARY.md`](GLOSSARY.md) | when a term is unclear, or before reading research evidence |
@@ -24,6 +25,7 @@ Working agreement for agents and contributors: [`../AGENTS.md`](../AGENTS.md).
 docs/
   README.md                 this index
   STATUS.md                 living: current milestone
+  GUIDE.md                  developer guide (v0 preview)
   LIFECYCLE-CONTRACTS.md    binding invariants C1–C13
   GLOSSARY.md               vocabulary (production + research-era)
   RESEARCH-REFERENCE.md     map to HasanH47/usai evidence

@@ -57,12 +57,38 @@ pub async fn run(
     port: u16,
     artifact: Option<PathBuf>,
     status: bool,
+    control: Option<String>,
 ) -> Result<()> {
     let (definition, engine) = definition_for(root, artifact).await?;
     let runtime = Runtime::new(engine, RuntimeConfig::default());
     let revision = runtime.install(definition).await?;
     runtime.activate(revision.id).await?;
-    serve_until_signal(runtime, host, port, false, status, None).await
+    let stop_requested = match control {
+        Some(addr) => {
+            let addr: std::net::SocketAddr = addr.parse().context("invalid --control address")?;
+            let token = std::env::var("USAI_CONTROL_TOKEN")
+                .ok()
+                .filter(|t| !t.is_empty());
+            let host = usai_runtime::control::ControlHost::new(
+                Arc::clone(&runtime),
+                usai_runtime::control::ControlConfig { addr, token },
+            )?;
+            let stop = host.stop_requested.clone();
+            let shutdown = runtime.shutdown_token();
+            tokio::spawn(async move {
+                if let Err(e) = usai_runtime::control::serve(host, shutdown, |bound| {
+                    eprintln!("Control   http://{bound}")
+                })
+                .await
+                {
+                    eprintln!("control surface failed: {e}");
+                }
+            });
+            Some(stop)
+        }
+        None => None,
+    };
+    serve_until_signal(runtime, host, port, false, status, stop_requested, None).await
 }
 
 pub async fn graph(root: &Path) -> Result<()> {
@@ -77,6 +103,7 @@ async fn serve_until_signal(
     port: u16,
     expose_diagnostics: bool,
     serve_status: bool,
+    stop_requested: Option<CancellationToken>,
     on_ready: Option<Box<dyn FnOnce(String) + Send>>,
 ) -> Result<()> {
     let addr: std::net::SocketAddr = format!("{host}:{port}")
@@ -122,7 +149,12 @@ async fn serve_until_signal(
         }
         handle
     };
-    tokio::signal::ctrl_c().await.ok();
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = async { match &stop_requested { Some(t) => t.cancelled().await, None => std::future::pending().await } } => {
+            eprintln!("stop requested through the control surface");
+        }
+    }
     eprintln!("\nshutting down: draining in-flight work (ctrl-c again to force)");
     shutdown.cancel();
     let drain = async {
@@ -304,6 +336,7 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
         port,
         true,
         true,
+        None,
         Some(Box::new(move |url| {
             let revision = banner_runtime.active().expect("active");
             print!(

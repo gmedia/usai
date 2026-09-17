@@ -496,6 +496,23 @@ impl Runtime {
         Ok(())
     }
 
+    /// Removes a revision that never served (installed) or already retired.
+    /// An active or draining revision must be drained first.
+    pub fn remove(&self, id: RevisionId) -> Result<(), RuntimeError> {
+        let revision = self.revision(id)?;
+        match revision.state() {
+            RevisionState::Installed | RevisionState::Retired => {
+                self.revisions
+                    .write()
+                    .expect("revisions poisoned")
+                    .remove(&id);
+                tracing::info!(revision = %id, "revision removed");
+                Ok(())
+            }
+            state => Err(RuntimeError::NotActive(id, state)),
+        }
+    }
+
     pub fn revision(&self, id: RevisionId) -> Result<Arc<Revision>, RuntimeError> {
         self.revisions
             .read()

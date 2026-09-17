@@ -6,7 +6,7 @@
 
 ## Current milestone
 
-**D13 — Production Hardening** (in progress: first evidence gathered). D0–D12 are done.
+**Developer preview groundwork done (D0–D15 each have a first implementation).** Remaining work is listed under Next; the largest item is per-world cost (see Measured).
 
 ## Done
 
@@ -24,6 +24,8 @@
 - **D11 WebSocket + stream workloads.** Streams: `http.stream(path, { params, query, auth }, (ctx, stream) => …)` — the response commits at the first `stream.start`/`send`/`event` (SSE helper) and the body ends when the handler returns (`headers sent != work complete`); a handler that never sends is an ordinary response; a client disconnect cancels the world through the body's drop guard; drain stops the loop gracefully. Sockets: `socket(path, { incoming, outgoing }, { open, message, close })` — HTTP upgrade (hyper `with_upgrades` + tungstenite), one world per connection, frames delivered as host completions (`socket.recv`), `ctx.state` connection-local, contract violations reported to the client without closing, application or client close runs `close`, drain sends 1012 and runs `close`. Per-revision `connections_stop`. Server rewritten with per-connection tasks + `TaskTracker` drain. 5 acceptance tests in `tests/connection.rs`.
 - **D12 observability + graph.** `observability.rs`: per-world trace record at `debug` (world, workload, revision, termination, outcome, duration, completions, children, violations) gated by `tracing::enabled!` so the disabled path builds nothing; HTTP class-level counters (2xx/3xx/4xx/5xx, rejected-before-world, upgrades, streams); `/_usai/status` (runtime status JSON incl. gauges, revisions, services, tasks, resources, http) and `/_usai/metrics` (Prometheus text) as runtime-owned surfaces (`HttpConfig.serve_status`; `usai run --status`, on in `usai dev`); `usai graph` renders workload → resource [lease] / dispatch → task edges from the definition; `--log-format json`. 1 acceptance test + 1 unit test.
 - **D13 hardening (first pass).** Service restart policy (`restart: { mode: never|on-failure|always, backoffMs, maxRestarts }`, doubling backoff, stop always wins). Graceful shutdown drains with a bound; a second SIGINT forces exit and reports live worlds/ops. `usai bench` (engineering measurement, prints percentiles, req/s, RSS high-water, and asserts ownership returned to baseline). Connection-loss SQLSTATEs (`08*`, `57P0x`) quarantine the connection instead of returning it. `docs/THREAT-MODEL.md`. 6 tests in `tests/hardening.rs`: memory limit faults cleanly and the runtime continues; failing service restarts per policy then settles; revision replacement under 8 concurrent clients loses no request; tampered/unsupported/missing artifacts are refused with clear errors; budget exhaustion refuses at once (503) and recovers; killed PostgreSQL backend → quarantine → recovery on a replacement connection.
+- **D14 developer preview groundwork.** `docs/GUIDE.md` (install → concepts → every workload kind → resources → operate); `create-usai <dir>` scaffolds a runnable project from a template (tested). Not yet an alpha: see Next.
+- **D15 control surface.** `usai run --control 127.0.0.1:3900` serves a generic JSON API (`control.rs`): `GET /health`, `GET /status`, `GET /revisions`, `POST /revisions {artifact}` (install from an artifact directory), `POST /revisions/{id}/activate`, `POST /revisions/{id}/drain`, `DELETE /revisions/{id}` (installed/retired only), `POST /stop`. Bearer token from `USAI_CONTROL_TOKEN`; binding off loopback without a token is refused. `Runtime::remove`. 2 tests. Sakala is one client of this protocol, never a dependency.
 - Design review closed 14 of 16 open questions as ADR-0001…0014; ADR-0015 records the engine decision.
 
 ## In progress
@@ -52,7 +54,7 @@ hello bundle (765 KB, zod evaluated per world) 6.52 ms/world
 1. **Per-world cost**: either (a) the Wasmtime + QuickJS-Wasm + Wizer image substrate behind the existing engine boundary (research path; needs a toolchain), or (b) a native mitigation such as reusing a pre-evaluated *runtime* with fresh *contexts* — which must be measured for isolation before it is trusted (contexts share a heap; that is a stop-and-surface decision). Decide with numbers, not preference.
 2. Long soak (≥ 1 h at c=16) watching RSS and gauge baseline; run with `usai bench --duration 3600`.
 3. Socket idle timeout; per-world CPU accounting (threat model "Open").
-4. D14 developer preview checklist: `usai build` artifact format finalized (ADR-0005 follow-up), docs that let a new developer build a real application, `create-usai`.
+4. D14 alpha checklist still open: publish `usai` / `create-usai` to npm and a `usai` binary (today the CLI is `cargo run -p usai-cli`); `usai/test` TypeScript harness (`testApp`, `GOAL.md` §36); artifact byte format + signing (ADR-0005 follow-up); OpenAPI for stream/socket endpoints; PostgreSQL TLS.
 
 ## Known gaps / debt
 

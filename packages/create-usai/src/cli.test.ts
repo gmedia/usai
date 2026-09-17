@@ -1,6 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { scaffold } from "./cli.ts";
 
-test("placeholder", () => {
-  assert.ok(true);
+test("scaffolds the hello template with the project name substituted", () => {
+  const dir = join(mkdtempSync(join(tmpdir(), "create-usai-")), "My App");
+  const target = scaffold({ target: dir, usaiVersion: "0.0.1" });
+  assert.ok(existsSync(join(target, "src/app.ts")));
+  assert.ok(existsSync(join(target, "usai.config.ts")));
+  const pkg = JSON.parse(readFileSync(join(target, "package.json"), "utf8"));
+  assert.equal(pkg.name, "my-app");
+  assert.equal(pkg.dependencies.usai, "^0.0.1");
+  assert.match(readFileSync(join(target, "src/app.ts"), "utf8"), /name: "my-app"/);
+  assert.throws(() => scaffold({ target: dir }), /not empty/);
 });

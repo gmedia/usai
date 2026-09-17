@@ -13,6 +13,7 @@
 
 pub mod admission;
 pub mod build;
+pub mod control;
 pub mod db;
 pub mod definition;
 pub mod engine;

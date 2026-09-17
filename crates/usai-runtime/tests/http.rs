@@ -143,8 +143,26 @@ async fn contract_endpoint_end_to_end() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn invalid_boundary_input_fails_before_any_world_exists() {
     let Some(s) = start().await else { return };
-    // The fixture's service world starts asynchronously at activation.
-    tokio::time::sleep(Duration::from_millis(150)).await;
+    // The fixture's services start asynchronously (one restarts twice by
+    // design); wait until every service has settled before counting worlds.
+    let started = std::time::Instant::now();
+    loop {
+        let services = s.runtime.active().unwrap().services();
+        let settled = services
+            .iter()
+            .all(|x| x.state == usai_runtime::workloads::services::ServiceState::Running)
+            && services
+                .iter()
+                .any(|x| x.name == "crashy" && x.restarts == 2);
+        if settled {
+            break;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "services did not settle: {services:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     let before = s.runtime.ledger().gauges.snapshot();
     let (status, body) = s.get("/users/not-a-uuid").await;
     assert_eq!(status, 400, "{body}");

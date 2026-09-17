@@ -4,8 +4,13 @@
   "description": "Scaffold a new Usai application.",
   "license": "Apache-2.0",
   "type": "module",
-  "bin": { "create-usai": "./dist/cli.js" },
-  "files": ["dist", "templates"],
+  "bin": {
+    "create-usai": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "templates"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

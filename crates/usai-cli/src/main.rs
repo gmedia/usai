@@ -42,6 +42,10 @@ enum Command {
         /// Serve /_usai/status and /_usai/metrics
         #[arg(long)]
         status: bool,
+        /// Bind the local control surface (install/activate/drain/stop), e.g. 127.0.0.1:3900.
+        /// Token from USAI_CONTROL_TOKEN (required off loopback).
+        #[arg(long)]
+        control: Option<String>,
     },
     /// Build, serve, and rebuild on change as a new revision
     Dev {
@@ -169,7 +173,8 @@ async fn main() {
             port,
             artifact,
             status,
-        } => commands::run(&root, &host, port, artifact, status).await,
+            control,
+        } => commands::run(&root, &host, port, artifact, status, control).await,
         Command::Dev { host, port } => commands::dev(&root, &host, port).await,
         Command::Inspect { json } => commands::inspect(&root, json).await,
         Command::Graph => commands::graph(&root).await,
