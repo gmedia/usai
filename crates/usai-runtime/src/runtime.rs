@@ -18,7 +18,7 @@ use crate::engine::{Compiled, Engine, EngineError};
 use crate::host_ops::{OpExtensions, OpHandler};
 use crate::ownership::{GaugeSnapshot, Ledger};
 use crate::resource::{BoundResources, ResourceError, ResourceRegistry, ResourceStatus};
-use crate::workloads::{cron, tasks};
+use crate::workloads::{cron, services, tasks};
 use crate::world::{WorkResult, WorldDriver, WorldSpec};
 
 /// Where the runtime reads deployment configuration from (`GOAL.md` §30).
@@ -101,6 +101,7 @@ pub struct Revision {
     settled: Notify,
     cron_stop: Mutex<Option<CancellationToken>>,
     pub cron_stats: Arc<cron::CronStats>,
+    services: Mutex<Option<Arc<services::Supervisor>>>,
 }
 
 impl Revision {
@@ -110,6 +111,15 @@ impl Revision {
 
     pub fn in_flight(&self) -> u64 {
         self.in_flight.load(Ordering::SeqCst)
+    }
+
+    pub fn services(&self) -> Vec<services::ServiceStatus> {
+        self.services
+            .lock()
+            .expect("services poisoned")
+            .as_ref()
+            .map(|s| s.status())
+            .unwrap_or_default()
     }
 
     pub fn resources(&self) -> Arc<BoundResources> {
@@ -206,6 +216,7 @@ pub struct RevisionStatus {
     pub identity: String,
     pub state: RevisionState,
     pub in_flight: u64,
+    pub services: Vec<services::ServiceStatus>,
 }
 
 pub struct Runtime {
@@ -335,6 +346,7 @@ impl Runtime {
             settled: Notify::new(),
             cron_stop: Mutex::new(None),
             cron_stats: Arc::new(cron::CronStats::default()),
+            services: Mutex::new(None),
         });
         cron::validate(&revision).map_err(|e| RuntimeError::InvalidDefinition(e.to_string()))?;
         self.revisions
@@ -388,6 +400,11 @@ impl Runtime {
             );
             *revision.cron_stop.lock().expect("cron poisoned") = Some(stop);
         }
+        let supervisor =
+            services::Supervisor::start(self.self_ref.clone(), &revision, &self.shutdown);
+        if !supervisor.is_empty() {
+            *revision.services.lock().expect("services poisoned") = Some(supervisor);
+        }
         if let Some(previous) = previous
             && previous != id
             && let Ok(old) = self.revision(previous)
@@ -410,6 +427,12 @@ impl Runtime {
         }
         if revision.state() == RevisionState::Active {
             revision.set_state(RevisionState::Draining);
+        }
+        // Services are the revision's own long-running work: ask them to
+        // stop before waiting for in-flight work to settle.
+        let supervisor = revision.services.lock().expect("services poisoned").clone();
+        if let Some(supervisor) = supervisor {
+            supervisor.stop(self.config.drain_timeout).await;
         }
         let wait = async {
             loop {
@@ -568,8 +591,19 @@ impl Runtime {
     pub async fn execute(
         &self,
         admission: Admission,
+        input: serde_json::Value,
+        cancel: CancellationToken,
+    ) -> Result<WorkResult, RuntimeError> {
+        self.execute_with_stop(admission, input, cancel, None).await
+    }
+
+    /// `execute` with a graceful-stop token, for persistent workloads.
+    pub async fn execute_with_stop(
+        &self,
+        admission: Admission,
         mut input: serde_json::Value,
         cancel: CancellationToken,
+        stop: Option<CancellationToken>,
     ) -> Result<WorkResult, RuntimeError> {
         let Admission {
             revision,
@@ -620,6 +654,7 @@ impl Runtime {
                 deadline,
                 cpu_slice: self.config.cpu_slice,
                 cancel,
+                stop,
                 revision: Some(Arc::clone(&revision)),
             },
         )
@@ -654,6 +689,7 @@ impl Runtime {
                 identity: r.definition.identity(),
                 state: r.state(),
                 in_flight: r.in_flight(),
+                services: r.services(),
             })
             .collect();
         RuntimeStatus {

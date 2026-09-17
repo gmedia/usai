@@ -56,6 +56,8 @@ export const sendReceipt = task("send-receipt", { input: z.object({ orderId: z.s
 declare global {
   // eslint-disable-next-line no-var
   var __mutable: unknown;
+  // eslint-disable-next-line no-var
+  var __serviceLocal: unknown;
 }
 
 
@@ -63,7 +65,7 @@ declare global {
 import { cron, command, dispatches } from "usai";
 
 const audit = cache.local("audit");
-type Audit = { increment(k: string): Promise<number>; get(k: string): Promise<number | null> };
+type Audit = { increment(k: string): Promise<number>; get(k: string): Promise<number | null>; set(k: string, v: unknown): Promise<boolean> };
 
 export const record = task("record", { input: z.object({ what: z.string() }), resources: [audit] }, async (ctx) => {
   await (ctx.resources["audit"] as Audit).increment(ctx.input.what);
@@ -99,6 +101,26 @@ export const overlapping = cron("overlapping", { schedule: "* * * * * *", overla
 });
 export const nightly = cron("nightly", { schedule: "0 3 * * *", timeout: "5m" }, async () => ({ ran: true }));
 
+// ---- D9: services ---------------------------------------------------------
+import { service } from "usai";
+
+export const ledgerSync = service("ledger-sync", { resources: [audit] }, async (ctx) => {
+  // Mutable state that survives iterations because the service is alive.
+  const state = new Map<string, number>();
+  globalThis.__serviceLocal = "service-secret";
+  let iterations = 0;
+  while (!ctx.signal.aborted) {
+    iterations += 1;
+    state.set("iterations", iterations);
+    await (ctx.resources["audit"] as Audit).increment("service:iterations");
+    await ctx.sleep("100ms");
+  }
+  await (ctx.resources["audit"] as Audit).set("service:final", state.get("iterations") ?? 0);
+  return { iterations, reason: ctx.signal.reason };
+});
+
+export const serviceLocalRead = http.get("/service-local", {}, async () => ({ sees: globalThis.__serviceLocal ?? null }));
+
 export const reconcile = command("reconcile", { resources: [audit] }, async (ctx) => {
   await (ctx.resources["audit"] as Audit).increment("command:reconcile");
   return { args: ctx.args };
@@ -110,6 +132,7 @@ export default defineApp({
   workloads: [
     counter, persistent, me, boom, badShape, detach, slow, echoQuery, webhook, sendReceipt,
     record, slowTask, failingTask, invokesSlow, order, auditRead, badDispatch, everySecond, overlapping, nightly, reconcile,
+    ledgerSync, serviceLocalRead,
   ],
   resources: [hits, audit],
   env: env({ GREETING: env.optional(env.string()) }),

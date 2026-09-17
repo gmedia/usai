@@ -107,7 +107,11 @@ impl Server {
         )
     }
 
-    fn baseline(&self) {
+    /// Ownership returns to baseline once the runtime has drained: a
+    /// running service is a live world by design until then.
+    async fn baseline(&self) {
+        self.runtime.shutdown().await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
         let g = self.runtime.ledger().gauges.snapshot();
         assert_eq!(g.live_worlds, 0, "{g:?}");
         assert_eq!(g.live_ops, 0, "{g:?}");
@@ -132,13 +136,15 @@ async fn contract_endpoint_end_to_end() {
         body["name"], "user page 1",
         "query default applied in-world"
     );
-    s.baseline();
+    s.baseline().await;
     s.shutdown.cancel();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn invalid_boundary_input_fails_before_any_world_exists() {
     let Some(s) = start().await else { return };
+    // The fixture's service world starts asynchronously at activation.
+    tokio::time::sleep(Duration::from_millis(150)).await;
     let before = s.runtime.ledger().gauges.snapshot();
     let (status, body) = s.get("/users/not-a-uuid").await;
     assert_eq!(status, 400, "{body}");
@@ -224,7 +230,7 @@ async fn fresh_world_per_request_and_persistent_resource() {
         let body: Value = r.json().await.unwrap();
         assert_eq!(body["hits"], expected);
     }
-    s.baseline();
+    s.baseline().await;
     s.shutdown.cancel();
 }
 
@@ -243,7 +249,7 @@ async fn concurrent_requests_do_not_share_state() {
     for h in handles {
         assert_eq!(h.await.unwrap(), 1);
     }
-    s.baseline();
+    s.baseline().await;
     s.shutdown.cancel();
 }
 
@@ -308,7 +314,7 @@ async fn detached_work_is_reported_and_the_response_still_commits() {
         s.runtime.ledger().gauges.snapshot().detached_work_detected,
         1
     );
-    s.baseline();
+    s.baseline().await;
     s.shutdown.cancel();
 }
 
@@ -319,7 +325,7 @@ async fn deadline_maps_to_gateway_timeout() {
     assert_eq!(status, 504, "{body}");
     assert_eq!(body["error"]["code"], "deadline_exceeded");
     tokio::time::sleep(Duration::from_millis(50)).await;
-    s.baseline();
+    s.baseline().await;
     s.shutdown.cancel();
 }
 
@@ -337,7 +343,7 @@ async fn client_disconnect_cancels_the_world() {
         .unwrap_err();
     assert!(err.is_timeout());
     tokio::time::sleep(Duration::from_millis(200)).await;
-    s.baseline();
+    s.baseline().await;
     s.shutdown.cancel();
 }
 

@@ -5,6 +5,7 @@
 //! keeps a permanent mutable application process alive.
 
 pub mod cron;
+pub mod services;
 pub mod tasks;
 
 use std::collections::BTreeMap;

@@ -13,6 +13,7 @@
   const pending = new Map();
   const cancelListeners = [];
   let cancelled = null;
+  let stopping = null;
   let outcome = null;
 
   function bridgeError(code, message) {
@@ -89,6 +90,7 @@
     },
     onCancel(fn) {
       if (cancelled !== null) fn(cancelled);
+      else if (stopping !== null) fn(stopping);
       else cancelListeners.push(fn);
     },
     isCancelled() {
@@ -107,6 +109,28 @@
       for (const entry of entries) {
         entry.reject(bridgeError("cancelled", "work was cancelled: " + cancelled));
       }
+    },
+    // Graceful stop (persistent workloads): the signal fires so loops can
+    // exit, pending timers resolve now so `await ctx.sleep()` returns, and
+    // other operations keep their owners until they complete.
+    stop(reason) {
+      if (cancelled !== null) return;
+      const listeners = cancelListeners.slice();
+      cancelListeners.length = 0;
+      stopping = String(reason);
+      for (const fn of listeners) {
+        try { fn(stopping); } catch (_) {}
+      }
+      for (const [id, entry] of Array.from(pending.entries())) {
+        if (entry.kind === "timer") {
+          pending.delete(id);
+          __usai_host_cancel(id);
+          entry.resolve("");
+        }
+      }
+    },
+    isStopping() {
+      return stopping !== null;
     },
     invoke(index, inputJson) {
       outcome = null;

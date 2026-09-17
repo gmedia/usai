@@ -134,6 +134,9 @@ pub trait WorldInstance: Send {
     async fn deliver(&mut self, op: u64, ok: bool, payload: &str) -> Result<bool, EngineError>;
     /// Tells the guest its work was cancelled and runs it until idle.
     async fn cancel(&mut self, reason: &str) -> Result<(), EngineError>;
+    /// Asks the guest to finish: the signal fires, pending timers resolve,
+    /// other operations complete normally. Used for persistent workloads.
+    async fn stop(&mut self, reason: &str) -> Result<(), EngineError>;
     async fn outcome(&mut self) -> Result<Option<Outcome>, EngineError>;
     async fn pending(&mut self) -> Result<Pending, EngineError>;
     /// Setting this flag aborts guest execution at its next safe point. Used

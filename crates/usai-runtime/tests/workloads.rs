@@ -63,7 +63,11 @@ fn value(result: &WorkResult) -> &Value {
     result.outcome.as_ref().unwrap().as_ref().unwrap()
 }
 
-fn baseline(rt: &Runtime) {
+/// Ownership returns to baseline once the runtime has drained: a running
+/// service is a live world by design until then.
+async fn baseline(rt: &Runtime) {
+    rt.shutdown().await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
     let g = rt.ledger().gauges.snapshot();
     assert_eq!(g.live_worlds, 0, "{g:?}");
     assert_eq!(g.live_ops, 0, "{g:?}");
@@ -114,7 +118,7 @@ async fn http_dispatches_a_task_and_ends_before_it_runs() {
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(audit(&rt, "dispatched:o1").await, json!(1));
     assert_eq!(rt.tasks().status()["completed"], 1);
-    baseline(&rt);
+    baseline(&rt).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -130,7 +134,7 @@ async fn owned_task_failure_reaches_the_parent_as_a_contract() {
     let r = rt.run_task("failing", json!(null)).await.unwrap();
     let err = r.outcome.unwrap().unwrap_err();
     assert_eq!(err.usai.unwrap()["code"], "conflict");
-    baseline(&rt);
+    baseline(&rt).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -153,7 +157,7 @@ async fn cancelling_the_parent_cancels_the_owned_child() {
     );
     assert!(r.duration < Duration::from_secs(2));
     tokio::time::sleep(Duration::from_millis(200)).await;
-    baseline(&rt);
+    baseline(&rt).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -180,7 +184,7 @@ async fn draining_waits_for_dispatched_tasks() {
         json!(1),
         "drain returned before the dispatched task settled"
     );
-    baseline(&rt);
+    baseline(&rt).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -193,7 +197,7 @@ async fn cron_runs_in_fresh_worlds_and_can_be_invoked_deterministically() {
         value(&r)["value"].as_str().unwrap().contains('T'),
         "scheduledAt is RFC 3339"
     );
-    baseline(&rt);
+    baseline(&rt).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -215,9 +219,7 @@ async fn cron_scheduler_ticks_and_skips_overlap() {
     let b = rt.install(Arc::clone(&rev.definition)).await.unwrap();
     rt.activate(b.id).await.unwrap();
     rt.drain(rev.id).await.unwrap();
-    rt.shutdown().await;
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    baseline(&rt);
+    baseline(&rt).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -244,5 +246,54 @@ async fn command_runs_in_a_fresh_finite_world() {
         .unwrap();
     assert_eq!(value(&r)["value"]["args"], json!(["--dry-run"]));
     assert_eq!(audit(&rt, "command:reconcile").await, json!(1));
-    baseline(&rt);
+    baseline(&rt).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn service_state_persists_for_the_service_lifetime_and_stops_gracefully() {
+    let Some(rt) = runtime().await else { return };
+    let rev = rt.active().unwrap();
+    tokio::time::sleep(Duration::from_millis(450)).await;
+    let services = rev.services();
+    assert_eq!(services.len(), 1);
+    assert_eq!(services[0].name, "ledger-sync");
+    assert_eq!(
+        services[0].state,
+        usai_runtime::workloads::services::ServiceState::Running
+    );
+    let iterations = audit(&rt, "service:iterations").await.as_u64().unwrap_or(0);
+    assert!(
+        iterations >= 3,
+        "service loop should have iterated, got {iterations}"
+    );
+    // The service world's globals are invisible to finite work.
+    let r = rt.invoke("http:GET /service-local", json!({ "kind": "http", "request": { "method": "GET", "path": "/service-local", "url": "/service-local", "params": {}, "query": {}, "headers": {}, "body": null } })).await.unwrap();
+    assert_eq!(value(&r)["json"]["sees"], Value::Null);
+    // Graceful stop: the loop observes the signal and returns normally.
+    let b = rt.install(Arc::clone(&rev.definition)).await.unwrap();
+    rt.activate(b.id).await.unwrap();
+    let started = std::time::Instant::now();
+    rt.drain(rev.id).await.unwrap();
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "graceful stop should be prompt"
+    );
+    let final_count = audit(&rt, "service:final").await.as_u64().unwrap_or(0);
+    assert!(
+        final_count >= 3,
+        "service ran its shutdown path: {final_count}"
+    );
+    let services = rev.services();
+    assert_eq!(
+        services[0].state,
+        usai_runtime::workloads::services::ServiceState::Stopped,
+        "{services:?}"
+    );
+    // The new revision started its own service.
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_eq!(
+        b.services()[0].state,
+        usai_runtime::workloads::services::ServiceState::Running
+    );
+    baseline(&rt).await;
 }

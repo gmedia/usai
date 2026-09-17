@@ -321,6 +321,22 @@ impl WorldInstance for QuickJsWorld {
             .await
     }
 
+    async fn stop(&mut self, reason: &str) -> Result<(), EngineError> {
+        let reason = reason.to_owned();
+        self.context
+            .with(move |ctx| {
+                let b = bridge(&ctx)?;
+                let stop: Function = b
+                    .get("stop")
+                    .map_err(|e| EngineError::Guest(describe(&ctx, e)))?;
+                stop.call::<_, ()>((reason,))
+                    .map_err(|e| EngineError::Guest(describe(&ctx, e)))?;
+                run_jobs(&ctx);
+                Ok(())
+            })
+            .await
+    }
+
     async fn outcome(&mut self) -> Result<Option<Outcome>, EngineError> {
         self.context
             .with(|ctx| {

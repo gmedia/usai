@@ -172,6 +172,8 @@ pub struct WorldSpec {
     /// Hard bound on one uninterrupted synchronous guest run.
     pub cpu_slice: Duration,
     pub cancel: CancellationToken,
+    /// Graceful stop request for persistent workloads (`None` for finite work).
+    pub stop: Option<CancellationToken>,
     pub revision: Option<Arc<crate::runtime::Revision>>,
 }
 
@@ -187,6 +189,7 @@ pub struct WorldDriver {
     deadline: Option<Duration>,
     cpu_slice: Duration,
     cancel: CancellationToken,
+    stop: Option<CancellationToken>,
     delivered: u32,
     dropped: u32,
     finished: bool,
@@ -233,6 +236,7 @@ impl WorldDriver {
             deadline: spec.deadline,
             cpu_slice: spec.cpu_slice,
             cancel: spec.cancel,
+            stop: spec.stop,
             delivered: 0,
             dropped: 0,
             finished: false,
@@ -356,6 +360,7 @@ impl WorldDriver {
     async fn drive(&mut self) -> Termination {
         let deadline = self.deadline.map(|d| tokio::time::sleep(d));
         tokio::pin!(deadline);
+        let mut stop = self.stop.clone();
         loop {
             match self.instance.outcome().await {
                 Ok(Some(_)) => return Termination::Completed,
@@ -371,6 +376,14 @@ impl WorldDriver {
                 _ = self.cancel.cancelled() => {
                     let reason = "cancelled by owner".to_owned();
                     return self.cancel_world(&reason).await.unwrap_or_else(|e| Termination::Faulted { detail: e.to_string() });
+                }
+                _ = async { match &stop { Some(s) => s.cancelled().await, None => std::future::pending().await } } => {
+                    // Ask once; afterwards only the hard cancel path ends the world.
+                    stop = None;
+                    let watchdog = self.watchdog();
+                    if let Err(e) = watchdog.finish(self.instance.stop("stop requested").await) {
+                        return Termination::Faulted { detail: e.to_string() };
+                    }
                 }
                 _ = async { match deadline.as_mut().as_pin_mut() { Some(d) => d.await, None => std::future::pending().await } } => {
                     return match self.cancel_world("deadline exceeded").await {

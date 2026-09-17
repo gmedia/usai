@@ -6,7 +6,7 @@
 
 ## Current milestone
 
-**D9 — Service Workload** (next). D0–D8 are done.
+**D10 — Queue / Message Workload** (next). D0–D9 are done.
 
 ## Done
 
@@ -19,17 +19,18 @@
 - **D6 PostgreSQL capability.** `resource/postgres.rs` (tokio-postgres + deadpool): pool at runtime lifetime, one lease per operation, prepared statements cached per physical connection, JSON↔SQL typing by prepared-statement parameter types (int/float/numeric/bool/text/uuid/json/timestamps/date/arrays) and by column types. C5 paths: normal/SQL error → terminal → return; cooperative cancel → `CancelRequest` → await the original query's 57014 → return; abandonment without terminal proof → quarantine (removed from pool); session state reset on checkout (`pool.recycling: clean` default). Unreachable database fails activation. SDK `postgres("main", { urlEnv, pool })` + `query/one/execute`. 8 acceptance tests in `tests/postgres.rs` against a real server (`USAI_TEST_DATABASE_URL`, else a portable PostgreSQL 17 the tests download to `~/.cache/usai/postgresql`). `examples/postgres`.
 - **D7 project model.** Module contributions (`migrations:`/`seeders:` globs, resources declared by several modules dedupe when identical and error when they conflict); migration discovery from `usai.config.ts` includes + module globs (root-relative, ordered by file name); `usai db migrate` applies each SQL file in its own transaction on a leased connection with a `usai_migrations` ledger row in the same transaction, refuses tampered applied files, never runs at startup; `usai db status`; seeders are `seeder(...)` default exports discovered by glob and run by `usai db seed [name]` as `command:seed:<name>` in a synthetic definition that borrows the app's resources and env; typed env validated for shape at activation (url/int/bool/enum) and delivered typed in `ctx.env`; `execute()` always injects the revision env. Fixture `tests/fixtures/project-app` uses colocated and centralized layouts at once. 3 acceptance tests in `tests/project.rs`.
 - **D8 API metadata + OpenAPI.** `openapi.rs` generates OpenAPI 3.1 from the ApplicationDefinition: paths from HTTP triggers, path/query/header parameters from the extracted JSON Schemas, request bodies, responses by declared status, declared errors and the standard error envelope, security schemes from auth declarations, module names as tags; raw endpoints are opaque (`x-usai-raw`), in-world-only contracts are flagged (`x-usai-validated-in-world`). `usai generate openapi [--out]`; the dev server serves `/_usai/openapi.json` and a dependency-free `/_usai/docs`. 1 acceptance test (served document == generated document; not served on a production host).
+- **D9 service workload.** `service("name", handler)` starts one persistent world per revision at activation (`workloads/services.rs` supervisor); state persists because the service is alive; finite worlds cannot see it. Drain stops services first: graceful (`__usai.stop` — `ctx.signal` fires, pending `sleep`s resolve, the loop exits and the handler's return is the service's outcome), hard cancel after `drain_timeout`. Service state in `RuntimeStatus.revisions[].services` and the `usai dev` banner. No restart policy yet (D13). 1 acceptance test.
 - Design review closed 14 of 16 open questions as ADR-0001…0014; ADR-0015 records the engine decision.
 
 ## In progress
 
 - nothing
 
-## Next (D9 acceptance: service state persists for the service lifetime; service lifetime is separate from runtime lifetime; graceful stop returns ownership to baseline; service API does not weaken finite-work isolation)
+## Next (D10 acceptance: message contract validation; bounded concurrency; per-message world; no mutable state leak across messages; retry/error semantics explicit; resource reuse follows ownership rules)
 
-1. Persistent worlds: a `service` workload starts one world at revision activation and keeps it until drain/stop; `ctx.signal` fires on stop; the handler's promise settling ends the service (restart policy later).
-2. Runtime: per-revision service supervisor (start/ready/cancel/drain/stop), status in `RuntimeStatus`, `usai dev` banner.
-3. Tests: mutable state survives across service iterations; finite worlds cannot see it; drain stops the service and ownership returns to baseline.
+1. A queue substrate for v0 without a broker dependency: a PostgreSQL-backed queue (`queue.postgres`) using `SELECT … FOR UPDATE SKIP LOCKED` — persistent consumer infrastructure per revision, fresh world per message, bounded concurrency from the declaration, explicit `retry` (ADR-0014) with attempts/backoff and a dead-letter state.
+2. SDK: `queue.consume("topic", { message, concurrency, retry }, handler)` and `ctx.queue.publish(topic, message)`; message JSON Schema validated before the world exists.
+3. Tests: per-message isolation, concurrency bound, retry then dead-letter, drain waits for in-flight messages.
 
 ## Known gaps / debt
 
