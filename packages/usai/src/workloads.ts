@@ -95,16 +95,25 @@ export interface ServiceContext extends BaseContext {
   sleep(duration: string | number): Promise<void>;
 }
 
+export interface ServiceOptions {
+  resources?: ResourceDeclaration[];
+  /** What happens when the service ends. Default `never`: it stays ended
+   * until the next revision. `on-failure` restarts after a throw; `always`
+   * restarts whenever it ends. Backoff doubles per restart. */
+  restart?: { mode: "never" | "on-failure" | "always"; backoffMs?: number; maxRestarts?: number };
+}
+
 export function service(name: string, handler: (ctx: ServiceContext) => unknown): Workload;
-export function service(name: string, options: { resources?: ResourceDeclaration[] }, handler: (ctx: ServiceContext) => unknown): Workload;
+export function service(name: string, options: ServiceOptions, handler: (ctx: ServiceContext) => unknown): Workload;
 export function service(name: string, a: unknown, b?: unknown): Workload {
-  const options = (typeof a === "function" ? {} : a) as { resources?: ResourceDeclaration[] };
+  const options = (typeof a === "function" ? {} : a) as ServiceOptions;
   const handler = (typeof a === "function" ? a : b) as Workload["handler"];
+  const restart = options.restart ? { mode: options.restart.mode, backoffMs: options.restart.backoffMs ?? 1000, maxRestarts: options.restart.maxRestarts ?? 10 } : undefined;
   return {
     __usai: "workload",
     kind: "service",
     name,
-    trigger: {},
+    trigger: restart ? { restart } : {},
     contracts: {},
     errors: [],
     resources: options.resources ?? [],

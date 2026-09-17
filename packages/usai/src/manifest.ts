@@ -86,6 +86,8 @@ function trigger(workload: Workload): ManifestWorkload["trigger"] {
       return { kind: "socket", path: workload.trigger["path"] };
     case "stream":
       return { kind: "stream", method: workload.trigger["method"], path: workload.trigger["path"] };
+    case "service":
+      return { kind: "service", ...(workload.trigger["restart"] !== undefined ? { restart: workload.trigger["restart"] } : {}) };
     default:
       return { kind: workload.kind };
   }

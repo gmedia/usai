@@ -5,6 +5,7 @@ mod commands;
 mod display;
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 
@@ -83,6 +84,16 @@ enum Command {
     Db {
         #[command(subcommand)]
         action: DbAction,
+    },
+    /// Engineering load test against an in-process server (not evidence)
+    Bench {
+        #[arg(long, default_value = "/")]
+        path: String,
+        #[arg(long, short, default_value_t = 16)]
+        concurrency: usize,
+        /// Seconds
+        #[arg(long, short, default_value_t = 10)]
+        duration: u64,
     },
     /// Generate artifacts from the application definition
     Generate {
@@ -179,6 +190,11 @@ async fn main() {
         Command::Db {
             action: DbAction::Seed { name },
         } => commands::db_seed(&root, name.as_deref()).await,
+        Command::Bench {
+            path,
+            concurrency,
+            duration,
+        } => commands::bench(&root, &path, concurrency, Duration::from_secs(duration)).await,
         Command::Generate {
             action: GenerateAction::Openapi { out },
         } => commands::generate_openapi(&root, out).await,

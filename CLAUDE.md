@@ -36,6 +36,8 @@ cargo run -p usai-cli -- --root <project> db migrate | db status | db seed [name
 cargo run -p usai-cli -- --root <project> generate openapi [--out openapi.json]
 cargo run -p usai-cli -- --root <project> graph                    # workload → resource / dispatch graph
 cargo run -p usai-cli -- --log-format json run --status ...       # JSON logs; /_usai/status + /_usai/metrics
+cargo run --release -p usai-cli -- --root examples/hello bench --path /hello/x -c 16 -d 10   # engineering load test (release build!)
+cargo test --release -p usai-runtime --test profile_world -- --ignored --nocapture   # per-world cost breakdown
 ```
 
 Single tests:

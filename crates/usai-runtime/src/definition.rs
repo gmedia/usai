@@ -42,7 +42,10 @@ pub enum Trigger {
         overlap: OverlapPolicy,
     },
     Command,
-    Service,
+    Service {
+        #[serde(default)]
+        restart: RestartPolicy,
+    },
     Queue {
         topic: String,
         #[serde(default = "default_concurrency")]
@@ -68,6 +71,39 @@ fn default_overlap() -> OverlapPolicy {
 
 fn default_concurrency() -> u32 {
     1
+}
+
+/// How a service that ends (returns or throws) is treated.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RestartPolicy {
+    /// `never` (default): a service that ends stays ended until the next
+    /// revision. `on-failure`: restart when it threw. `always`: restart
+    /// whenever it ends.
+    #[serde(default = "never")]
+    pub mode: String,
+    #[serde(default = "thousand")]
+    pub backoff_ms: u64,
+    /// Upper bound on restarts per revision (0 = unbounded).
+    #[serde(default = "ten")]
+    pub max_restarts: u32,
+}
+
+fn never() -> String {
+    "never".into()
+}
+fn ten() -> u32 {
+    10
+}
+
+impl Default for RestartPolicy {
+    fn default() -> Self {
+        Self {
+            mode: "never".into(),
+            backoff_ms: 1000,
+            max_restarts: 10,
+        }
+    }
 }
 
 /// Explicit retry (ADR-0014). Default: one attempt, failure is terminal.
@@ -132,7 +168,7 @@ impl Trigger {
             | Trigger::Command
             | Trigger::Queue { .. } => LifetimeFamily::Finite,
             Trigger::Socket { .. } | Trigger::Stream { .. } => LifetimeFamily::ConnectionBound,
-            Trigger::Service => LifetimeFamily::Persistent,
+            Trigger::Service { .. } => LifetimeFamily::Persistent,
         }
     }
 
@@ -142,7 +178,7 @@ impl Trigger {
             Trigger::Task => "task",
             Trigger::Cron { .. } => "cron",
             Trigger::Command => "command",
-            Trigger::Service => "service",
+            Trigger::Service { .. } => "service",
             Trigger::Queue { .. } => "queue",
             Trigger::Socket { .. } => "socket",
             Trigger::Stream { .. } => "stream",
@@ -528,7 +564,13 @@ mod tests {
     #[test]
     fn lifetime_follows_trigger() {
         assert_eq!(Trigger::Task.lifetime(), LifetimeFamily::Finite);
-        assert_eq!(Trigger::Service.lifetime(), LifetimeFamily::Persistent);
+        assert_eq!(
+            Trigger::Service {
+                restart: RestartPolicy::default()
+            }
+            .lifetime(),
+            LifetimeFamily::Persistent
+        );
         assert_eq!(
             Trigger::Socket { path: "/c".into() }.lifetime(),
             LifetimeFamily::ConnectionBound

@@ -190,12 +190,32 @@ enum Finished<T> {
     Ambiguous,
 }
 
+/// SQLSTATEs that mean the connection itself is gone: class 08
+/// (connection exception) and 57P01–57P03 (admin shutdown, crash
+/// shutdown, cannot connect now). The query has a terminal outcome but
+/// the physical connection has none worth reusing.
+fn connection_lost(code: &str) -> bool {
+    code.starts_with("08") || matches!(code, "57P01" | "57P02" | "57P03")
+}
+
 fn sql_error(error: tokio_postgres::Error) -> ResourceError {
+    if error.is_closed() {
+        return ResourceError::Operation {
+            code: "connection_closed".into(),
+            message: error.to_string(),
+            proof: TerminalProof::Ambiguous,
+        };
+    }
     if let Some(db) = error.as_db_error() {
+        let code = db.code().code();
         ResourceError::Operation {
-            code: format!("sql_{}", db.code().code().to_ascii_lowercase()),
+            code: format!("sql_{}", code.to_ascii_lowercase()),
             message: db.message().to_owned(),
-            proof: TerminalProof::Terminal,
+            proof: if connection_lost(code) {
+                TerminalProof::Ambiguous
+            } else {
+                TerminalProof::Terminal
+            },
         }
     } else if error.is_closed() {
         ResourceError::Operation {

@@ -14,7 +14,7 @@ fn lifetime_label(family: LifetimeFamily, trigger: &Trigger) -> &'static str {
         (_, Trigger::Queue { .. }) => "message",
         (_, Trigger::Socket { .. }) => "connection",
         (_, Trigger::Stream { .. }) => "stream",
-        (_, Trigger::Service) => "service",
+        (_, Trigger::Service { .. }) => "service",
     }
 }
 

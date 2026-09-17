@@ -255,10 +255,12 @@ async fn service_state_persists_for_the_service_lifetime_and_stops_gracefully() 
     let rev = rt.active().unwrap();
     tokio::time::sleep(Duration::from_millis(450)).await;
     let services = rev.services();
-    assert_eq!(services.len(), 1);
-    assert_eq!(services[0].name, "ledger-sync");
+    let ledger = services
+        .iter()
+        .find(|s| s.name == "ledger-sync")
+        .expect("ledger-sync service");
     assert_eq!(
-        services[0].state,
+        ledger.state,
         usai_runtime::workloads::services::ServiceState::Running
     );
     let iterations = audit(&rt, "service:iterations").await.as_u64().unwrap_or(0);
@@ -284,15 +286,21 @@ async fn service_state_persists_for_the_service_lifetime_and_stops_gracefully() 
         "service ran its shutdown path: {final_count}"
     );
     let services = rev.services();
+    let ledger = services.iter().find(|s| s.name == "ledger-sync").unwrap();
     assert_eq!(
-        services[0].state,
+        ledger.state,
         usai_runtime::workloads::services::ServiceState::Stopped,
         "{services:?}"
     );
     // The new revision started its own service.
     tokio::time::sleep(Duration::from_millis(150)).await;
+    let fresh = b.services();
     assert_eq!(
-        b.services()[0].state,
+        fresh
+            .iter()
+            .find(|s| s.name == "ledger-sync")
+            .unwrap()
+            .state,
         usai_runtime::workloads::services::ServiceState::Running
     );
     baseline(&rt).await;

@@ -71,9 +71,10 @@ impl Supervisor {
             restarts: AtomicU64::new(0),
         });
         for workload in revision.definition.workloads() {
-            if !matches!(workload.trigger, Trigger::Service) {
+            let Trigger::Service { restart } = &workload.trigger else {
                 continue;
-            }
+            };
+            let restart = restart.clone();
             let index = supervisor.entries.lock().expect("services poisoned").len();
             supervisor
                 .entries
@@ -91,49 +92,77 @@ impl Supervisor {
             let id = workload.id.clone();
             let name = workload.name.clone();
             let handle = tokio::spawn(async move {
-                let Some(runtime) = runtime.upgrade() else {
-                    return;
-                };
-                let admission = match runtime.admit_child(&revision, &id) {
-                    Ok(a) => a,
-                    Err(e) => {
-                        sup.set(index, ServiceState::Failed, None, Some(e.to_string()));
-                        tracing::error!(service = %name, error = %e, "service could not be admitted");
+                let mut restarts: u32 = 0;
+                loop {
+                    let Some(runtime) = runtime.upgrade() else {
+                        return;
+                    };
+                    let admission = match runtime.admit_child(&revision, &id) {
+                        Ok(a) => a,
+                        Err(e) => {
+                            sup.set(index, ServiceState::Failed, None, Some(e.to_string()));
+                            tracing::error!(service = %name, error = %e, "service could not be admitted");
+                            return;
+                        }
+                    };
+                    let input = super::input(&revision, "service", json!({}));
+                    sup.set(index, ServiceState::Running, None, None);
+                    tracing::info!(service = %name, restarts, "service starting");
+                    let result = runtime
+                        .execute_with_stop(
+                            admission,
+                            input,
+                            sup.cancel.child_token(),
+                            Some(sup.stop.child_token()),
+                        )
+                        .await;
+                    drop(runtime);
+                    let (state, error, world) = match result {
+                        Ok(r) => {
+                            let (state, error) = match (&r.termination, &r.outcome) {
+                                (Termination::Completed, Some(Ok(_))) => {
+                                    (ServiceState::Stopped, None)
+                                }
+                                (Termination::Completed, Some(Err(e))) => (
+                                    ServiceState::Failed,
+                                    Some(format!("{}: {}", e.name, e.message)),
+                                ),
+                                (Termination::Cancelled { .. }, _) => (ServiceState::Stopped, None),
+                                (t, _) => (ServiceState::Failed, Some(format!("{t:?}"))),
+                            };
+                            (state, error, Some(r.world))
+                        }
+                        Err(e) => (ServiceState::Failed, Some(e.to_string()), None),
+                    };
+                    if state == ServiceState::Failed {
+                        tracing::error!(service = %name, world = ?world, error = ?error, "service ended with failure");
+                    } else {
+                        tracing::info!(service = %name, world = ?world, "service stopped");
+                    }
+                    sup.set(index, state, world, error);
+                    // Restart applies only while the revision wants the service
+                    // alive; a stop request always wins.
+                    let wants_restart = !sup.stop.is_cancelled()
+                        && match restart.mode.as_str() {
+                            "always" => true,
+                            "on-failure" => state == ServiceState::Failed,
+                            _ => false,
+                        }
+                        && (restart.max_restarts == 0 || restarts < restart.max_restarts);
+                    if !wants_restart {
                         return;
                     }
-                };
-                let input = super::input(&revision, "service", json!({}));
-                sup.set(index, ServiceState::Running, None, None);
-                tracing::info!(service = %name, "service starting");
-                let result = runtime
-                    .execute_with_stop(
-                        admission,
-                        input,
-                        sup.cancel.child_token(),
-                        Some(sup.stop.child_token()),
-                    )
-                    .await;
-                match result {
-                    Ok(r) => {
-                        let (state, error) = match (&r.termination, &r.outcome) {
-                            (Termination::Completed, Some(Ok(_))) => (ServiceState::Stopped, None),
-                            (Termination::Completed, Some(Err(e))) => (
-                                ServiceState::Failed,
-                                Some(format!("{}: {}", e.name, e.message)),
-                            ),
-                            (Termination::Cancelled { .. }, _) => (ServiceState::Stopped, None),
-                            (t, _) => (ServiceState::Failed, Some(format!("{t:?}"))),
-                        };
-                        if state == ServiceState::Failed {
-                            tracing::error!(service = %name, world = %r.world, error = ?error, "service ended with failure");
-                        } else {
-                            tracing::info!(service = %name, world = %r.world, "service stopped");
-                        }
-                        sup.set(index, state, Some(r.world), error);
-                    }
-                    Err(e) => {
-                        sup.set(index, ServiceState::Failed, None, Some(e.to_string()));
-                        tracing::error!(service = %name, error = %e, "service world failed");
+                    restarts += 1;
+                    sup.restarts.fetch_add(1, Ordering::SeqCst);
+                    let delay = Duration::from_millis(
+                        restart
+                            .backoff_ms
+                            .saturating_mul(1u64 << (restarts - 1).min(10)),
+                    );
+                    tracing::warn!(service = %name, restarts, delay_ms = delay.as_millis() as u64, "service restarting");
+                    tokio::select! {
+                        _ = tokio::time::sleep(delay) => {}
+                        _ = sup.stop.cancelled() => return,
                     }
                 }
             });

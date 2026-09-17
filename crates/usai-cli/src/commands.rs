@@ -123,10 +123,20 @@ async fn serve_until_signal(
         handle
     };
     tokio::signal::ctrl_c().await.ok();
-    eprintln!("\nshutting down");
+    eprintln!("\nshutting down: draining in-flight work (ctrl-c again to force)");
     shutdown.cancel();
-    runtime.shutdown().await;
-    let _ = tokio::time::timeout(Duration::from_secs(35), server).await;
+    let drain = async {
+        runtime.shutdown().await;
+        let _ = tokio::time::timeout(Duration::from_secs(35), server).await;
+    };
+    tokio::select! {
+        _ = drain => eprintln!("drained; ownership returned to baseline"),
+        _ = tokio::signal::ctrl_c() => {
+            let g = runtime.ledger().gauges.snapshot();
+            eprintln!("forced shutdown with {} live worlds and {} live operations", g.live_worlds, g.live_ops);
+            std::process::exit(130);
+        }
+    }
     Ok(())
 }
 
@@ -513,6 +523,126 @@ pub async fn generate_openapi(root: &Path, out: Option<PathBuf>) -> Result<()> {
             eprintln!("wrote {}", path.display());
         }
         None => println!("{text}"),
+    }
+    Ok(())
+}
+
+/// `usai bench`: an engineering load test against an in-process server.
+/// Reports latency percentiles, throughput, RSS high-water, and whether
+/// ownership returned to baseline. Not canonical evidence (AGENTS.md §2).
+pub async fn bench(root: &Path, path: &str, concurrency: usize, duration: Duration) -> Result<()> {
+    let (definition, engine) = definition_for(root, None).await?;
+    let runtime = Runtime::new(
+        engine,
+        RuntimeConfig {
+            cron_scheduler: false,
+            queue_consumers: false,
+            ..RuntimeConfig::default()
+        },
+    );
+    let revision = runtime.install(definition).await?;
+    runtime.activate(revision.id).await?;
+    let http = HttpHost::new(
+        Arc::clone(&runtime),
+        HttpConfig {
+            addr: ([127, 0, 0, 1], 0).into(),
+            ..HttpConfig::default()
+        },
+    );
+    let shutdown = CancellationToken::new();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let token = shutdown.clone();
+    let server = tokio::spawn(async move {
+        serve(http, token, |addr| {
+            let _ = tx.send(addr);
+        })
+        .await
+    });
+    let addr = rx.await.context("server did not bind")?;
+    let url = format!("http://{addr}{path}");
+    let client = reqwest::Client::builder()
+        .pool_max_idle_per_host(concurrency)
+        .build()?;
+    // Warm-up: definition-lifetime work (routing, validators) happens once.
+    for _ in 0..(concurrency.min(16)) {
+        let _ = client.get(&url).send().await;
+    }
+    let started = std::time::Instant::now();
+    let deadline = started + duration;
+    let mut workers = Vec::new();
+    for _ in 0..concurrency {
+        let client = client.clone();
+        let url = url.clone();
+        workers.push(tokio::spawn(async move {
+            let mut latencies = Vec::new();
+            let mut errors = 0u64;
+            while std::time::Instant::now() < deadline {
+                let t = std::time::Instant::now();
+                match client.get(&url).send().await {
+                    Ok(r) if r.status().is_success() => {
+                        let _ = r.bytes().await;
+                        latencies.push(t.elapsed().as_micros() as u64);
+                    }
+                    _ => errors += 1,
+                }
+            }
+            (latencies, errors)
+        }));
+    }
+    let mut all = Vec::new();
+    let mut errors = 0;
+    for w in workers {
+        let (l, e) = w.await?;
+        all.extend(l);
+        errors += e;
+    }
+    let elapsed = started.elapsed();
+    all.sort_unstable();
+    let pct = |p: f64| -> f64 {
+        if all.is_empty() {
+            return 0.0;
+        }
+        let rank = ((p / 100.0) * all.len() as f64).ceil().max(1.0) as usize;
+        all[rank.min(all.len()) - 1] as f64 / 1000.0
+    };
+    shutdown.cancel();
+    runtime.shutdown().await;
+    let _ = tokio::time::timeout(Duration::from_secs(10), server).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let g = runtime.ledger().gauges.snapshot();
+    let rss = std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find(|l| l.starts_with("VmHWM:"))
+                .map(|l| l.trim_start_matches("VmHWM:").trim().to_owned())
+        })
+        .unwrap_or_else(|| "n/a".into());
+    println!("usai bench (engineering measurement, not canonical evidence)\n");
+    println!(
+        "target        {path}\nconcurrency   {concurrency}\nduration      {:.1}s",
+        elapsed.as_secs_f64()
+    );
+    println!(
+        "requests      {} ok, {} errors ({:.0} req/s)",
+        all.len(),
+        errors,
+        all.len() as f64 / elapsed.as_secs_f64()
+    );
+    println!(
+        "latency ms    p50 {:.2}  p90 {:.2}  p99 {:.2}  max {:.2}",
+        pct(50.0),
+        pct(90.0),
+        pct(99.0),
+        pct(100.0)
+    );
+    println!(
+        "worlds        {} created, {} live after drain, {} live ops",
+        g.worlds_created, g.live_worlds, g.live_ops
+    );
+    println!("rss high-water {rss}");
+    if g.live_worlds != 0 || g.live_ops != 0 {
+        anyhow::bail!("ownership did not return to baseline after the run");
     }
     Ok(())
 }

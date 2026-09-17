@@ -332,7 +332,7 @@ pub fn render_graph(definition: &crate::definition::ApplicationDefinition) -> St
         Trigger::Task => "task",
         Trigger::Cron { .. } => "cron",
         Trigger::Command => "command",
-        Trigger::Service => "service",
+        Trigger::Service { .. } => "service",
         Trigger::Queue { .. } => "message",
         Trigger::Socket { .. } => "connection",
         Trigger::Stream { .. } => "stream",

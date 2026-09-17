@@ -123,6 +123,19 @@ export const ledgerSync = service("ledger-sync", { resources: [audit] }, async (
 
 export const serviceLocalRead = http.get("/service-local", {}, async () => ({ sees: globalThis.__serviceLocal ?? null }));
 
+// ---- D13: hardening ---------------------------------------------------------
+export const memoryHog = task("memory-hog", {}, async () => {
+  const chunks: string[] = [];
+  for (;;) chunks.push("x".repeat(1024 * 1024));
+});
+
+export const crashy = service("crashy", { restart: { mode: "on-failure", backoffMs: 20, maxRestarts: 3 }, resources: [audit] }, async (ctx) => {
+  const n = await (ctx.resources["audit"] as Audit).increment("service:crashy:starts");
+  if (n <= 2) throw errors.internal(`crash ${n}`);
+  while (!ctx.signal.aborted) await ctx.sleep("50ms");
+  return { survived: true };
+});
+
 // ---- D11: streams and sockets ---------------------------------------------
 import { socket } from "usai";
 
@@ -174,7 +187,7 @@ export default defineApp({
   workloads: [
     counter, persistent, me, boom, badShape, detach, slow, echoQuery, webhook, sendReceipt,
     record, slowTask, failingTask, invokesSlow, order, auditRead, badDispatch, everySecond, overlapping, nightly, reconcile,
-    ledgerSync, serviceLocalRead, events, endless, plainStream, chat, socketLocalRead,
+    ledgerSync, serviceLocalRead, events, endless, plainStream, chat, socketLocalRead, memoryHog, crashy,
   ],
   resources: [hits, audit],
   env: env({ GREETING: env.optional(env.string()) }),
