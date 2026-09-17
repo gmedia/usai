@@ -27,6 +27,7 @@
 - **D14 developer preview groundwork.** `docs/GUIDE.md` (install → concepts → every workload kind → resources → operate); `create-usai <dir>` scaffolds a runnable project from a template (tested). Not yet an alpha: see Next.
 - **D15 control surface.** `usai run --control 127.0.0.1:3900` serves a generic JSON API (`control.rs`): `GET /health`, `GET /status`, `GET /revisions`, `POST /revisions {artifact}` (install from an artifact directory), `POST /revisions/{id}/activate`, `POST /revisions/{id}/drain`, `DELETE /revisions/{id}` (installed/retired only), `POST /stop`. Bearer token from `USAI_CONTROL_TOKEN`; binding off loopback without a token is refused. `Runtime::remove`. 2 tests. Sakala is one client of this protocol, never a dependency.
 - **`usai/test` harness** (`GOAL.md` §36): `testApp({ root })` spawns `usai run --port 0 --control 127.0.0.1:0 --announce`, drives HTTP, and invokes tasks / cron ticks / commands deterministically through the control surface's `POST /invoke`. Tested against `examples/hello` with the repository binary.
+- `usai test` runs the project's `node --test` files with `USAI_BIN` set to the running binary and the `usai` export condition (workspace checkouts need no `dist/`). OpenAPI describes streams (`x-usai-stream`) and sockets (`x-usai-socket`, 101/426) explicitly. WebSocket idle timeout (`HttpConfig.socket_idle_timeout`, 300 s default, close 1008; tested). ADR-0015 records the measured per-world numbers and states that its revisit trigger has fired.
 - Measured bundle composition (release): SDK only 1.0 ms/world, `zod/mini` 1.3 ms/world, `zod` 6.6 ms/world (`tests/profile_bundles.rs`). `zod/mini` lacks Standard JSON Schema, so before-world validation and OpenAPI degrade with it; documented in the guide.
 - Design review closed 14 of 16 open questions as ADR-0001…0014; ADR-0015 records the engine decision.
 
@@ -55,7 +56,7 @@ hello bundle (765 KB, zod evaluated per world) 6.52 ms/world
 
 1. **Per-world cost**: either (a) the Wasmtime + QuickJS-Wasm + Wizer image substrate behind the existing engine boundary (research path; needs a toolchain), or (b) a native mitigation such as reusing a pre-evaluated *runtime* with fresh *contexts* — which must be measured for isolation before it is trusted (contexts share a heap; that is a stop-and-surface decision). Decide with numbers, not preference.
 2. Long soak (≥ 1 h at c=16) watching RSS and gauge baseline; run with `usai bench --duration 3600`.
-3. Socket idle timeout; per-world CPU accounting (threat model "Open").
+3. Per-world CPU accounting (threat model "Open").
 4. D14 alpha checklist still open: publish `usai` / `create-usai` to npm and a `usai` binary (today the CLI is `cargo run -p usai-cli`); artifact byte format + signing (ADR-0005 follow-up); OpenAPI for stream/socket endpoints; PostgreSQL TLS.
 
 ## Known gaps / debt

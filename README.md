@@ -127,9 +127,19 @@ requires explicit ownership and terminal-state rules.
 
 ```bash
 pnpm install
-cargo run -p usai-cli -- dev --root examples/hello
+cargo run -p usai-cli -- dev --root examples/hello       # build, serve on :3000, rebuild on change
 curl http://localhost:3000/hello/world
+cargo run -p usai-cli -- --root examples/hello test      # tests through the real runtime (usai/test)
+cargo run -p usai-cli -- --root examples/hello inspect   # what the runtime understood
 ```
+
+What exists today (each with acceptance tests): contract-aware HTTP with
+validation before a world exists, tasks with explicit ownership transfer,
+cron, commands, PostgreSQL with terminal-proof connection reuse, migrations
+and seeders, a PostgreSQL-backed queue with explicit retry, streams,
+WebSockets, services with restart policy, OpenAPI from the definition,
+`/_usai/status` + `/_usai/metrics`, a graph, an orchestrator control
+surface, and a `usai/test` harness. See `docs/GUIDE.md` and `docs/STATUS.md`.
 
 `examples/hello/src/app.ts`:
 

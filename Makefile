@@ -21,7 +21,7 @@ lint:
 
 test:
 	cargo test --workspace
-	pnpm -r run test
+	USAI_BIN=$(CURDIR)/target/debug/usai pnpm -r run test
 
 build:
 	cargo build --workspace --release

@@ -35,6 +35,7 @@ cargo run -p usai-cli -- --root <project> task run <name> --input '{...}'
 cargo run -p usai-cli -- --root <project> db migrate | db status | db seed [name]
 cargo run -p usai-cli -- --root <project> generate openapi [--out openapi.json]
 cargo run -p usai-cli -- --root <project> graph                    # workload → resource / dispatch graph
+cargo run -p usai-cli -- --root <project> test [files]             # node --test with usai/test pointed at this binary
 cargo run -p usai-cli -- --log-format json run --status ...       # JSON logs; /_usai/status + /_usai/metrics
 cargo run -p usai-cli -- --root <project> run --artifact .usai/build --control 127.0.0.1:3900   # orchestrator surface (USAI_CONTROL_TOKEN)
 cargo run --release -p usai-cli -- --root examples/hello bench --path /hello/x -c 16 -d 10   # engineering load test (release build!)

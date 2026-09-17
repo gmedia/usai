@@ -30,6 +30,7 @@
 | Unbounded concurrency | hierarchical budgets: runtime → application → workload → resource; refusal is immediate (503), never a queue inside a world | `admission.rs` |
 | Leaked async work extending a request's lifetime | detached-work detection and cancellation at the finite world's terminal state (C3) | `world.rs` |
 | Stale completions reaching a new world | identity-first routing gate; ledger deliverability | `world.rs`, `ownership.rs` |
+| Silent WebSocket clients holding a world | idle timeout (`HttpConfig.socket_idle_timeout`, 300 s default) closes with 1008 and runs the close handler | `http/socket.rs` |
 | Poisoned pooled database connections | reuse only after terminal proof; quarantine on ambiguity or connection-loss SQLSTATEs; session state reset on checkout | `resource/postgres.rs` |
 | Secrets in artifacts / manifests | resources reference env *names*; values resolved at activation; fingerprints hash secrets | `resource/mod.rs`, SDK `postgres()` |
 | Internal detail leaking in error responses | unexpected errors sanitized to `internal`; stacks only in logs; `expose_diagnostics` is development-only | `http/pipeline.rs` |
@@ -45,7 +46,6 @@
 - **No durable tasks.** A crash loses locally dispatched tasks (ADR-0010); the queue substrate is durable because PostgreSQL is.
 - **No rate limiting per client.** Budgets are per workload/resource, not per caller.
 - **No protection against a malicious build step.** `usai build` runs `node` and esbuild from the project's `node_modules`; the supply chain is the project's.
-- **WebSocket idle connections are not timed out** by the runtime; a proxy or the application must close idle sockets.
 
 ## Operator checklist
 
@@ -59,5 +59,4 @@
 ## Open
 
 - Per-world CPU time accounting and fairness (D13 follow-up).
-- Socket idle timeout (D13 follow-up).
 - A hardened multi-tenant mode is a separate, evidence-backed decision (ADR-0008).

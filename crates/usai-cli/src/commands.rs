@@ -707,3 +707,37 @@ pub async fn bench(root: &Path, path: &str, concurrency: usize, duration: Durati
     }
     Ok(())
 }
+
+/// `usai test`: builds the project once (so the first `testApp` is fast),
+/// then runs `node --test` with USAI_BIN pointing at this binary.
+pub async fn test(root: &Path, args: Vec<String>) -> Result<()> {
+    let engine = engine();
+    let config = load_config(engine.as_ref(), root).await?;
+    usai_runtime::build::build(engine.as_ref(), &BuildOptions::from_config(&config)).await?;
+    let me = std::env::current_exe().context("cannot locate the usai binary")?;
+    let mut command = tokio::process::Command::new("node");
+    // The `usai` export condition resolves the SDK to its TypeScript sources
+    // (Node strips types), so a workspace checkout needs no `dist/`.
+    command.args(["--conditions=usai", "--test"]);
+    if args.is_empty() {
+        for pattern in [
+            "src/**/*.test.ts",
+            "test/**/*.test.ts",
+            "tests/**/*.test.ts",
+        ] {
+            command.arg(pattern);
+        }
+    } else {
+        command.args(&args);
+    }
+    let status = command
+        .current_dir(&config.root)
+        .env("USAI_BIN", &me)
+        .status()
+        .await
+        .context("node is required to run tests")?;
+    if !status.success() {
+        anyhow::bail!("tests failed");
+    }
+    Ok(())
+}

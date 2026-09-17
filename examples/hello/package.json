@@ -5,13 +5,15 @@
   "type": "module",
   "description": "Smallest Usai application: one contract-aware HTTP endpoint.",
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "node --conditions=usai --test test/**/*.test.ts"
   },
   "dependencies": {
     "usai": "workspace:*",
     "zod": "^4.0.0"
   },
   "devDependencies": {
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "@types/node": "^24.0.0"
   }
 }

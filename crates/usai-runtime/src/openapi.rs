@@ -104,14 +104,30 @@ pub fn generate(definition: &ApplicationDefinition) -> Value {
     let mut security_schemes: Map<String, Value> = Map::new();
 
     for workload in definition.workloads() {
-        let Trigger::Http { method, path, raw } = &workload.trigger else {
-            continue;
+        let (method, path, raw, lifetime) = match &workload.trigger {
+            Trigger::Http { method, path, raw } => (method.clone(), path.clone(), *raw, "request"),
+            Trigger::Stream { method, path } => (method.clone(), path.clone(), false, "stream"),
+            Trigger::Socket { path } => ("GET".to_owned(), path.clone(), true, "connection"),
+            _ => continue,
         };
+        let (method, path, raw) = (&method, &path, &raw);
         let mut operation = json!({
             "operationId": operation_id(workload),
             "summary": workload.name,
-            "x-usai-lifetime": "request",
+            "x-usai-lifetime": lifetime,
         });
+        if lifetime == "stream" {
+            operation["description"] = json!(
+                "Streaming response: the connection stays open until the handler returns. Chunks are text/event-stream by default."
+            );
+            operation["x-usai-stream"] = json!(true);
+        }
+        if lifetime == "connection" {
+            operation["description"] = json!(
+                "WebSocket endpoint: send an HTTP upgrade. Messages follow the declared incoming/outgoing contracts; not described as HTTP bodies."
+            );
+            operation["x-usai-socket"] = json!(true);
+        }
         if let Some(module) = &workload.module {
             operation["tags"] = json!([module]);
         }

@@ -92,6 +92,12 @@ enum Command {
         #[command(subcommand)]
         action: DbAction,
     },
+    /// Run the project's tests with `usai/test` pointed at this binary
+    Test {
+        /// Arguments passed to `node --test` (default: the project's test files)
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// Engineering load test against an in-process server (not evidence)
     Bench {
         #[arg(long, default_value = "/")]
@@ -199,6 +205,7 @@ async fn main() {
         Command::Db {
             action: DbAction::Seed { name },
         } => commands::db_seed(&root, name.as_deref()).await,
+        Command::Test { args } => commands::test(&root, args).await,
         Command::Bench {
             path,
             concurrency,

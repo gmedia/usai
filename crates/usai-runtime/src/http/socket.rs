@@ -52,11 +52,21 @@ pub async fn pump(
     inbound: mpsc::Sender<Inbound>,
     mut outbound: mpsc::Receiver<Message>,
     stop: CancellationToken,
+    idle_timeout: std::time::Duration,
 ) {
     let ws = WebSocketStream::from_raw_socket(TokioIo::new(upgraded), Role::Server, None).await;
     let (mut sink, mut source) = ws.split();
     loop {
+        let idle = tokio::time::sleep(idle_timeout);
         tokio::select! {
+            _ = idle => {
+                let _ = sink.send(Message::Close(Some(tokio_tungstenite::tungstenite::protocol::CloseFrame {
+                    code: tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Policy,
+                    reason: "idle timeout".into(),
+                }))).await;
+                let _ = inbound.send(Inbound::Close { code: Some(1008), reason: "idle timeout".into() }).await;
+                break;
+            }
             incoming = source.next() => match incoming {
                 Some(Ok(Message::Text(text))) => {
                     if inbound.send(Inbound::Text { data: text.to_string() }).await.is_err() { break; }

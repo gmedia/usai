@@ -377,3 +377,41 @@ async fn drain_closes_sockets_and_runs_close_handlers() {
     assert_eq!(audit(&s.runtime, "socket:drainee").await, json!(1));
     finish(s).await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn idle_sockets_are_closed_by_the_runtime() {
+    let Some(s) = start().await else { return };
+    // A dedicated host with a short idle timeout.
+    let host = HttpHost::new(
+        Arc::clone(&s.runtime),
+        HttpConfig {
+            addr: ([127, 0, 0, 1], 0).into(),
+            socket_idle_timeout: Duration::from_millis(300),
+            ..HttpConfig::default()
+        },
+    );
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let token = CancellationToken::new();
+    let t = token.clone();
+    tokio::spawn(async move {
+        serve(host, t, |addr| {
+            let _ = tx.send(addr);
+        })
+        .await
+        .unwrap()
+    });
+    let addr = rx.await.unwrap();
+    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/chat?user=idle"))
+        .await
+        .unwrap();
+    let close = recv_json(&mut ws).await;
+    assert_eq!(close["close"], "idle timeout");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(
+        audit(&s.runtime, "socket:idle").await,
+        json!(0),
+        "close handler ran with the connection's state"
+    );
+    token.cancel();
+    finish(s).await;
+}

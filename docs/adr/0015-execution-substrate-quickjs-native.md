@@ -25,6 +25,17 @@ The research lineage ran QuickJS-ng compiled to WebAssembly inside Wasmtime with
 - Forbidden: exposing rquickjs types outside `engine/quickjs.rs`; letting any other module import `rquickjs`.
 - Revisit: when D13 profiling shows world creation dominating, or when many-app density (research §11.3) becomes decision-relevant.
 
+## Measured (2026-09-17, release, `tests/profile_bundles.rs`)
+
+```text
+engine floor (fresh runtime + context)   0.9 ms/world
+SDK-only bundle (26 KB)                  1.0 ms/world
+zod/mini bundle (53 KB)                  1.3 ms/world
+zod bundle (765 KB)                      6.6 ms/world
+```
+
+The revisit trigger has fired: for a realistic application the per-world cost is dominated by re-evaluating the application module (schema-library initialization) in every fresh context, which this substrate cannot snapshot. The lifecycle model is not the cost; the representation is. The next substrate decision should be made with these numbers against a Wasmtime + pre-initialized image prototype behind the same `Engine` boundary (ADR-0016 when it exists).
+
 ## Alternatives considered
 
 - **Wasmtime + QuickJS Wasm now.** Rejected for v0: toolchain cost blocks every other milestone.

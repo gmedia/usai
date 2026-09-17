@@ -38,6 +38,9 @@ pub struct HttpConfig {
     pub serve_docs: bool,
     /// Serve `/_usai/status` (JSON) and `/_usai/metrics` (Prometheus text).
     pub serve_status: bool,
+    /// A WebSocket with no frames in either direction for this long is
+    /// closed (1008) so a silent client cannot hold a world forever.
+    pub socket_idle_timeout: std::time::Duration,
 }
 
 impl Default for HttpConfig {
@@ -48,6 +51,7 @@ impl Default for HttpConfig {
             expose_diagnostics: false,
             serve_docs: false,
             serve_status: false,
+            socket_idle_timeout: std::time::Duration::from_secs(300),
         }
     }
 }
@@ -685,10 +689,12 @@ impl HttpHost {
         let pump_stop = stop.clone();
         let cancel = CancellationToken::new();
         let pump_cancel = cancel.clone();
+        let idle_timeout = self.config.socket_idle_timeout;
         tokio::spawn(async move {
             match on_upgrade.await {
                 Ok(upgraded) => {
-                    super::socket::pump(upgraded, inbound_tx, outbound_rx, pump_stop).await;
+                    super::socket::pump(upgraded, inbound_tx, outbound_rx, pump_stop, idle_timeout)
+                        .await;
                 }
                 Err(e) => {
                     tracing::debug!(error = %e, "websocket upgrade failed");
