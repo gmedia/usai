@@ -47,6 +47,11 @@ pub enum Trigger {
         topic: String,
         #[serde(default = "default_concurrency")]
         concurrency: u32,
+        /// PostgreSQL resource backing the queue (default: the first declared).
+        #[serde(default)]
+        database: Option<String>,
+        #[serde(default)]
+        retry: RetryPolicy,
     },
     Socket {
         path: String,
@@ -63,6 +68,51 @@ fn default_overlap() -> OverlapPolicy {
 
 fn default_concurrency() -> u32 {
     1
+}
+
+/// Explicit retry (ADR-0014). Default: one attempt, failure is terminal.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RetryPolicy {
+    #[serde(default = "one")]
+    pub max_attempts: u32,
+    /// `fixed` or `exponential`.
+    #[serde(default = "fixed")]
+    pub backoff: String,
+    #[serde(default = "thousand")]
+    pub base_ms: u64,
+}
+
+fn one() -> u32 {
+    1
+}
+fn fixed() -> String {
+    "fixed".into()
+}
+fn thousand() -> u64 {
+    1000
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self {
+            max_attempts: 1,
+            backoff: "fixed".into(),
+            base_ms: 1000,
+        }
+    }
+}
+
+impl RetryPolicy {
+    /// Delay before attempt number `attempt` (1-based) is retried.
+    pub fn delay_ms(&self, attempt: u32) -> u64 {
+        match self.backoff.as_str() {
+            "exponential" => self
+                .base_ms
+                .saturating_mul(1u64 << attempt.saturating_sub(1).min(20)),
+            _ => self.base_ms,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]

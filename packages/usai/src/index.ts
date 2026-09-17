@@ -9,6 +9,8 @@ export { auth } from "./auth.ts";
 export { task, cron, command, service, dispatches, seeder } from "./workloads.ts";
 export type { SeederDeclaration, SeederContext } from "./workloads.ts";
 export type { TaskContext, CronContext, CommandContext, ServiceContext } from "./workloads.ts";
+export { queue } from "./queue.ts";
+export type { QueueContext, QueueHandle, RetryOptions } from "./queue.ts";
 export { cache, postgres } from "./resources.ts";
 export type { CacheLocalHandle, PostgresHandle, SqlParam } from "./resources.ts";
 export { errors, UsaiError, isUsaiError } from "./errors.ts";

@@ -64,6 +64,10 @@ impl Fixture {
 }
 
 async fn fixture() -> Option<Fixture> {
+    fixture_with(false).await
+}
+
+async fn fixture_with(queue_consumers: bool) -> Option<Fixture> {
     let Some(url) = support::database_url() else {
         eprintln!("skipping: no PostgreSQL available");
         return None;
@@ -103,6 +107,7 @@ async fn fixture() -> Option<Fixture> {
         RuntimeConfig {
             default_timeout: Duration::from_secs(10),
             cron_scheduler: false,
+            queue_consumers,
             ..RuntimeConfig::default()
         },
         move |name| (name == "DATABASE_URL").then(|| url.clone()),
@@ -326,4 +331,120 @@ async fn unreachable_database_fails_activation_not_the_first_request() {
     );
     assert_eq!(rev.state(), RevisionState::Installed);
     let _ = TerminalProof::Terminal;
+}
+
+async fn wait_for(f: &Fixture, key: &str, expected: u64, timeout: Duration) -> Value {
+    let started = std::time::Instant::now();
+    loop {
+        let (_, body) = f.http("GET", "/seen/:key", json!({ "key": key })).await;
+        if body["n"].as_u64() == Some(expected) || started.elapsed() > timeout {
+            return body["n"].clone();
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn queue_messages_run_in_fresh_worlds_with_explicit_retry() {
+    let Some(f) = fixture_with(true).await else {
+        return;
+    };
+    // Publish from an HTTP world; consumption happens in its own worlds.
+    for id in ["a", "b", "c", "d"] {
+        let rev = f.runtime.active().unwrap();
+        let (_, w) = rev
+            .definition
+            .workload("http:POST /orders")
+            .map(|(i, w)| (i, w.id.clone()))
+            .unwrap();
+        let input = json!({ "kind": "http", "request": { "method": "POST", "path": "/orders", "url": "/orders", "params": {}, "query": {}, "headers": {}, "body": { "json": { "orderId": id } } } });
+        let r = f.runtime.invoke(&w, input).await.unwrap();
+        let v = r.outcome.unwrap().unwrap();
+        assert_eq!(v["status"], 200, "{v}");
+        assert!(v["json"]["id"].is_string());
+    }
+    for id in ["a", "b", "c", "d"] {
+        assert_eq!(
+            wait_for(&f, &format!("orders:{id}"), 1, Duration::from_secs(5)).await,
+            json!(1),
+            "message {id} processed exactly once"
+        );
+    }
+    let rev = f.runtime.active().unwrap();
+    assert_eq!(
+        rev.queue_stats
+            .done
+            .load(std::sync::atomic::Ordering::SeqCst),
+        4
+    );
+    assert_eq!(
+        rev.queue_stats
+            .dead
+            .load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
+
+    // Retry: fails on attempts 1 and 2, succeeds on 3 (maxAttempts 3).
+    let (_, w) = rev
+        .definition
+        .workload("http:POST /orders")
+        .map(|(i, w)| (i, w.id.clone()))
+        .unwrap();
+    f.runtime.invoke(&w, json!({ "kind": "http", "request": { "method": "POST", "path": "/orders", "url": "/orders", "params": {}, "query": {}, "headers": {}, "body": { "json": { "orderId": "flaky", "fail": 2 } } } })).await.unwrap();
+    assert_eq!(
+        wait_for(&f, "orders:flaky", 3, Duration::from_secs(8)).await,
+        json!(3),
+        "three attempts, each in a fresh world"
+    );
+    assert!(
+        rev.queue_stats
+            .retried
+            .load(std::sync::atomic::Ordering::SeqCst)
+            >= 2
+    );
+
+    // Dead letter: fails every attempt.
+    f.runtime.invoke(&w, json!({ "kind": "http", "request": { "method": "POST", "path": "/orders", "url": "/orders", "params": {}, "query": {}, "headers": {}, "body": { "json": { "orderId": "doomed", "fail": 99 } } } })).await.unwrap();
+    assert_eq!(
+        wait_for(&f, "orders:doomed", 3, Duration::from_secs(8)).await,
+        json!(3)
+    );
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        rev.queue_stats
+            .dead
+            .load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
+    let manager = rev.resources().get("main").cloned().unwrap();
+    let depth = usai_runtime::workloads::queue::depth(manager.as_ref(), "orders")
+        .await
+        .unwrap();
+    assert_eq!(depth["dead"], 1);
+    assert_eq!(depth["done"], 5);
+    assert_eq!(depth["ready"], 0);
+
+    // An invalid message never gets a world.
+    let before = f.runtime.ledger().gauges.snapshot().worlds_created;
+    manager.call(usai_runtime::resource::ResourceCall { method: "execute".into(), args: json!({ "sql": "INSERT INTO usai_queue (topic, payload) VALUES ('orders', '{\"orderId\": 5}'::jsonb)", "params": [] }) }, CancellationToken::new()).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    assert_eq!(
+        rev.queue_stats
+            .invalid
+            .load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
+    let depth = usai_runtime::workloads::queue::depth(manager.as_ref(), "orders")
+        .await
+        .unwrap();
+    assert_eq!(depth["dead"], 2);
+    assert_eq!(
+        f.runtime.ledger().gauges.snapshot().worlds_created,
+        before,
+        "invalid message created a world"
+    );
+
+    f.runtime.shutdown().await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    f.baseline();
 }

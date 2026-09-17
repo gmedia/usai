@@ -18,7 +18,7 @@ use crate::engine::{Compiled, Engine, EngineError};
 use crate::host_ops::{OpExtensions, OpHandler};
 use crate::ownership::{GaugeSnapshot, Ledger};
 use crate::resource::{BoundResources, ResourceError, ResourceRegistry, ResourceStatus};
-use crate::workloads::{cron, services, tasks};
+use crate::workloads::{cron, queue, services, tasks};
 use crate::world::{WorkResult, WorldDriver, WorldSpec};
 
 /// Where the runtime reads deployment configuration from (`GOAL.md` §30).
@@ -43,6 +43,8 @@ pub struct RuntimeConfig {
     /// Whether this instance runs cron schedulers. A deployment concern:
     /// only one instance of an application should tick its crons.
     pub cron_scheduler: bool,
+    /// Whether this instance runs queue consumers.
+    pub queue_consumers: bool,
 }
 
 impl Default for RuntimeConfig {
@@ -56,6 +58,7 @@ impl Default for RuntimeConfig {
             task_concurrency: 64,
             task_queue_capacity: 10_000,
             cron_scheduler: true,
+            queue_consumers: true,
         }
     }
 }
@@ -102,6 +105,8 @@ pub struct Revision {
     cron_stop: Mutex<Option<CancellationToken>>,
     pub cron_stats: Arc<cron::CronStats>,
     services: Mutex<Option<Arc<services::Supervisor>>>,
+    queue_stop: Mutex<Option<CancellationToken>>,
+    pub queue_stats: Arc<queue::QueueStats>,
 }
 
 impl Revision {
@@ -134,10 +139,13 @@ impl Revision {
 
     fn set_state(&self, state: RevisionState) {
         *self.state.write().expect("state poisoned") = state;
-        if matches!(state, RevisionState::Draining | RevisionState::Retired)
-            && let Some(stop) = self.cron_stop.lock().expect("cron poisoned").take()
-        {
-            stop.cancel();
+        if matches!(state, RevisionState::Draining | RevisionState::Retired) {
+            if let Some(stop) = self.cron_stop.lock().expect("cron poisoned").take() {
+                stop.cancel();
+            }
+            if let Some(stop) = self.queue_stop.lock().expect("queue poisoned").take() {
+                stop.cancel();
+            }
         }
     }
 
@@ -259,6 +267,9 @@ impl Runtime {
             for (kind, handler) in tasks::handlers(weak.clone(), Arc::clone(&tasks)) {
                 extensions.handlers.insert(kind.to_owned(), handler);
             }
+            extensions
+                .handlers
+                .insert("queue.publish".into(), Arc::new(queue::PublishHandler));
             Self {
                 self_ref: weak.clone(),
                 world_budget: Budget::new("runtime.worlds", config.max_worlds),
@@ -347,6 +358,8 @@ impl Runtime {
             cron_stop: Mutex::new(None),
             cron_stats: Arc::new(cron::CronStats::default()),
             services: Mutex::new(None),
+            queue_stop: Mutex::new(None),
+            queue_stats: Arc::new(queue::QueueStats::default()),
         });
         cron::validate(&revision).map_err(|e| RuntimeError::InvalidDefinition(e.to_string()))?;
         self.revisions
@@ -404,6 +417,14 @@ impl Runtime {
             services::Supervisor::start(self.self_ref.clone(), &revision, &self.shutdown);
         if !supervisor.is_empty() {
             *revision.services.lock().expect("services poisoned") = Some(supervisor);
+        }
+        if self.config.queue_consumers {
+            let stop = queue::start(
+                self.self_ref.clone(),
+                Arc::clone(&revision),
+                Arc::clone(&revision.queue_stats),
+            );
+            *revision.queue_stop.lock().expect("queue poisoned") = Some(stop);
         }
         if let Some(previous) = previous
             && previous != id

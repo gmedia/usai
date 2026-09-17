@@ -6,7 +6,7 @@
 
 ## Current milestone
 
-**D10 — Queue / Message Workload** (next). D0–D9 are done.
+**D11 — WebSocket + Stream Workloads** (next). D0–D10 are done.
 
 ## Done
 
@@ -20,17 +20,18 @@
 - **D7 project model.** Module contributions (`migrations:`/`seeders:` globs, resources declared by several modules dedupe when identical and error when they conflict); migration discovery from `usai.config.ts` includes + module globs (root-relative, ordered by file name); `usai db migrate` applies each SQL file in its own transaction on a leased connection with a `usai_migrations` ledger row in the same transaction, refuses tampered applied files, never runs at startup; `usai db status`; seeders are `seeder(...)` default exports discovered by glob and run by `usai db seed [name]` as `command:seed:<name>` in a synthetic definition that borrows the app's resources and env; typed env validated for shape at activation (url/int/bool/enum) and delivered typed in `ctx.env`; `execute()` always injects the revision env. Fixture `tests/fixtures/project-app` uses colocated and centralized layouts at once. 3 acceptance tests in `tests/project.rs`.
 - **D8 API metadata + OpenAPI.** `openapi.rs` generates OpenAPI 3.1 from the ApplicationDefinition: paths from HTTP triggers, path/query/header parameters from the extracted JSON Schemas, request bodies, responses by declared status, declared errors and the standard error envelope, security schemes from auth declarations, module names as tags; raw endpoints are opaque (`x-usai-raw`), in-world-only contracts are flagged (`x-usai-validated-in-world`). `usai generate openapi [--out]`; the dev server serves `/_usai/openapi.json` and a dependency-free `/_usai/docs`. 1 acceptance test (served document == generated document; not served on a production host).
 - **D9 service workload.** `service("name", handler)` starts one persistent world per revision at activation (`workloads/services.rs` supervisor); state persists because the service is alive; finite worlds cannot see it. Drain stops services first: graceful (`__usai.stop` — `ctx.signal` fires, pending `sleep`s resolve, the loop exits and the handler's return is the service's outcome), hard cancel after `drain_timeout`. Service state in `RuntimeStatus.revisions[].services` and the `usai dev` banner. No restart policy yet (D13). 1 acceptance test.
+- **D10 queue / message workload.** `queue.consume("topic", { message, concurrency, retry, database }, handler)` + `ctx.queue.publish(topic, message, { delayMs })`. v0 substrate: a PostgreSQL table (`usai_queue`) claimed with `FOR UPDATE SKIP LOCKED` — persistent consumer loops per revision (`workloads/queue.rs`), fresh world per message, concurrency from the declaration, message JSON Schema validated before the world exists (invalid → dead, no world), explicit retry with fixed/exponential backoff and a dead-letter state (ADR-0014; delivery is at-least-once and says so), consumers stop at drain; `RuntimeConfig.queue_consumers`. 1 acceptance test (publish from HTTP world → four messages processed once, retry-then-success across three fresh worlds, dead letter, invalid message never gets a world).
 - Design review closed 14 of 16 open questions as ADR-0001…0014; ADR-0015 records the engine decision.
 
 ## In progress
 
 - nothing
 
-## Next (D10 acceptance: message contract validation; bounded concurrency; per-message world; no mutable state leak across messages; retry/error semantics explicit; resource reuse follows ownership rules)
+## Next (D11 acceptance: connection-local mutable state survives messages; state disappears when the connection ends; stream lifetime distinct from request completion; cancellation/drain correct; no process-global connection state)
 
-1. A queue substrate for v0 without a broker dependency: a PostgreSQL-backed queue (`queue.postgres`) using `SELECT … FOR UPDATE SKIP LOCKED` — persistent consumer infrastructure per revision, fresh world per message, bounded concurrency from the declaration, explicit `retry` (ADR-0014) with attempts/backoff and a dead-letter state.
-2. SDK: `queue.consume("topic", { message, concurrency, retry }, handler)` and `ctx.queue.publish(topic, message)`; message JSON Schema validated before the world exists.
-3. Tests: per-message isolation, concurrency bound, retry then dead-letter, drain waits for in-flight messages.
+1. Streams: `http.stream(path, handler(ctx, stream))` — world lives until the handler returns; `stream.send(chunk)` is a host op that writes to the response body (chunked / SSE); headers commit on first send; client disconnect cancels.
+2. WebSocket: `socket(path, { incoming, outgoing }, { open, message, close })` — HTTP upgrade (hyper + tungstenite), one world per connection, `ctx.state` connection-local, incoming messages delivered as host completions into the same world, `ctx.send` as a host op; drain closes connections gracefully.
+3. Tests: per-connection state, isolation between connections, stream chunks, disconnect cancels.
 
 ## Known gaps / debt
 

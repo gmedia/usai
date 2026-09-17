@@ -75,7 +75,13 @@ function trigger(workload: Workload): ManifestWorkload["trigger"] {
       return { kind: "cron", schedule: workload.trigger["schedule"], overlap: workload.trigger["overlap"] ?? "skip", ...(timeoutMs !== undefined ? { timeoutMs } : {}) };
     }
     case "queue":
-      return { kind: "queue", topic: workload.trigger["topic"], concurrency: workload.trigger["concurrency"] ?? 1 };
+      return {
+        kind: "queue",
+        topic: workload.trigger["topic"],
+        concurrency: workload.trigger["concurrency"] ?? 1,
+        ...(workload.trigger["database"] !== undefined ? { database: workload.trigger["database"] } : {}),
+        ...(workload.trigger["retry"] !== undefined ? { retry: workload.trigger["retry"] } : {}),
+      };
     case "socket":
       return { kind: "socket", path: workload.trigger["path"] };
     case "stream":

@@ -28,7 +28,8 @@ interface TaskInput { kind: "task"; env: Record<string, string>; input: unknown 
 interface CronInput { kind: "cron"; env: Record<string, string>; scheduledAt: string }
 interface CommandInput { kind: "command"; env: Record<string, string>; args: string[] }
 interface ServiceInput { kind: "service"; env: Record<string, string> }
-type Input = HttpInput | TaskInput | CronInput | CommandInput | ServiceInput;
+interface QueueInput { kind: "queue"; env: Record<string, string>; message: unknown; id: string; attempt: number }
+type Input = HttpInput | TaskInput | CronInput | CommandInput | ServiceInput | QueueInput;
 
 interface HttpOutput {
   status: number;
@@ -176,6 +177,12 @@ async function runCommand(workload: Workload, input: CommandInput): Promise<unkn
   return (workload.handler as (ctx: unknown) => unknown)({ ...base, args: input.args });
 }
 
+async function runQueue(workload: Workload, input: QueueInput): Promise<unknown> {
+  const base = makeBase(workload.resources, input.env);
+  const message = parse("message", workload.contracts.message, input.message);
+  return (workload.handler as (ctx: unknown) => unknown)({ ...base, message, id: input.id, attempt: input.attempt });
+}
+
 async function runService(workload: Workload, input: ServiceInput): Promise<unknown> {
   const base = makeBase(workload.resources, input.env);
   return (workload.handler as (ctx: unknown) => unknown)(base);
@@ -196,6 +203,7 @@ export async function invoke(app: AppDeclaration, index: number, inputJson: stri
       case "cron": return { value: await runCron(workload, input) ?? null };
       case "command": return { value: await runCommand(workload, input) ?? null };
       case "service": return { value: await runService(workload, input) ?? null };
+      case "queue": return { value: await runQueue(workload, input) ?? null };
       default: throw new UsaiError("unknown_input_kind", 500, `unsupported input kind ${(input as { kind: string }).kind}`);
     }
   } catch (error) {

@@ -58,6 +58,7 @@ export interface TaskHandle {
 export interface BaseContext {
   readonly resources: Record<string, unknown>;
   readonly tasks: TaskHandle;
+  readonly queue: import("../queue.ts").QueueHandle;
   readonly signal: UsaiAbortSignal;
   readonly env: Record<string, string>;
   readonly log: Pick<ConsoleLike, "debug" | "info" | "warn" | "error">;
@@ -147,6 +148,10 @@ export function makeBase(resources: readonly ResourceDeclaration[], env: Record<
     tasks: {
       invoke: (task, input) => op("task.invoke", { name: task.name, input: input ?? null }),
       dispatch: (task, input) => op("task.dispatch", { name: task.name, input: input ?? null }),
+    },
+    queue: {
+      publish: (topic, message, options) =>
+        op("queue.publish", { topic, message: message ?? null, ...(options?.delayMs !== undefined ? { delayMs: options.delayMs } : {}), ...(options?.database ? { database: options.database.name } : {}) }),
     },
     signal: makeSignal(),
     env,

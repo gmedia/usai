@@ -1,5 +1,5 @@
 // PostgreSQL fixture for the D6 acceptance tests (contract C5).
-import { defineApp, http, task, command, postgres, errors, env } from "usai";
+import { defineApp, http, task, command, postgres, errors, env, queue, cache } from "usai";
 import { z } from "zod";
 
 const db = postgres("main", { pool: { max: 4 } });
@@ -56,9 +56,28 @@ export const leak = http.get("/leak", { resources: [db] }, async (ctx) => {
   return { before: before?.v ?? null };
 });
 
+// ---- D10: queue -----------------------------------------------------------
+const seen = cache.local("seen");
+type Seen = { increment(k: string): Promise<number>; get(k: string): Promise<number | null> };
+
+export const orders = queue.consume("orders", { message: z.object({ orderId: z.string(), fail: z.number().int().optional() }), concurrency: 2, retry: { maxAttempts: 3, backoff: "fixed", baseMs: 100 }, resources: [seen, db] }, async (ctx) => {
+  globalThis.__mutable = ((globalThis.__mutable as number | undefined) ?? 0) + 1;
+  const n = await (ctx.resources["seen"] as Seen).increment(`orders:${ctx.message.orderId}`);
+  if (ctx.message.fail !== undefined && ctx.attempt <= ctx.message.fail) throw errors.internal(`attempt ${ctx.attempt} failed on purpose`);
+  return { orderId: ctx.message.orderId, attempt: ctx.attempt, worldCounter: globalThis.__mutable, seen: n };
+});
+
+export const publish = http.post("/orders", { body: z.object({ orderId: z.string(), fail: z.number().int().optional() }) }, async (ctx) => ctx.queue.publish("orders", ctx.body));
+export const seenCount = http.get("/seen/:key", { resources: [seen] }, async (ctx) => ({ n: await (ctx.resources["seen"] as Seen).get(ctx.params["key"]!) }));
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __mutable: unknown;
+}
+
 export default defineApp({
   name: "pg-fixture",
-  workloads: [setup, getUser, listUsers, slow, fail, types, badParams, leak],
-  resources: [db],
+  workloads: [setup, getUser, listUsers, slow, fail, types, badParams, leak, orders, publish, seenCount],
+  resources: [db, seen],
   env: env({ DATABASE_URL: env.url() }),
 });
