@@ -107,6 +107,9 @@ pub struct Revision {
     services: Mutex<Option<Arc<services::Supervisor>>>,
     queue_stop: Mutex<Option<CancellationToken>>,
     pub queue_stats: Arc<queue::QueueStats>,
+    /// Fires when the revision starts draining: connection-bound worlds
+    /// (sockets, streams) are asked to finish.
+    connections_stop: CancellationToken,
 }
 
 impl Revision {
@@ -116,6 +119,11 @@ impl Revision {
 
     pub fn in_flight(&self) -> u64 {
         self.in_flight.load(Ordering::SeqCst)
+    }
+
+    /// Token connection-bound worlds should treat as a graceful stop.
+    pub fn connections_stop(&self) -> CancellationToken {
+        self.connections_stop.clone()
     }
 
     pub fn services(&self) -> Vec<services::ServiceStatus> {
@@ -146,6 +154,7 @@ impl Revision {
             if let Some(stop) = self.queue_stop.lock().expect("queue poisoned").take() {
                 stop.cancel();
             }
+            self.connections_stop.cancel();
         }
     }
 
@@ -267,9 +276,17 @@ impl Runtime {
             for (kind, handler) in tasks::handlers(weak.clone(), Arc::clone(&tasks)) {
                 extensions.handlers.insert(kind.to_owned(), handler);
             }
-            extensions
-                .handlers
-                .insert("queue.publish".into(), Arc::new(queue::PublishHandler));
+            let builtin: Vec<(&str, Arc<dyn OpHandler>)> = vec![
+                ("queue.publish", Arc::new(queue::PublishHandler)),
+                ("stream.start", Arc::new(crate::http::stream::StartHandler)),
+                ("stream.send", Arc::new(crate::http::stream::SendHandler)),
+                ("socket.recv", Arc::new(crate::http::socket::RecvHandler)),
+                ("socket.send", Arc::new(crate::http::socket::SendHandler)),
+                ("socket.close", Arc::new(crate::http::socket::CloseHandler)),
+            ];
+            for (kind, handler) in builtin {
+                extensions.handlers.insert(kind.to_owned(), handler);
+            }
             Self {
                 self_ref: weak.clone(),
                 world_budget: Budget::new("runtime.worlds", config.max_worlds),
@@ -360,6 +377,7 @@ impl Runtime {
             services: Mutex::new(None),
             queue_stop: Mutex::new(None),
             queue_stats: Arc::new(queue::QueueStats::default()),
+            connections_stop: CancellationToken::new(),
         });
         cron::validate(&revision).map_err(|e| RuntimeError::InvalidDefinition(e.to_string()))?;
         self.revisions
@@ -622,10 +640,33 @@ impl Runtime {
     pub async fn execute_with_stop(
         &self,
         admission: Admission,
-        mut input: serde_json::Value,
+        input: serde_json::Value,
         cancel: CancellationToken,
         stop: Option<CancellationToken>,
     ) -> Result<WorkResult, RuntimeError> {
+        self.execute_opts(
+            admission,
+            input,
+            ExecuteOptions {
+                cancel,
+                stop,
+                attachment: None,
+            },
+        )
+        .await
+    }
+
+    pub async fn execute_opts(
+        &self,
+        admission: Admission,
+        mut input: serde_json::Value,
+        options: ExecuteOptions,
+    ) -> Result<WorkResult, RuntimeError> {
+        let ExecuteOptions {
+            cancel,
+            stop,
+            attachment,
+        } = options;
         let Admission {
             revision,
             workload_index,
@@ -677,6 +718,7 @@ impl Runtime {
                 cancel,
                 stop,
                 revision: Some(Arc::clone(&revision)),
+                attachment,
             },
         )
         .await?;
@@ -739,6 +781,16 @@ impl Runtime {
         }
         self.resources.shutdown().await;
     }
+}
+
+/// How to run admitted work.
+#[derive(Default)]
+pub struct ExecuteOptions {
+    pub cancel: CancellationToken,
+    /// Graceful stop for persistent / connection-bound work.
+    pub stop: Option<CancellationToken>,
+    /// Per-world host state (stream sink, socket link).
+    pub attachment: Option<Arc<dyn std::any::Any + Send + Sync>>,
 }
 
 /// Proof that work was admitted. Must be consumed by `execute` or dropped;

@@ -100,6 +100,9 @@ pub struct OpContext {
     /// definition.
     pub revision: Option<Arc<crate::runtime::Revision>>,
     pub children: Arc<std::sync::Mutex<Vec<ChildRecord>>>,
+    /// Per-world state a host subsystem attached at creation (a stream
+    /// sink, a socket link). Opaque to the op layer.
+    pub attachment: Option<Arc<dyn std::any::Any + Send + Sync>>,
 }
 
 /// Hooks other subsystems (tasks, cron) register so the op layer does not

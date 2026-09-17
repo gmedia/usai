@@ -10,10 +10,24 @@ use serde_json::Value;
 use crate::definition::{ApplicationDefinition, Contracts, Trigger, WorkloadSpec};
 use crate::runtime::Revision;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RouteKind {
+    Contract,
+    Raw,
+    Stream,
+    Socket,
+}
+
 pub struct Route {
     pub method: String,
     pub index: usize,
-    pub raw: bool,
+    pub kind: RouteKind,
+}
+
+impl Route {
+    pub fn raw(&self) -> bool {
+        self.kind == RouteKind::Raw
+    }
 }
 
 /// Compiled JSON Schema validators for one workload's contract slots.
@@ -88,8 +102,22 @@ impl CompiledRevision {
         let mut by_path: BTreeMap<String, Vec<Route>> = BTreeMap::new();
         let mut validators = BTreeMap::new();
         for (index, workload) in definition.workloads().iter().enumerate() {
-            let Trigger::Http { method, path, raw } = &workload.trigger else {
-                continue;
+            let (method, path, kind) = match &workload.trigger {
+                Trigger::Http {
+                    method,
+                    path,
+                    raw: true,
+                } => (method.as_str(), path.as_str(), RouteKind::Raw),
+                Trigger::Http {
+                    method,
+                    path,
+                    raw: false,
+                } => (method.as_str(), path.as_str(), RouteKind::Contract),
+                Trigger::Stream { method, path } => {
+                    (method.as_str(), path.as_str(), RouteKind::Stream)
+                }
+                Trigger::Socket { path } => ("GET", path.as_str(), RouteKind::Socket),
+                _ => continue,
             };
             by_path
                 .entry(to_matchit_path(path))
@@ -97,9 +125,9 @@ impl CompiledRevision {
                 .push(Route {
                     method: method.to_ascii_uppercase(),
                     index,
-                    raw: *raw,
+                    kind,
                 });
-            if !raw {
+            if kind != RouteKind::Raw && kind != RouteKind::Socket {
                 let c = &workload.contracts;
                 validators.insert(
                     index,

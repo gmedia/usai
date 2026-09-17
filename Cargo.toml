@@ -35,6 +35,8 @@ base64 = "0.22"
 http = "1"
 croner = "4"
 glob = "0.3"
+tokio-tungstenite = "0.30"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 tokio-postgres = { version = "0.7", features = ["with-serde_json-1", "with-uuid-1", "with-chrono-0_4"] }
 deadpool-postgres = "0.14"
 uuid = { version = "1", features = ["serde"] }

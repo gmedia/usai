@@ -127,7 +127,11 @@ function raw(path: string, a: RawOptions | RawHandler, b?: RawHandler): Workload
   };
 }
 
+import { streams } from "./connection.ts";
+
 export const http = {
+  /** Streaming response: the world lives until the handler returns. */
+  stream: streams.stream,
   get: method("GET"),
   post: method("POST"),
   put: method("PUT"),

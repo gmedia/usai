@@ -11,6 +11,8 @@
 pub mod pipeline;
 pub mod router;
 pub mod server;
+pub mod socket;
+pub mod stream;
 
 pub use pipeline::{HttpConfig, HttpHost};
 pub use server::serve;

@@ -6,7 +6,7 @@ import { type AppDeclaration, type Workload, flatten } from "../declarations.ts"
 import { UsaiError, isUsaiError } from "../errors.ts";
 import { isHttpResponse, isRawResponse } from "../http.ts";
 import { type AnySchema, validateWith } from "../schema.ts";
-import { type BaseContext, makeBase } from "./context.ts";
+import { type BaseContext, makeBase, op } from "./context.ts";
 import { describe } from "../manifest.ts";
 import { resolveEnv } from "../env.ts";
 
@@ -29,7 +29,9 @@ interface CronInput { kind: "cron"; env: Record<string, string>; scheduledAt: st
 interface CommandInput { kind: "command"; env: Record<string, string>; args: string[] }
 interface ServiceInput { kind: "service"; env: Record<string, string> }
 interface QueueInput { kind: "queue"; env: Record<string, string>; message: unknown; id: string; attempt: number }
-type Input = HttpInput | TaskInput | CronInput | CommandInput | ServiceInput | QueueInput;
+interface StreamInput { kind: "stream"; env: Record<string, string>; request: HttpInput["request"] }
+interface SocketInput { kind: "socket"; env: Record<string, string>; request: Omit<HttpInput["request"], "body"> }
+type Input = HttpInput | TaskInput | CronInput | CommandInput | ServiceInput | QueueInput | StreamInput | SocketInput;
 
 interface HttpOutput {
   status: number;
@@ -183,6 +185,89 @@ async function runQueue(workload: Workload, input: QueueInput): Promise<unknown>
   return (workload.handler as (ctx: unknown) => unknown)({ ...base, message, id: input.id, attempt: input.attempt });
 }
 
+async function runStream(workload: Workload, input: StreamInput): Promise<unknown> {
+  const base = makeBase(workload.resources, input.env);
+  const { request } = input;
+  const auth = await authenticate(workload, base, request);
+  const ctx = {
+    ...base,
+    auth,
+    method: request.method,
+    path: request.path,
+    url: request.url,
+    params: parse("params", workload.contracts.params, request.params),
+    query: parse("query", workload.contracts.query, request.query),
+    headers: request.headers,
+  };
+  const stream = {
+    start: async (options?: { status?: number; headers?: Record<string, string> }) => { await op("stream.start", { status: options?.status ?? 200, headers: options?.headers ?? {} }); },
+    send: async (chunk: string | Uint8Array) => {
+      if (typeof chunk === "string") await op("stream.send", { text: chunk });
+      else await op("stream.send", { base64: base64FromBytes(chunk) });
+    },
+    event: async (name: string, data: unknown) => {
+      const payload = typeof data === "string" ? data : JSON.stringify(data);
+      await op("stream.send", { text: `event: ${name}\ndata: ${payload}\n\n` });
+    },
+  };
+  // If nothing was streamed, the return value is an ordinary response.
+  const result = await (workload.handler as (ctx: unknown, stream: unknown) => unknown)(ctx, stream);
+  return encodeHttp(workload, result);
+}
+
+interface SocketEvent { type: "text" | "binary" | "close"; data?: string; base64?: string; code?: number | null; reason?: string }
+
+async function runSocket(workload: Workload, input: SocketInput): Promise<unknown> {
+  const base = makeBase(workload.resources, input.env);
+  const { request } = input;
+  const handlers = workload.handler as unknown as { open?: (ctx: unknown) => unknown; message?: (ctx: unknown) => unknown; close?: (ctx: unknown) => unknown };
+  const auth = await authenticate(workload, base, { ...request, body: null });
+  const outgoing = workload.contracts.response?.[200];
+  const state: Record<string, unknown> = {};
+  const ctx = {
+    ...base,
+    auth,
+    path: request.path,
+    url: request.url,
+    params: request.params,
+    query: request.query,
+    headers: request.headers,
+    state,
+    message: undefined as unknown,
+    closeInfo: null as { code: number | null; reason: string } | null,
+    send: async (message: unknown) => {
+      const checked = outgoing ? parse("outgoing", outgoing, message) : message;
+      await op("socket.send", { text: typeof checked === "string" ? checked : JSON.stringify(checked) });
+    },
+    close: async (reason?: string) => { await op("socket.close", { reason: reason ?? "" }); },
+  };
+  if (handlers.open) await handlers.open(ctx);
+  for (;;) {
+    const event = await op<SocketEvent>("socket.recv", "");
+    if (!event || event.type === "close") {
+      ctx.closeInfo = { code: event?.code ?? null, reason: event?.reason ?? "" };
+      break;
+    }
+    let raw: unknown = event.type === "text" ? event.data : bytesFromBase64(event.base64 ?? "");
+    if (workload.contracts.message && typeof raw === "string") {
+      try { raw = JSON.parse(raw); } catch { /* validated below as a string */ }
+    }
+    try {
+      ctx.message = workload.contracts.message ? parse("message", workload.contracts.message, raw) : raw;
+    } catch (error) {
+      // A message that fails its contract is reported to the client and
+      // dropped; the connection stays open. The error envelope is not
+      // subject to the outgoing contract.
+      const detail = (error as { usai?: { details?: unknown } }).usai?.details;
+      await op("socket.send", { text: JSON.stringify({ error: { code: "validation_failed", message: (error as Error).message, details: detail ?? null } }) }).catch(() => {});
+      continue;
+    }
+    if (handlers.message) await handlers.message(ctx);
+  }
+  if (handlers.close) await handlers.close(ctx);
+  return null;
+}
+
 async function runService(workload: Workload, input: ServiceInput): Promise<unknown> {
   const base = makeBase(workload.resources, input.env);
   return (workload.handler as (ctx: unknown) => unknown)(base);
@@ -204,6 +289,8 @@ export async function invoke(app: AppDeclaration, index: number, inputJson: stri
       case "command": return { value: await runCommand(workload, input) ?? null };
       case "service": return { value: await runService(workload, input) ?? null };
       case "queue": return { value: await runQueue(workload, input) ?? null };
+      case "stream": return await runStream(workload, input);
+      case "socket": return { value: await runSocket(workload, input) ?? null };
       default: throw new UsaiError("unknown_input_kind", 500, `unsupported input kind ${(input as { kind: string }).kind}`);
     }
   } catch (error) {

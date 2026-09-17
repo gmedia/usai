@@ -9,14 +9,20 @@ use std::sync::{Arc, RwLock};
 use base64::Engine as _;
 use bytes::Bytes;
 use http::{HeaderMap, HeaderValue, Method, Request, Response, StatusCode, header};
-use http_body_util::{BodyExt, Full, Limited};
+use http_body_util::combinators::BoxBody;
+use http_body_util::{BodyExt, Full, Limited, StreamBody};
+use hyper::body::Frame;
 use hyper::body::Incoming;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::convert::Infallible;
 use tokio_util::sync::CancellationToken;
 
-use super::router::{CompiledRevision, SlotValidators};
+use super::router::{CompiledRevision, RouteKind, SlotValidators};
+use super::socket::{Inbound, SocketLink};
+use super::stream::StreamSink;
 use crate::engine::GuestError;
+use crate::runtime::ExecuteOptions;
 use crate::runtime::{Runtime, RuntimeError};
 use crate::world::{Termination, WorkResult};
 
@@ -82,15 +88,33 @@ struct GuestHttpOutput {
     base64: Option<String>,
 }
 
-pub type HttpResponse = Response<Full<Bytes>>;
+pub type HttpResponse = Response<BoxBody<Bytes, Infallible>>;
 
 fn json_response(status: StatusCode, body: &Value) -> HttpResponse {
     let bytes = serde_json::to_vec(body).unwrap_or_else(|_| b"{}".to_vec());
     Response::builder()
         .status(status)
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Full::new(Bytes::from(bytes)))
+        .body(Full::new(Bytes::from(bytes)).boxed())
         .expect("static response")
+}
+
+/// Streaming body whose drop (client gone) cancels the world.
+struct WorldBody {
+    receiver: tokio::sync::mpsc::Receiver<Bytes>,
+    _guard: tokio_util::sync::DropGuard,
+}
+
+impl futures_util::Stream for WorldBody {
+    type Item = Result<Frame<Bytes>, Infallible>;
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.receiver
+            .poll_recv(cx)
+            .map(|item| item.map(|bytes| Ok(Frame::data(bytes))))
+    }
 }
 
 fn header_map_to_json(headers: &HeaderMap) -> Value {
@@ -269,9 +293,10 @@ impl HttpHost {
                     return Ok(Response::builder()
                         .status(StatusCode::OK)
                         .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
-                        .body(Full::new(Bytes::from_static(
-                            crate::openapi::DOCS_HTML.as_bytes(),
-                        )))
+                        .body(
+                            Full::new(Bytes::from_static(crate::openapi::DOCS_HTML.as_bytes()))
+                                .boxed(),
+                        )
                         .expect("static response"));
                 }
                 _ => {}
@@ -312,9 +337,25 @@ impl HttpHost {
             .workload_by_index(route.index)
             .expect("routed index exists");
 
-        // 2. decode
         let mut query = query_to_json(parts.uri.query());
         let mut headers = header_map_to_json(&parts.headers);
+
+        // Sockets: an HTTP upgrade, then one world for the connection.
+        if route.kind == RouteKind::Socket {
+            return self
+                .upgrade_socket(
+                    parts,
+                    compiled.clone(),
+                    route.index,
+                    &workload.id,
+                    params,
+                    query,
+                    headers,
+                )
+                .await;
+        }
+
+        // 2. decode
         let content_type = parts
             .headers
             .get(header::CONTENT_TYPE)
@@ -334,7 +375,7 @@ impl HttpHost {
             .to_bytes();
         let body_json: Value = if raw_body.is_empty() {
             Value::Null
-        } else if route.raw {
+        } else if route.raw() {
             json!({ "base64": base64::engine::general_purpose::STANDARD.encode(&raw_body) })
         } else if content_type.starts_with("application/json") || content_type.ends_with("+json") {
             let parsed: Value = serde_json::from_slice(&raw_body).map_err(|e| {
@@ -411,19 +452,21 @@ impl HttpHost {
 
         // 5. world
         let env: BTreeMap<String, String> = (*compiled.revision.env()).clone();
-        let input = json!({
-            "kind": "http",
-            "env": env,
-            "request": {
-                "method": parts.method.as_str(),
-                "path": path,
-                "url": parts.uri.to_string(),
-                "params": params,
-                "query": query,
-                "headers": headers,
-                "body": body_json,
-            }
+        let request = json!({
+            "method": parts.method.as_str(),
+            "path": path,
+            "url": parts.uri.to_string(),
+            "params": params,
+            "query": query,
+            "headers": headers,
+            "body": body_json,
         });
+        if route.kind == RouteKind::Stream {
+            return self
+                .run_stream(admission, &workload.id, compiled.clone(), request)
+                .await;
+        }
+        let input = json!({ "kind": "http", "env": env, "request": request });
         let cancel = CancellationToken::new();
         // Dropping the request future (client gone) cancels the world.
         let _guard = cancel.clone().drop_guard();
@@ -442,6 +485,201 @@ impl HttpHost {
 
         // 6. encode / commit
         Ok(self.encode(&workload.id, result))
+    }
+
+    /// A stream world: the response commits at the first `stream.send`
+    /// (or `stream.start`) and the body ends when the handler returns.
+    /// If the handler returns before sending anything, it is an ordinary
+    /// response.
+    async fn run_stream(
+        &self,
+        admission: crate::runtime::Admission,
+        workload: &str,
+        compiled: Arc<CompiledRevision>,
+        request: Value,
+    ) -> Result<HttpResponse, Reply> {
+        let (sink, head_rx, body_rx) = StreamSink::new("text/event-stream");
+        let cancel = CancellationToken::new();
+        let stop = compiled.revision.connections_stop();
+        let runtime = Arc::clone(&self.runtime);
+        let input = json!({ "kind": "stream", "request": request });
+        let world_cancel = cancel.clone();
+        let mut task = tokio::spawn(async move {
+            runtime
+                .execute_opts(
+                    admission,
+                    input,
+                    ExecuteOptions {
+                        cancel: world_cancel,
+                        stop: Some(stop),
+                        attachment: Some(sink),
+                    },
+                )
+                .await
+        });
+        tokio::select! {
+            head = head_rx => match head {
+                Ok(head) => {
+                    let mut builder = Response::builder().status(StatusCode::from_u16(head.status).unwrap_or(StatusCode::OK));
+                    for (name, value) in head.headers {
+                        if let Ok(v) = HeaderValue::from_str(&value) {
+                            builder = builder.header(name.as_str(), v);
+                        }
+                    }
+                    builder = builder.header("x-usai-lifetime", "stream");
+                    let body = WorldBody { receiver: body_rx, _guard: cancel.drop_guard() };
+                    // The world keeps running; its result is observed by the task.
+                    let workload = workload.to_owned();
+                    tokio::spawn(async move {
+                        match task.await {
+                            Ok(Ok(result)) => {
+                                for v in &result.violations {
+                                    tracing::warn!(world = %result.world, workload, code = v.code, "{}", v.message);
+                                }
+                            }
+                            Ok(Err(e)) => tracing::error!(workload, error = %e, "stream world failed"),
+                            Err(e) => tracing::error!(workload, error = %e, "stream task panicked"),
+                        }
+                    });
+                    Ok(builder.body(BoxBody::new(StreamBody::new(body))).expect("stream response"))
+                }
+                Err(_) => {
+                    // The sink was dropped without a head: the world ended first.
+                    let result = task.await.map_err(|e| Reply::error(StatusCode::INTERNAL_SERVER_ERROR, "stream_failed", e.to_string()))?;
+                    let result = result.map_err(|e| Reply::error(StatusCode::INTERNAL_SERVER_ERROR, "world_creation_failed", e.to_string()))?;
+                    Ok(self.encode(workload, result))
+                }
+            },
+            finished = &mut task => {
+                let result = finished.map_err(|e| Reply::error(StatusCode::INTERNAL_SERVER_ERROR, "stream_failed", e.to_string()))?;
+                let result = result.map_err(|e| Reply::error(StatusCode::INTERNAL_SERVER_ERROR, "world_creation_failed", e.to_string()))?;
+                Ok(self.encode(workload, result))
+            }
+        }
+    }
+
+    /// A socket world: 101 Switching Protocols, then one world for the
+    /// connection with frames delivered as host completions.
+    #[allow(clippy::too_many_arguments)]
+    async fn upgrade_socket(
+        &self,
+        mut parts: http::request::Parts,
+        compiled: Arc<CompiledRevision>,
+        index: usize,
+        workload: &str,
+        params: Value,
+        query: Value,
+        headers: Value,
+    ) -> Result<HttpResponse, Reply> {
+        let is_upgrade = parts
+            .headers
+            .get(header::UPGRADE)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.eq_ignore_ascii_case("websocket"));
+        let key = parts
+            .headers
+            .get("sec-websocket-key")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        let (Some(key), true) = (key, is_upgrade) else {
+            return Err(Reply::error(
+                StatusCode::UPGRADE_REQUIRED,
+                "upgrade_required",
+                "this route is a WebSocket endpoint",
+            ));
+        };
+        let workload_spec = compiled
+            .revision
+            .definition
+            .workload_by_index(index)
+            .expect("routed index exists");
+        let admission = self
+            .runtime
+            .admit(&compiled.revision, &workload_spec.id)
+            .map_err(|e| match e {
+                RuntimeError::Admission(_) => Reply::error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "capacity_exhausted",
+                    e.to_string(),
+                ),
+                other => Reply::error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "admission_failed",
+                    other.to_string(),
+                ),
+            })?;
+        let accept = tokio_tungstenite::tungstenite::handshake::derive_accept_key(key.as_bytes());
+        // The OnUpgrade future lives in the request extensions.
+        let on_upgrade = parts
+            .extensions
+            .remove::<hyper::upgrade::OnUpgrade>()
+            .ok_or_else(|| {
+                Reply::error(
+                    StatusCode::UPGRADE_REQUIRED,
+                    "upgrade_required",
+                    "connection cannot be upgraded",
+                )
+            })?;
+        let (inbound_tx, inbound_rx) = tokio::sync::mpsc::channel::<Inbound>(64);
+        let (outbound_tx, outbound_rx) = tokio::sync::mpsc::channel(64);
+        let link = SocketLink::new(inbound_rx, outbound_tx);
+        let stop = compiled.revision.connections_stop();
+        let pump_stop = stop.clone();
+        let cancel = CancellationToken::new();
+        let pump_cancel = cancel.clone();
+        tokio::spawn(async move {
+            match on_upgrade.await {
+                Ok(upgraded) => {
+                    super::socket::pump(upgraded, inbound_tx, outbound_rx, pump_stop).await;
+                }
+                Err(e) => {
+                    tracing::debug!(error = %e, "websocket upgrade failed");
+                    pump_cancel.cancel();
+                }
+            }
+        });
+        let runtime = Arc::clone(&self.runtime);
+        let request = json!({
+            "method": "GET",
+            "path": parts.uri.path(),
+            "url": parts.uri.to_string(),
+            "params": params,
+            "query": query,
+            "headers": headers,
+        });
+        let input = json!({ "kind": "socket", "request": request });
+        let workload = workload.to_owned();
+        tokio::spawn(async move {
+            match runtime
+                .execute_opts(
+                    admission,
+                    input,
+                    ExecuteOptions {
+                        cancel,
+                        stop: Some(stop),
+                        attachment: Some(link),
+                    },
+                )
+                .await
+            {
+                Ok(result) => {
+                    for v in &result.violations {
+                        tracing::warn!(world = %result.world, workload, code = v.code, "{}", v.message);
+                    }
+                    if let Some(Err(e)) = &result.outcome {
+                        tracing::error!(world = %result.world, workload, name = %e.name, message = %e.message, "socket handler failed");
+                    }
+                }
+                Err(e) => tracing::error!(workload, error = %e, "socket world failed"),
+            }
+        });
+        Ok(Response::builder()
+            .status(StatusCode::SWITCHING_PROTOCOLS)
+            .header(header::CONNECTION, "upgrade")
+            .header(header::UPGRADE, "websocket")
+            .header("sec-websocket-accept", accept)
+            .body(http_body_util::Empty::new().boxed())
+            .expect("upgrade response"))
     }
 
     fn encode(&self, workload: &str, result: WorkResult) -> HttpResponse {
@@ -539,7 +777,7 @@ impl HttpHost {
             builder = builder.header(header::CONTENT_TYPE, content_type);
         }
         builder
-            .body(Full::new(Bytes::from(bytes)))
+            .body(Full::new(Bytes::from(bytes)).boxed())
             .unwrap_or_else(|_| {
                 json_response(
                     StatusCode::INTERNAL_SERVER_ERROR,

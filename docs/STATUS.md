@@ -6,7 +6,7 @@
 
 ## Current milestone
 
-**D11 — WebSocket + Stream Workloads** (next). D0–D10 are done.
+**D12 — Observability + Graph** (next). D0–D11 are done.
 
 ## Done
 
@@ -21,17 +21,19 @@
 - **D8 API metadata + OpenAPI.** `openapi.rs` generates OpenAPI 3.1 from the ApplicationDefinition: paths from HTTP triggers, path/query/header parameters from the extracted JSON Schemas, request bodies, responses by declared status, declared errors and the standard error envelope, security schemes from auth declarations, module names as tags; raw endpoints are opaque (`x-usai-raw`), in-world-only contracts are flagged (`x-usai-validated-in-world`). `usai generate openapi [--out]`; the dev server serves `/_usai/openapi.json` and a dependency-free `/_usai/docs`. 1 acceptance test (served document == generated document; not served on a production host).
 - **D9 service workload.** `service("name", handler)` starts one persistent world per revision at activation (`workloads/services.rs` supervisor); state persists because the service is alive; finite worlds cannot see it. Drain stops services first: graceful (`__usai.stop` — `ctx.signal` fires, pending `sleep`s resolve, the loop exits and the handler's return is the service's outcome), hard cancel after `drain_timeout`. Service state in `RuntimeStatus.revisions[].services` and the `usai dev` banner. No restart policy yet (D13). 1 acceptance test.
 - **D10 queue / message workload.** `queue.consume("topic", { message, concurrency, retry, database }, handler)` + `ctx.queue.publish(topic, message, { delayMs })`. v0 substrate: a PostgreSQL table (`usai_queue`) claimed with `FOR UPDATE SKIP LOCKED` — persistent consumer loops per revision (`workloads/queue.rs`), fresh world per message, concurrency from the declaration, message JSON Schema validated before the world exists (invalid → dead, no world), explicit retry with fixed/exponential backoff and a dead-letter state (ADR-0014; delivery is at-least-once and says so), consumers stop at drain; `RuntimeConfig.queue_consumers`. 1 acceptance test (publish from HTTP world → four messages processed once, retry-then-success across three fresh worlds, dead letter, invalid message never gets a world).
+- **D11 WebSocket + stream workloads.** Streams: `http.stream(path, { params, query, auth }, (ctx, stream) => …)` — the response commits at the first `stream.start`/`send`/`event` (SSE helper) and the body ends when the handler returns (`headers sent != work complete`); a handler that never sends is an ordinary response; a client disconnect cancels the world through the body's drop guard; drain stops the loop gracefully. Sockets: `socket(path, { incoming, outgoing }, { open, message, close })` — HTTP upgrade (hyper `with_upgrades` + tungstenite), one world per connection, frames delivered as host completions (`socket.recv`), `ctx.state` connection-local, contract violations reported to the client without closing, application or client close runs `close`, drain sends 1012 and runs `close`. Per-revision `connections_stop`. Server rewritten with per-connection tasks + `TaskTracker` drain. 5 acceptance tests in `tests/connection.rs`.
 - Design review closed 14 of 16 open questions as ADR-0001…0014; ADR-0015 records the engine decision.
 
 ## In progress
 
 - nothing
 
-## Next (D11 acceptance: connection-local mutable state survives messages; state disappears when the connection ends; stream lifetime distinct from request completion; cancellation/drain correct; no process-global connection state)
+## Next (D12 acceptance: observability derives from runtime truth; detailed tracing can be disabled cheaply; ownership/lifetime failures are diagnosable)
 
-1. Streams: `http.stream(path, handler(ctx, stream))` — world lives until the handler returns; `stream.send(chunk)` is a host op that writes to the response body (chunked / SSE); headers commit on first send; client disconnect cancels.
-2. WebSocket: `socket(path, { incoming, outgoing }, { open, message, close })` — HTTP upgrade (hyper + tungstenite), one world per connection, `ctx.state` connection-local, incoming messages delivered as host completions into the same world, `ctx.send` as a host op; drain closes connections gracefully.
-3. Tests: per-connection state, isolation between connections, stream chunks, disconnect cancels.
+1. Structured lifecycle events (world created/terminal/retired, op start/complete/dropped, lease returned/quarantined, dispatch, cancel, violation) emitted through `tracing` with stable field names; JSON log format flag on the CLI; a per-world trace summary (like `GOAL.md` §44) at debug level.
+2. Metrics: `/_usai/status` (runtime status JSON: gauges, revisions, services, tasks, resources, queues) and a Prometheus-style `/_usai/metrics` text endpoint, both runtime-owned surfaces.
+3. `usai graph`: workload → resource / dispatch graph from the definition.
+4. Keep the disabled path free: no formatting when the level is off (tracing already gates by level; verify with a benchmark-ish test that debug spans are not built when disabled).
 
 ## Known gaps / debt
 

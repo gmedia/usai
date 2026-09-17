@@ -1,5 +1,6 @@
 //! hyper 1 server: persistent listener, one connection task per socket,
-//! graceful shutdown that lets in-flight worlds settle.
+//! graceful shutdown that lets in-flight worlds settle. Connections are
+//! upgradeable (WebSocket).
 
 use std::sync::Arc;
 
@@ -8,6 +9,7 @@ use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 
 use super::pipeline::HttpHost;
 
@@ -20,7 +22,7 @@ pub async fn serve(
 ) -> std::io::Result<()> {
     let listener = TcpListener::bind(host.config().addr).await?;
     on_bound(listener.local_addr()?);
-    let graceful = hyper_util::server::graceful::GracefulShutdown::new();
+    let tracker = TaskTracker::new();
     loop {
         let (stream, peer) = tokio::select! {
             accepted = listener.accept() => match accepted {
@@ -33,23 +35,40 @@ pub async fn serve(
             _ = shutdown.cancelled() => break,
         };
         let host = Arc::clone(&host);
-        let connection = http1::Builder::new().keep_alive(true).serve_connection(
-            TokioIo::new(stream),
-            service_fn(move |request| {
-                let host = Arc::clone(&host);
-                async move { Ok::<_, std::convert::Infallible>(host.handle(request).await) }
-            }),
-        );
-        let connection = graceful.watch(connection);
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                tracing::debug!(%peer, error = %e, "connection ended with error");
+        let shutdown = shutdown.clone();
+        tracker.spawn(async move {
+            let connection = http1::Builder::new()
+                .keep_alive(true)
+                .serve_connection(
+                    TokioIo::new(stream),
+                    service_fn(move |request| {
+                        let host = Arc::clone(&host);
+                        async move { Ok::<_, std::convert::Infallible>(host.handle(request).await) }
+                    }),
+                )
+                // A 101 hands the socket to the WebSocket pump.
+                .with_upgrades();
+            tokio::pin!(connection);
+            tokio::select! {
+                result = connection.as_mut() => {
+                    if let Err(e) = result {
+                        tracing::debug!(%peer, error = %e, "connection ended with error");
+                    }
+                }
+                _ = shutdown.cancelled() => {
+                    // Finish the in-flight response, then close.
+                    connection.as_mut().graceful_shutdown();
+                    if let Err(e) = connection.await {
+                        tracing::debug!(%peer, error = %e, "connection ended during shutdown");
+                    }
+                }
             }
         });
     }
     tracing::info!("http listener closed; draining connections");
+    tracker.close();
     tokio::select! {
-        _ = graceful.shutdown() => {}
+        _ = tracker.wait() => {}
         _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {
             tracing::warn!("connections did not drain within 30s");
         }

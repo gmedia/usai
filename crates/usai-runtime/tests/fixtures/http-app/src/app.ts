@@ -58,6 +58,8 @@ declare global {
   var __mutable: unknown;
   // eslint-disable-next-line no-var
   var __serviceLocal: unknown;
+  // eslint-disable-next-line no-var
+  var __socketLocal: unknown;
 }
 
 
@@ -121,6 +123,46 @@ export const ledgerSync = service("ledger-sync", { resources: [audit] }, async (
 
 export const serviceLocalRead = http.get("/service-local", {}, async () => ({ sees: globalThis.__serviceLocal ?? null }));
 
+// ---- D11: streams and sockets ---------------------------------------------
+import { socket } from "usai";
+
+export const events = http.stream("/events", { query: z.object({ n: z.coerce.number().int().min(1).max(100).default(3) }) }, async (ctx, stream) => {
+  await stream.start({ headers: { "x-stream": "yes" } });
+  for (let i = 1; i <= (ctx.query as unknown as { n: number }).n; i++) {
+    await stream.event("tick", { i });
+    await ctx.sleep("20ms");
+  }
+  await stream.event("done", { total: (ctx.query as unknown as { n: number }).n });
+});
+
+export const endless = http.stream("/endless", {}, async (ctx, stream) => {
+  let i = 0;
+  while (!ctx.signal.aborted) {
+    await stream.send(`chunk ${i++}\n`);
+    await ctx.sleep("30ms");
+  }
+  return { stopped: true, chunks: i };
+});
+
+export const plainStream = http.stream("/no-send", {}, async () => ({ nothing: "sent" }));
+
+export const chat = socket("/chat", { incoming: z.object({ text: z.string() }), outgoing: z.object({ echo: z.string(), count: z.number() }), resources: [audit] }, {
+  async open(ctx) {
+    ctx.state["count"] = 0;
+    ctx.state["user"] = ctx.query["user"] ?? "anon";
+    globalThis.__socketLocal = "socket-secret";
+  },
+  async message(ctx) {
+    ctx.state["count"] = (ctx.state["count"] as number) + 1;
+    await ctx.send({ echo: `${String(ctx.state["user"])}: ${ctx.message.text}`, count: ctx.state["count"] as number });
+    if (ctx.message.text === "bye") await ctx.close("bye then");
+  },
+  async close(ctx) {
+    await (ctx.resources["audit"] as Audit).set(`socket:${String(ctx.state["user"])}`, ctx.state["count"]);
+  },
+});
+export const socketLocalRead = http.get("/socket-local", {}, async () => ({ sees: globalThis.__socketLocal ?? null }));
+
 export const reconcile = command("reconcile", { resources: [audit] }, async (ctx) => {
   await (ctx.resources["audit"] as Audit).increment("command:reconcile");
   return { args: ctx.args };
@@ -132,7 +174,7 @@ export default defineApp({
   workloads: [
     counter, persistent, me, boom, badShape, detach, slow, echoQuery, webhook, sendReceipt,
     record, slowTask, failingTask, invokesSlow, order, auditRead, badDispatch, everySecond, overlapping, nightly, reconcile,
-    ledgerSync, serviceLocalRead,
+    ledgerSync, serviceLocalRead, events, endless, plainStream, chat, socketLocalRead,
   ],
   resources: [hits, audit],
   env: env({ GREETING: env.optional(env.string()) }),

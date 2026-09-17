@@ -107,6 +107,7 @@ pub struct WorldShared {
     completions: mpsc::Sender<Completion>,
     revision: Option<Arc<crate::runtime::Revision>>,
     children: Arc<Mutex<Vec<ChildRecord>>>,
+    attachment: Option<Arc<dyn std::any::Any + Send + Sync>>,
     logs: Mutex<Vec<LogLine>>,
     accepting_ops: AtomicBool,
     max_logs: usize,
@@ -126,6 +127,7 @@ impl HostBindings for WorldShared {
             extensions: Arc::clone(&self.extensions),
             revision: self.revision.clone(),
             children: Arc::clone(&self.children),
+            attachment: self.attachment.clone(),
         };
         match spawn_operation(
             &self.ledger,
@@ -175,6 +177,7 @@ pub struct WorldSpec {
     /// Graceful stop request for persistent workloads (`None` for finite work).
     pub stop: Option<CancellationToken>,
     pub revision: Option<Arc<crate::runtime::Revision>>,
+    pub attachment: Option<Arc<dyn std::any::Any + Send + Sync>>,
 }
 
 pub struct WorldDriver {
@@ -212,6 +215,7 @@ impl WorldDriver {
             completions: tx,
             revision: spec.revision,
             children: Arc::new(Mutex::new(Vec::new())),
+            attachment: spec.attachment,
             logs: Mutex::new(Vec::new()),
             accepting_ops: AtomicBool::new(true),
             max_logs: 1_000,
