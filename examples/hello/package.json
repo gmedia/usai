@@ -1,0 +1,12 @@
+{
+  "name": "@usai-examples/hello",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Smallest Usai application. Runnable once milestone D3 lands `usai dev`.",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": { "usai": "workspace:*" },
+  "devDependencies": { "typescript": "^5.9.0" }
+}

@@ -14,11 +14,30 @@ Session start: `docs/STATUS.md` (where we are) → the `GOAL.md` section relevan
 
 ## Commands
 
-**None exist yet.** The repository currently holds only documentation (`README.md`, `GOAL.md`, `AGENTS.md`, `docs/`). Do not assume or invent `cargo`, `npm`, or `make` targets in answers. Creating them is milestone D0; when they land, replace this section with the real build / lint / test / single-test commands and keep `AGENTS.md` §9 in sync.
+```bash
+make setup        # pnpm install --frozen-lockfile + cargo fetch
+make check        # fmt-check + lint + test (what CI runs)
+make lint         # cargo clippy --workspace --all-targets -- -D warnings; pnpm -r run typecheck
+make test         # cargo test --workspace; pnpm -r run test
+make build        # release build + tsc for packages
+make fmt          # cargo fmt --all
+```
+
+Single tests:
+
+```bash
+cargo test -p usai-runtime --test lifecycle detached_timer          # one integration test by name
+cargo test -p usai-runtime --lib ownership::                        # one module's unit tests
+node --test packages/usai/src/index.test.ts                         # one TS test file (Node 24 strips types natively)
+```
+
+Lifecycle tests use `#[tokio::test(flavor = "multi_thread")]` on purpose: guest execution blocks its worker thread, and a single-thread executor cannot host the completion owners alongside it.
+
+Toolchain pins: Rust 1.98.1 (`rust-toolchain.toml`), Node ≥ 24, pnpm 12.3.4 (`package.json#packageManager`). `rquickjs` compiles QuickJS-ng from source with `cc`; the first build takes ~20 s.
 
 ## Architecture in one screen
 
-Five lifetimes, always distinct in code (`docs/LIFECYCLE-CONTRACTS.md` C1):
+Five lifetimes, always distinct in code (`docs/LIFECYCLE-CONTRACTS.md` C1). In `crates/usai-runtime/src`: `runtime.rs` (persistent, revisions) → `definition.rs` (immutable) → `world.rs` (`WorldDriver`, one routing gate) → `host_ops.rs` (operation owners) / `resource/` (leases, terminal proof); `ownership.rs` is the bounded ledger; `engine/` is the substrate boundary (only `engine/quickjs.rs` may import `rquickjs`); `engine/guest-bridge.js` + `docs/GUEST-ABI.md` is the host↔guest contract.
 
 ```text
 persistent runtime state  →  immutable ApplicationDefinition  →  execution world

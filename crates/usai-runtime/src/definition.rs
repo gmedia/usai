@@ -1,0 +1,466 @@
+//! The immutable application definition.
+//!
+//! Built once (by `usai build` or a test harness), reused across every
+//! execution world of a revision, and read by tooling without executing any
+//! business code. Nothing here is mutable after construction.
+
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+/// Manifest format version. Bump when a field changes meaning.
+pub const MANIFEST_VERSION: u32 = 1;
+
+/// The three lifetime families of `GOAL.md` §9.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum LifetimeFamily {
+    Finite,
+    ConnectionBound,
+    Persistent,
+}
+
+/// What kind of work a workload declares. The kind fixes the default
+/// lifetime family; the developer never annotates values as ephemeral.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum Trigger {
+    Http {
+        method: String,
+        path: String,
+        #[serde(default)]
+        raw: bool,
+    },
+    Task,
+    Cron {
+        schedule: String,
+        #[serde(default)]
+        timeout_ms: Option<u64>,
+        #[serde(default = "default_overlap")]
+        overlap: OverlapPolicy,
+    },
+    Command,
+    Service,
+    Queue {
+        topic: String,
+        #[serde(default = "default_concurrency")]
+        concurrency: u32,
+    },
+    Socket {
+        path: String,
+    },
+    Stream {
+        method: String,
+        path: String,
+    },
+}
+
+fn default_overlap() -> OverlapPolicy {
+    OverlapPolicy::Skip
+}
+
+fn default_concurrency() -> u32 {
+    1
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum OverlapPolicy {
+    Allow,
+    #[default]
+    Skip,
+}
+
+impl Trigger {
+    pub fn lifetime(&self) -> LifetimeFamily {
+        match self {
+            Trigger::Http { .. }
+            | Trigger::Task
+            | Trigger::Cron { .. }
+            | Trigger::Command
+            | Trigger::Queue { .. } => LifetimeFamily::Finite,
+            Trigger::Socket { .. } | Trigger::Stream { .. } => LifetimeFamily::ConnectionBound,
+            Trigger::Service => LifetimeFamily::Persistent,
+        }
+    }
+
+    pub fn kind_name(&self) -> &'static str {
+        match self {
+            Trigger::Http { .. } => "http",
+            Trigger::Task => "task",
+            Trigger::Cron { .. } => "cron",
+            Trigger::Command => "command",
+            Trigger::Service => "service",
+            Trigger::Queue { .. } => "queue",
+            Trigger::Socket { .. } => "socket",
+            Trigger::Stream { .. } => "stream",
+        }
+    }
+}
+
+/// A JSON Schema (draft 2020-12) as extracted at build time, or `None` when
+/// the schema provider could not describe itself. `None` means the contract
+/// is still validated inside the world by the provider's own validator, but
+/// the runtime cannot validate before world creation and generated docs are
+/// degraded for it (ADR-0002).
+pub type JsonSchema = Option<serde_json::Value>;
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Contracts {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub params: JsonSchema,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query: JsonSchema,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub headers: JsonSchema,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: JsonSchema,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: JsonSchema,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: JsonSchema,
+    /// Response contracts keyed by status code. The lowest declared 2xx is
+    /// the default status for a plain return.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub response: BTreeMap<u16, serde_json::Value>,
+    /// Which contract slots exist in the source but could not be described as
+    /// JSON Schema. Validation for these happens in the world.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub in_world_only: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DeclaredError {
+    pub code: String,
+    pub status: u16,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkloadSpec {
+    /// Stable identity inside the revision: `<kind>:<name>`.
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub module: Option<String>,
+    pub trigger: Trigger,
+    #[serde(default)]
+    pub contracts: Contracts,
+    #[serde(default)]
+    pub errors: Vec<DeclaredError>,
+    /// Name of the auth boundary declaration this workload requires, if any.
+    #[serde(default)]
+    pub auth: Option<String>,
+    /// Resource names this workload declares it uses. Informational for
+    /// `inspect`/`graph`; access is not restricted by this list in v0.
+    #[serde(default)]
+    pub resources: Vec<String>,
+    /// Task names this workload dispatches to. Informational for `graph`.
+    #[serde(default)]
+    pub dispatches: Vec<String>,
+    /// Per-workload world budget (ADR-0012). `None` = inherit application budget.
+    #[serde(default)]
+    pub max_concurrency: Option<u32>,
+    /// Per-invocation deadline. `None` = inherit application default.
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+}
+
+impl WorkloadSpec {
+    pub fn lifetime(&self) -> LifetimeFamily {
+        self.trigger.lifetime()
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceSpec {
+    pub name: String,
+    /// Resource kind, e.g. `postgres`, `cache.local`.
+    pub kind: String,
+    #[serde(default)]
+    pub module: Option<String>,
+    /// Normalized, secret-free configuration. Secrets are referenced by env
+    /// name, never inlined; the fingerprint (ADR-0011) is computed at runtime
+    /// from the resolved values.
+    #[serde(default)]
+    pub config: serde_json::Value,
+    /// Env variable names whose resolved values participate in the identity
+    /// fingerprint.
+    #[serde(default)]
+    pub env: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvRequirement {
+    pub name: String,
+    /// `string`, `url`, `secret`, `int`, `bool`, `enum`
+    pub kind: String,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default)]
+    pub values: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModuleSpec {
+    pub name: String,
+    #[serde(default)]
+    pub migrations: Vec<String>,
+    #[serde(default)]
+    pub seeders: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthSpec {
+    pub name: String,
+    /// `bearer`, `header`, `custom`
+    pub scheme: String,
+    #[serde(default)]
+    pub header: Option<String>,
+}
+
+/// The serializable manifest. This is what `usai build` writes and what the
+/// runtime, `inspect`, and OpenAPI generation read.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Manifest {
+    pub manifest_version: u32,
+    pub name: String,
+    #[serde(default)]
+    pub modules: Vec<ModuleSpec>,
+    pub workloads: Vec<WorkloadSpec>,
+    #[serde(default)]
+    pub resources: Vec<ResourceSpec>,
+    #[serde(default)]
+    pub auth: Vec<AuthSpec>,
+    #[serde(default)]
+    pub env: Vec<EnvRequirement>,
+    /// SHA-256 of the application code the manifest describes.
+    pub code_sha256: String,
+}
+
+/// The application's executable code in the build pipeline's portable form:
+/// one ES module whose default export is the application object.
+#[derive(Clone, Debug)]
+pub struct Code {
+    pub source: Arc<str>,
+    pub sha256: String,
+}
+
+impl Code {
+    pub fn new(source: impl Into<Arc<str>>) -> Self {
+        let source = source.into();
+        let sha256 = hex::encode(Sha256::digest(source.as_bytes()));
+        Self { source, sha256 }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DefinitionError {
+    #[error("manifest version {found} is not supported (expected {MANIFEST_VERSION})")]
+    UnsupportedVersion { found: u32 },
+    #[error("manifest describes code {expected} but the loaded code hashes to {found}")]
+    CodeMismatch { expected: String, found: String },
+    #[error("duplicate workload id {0}")]
+    DuplicateWorkload(String),
+    #[error("duplicate resource name {0}")]
+    DuplicateResource(String),
+    #[error("workload {workload} references undeclared auth boundary {auth}")]
+    UnknownAuth { workload: String, auth: String },
+    #[error("workload {workload} references undeclared resource {resource}")]
+    UnknownResource { workload: String, resource: String },
+    #[error("workload {0} has an empty name")]
+    EmptyName(String),
+}
+
+/// Immutable, validated, shareable. Constructed from a manifest plus the code
+/// it describes; the constructor is the only place the two are checked
+/// against each other.
+#[derive(Debug)]
+pub struct ApplicationDefinition {
+    manifest: Manifest,
+    code: Code,
+    /// Workload id -> index into `manifest.workloads`. The index is the
+    /// ordinal the guest SDK uses to locate the handler.
+    index: BTreeMap<String, usize>,
+}
+
+impl ApplicationDefinition {
+    pub fn new(manifest: Manifest, code: Code) -> Result<Arc<Self>, DefinitionError> {
+        if manifest.manifest_version != MANIFEST_VERSION {
+            return Err(DefinitionError::UnsupportedVersion {
+                found: manifest.manifest_version,
+            });
+        }
+        if manifest.code_sha256 != code.sha256 {
+            return Err(DefinitionError::CodeMismatch {
+                expected: manifest.code_sha256.clone(),
+                found: code.sha256.clone(),
+            });
+        }
+        let mut index = BTreeMap::new();
+        for (i, workload) in manifest.workloads.iter().enumerate() {
+            if workload.name.is_empty() {
+                return Err(DefinitionError::EmptyName(workload.id.clone()));
+            }
+            if index.insert(workload.id.clone(), i).is_some() {
+                return Err(DefinitionError::DuplicateWorkload(workload.id.clone()));
+            }
+            if let Some(auth) = &workload.auth
+                && !manifest.auth.iter().any(|a| &a.name == auth)
+            {
+                return Err(DefinitionError::UnknownAuth {
+                    workload: workload.id.clone(),
+                    auth: auth.clone(),
+                });
+            }
+            for resource in &workload.resources {
+                if !manifest.resources.iter().any(|r| &r.name == resource) {
+                    return Err(DefinitionError::UnknownResource {
+                        workload: workload.id.clone(),
+                        resource: resource.clone(),
+                    });
+                }
+            }
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for resource in &manifest.resources {
+            if !seen.insert(&resource.name) {
+                return Err(DefinitionError::DuplicateResource(resource.name.clone()));
+            }
+        }
+        Ok(Arc::new(Self {
+            manifest,
+            code,
+            index,
+        }))
+    }
+
+    pub fn name(&self) -> &str {
+        &self.manifest.name
+    }
+
+    pub fn manifest(&self) -> &Manifest {
+        &self.manifest
+    }
+
+    pub fn code(&self) -> &Code {
+        &self.code
+    }
+
+    pub fn workloads(&self) -> &[WorkloadSpec] {
+        &self.manifest.workloads
+    }
+
+    pub fn resources(&self) -> &[ResourceSpec] {
+        &self.manifest.resources
+    }
+
+    pub fn workload(&self, id: &str) -> Option<(usize, &WorkloadSpec)> {
+        self.index
+            .get(id)
+            .map(|&i| (i, &self.manifest.workloads[i]))
+    }
+
+    pub fn workload_by_index(&self, index: usize) -> Option<&WorkloadSpec> {
+        self.manifest.workloads.get(index)
+    }
+
+    pub fn auth(&self, name: &str) -> Option<&AuthSpec> {
+        self.manifest.auth.iter().find(|a| a.name == name)
+    }
+
+    /// Content identity of the definition: manifest + code. Stable across
+    /// hosts and engines (ADR-0005).
+    pub fn identity(&self) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(serde_json::to_vec(&self.manifest).expect("manifest serializes"));
+        hasher.update(self.code.sha256.as_bytes());
+        hex::encode(hasher.finalize())[..16].to_owned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn manifest(code: &Code) -> Manifest {
+        Manifest {
+            manifest_version: MANIFEST_VERSION,
+            name: "t".into(),
+            modules: vec![],
+            workloads: vec![WorkloadSpec {
+                id: "http:GET /x".into(),
+                name: "GET /x".into(),
+                module: None,
+                trigger: Trigger::Http {
+                    method: "GET".into(),
+                    path: "/x".into(),
+                    raw: false,
+                },
+                contracts: Contracts::default(),
+                errors: vec![],
+                auth: None,
+                resources: vec![],
+                dispatches: vec![],
+                max_concurrency: None,
+                timeout_ms: None,
+            }],
+            resources: vec![],
+            auth: vec![],
+            env: vec![],
+            code_sha256: code.sha256.clone(),
+        }
+    }
+
+    #[test]
+    fn code_mismatch_is_rejected() {
+        let code = Code::new("export default {}");
+        let mut m = manifest(&code);
+        m.code_sha256 = "0".repeat(64);
+        assert!(matches!(
+            ApplicationDefinition::new(m, code).unwrap_err(),
+            DefinitionError::CodeMismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn duplicate_workload_is_rejected() {
+        let code = Code::new("export default {}");
+        let mut m = manifest(&code);
+        m.workloads.push(m.workloads[0].clone());
+        assert!(matches!(
+            ApplicationDefinition::new(m, code).unwrap_err(),
+            DefinitionError::DuplicateWorkload(_)
+        ));
+    }
+
+    #[test]
+    fn identity_is_stable_and_content_addressed() {
+        let code = Code::new("export default {}");
+        let a = ApplicationDefinition::new(manifest(&code), code.clone()).unwrap();
+        let b = ApplicationDefinition::new(manifest(&code), code).unwrap();
+        assert_eq!(a.identity(), b.identity());
+        let other = Code::new("export default {x:1}");
+        let c = ApplicationDefinition::new(manifest(&other), other).unwrap();
+        assert_ne!(a.identity(), c.identity());
+    }
+
+    #[test]
+    fn lifetime_follows_trigger() {
+        assert_eq!(Trigger::Task.lifetime(), LifetimeFamily::Finite);
+        assert_eq!(Trigger::Service.lifetime(), LifetimeFamily::Persistent);
+        assert_eq!(
+            Trigger::Socket { path: "/c".into() }.lifetime(),
+            LifetimeFamily::ConnectionBound
+        );
+    }
+}

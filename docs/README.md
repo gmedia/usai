@@ -12,6 +12,7 @@
 | [`GLOSSARY.md`](GLOSSARY.md) | when a term is unclear, or before reading research evidence |
 | [`RESEARCH-REFERENCE.md`](RESEARCH-REFERENCE.md) | when you need the evidence behind a contract |
 | [`OPEN-QUESTIONS.md`](OPEN-QUESTIONS.md) | before deciding anything about schema, response API, auth, artifacts, reload, runtime-local state, revisions, multi-core, or security |
+| [`GUEST-ABI.md`](GUEST-ABI.md) | when touching the bridge, the SDK's `invoke`, or any host operation |
 | [`adr/`](adr/README.md) | to record or look up a strategic decision |
 
 Working agreement for agents and contributors: [`../AGENTS.md`](../AGENTS.md).
@@ -26,6 +27,7 @@ docs/
   GLOSSARY.md               vocabulary (production + research-era)
   RESEARCH-REFERENCE.md     map to HasanH47/usai evidence
   OPEN-QUESTIONS.md         living: undecided design questions
+  GUEST-ABI.md              host <-> guest contract
   adr/                      architecture decision records
 ```
 

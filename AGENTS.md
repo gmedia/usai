@@ -165,7 +165,12 @@ docs/LIFECYCLE-CONTRACTS.md   binding runtime invariants, phrased as testable ru
 docs/GLOSSARY.md              vocabulary, including research-era terms
 docs/RESEARCH-REFERENCE.md    map from production concepts to research evidence
 docs/OPEN-QUESTIONS.md        design questions that must not be decided by accident
+docs/GUEST-ABI.md             host <-> guest contract inside a world
 docs/adr/                     architecture decision records
+crates/usai-runtime/          the runtime (lib); tests/lifecycle.rs is the D1 acceptance suite
+crates/usai-cli/              the `usai` binary
+packages/usai/                TypeScript SDK (developer surface)
+packages/create-usai/         scaffolder
+examples/                     runnable applications
+Makefile, .github/workflows/  `make check` is CI
 ```
-
-Code directories appear as milestones land; update this map when they do.

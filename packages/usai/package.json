@@ -1,0 +1,21 @@
+{
+  "name": "usai",
+  "version": "0.0.1",
+  "description": "Usai developer SDK: declare workloads and resources; the runtime gives each its natural lifetime.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./config": { "types": "./dist/config.d.ts", "import": "./dist/config.js" }
+  },
+  "files": ["dist", "guest"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test src/**/*.test.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "@types/node": "^24.0.0"
+  }
+}

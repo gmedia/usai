@@ -6,27 +6,28 @@
 
 ## Current milestone
 
-**D0 — Production Repository Foundation** (`GOAL.md` §53). Not started beyond documentation.
+**D2 — HTTP Contract Workload** (next). D0 and D1 are done.
 
 ## Done
 
-- Repository created (`gmedia/usai`, Apache-2.0).
-- `README.md`, `GOAL.md` (product direction), agent working agreement (`AGENTS.md`, `CLAUDE.md`), and `docs/` foundation (contracts, glossary, research reference, open questions).
-- Design review closed 14 of 16 open questions as ADR-0001…0014 (v0 stances). Only Q8 (multi-core) and Q10 (p50 gap) remain open as empirical questions.
+- **D0 foundation.** Rust workspace (`crates/usai-runtime`, `crates/usai-cli`), pnpm workspace (`packages/usai`, `packages/create-usai`, `examples/hello`), `make check` (fmt, clippy `-D warnings`, cargo test, tsc, node --test), GitHub Actions CI, pinned Rust 1.98.1 / Node 24 / pnpm 12.
+- **D1 lifecycle core** in `usai-runtime`: immutable `ApplicationDefinition` + manifest; engine boundary with the QuickJS-ng substrate (ADR-0015) and the guest bridge ABI (`docs/GUEST-ABI.md`); `WorldDriver` with one identity-first completion gate; bounded live-ownership `Ledger` + gauges; host operations (timer, resource) with independent owners; `ResourceManager`/`ResourceIdentity`/`cache.local`; hierarchical `Budget` admission; `Runtime` with revisions `installed → active → draining → retired`. 17 lifecycle acceptance tests (`crates/usai-runtime/tests/lifecycle.rs`) cover isolation, resource persistence, baseline return, cancel, deadline, detached work, runaway CPU, budget refusal, revision replacement, failed activation, shutdown.
+- Design review closed 14 of 16 open questions as ADR-0001…0014; ADR-0015 records the engine decision.
 
 ## In progress
 
 - nothing
 
-## Next (D0 acceptance: clean clone builds; tests pass with documented commands; no dependency on the research repo; repository is clearly production-oriented)
+## Next (D2 acceptance: contract-aware endpoint end-to-end; invalid boundary input fails before world creation; fresh world per request; correct response ownership; concurrent requests do not leak state)
 
-1. Rust workspace (`crates/usai-runtime`, `crates/usai-cli`) with pinned toolchain, `fmt` / `clippy -D warnings` / `test`.
-2. TypeScript workspace (`packages/usai`, `packages/create-usai`) with lint/typecheck/test.
-3. One top-level command set (e.g. `make check` / `make test` or a task runner) and CI running it.
-4. `examples/hello` placeholder so the layout is real.
-5. Record the commands in `CLAUDE.md` and `AGENTS.md` §9 once they exist.
+1. `usai` SDK: `defineApp`, `defineModule`, `http.get/post/…`, `http.raw`, `errors`, `env`, resource declarations; `__usai_sdk.invoke` on top of the bridge; manifest extraction (`describe`).
+2. Runtime HTTP host: hyper server, `matchit` router from the definition, decode → JSON Schema validation (`jsonschema`) → auth boundary → admission → world → response contract → error mapping; raw escape hatch; client-disconnect cancellation.
+3. Build pipeline: esbuild bundle + controlled evaluation to emit `manifest.json` + `app.js` (ADR-0009).
+4. `examples/hello` becomes runnable.
 
 ## Known gaps / debt
 
-- No commands exist yet; agents must not assume any.
-- Toolchain pins (Rust, Node, Wasmtime, QuickJS build) are not yet chosen for this repo. The research baseline is listed in `docs/RESEARCH-REFERENCE.md`; pinning is a D0 decision, not an inheritance.
+- The QuickJS substrate is native, not the Wasmtime pooling+COW representation the research measured (ADR-0015). Do not cite EXP-012B economics for it.
+- Auth resolvers run inside the world (after structural validation) in v0; ADR-0004 allows this and `inspect` must say so.
+- `create-usai` is a placeholder until `usai dev` exists (D3).
+- No PostgreSQL provider yet (D6).

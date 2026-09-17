@@ -1,0 +1,22 @@
+[package]
+name = "usai-cli"
+description = "The usai command-line tool"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "usai"
+path = "src/main.rs"
+
+[dependencies]
+usai-runtime.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true

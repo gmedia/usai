@@ -48,3 +48,4 @@ Briefly, with the reason each was not chosen.
 | [0012](0012-hierarchical-admission.md) | Hierarchical admission budgets, no single global knob | accepted (baseline) | Q14 |
 | [0013](0013-capability-based-api-surface.md) | Capability-based minimal Web-like surface; no Node target | accepted (v0) | Q15 |
 | [0014](0014-no-implicit-retry.md) | No implicit retry; failure terminal by default | accepted (v0) | Q16 |
+| [0015](0015-execution-substrate-quickjs-native.md) | v0 execution substrate is native QuickJS-ng behind an engine boundary | accepted (v0, interim) | — |
