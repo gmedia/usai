@@ -51,12 +51,24 @@ async fn definition_for(
     Ok((definition, engine))
 }
 
-pub async fn run(root: &Path, host: &str, port: u16, artifact: Option<PathBuf>) -> Result<()> {
+pub async fn run(
+    root: &Path,
+    host: &str,
+    port: u16,
+    artifact: Option<PathBuf>,
+    status: bool,
+) -> Result<()> {
     let (definition, engine) = definition_for(root, artifact).await?;
     let runtime = Runtime::new(engine, RuntimeConfig::default());
     let revision = runtime.install(definition).await?;
     runtime.activate(revision.id).await?;
-    serve_until_signal(runtime, host, port, false, None).await
+    serve_until_signal(runtime, host, port, false, status, None).await
+}
+
+pub async fn graph(root: &Path) -> Result<()> {
+    let (definition, _) = definition_for(root, None).await?;
+    print!("{}", usai_runtime::observability::render_graph(&definition));
+    Ok(())
 }
 
 async fn serve_until_signal(
@@ -64,6 +76,7 @@ async fn serve_until_signal(
     host: &str,
     port: u16,
     expose_diagnostics: bool,
+    serve_status: bool,
     on_ready: Option<Box<dyn FnOnce(String) + Send>>,
 ) -> Result<()> {
     let addr: std::net::SocketAddr = format!("{host}:{port}")
@@ -74,6 +87,8 @@ async fn serve_until_signal(
         HttpConfig {
             addr,
             expose_diagnostics,
+            serve_docs: expose_diagnostics,
+            serve_status,
             ..HttpConfig::default()
         },
     );
@@ -277,6 +292,7 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
         runtime,
         host,
         port,
+        true,
         true,
         Some(Box::new(move |url| {
             let revision = banner_runtime.active().expect("active");

@@ -6,7 +6,7 @@
 
 ## Current milestone
 
-**D12 — Observability + Graph** (next). D0–D11 are done.
+**D13 — Production Hardening** (next). D0–D12 are done.
 
 ## Done
 
@@ -22,18 +22,21 @@
 - **D9 service workload.** `service("name", handler)` starts one persistent world per revision at activation (`workloads/services.rs` supervisor); state persists because the service is alive; finite worlds cannot see it. Drain stops services first: graceful (`__usai.stop` — `ctx.signal` fires, pending `sleep`s resolve, the loop exits and the handler's return is the service's outcome), hard cancel after `drain_timeout`. Service state in `RuntimeStatus.revisions[].services` and the `usai dev` banner. No restart policy yet (D13). 1 acceptance test.
 - **D10 queue / message workload.** `queue.consume("topic", { message, concurrency, retry, database }, handler)` + `ctx.queue.publish(topic, message, { delayMs })`. v0 substrate: a PostgreSQL table (`usai_queue`) claimed with `FOR UPDATE SKIP LOCKED` — persistent consumer loops per revision (`workloads/queue.rs`), fresh world per message, concurrency from the declaration, message JSON Schema validated before the world exists (invalid → dead, no world), explicit retry with fixed/exponential backoff and a dead-letter state (ADR-0014; delivery is at-least-once and says so), consumers stop at drain; `RuntimeConfig.queue_consumers`. 1 acceptance test (publish from HTTP world → four messages processed once, retry-then-success across three fresh worlds, dead letter, invalid message never gets a world).
 - **D11 WebSocket + stream workloads.** Streams: `http.stream(path, { params, query, auth }, (ctx, stream) => …)` — the response commits at the first `stream.start`/`send`/`event` (SSE helper) and the body ends when the handler returns (`headers sent != work complete`); a handler that never sends is an ordinary response; a client disconnect cancels the world through the body's drop guard; drain stops the loop gracefully. Sockets: `socket(path, { incoming, outgoing }, { open, message, close })` — HTTP upgrade (hyper `with_upgrades` + tungstenite), one world per connection, frames delivered as host completions (`socket.recv`), `ctx.state` connection-local, contract violations reported to the client without closing, application or client close runs `close`, drain sends 1012 and runs `close`. Per-revision `connections_stop`. Server rewritten with per-connection tasks + `TaskTracker` drain. 5 acceptance tests in `tests/connection.rs`.
+- **D12 observability + graph.** `observability.rs`: per-world trace record at `debug` (world, workload, revision, termination, outcome, duration, completions, children, violations) gated by `tracing::enabled!` so the disabled path builds nothing; HTTP class-level counters (2xx/3xx/4xx/5xx, rejected-before-world, upgrades, streams); `/_usai/status` (runtime status JSON incl. gauges, revisions, services, tasks, resources, http) and `/_usai/metrics` (Prometheus text) as runtime-owned surfaces (`HttpConfig.serve_status`; `usai run --status`, on in `usai dev`); `usai graph` renders workload → resource [lease] / dispatch → task edges from the definition; `--log-format json`. 1 acceptance test + 1 unit test.
 - Design review closed 14 of 16 open questions as ADR-0001…0014; ADR-0015 records the engine decision.
 
 ## In progress
 
 - nothing
 
-## Next (D12 acceptance: observability derives from runtime truth; detailed tracing can be disabled cheaply; ownership/lifetime failures are diagnosable)
+## Next (D13: produce evidence before calling anything production-ready)
 
-1. Structured lifecycle events (world created/terminal/retired, op start/complete/dropped, lease returned/quarantined, dispatch, cancel, violation) emitted through `tracing` with stable field names; JSON log format flag on the CLI; a per-world trace summary (like `GOAL.md` §44) at debug level.
-2. Metrics: `/_usai/status` (runtime status JSON: gauges, revisions, services, tasks, resources, queues) and a Prometheus-style `/_usai/metrics` text endpoint, both runtime-owned surfaces.
-3. `usai graph`: workload → resource / dispatch graph from the definition.
-4. Keep the disabled path free: no formatting when the level is off (tracing already gates by level; verify with a benchmark-ish test that debug spans are not built when disabled).
+1. Soak + sustained concurrency: a `usai bench` (or a `benches/` harness) that runs N concurrent HTTP clients for T minutes against an example and reports latency percentiles, RSS high-water, gauge baseline after the run. Engineering benchmark, not canonical evidence.
+2. Overload/backpressure: budgets exhausted → 503 promptly; resource-aware queueing for tasks; document the shape.
+3. Graceful vs forced shutdown: `SIGINT` drains with a bound, second `SIGINT` forces; verify ownership returns to baseline.
+4. Crash/restart: service restart policy (`restart: "always" | "never"`, backoff); runtime restart drops nothing durable (tasks are documented non-durable).
+5. Malformed artifacts, version compatibility (manifest version bump path), revision activation/drain under load.
+6. Security/threat model document (ADR-0008 baseline → `docs/THREAT-MODEL.md`), memory limits per world enforced (already), request size limits (already), timeouts everywhere (check sockets: idle timeout).
 
 ## Known gaps / debt
 

@@ -73,6 +73,7 @@ pub struct Gauges {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GaugeSnapshot {
     pub worlds_created: u64,
     pub live_worlds: u64,

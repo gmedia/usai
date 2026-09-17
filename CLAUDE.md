@@ -34,6 +34,8 @@ cargo run -p usai-cli -- --root <project> cron run <name>        # one cron invo
 cargo run -p usai-cli -- --root <project> task run <name> --input '{...}'
 cargo run -p usai-cli -- --root <project> db migrate | db status | db seed [name]
 cargo run -p usai-cli -- --root <project> generate openapi [--out openapi.json]
+cargo run -p usai-cli -- --root <project> graph                    # workload → resource / dispatch graph
+cargo run -p usai-cli -- --log-format json run --status ...       # JSON logs; /_usai/status + /_usai/metrics
 ```
 
 Single tests:

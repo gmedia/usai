@@ -102,6 +102,8 @@ pub fn banner(
         if docs {
             let _ = writeln!(out, "API Docs  {url}/_usai/docs");
             let _ = writeln!(out, "OpenAPI   {url}/_usai/openapi.json");
+            let _ = writeln!(out, "Status    {url}/_usai/status");
+            let _ = writeln!(out, "Metrics   {url}/_usai/metrics");
         }
     }
     out

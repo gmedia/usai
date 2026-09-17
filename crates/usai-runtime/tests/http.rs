@@ -512,3 +512,84 @@ async fn openapi_is_generated_from_the_definition() {
     token.cancel();
     s.shutdown.cancel();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn status_and_metrics_derive_from_runtime_truth() {
+    let Some(s) = start().await else { return };
+    let host = HttpHost::new(
+        Arc::clone(&s.runtime),
+        HttpConfig {
+            addr: ([127, 0, 0, 1], 0).into(),
+            serve_status: true,
+            ..HttpConfig::default()
+        },
+    );
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let token = CancellationToken::new();
+    let t = token.clone();
+    tokio::spawn(async move {
+        serve(host, t, |addr| {
+            let _ = tx.send(addr);
+        })
+        .await
+        .unwrap()
+    });
+    let addr = rx.await.unwrap();
+    let base = format!("http://{addr}");
+    let _ = s
+        .client
+        .get(format!("{base}/counter"))
+        .send()
+        .await
+        .unwrap();
+    let _ = s
+        .client
+        .get(format!("{base}/users/not-a-uuid"))
+        .send()
+        .await
+        .unwrap();
+    let status: Value = s
+        .client
+        .get(format!("{base}/_usai/status"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(status["engine"], "quickjs");
+    assert_eq!(status["http"]["responses_2xx"], 1);
+    assert_eq!(status["http"]["responses_4xx"], 1);
+    assert_eq!(status["http"]["rejected_before_world"], 1);
+    assert_eq!(status["revisions"][0]["state"], "active");
+    assert!(status["gauges"]["worldsCreated"].as_u64().unwrap() >= 1);
+    let metrics = s
+        .client
+        .get(format!("{base}/_usai/metrics"))
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        metrics
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("text/plain")
+    );
+    let text = metrics.text().await.unwrap();
+    assert!(
+        text.contains("usai_http_rejected_before_world_total 1"),
+        "{text}"
+    );
+    assert!(text.contains("usai_http_responses_total{class=\"2xx\"} 1"));
+    assert!(text.contains("usai_resource{kind=\"cache.local\",name=\"hits\",metric=\"max\"}"));
+    // Not served on a host without the flag.
+    let (status_code, _) = s.get("/_usai/metrics").await;
+    assert_eq!(status_code, 404);
+    let graph = usai_runtime::observability::render_graph(&s.runtime.active().unwrap().definition);
+    assert!(graph.contains("POST /orders [request]\n   ├── cache.local/audit [lease]\n   └── dispatch → record [task]"), "{graph}");
+    token.cancel();
+    s.shutdown.cancel();
+}

@@ -36,6 +36,8 @@ pub struct HttpConfig {
     /// Serve `/_usai/openapi.json` and `/_usai/docs` from the active
     /// definition.
     pub serve_docs: bool,
+    /// Serve `/_usai/status` (JSON) and `/_usai/metrics` (Prometheus text).
+    pub serve_status: bool,
 }
 
 impl Default for HttpConfig {
@@ -45,6 +47,7 @@ impl Default for HttpConfig {
             max_body_bytes: 1024 * 1024,
             expose_diagnostics: false,
             serve_docs: false,
+            serve_status: false,
         }
     }
 }
@@ -53,12 +56,15 @@ pub struct HttpHost {
     runtime: Arc<Runtime>,
     config: HttpConfig,
     compiled: RwLock<Option<Arc<CompiledRevision>>>,
+    pub stats: crate::observability::HttpStats,
 }
 
 /// A response decided before (or instead of) application work.
 struct Reply {
     status: StatusCode,
     body: Value,
+    /// Decided before any world existed (routing, validation, admission).
+    before_world: bool,
 }
 
 impl Reply {
@@ -66,6 +72,15 @@ impl Reply {
         Self {
             status,
             body: json!({ "error": { "code": code, "message": message.into() } }),
+            before_world: true,
+        }
+    }
+
+    /// A failure after admission: a world existed or was being created.
+    fn after_world(status: StatusCode, code: &str, message: impl Into<String>) -> Self {
+        Self {
+            before_world: false,
+            ..Self::error(status, code, message)
         }
     }
 
@@ -235,6 +250,7 @@ impl HttpHost {
             runtime,
             config,
             compiled: RwLock::new(None),
+            stats: crate::observability::HttpStats::default(),
         })
     }
 
@@ -269,10 +285,26 @@ impl HttpHost {
     }
 
     pub async fn handle(self: Arc<Self>, request: Request<Incoming>) -> HttpResponse {
+        // Runtime-owned surfaces are not application traffic.
+        let internal = request.uri().path().starts_with("/_usai/");
         match self.pipeline(request).await {
-            Ok(response) => response,
-            Err(reply) => json_response(reply.status, &reply.body),
+            Ok(response) => {
+                if !internal {
+                    self.stats.record(response.status().as_u16(), false);
+                }
+                response
+            }
+            Err(reply) => {
+                if !internal {
+                    self.stats.record(reply.status.as_u16(), reply.before_world);
+                }
+                json_response(reply.status, &reply.body)
+            }
         }
+    }
+
+    pub fn runtime(&self) -> &Arc<Runtime> {
+        &self.runtime
     }
 
     async fn pipeline(&self, request: Request<Incoming>) -> Result<HttpResponse, Reply> {
@@ -281,6 +313,32 @@ impl HttpHost {
         let path = parts.uri.path().to_owned();
 
         // 0. runtime-owned surfaces (never application work)
+        if self.config.serve_status && parts.method == Method::GET {
+            match path.as_str() {
+                "/_usai/status" => {
+                    let mut status =
+                        serde_json::to_value(self.runtime.status()).unwrap_or(Value::Null);
+                    status["http"] =
+                        serde_json::to_value(self.stats.snapshot()).unwrap_or(Value::Null);
+                    return Ok(json_response(StatusCode::OK, &status));
+                }
+                "/_usai/metrics" => {
+                    let text = crate::observability::render_prometheus(
+                        &self.runtime.status(),
+                        Some(&self.stats.snapshot()),
+                    );
+                    return Ok(Response::builder()
+                        .status(StatusCode::OK)
+                        .header(
+                            header::CONTENT_TYPE,
+                            "text/plain; version=0.0.4; charset=utf-8",
+                        )
+                        .body(Full::new(Bytes::from(text)).boxed())
+                        .expect("static response"));
+                }
+                _ => {}
+            }
+        }
         if self.config.serve_docs && parts.method == Method::GET {
             match path.as_str() {
                 "/_usai/openapi.json" => {
@@ -476,7 +534,7 @@ impl HttpHost {
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, workload = %workload.id, "world could not be created");
-                Reply::error(
+                Reply::after_world(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "world_creation_failed",
                     "the request could not be executed",
@@ -545,14 +603,14 @@ impl HttpHost {
                 }
                 Err(_) => {
                     // The sink was dropped without a head: the world ended first.
-                    let result = task.await.map_err(|e| Reply::error(StatusCode::INTERNAL_SERVER_ERROR, "stream_failed", e.to_string()))?;
-                    let result = result.map_err(|e| Reply::error(StatusCode::INTERNAL_SERVER_ERROR, "world_creation_failed", e.to_string()))?;
+                    let result = task.await.map_err(|e| Reply::after_world(StatusCode::INTERNAL_SERVER_ERROR, "stream_failed", e.to_string()))?;
+                    let result = result.map_err(|e| Reply::after_world(StatusCode::INTERNAL_SERVER_ERROR, "world_creation_failed", e.to_string()))?;
                     Ok(self.encode(workload, result))
                 }
             },
             finished = &mut task => {
-                let result = finished.map_err(|e| Reply::error(StatusCode::INTERNAL_SERVER_ERROR, "stream_failed", e.to_string()))?;
-                let result = result.map_err(|e| Reply::error(StatusCode::INTERNAL_SERVER_ERROR, "world_creation_failed", e.to_string()))?;
+                let result = finished.map_err(|e| Reply::after_world(StatusCode::INTERNAL_SERVER_ERROR, "stream_failed", e.to_string()))?;
+                let result = result.map_err(|e| Reply::after_world(StatusCode::INTERNAL_SERVER_ERROR, "world_creation_failed", e.to_string()))?;
                 Ok(self.encode(workload, result))
             }
         }

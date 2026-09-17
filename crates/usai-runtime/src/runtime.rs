@@ -723,6 +723,7 @@ impl Runtime {
         )
         .await?;
         let result = driver.run(&input).await;
+        crate::observability::trace_world(&result, &revision.id.to_string());
         drop(in_flight);
         Ok(result)
     }

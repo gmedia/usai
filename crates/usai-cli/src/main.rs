@@ -18,6 +18,9 @@ struct Cli {
     /// Project root (defaults to the current directory)
     #[arg(long, global = true)]
     root: Option<PathBuf>,
+    /// Log format: text (default) or json
+    #[arg(long, global = true, default_value = "text")]
+    log_format: String,
     #[command(subcommand)]
     command: Command,
 }
@@ -35,6 +38,9 @@ enum Command {
         /// Artifact directory (defaults to the configured outDir)
         #[arg(long)]
         artifact: Option<PathBuf>,
+        /// Serve /_usai/status and /_usai/metrics
+        #[arg(long)]
+        status: bool,
     },
     /// Build, serve, and rebuild on change as a new revision
     Dev {
@@ -48,6 +54,8 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Show the workload → resource / dispatch graph
+    Graph,
     /// Show the effective project configuration and where each value came from
     Config {
         #[arg(long)]
@@ -149,9 +157,11 @@ async fn main() {
             host,
             port,
             artifact,
-        } => commands::run(&root, &host, port, artifact).await,
+            status,
+        } => commands::run(&root, &host, port, artifact, status).await,
         Command::Dev { host, port } => commands::dev(&root, &host, port).await,
         Command::Inspect { json } => commands::inspect(&root, json).await,
+        Command::Graph => commands::graph(&root).await,
         Command::Config { json } => commands::config(&root, json).await,
         Command::App { name, args } => commands::app(&root, &name, args).await,
         Command::Cron {
