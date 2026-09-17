@@ -46,6 +46,9 @@ enum Command {
         /// Token from USAI_CONTROL_TOKEN (required off loopback).
         #[arg(long)]
         control: Option<String>,
+        /// Print one JSON line with the bound addresses on stdout (for harnesses)
+        #[arg(long)]
+        announce: bool,
     },
     /// Build, serve, and rebuild on change as a new revision
     Dev {
@@ -174,7 +177,8 @@ async fn main() {
             artifact,
             status,
             control,
-        } => commands::run(&root, &host, port, artifact, status, control).await,
+            announce,
+        } => commands::run(&root, &host, port, artifact, status, control, announce).await,
         Command::Dev { host, port } => commands::dev(&root, &host, port).await,
         Command::Inspect { json } => commands::inspect(&root, json).await,
         Command::Graph => commands::graph(&root).await,

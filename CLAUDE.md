@@ -50,6 +50,7 @@ cargo test -p usai-runtime --test workloads cron_scheduler
 cargo test -p usai-runtime --test postgres                          # needs PostgreSQL: USAI_TEST_DATABASE_URL, else downloads a portable PG 17 once (~12 MB)
 cargo test -p usai-runtime --lib ownership::                        # one module's unit tests
 node --test packages/usai/src/index.test.ts                         # one TS test file (Node 24 strips types natively)
+node --test packages/usai/src/test.test.ts                          # usai/test harness; needs target/debug/usai (skips otherwise)
 ```
 
 Lifecycle tests use `#[tokio::test(flavor = "multi_thread")]` on purpose: guest execution blocks its worker thread, and a single-thread executor cannot host the completion owners alongside it.

@@ -58,11 +58,13 @@ pub async fn run(
     artifact: Option<PathBuf>,
     status: bool,
     control: Option<String>,
+    announce: bool,
 ) -> Result<()> {
     let (definition, engine) = definition_for(root, artifact).await?;
     let runtime = Runtime::new(engine, RuntimeConfig::default());
     let revision = runtime.install(definition).await?;
     runtime.activate(revision.id).await?;
+    let (control_tx, control_rx) = tokio::sync::oneshot::channel::<String>();
     let stop_requested = match control {
         Some(addr) => {
             let addr: std::net::SocketAddr = addr.parse().context("invalid --control address")?;
@@ -76,8 +78,14 @@ pub async fn run(
             let stop = host.stop_requested.clone();
             let shutdown = runtime.shutdown_token();
             tokio::spawn(async move {
+                let mut tx = Some(control_tx);
                 if let Err(e) = usai_runtime::control::serve(host, shutdown, |bound| {
-                    eprintln!("Control   http://{bound}")
+                    if let Some(tx) = tx.take() {
+                        let _ = tx.send(format!("http://{bound}"));
+                    }
+                    if !announce {
+                        eprintln!("Control   http://{bound}");
+                    }
                 })
                 .await
                 {
@@ -86,9 +94,29 @@ pub async fn run(
             });
             Some(stop)
         }
-        None => None,
+        None => {
+            drop(control_tx);
+            None
+        }
     };
-    serve_until_signal(runtime, host, port, false, status, stop_requested, None).await
+    // `--announce`: one JSON line on stdout with the bound addresses, for
+    // harnesses that spawn the runtime (usai/test).
+    let on_ready: Option<Box<dyn FnOnce(String) + Send>> = if announce {
+        let has_control = stop_requested.is_some();
+        Some(Box::new(move |url: String| {
+            tokio::spawn(async move {
+                let control = if has_control {
+                    control_rx.await.ok()
+                } else {
+                    None
+                };
+                println!("{}", serde_json::json!({ "app": url, "control": control }));
+            });
+        }))
+    } else {
+        None
+    };
+    serve_until_signal(runtime, host, port, false, status, stop_requested, on_ready).await
 }
 
 pub async fn graph(root: &Path) -> Result<()> {

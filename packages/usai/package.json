@@ -16,7 +16,12 @@
       "import": "./dist/config.js"
     },
     "./package.json": "./package.json",
-    "./build/*": "./build/*"
+    "./build/*": "./build/*",
+    "./test": {
+      "types": "./dist/test.d.ts",
+      "usai": "./src/test.ts",
+      "import": "./dist/test.js"
+    }
   },
   "files": [
     "dist",
@@ -24,12 +29,13 @@
     "src"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
     "test": "node --test src/**/*.test.ts"
   },
   "devDependencies": {
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "@types/node": "^24.0.0"
   },
   "sideEffects": [
     "./dist/index.js",

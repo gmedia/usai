@@ -12,6 +12,7 @@
 //! POST   /revisions/{id}/drain        drain and retire
 //! DELETE /revisions/{id}              remove an installed (never active) revision
 //! POST   /stop                        graceful shutdown of the runtime
+//! POST   /invoke {kind,name,input|args} run a task / cron tick / command now, in a fresh world
 //! ```
 //!
 //! Authentication: a bearer token from `USAI_CONTROL_TOKEN`. Binding to a
@@ -102,6 +103,43 @@ fn runtime_error(e: RuntimeError) -> ControlResponse {
 #[derive(Deserialize)]
 struct InstallRequest {
     artifact: String,
+}
+
+#[derive(Deserialize)]
+struct InvokeRequest {
+    kind: String,
+    name: String,
+    #[serde(default)]
+    input: Value,
+    #[serde(default)]
+    args: Vec<String>,
+}
+
+fn work_result_json(result: &crate::world::WorkResult) -> Value {
+    let (ok, value, error) = match &result.outcome {
+        Some(Ok(v)) => (
+            true,
+            v.get("value").cloned().unwrap_or(v.clone()),
+            Value::Null,
+        ),
+        Some(Err(e)) => (
+            false,
+            Value::Null,
+            json!({ "name": e.name, "message": e.message, "usai": e.usai }),
+        ),
+        None => (false, Value::Null, Value::Null),
+    };
+    json!({
+        "ok": ok,
+        "value": value,
+        "error": error,
+        "termination": result.termination,
+        "world": result.world,
+        "durationMs": result.duration.as_millis() as u64,
+        "violations": result.violations,
+        "logs": result.logs,
+        "children": result.children,
+    })
 }
 
 impl ControlHost {
@@ -237,6 +275,43 @@ impl ControlHost {
                 };
                 match self.runtime.remove(id) {
                     Ok(()) => reply(StatusCode::OK, json!({ "id": id, "removed": true })),
+                    Err(e) => runtime_error(e),
+                }
+            }
+            (&Method::POST, ["invoke"]) => {
+                let body = match Limited::new(request.into_body(), 1024 * 1024)
+                    .collect()
+                    .await
+                {
+                    Ok(b) => b.to_bytes(),
+                    Err(_) => {
+                        return error(
+                            StatusCode::PAYLOAD_TOO_LARGE,
+                            "payload_too_large",
+                            "request body too large",
+                        );
+                    }
+                };
+                let invoke: InvokeRequest = match serde_json::from_slice(&body) {
+                    Ok(i) => i,
+                    Err(e) => {
+                        return error(StatusCode::BAD_REQUEST, "invalid_request", e.to_string());
+                    }
+                };
+                let result = match invoke.kind.as_str() {
+                    "task" => self.runtime.run_task(&invoke.name, invoke.input).await,
+                    "cron" => self.runtime.run_cron(&invoke.name).await,
+                    "command" => self.runtime.run_command(&invoke.name, invoke.args).await,
+                    other => {
+                        return error(
+                            StatusCode::BAD_REQUEST,
+                            "invalid_kind",
+                            format!("cannot invoke kind {other}; use task, cron, or command"),
+                        );
+                    }
+                };
+                match result {
+                    Ok(r) => reply(StatusCode::OK, work_result_json(&r)),
                     Err(e) => runtime_error(e),
                 }
             }

@@ -203,4 +203,30 @@ Ctrl-C drains in-flight work with a bound; a second Ctrl-C forces exit. Read `do
 
 ## 13. Testing
 
-Tests run the same application model as production. The Rust harness (`Runtime::invoke`, `run_task`, `run_cron`, `run_command`) is what the repository's own tests use; a TypeScript `usai/test` harness is planned for the developer preview.
+Tests run the same application model as production:
+
+```ts
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { testApp } from "usai/test";
+
+test("users", async () => {
+  const app = await testApp({ root: "." });          // spawns the runtime for this project
+  try {
+    const res = await app.http.post("/users", { body: { name: "Ayu", email: "ayu@x.io" } });
+    assert.equal(res.status, 201);
+    const receipt = await app.task("send-receipt").invoke({ orderId: "o1" });   // fresh world, no queue
+    assert.ok(receipt.ok);
+    await app.cron("cleanup").run();                                            // one tick, no wall clock
+    await app.command("reconcile").run(["--dry-run"]);
+  } finally {
+    await app.close();
+  }
+});
+```
+
+`testApp` needs the `usai` binary (`USAI_BIN` or on `PATH`) and the project's declared environment (pass `env: { DATABASE_URL }`). Lifecycle-specific tests are ordinary: mutate in one request, read in the next, and assert the mutation is gone.
+
+## 14. Performance note (v0)
+
+Every world evaluates the application module afresh. The SDK itself costs ~1 ms per world on the current substrate; a full Zod build adds ~5 ms because Zod initializes per world (measured: `zod` 6.6 ms/world, `zod/mini` 1.3 ms/world, SDK only 1.0 ms/world, release build). `zod/mini` is much cheaper but does not expose JSON Schema, so contracts are validated inside the world and OpenAPI is degraded for them. Pick per endpoint; keep validation libraries small; this cost is the engine substrate's, not the lifecycle model's, and is the top item on the roadmap (`docs/STATUS.md`).
