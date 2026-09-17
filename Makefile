@@ -21,6 +21,7 @@ lint:
 
 test:
 	cargo test --workspace
+	cargo build -p usai-cli
 	USAI_BIN=$(CURDIR)/target/debug/usai pnpm -r run test
 
 build:
