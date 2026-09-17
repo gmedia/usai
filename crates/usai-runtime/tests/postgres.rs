@@ -284,9 +284,17 @@ async fn pool_exhaustion_is_resource_aware_backpressure() {
             .await
         }));
     }
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    let s = f.pg_status();
-    assert_eq!(s.in_use, 4);
+    // Connections are created lazily; on a slow CI database the four
+    // leases take a moment to exist. Poll, well within the 2 s sleeps.
+    let started = std::time::Instant::now();
+    let s = loop {
+        let s = f.pg_status();
+        if s.in_use == 4 || started.elapsed() > Duration::from_millis(1500) {
+            break s;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    assert_eq!(s.in_use, 4, "{s:?}");
     assert_eq!(s.max, 4);
     for h in holders {
         let r = h.await.unwrap();
