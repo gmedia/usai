@@ -3,10 +3,15 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "Smallest Usai application. Runnable once milestone D3 lands `usai dev`.",
+  "description": "Smallest Usai application: one contract-aware HTTP endpoint.",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
-  "dependencies": { "usai": "workspace:*" },
-  "devDependencies": { "typescript": "^5.9.0" }
+  "dependencies": {
+    "usai": "workspace:*",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
 }

@@ -83,6 +83,7 @@ pub struct Revision {
     pub compiled: Arc<dyn Compiled>,
     state: RwLock<RevisionState>,
     resources: RwLock<Arc<BoundResources>>,
+    env: RwLock<Arc<BTreeMap<String, String>>>,
     app_budget: Arc<Budget>,
     workload_budgets: Vec<Option<Arc<Budget>>>,
     in_flight: AtomicU64,
@@ -100,6 +101,12 @@ impl Revision {
 
     pub fn resources(&self) -> Arc<BoundResources> {
         Arc::clone(&self.resources.read().expect("resources poisoned"))
+    }
+
+    /// The declared environment values resolved at activation. Only names
+    /// the application declared are present; the world sees nothing else.
+    pub fn env(&self) -> Arc<BTreeMap<String, String>> {
+        Arc::clone(&self.env.read().expect("env poisoned"))
     }
 
     fn set_state(&self, state: RevisionState) {
@@ -266,6 +273,7 @@ impl Runtime {
             compiled,
             state: RwLock::new(RevisionState::Installed),
             resources: RwLock::new(Arc::new(BoundResources::default())),
+            env: RwLock::new(Arc::new(BTreeMap::new())),
             app_budget,
             workload_budgets,
             in_flight: AtomicU64::new(0),
@@ -284,11 +292,19 @@ impl Runtime {
     /// untouched (ADR-0006).
     pub async fn activate(&self, id: RevisionId) -> Result<Arc<Revision>, RuntimeError> {
         let revision = self.revision(id)?;
+        let mut env = BTreeMap::new();
         for requirement in &revision.definition.manifest().env {
-            if requirement.required && (self.env)(&requirement.name).is_none() {
-                return Err(RuntimeError::MissingEnv(requirement.name.clone()));
+            match (self.env)(&requirement.name) {
+                Some(value) => {
+                    env.insert(requirement.name.clone(), value);
+                }
+                None if requirement.required => {
+                    return Err(RuntimeError::MissingEnv(requirement.name.clone()));
+                }
+                None => {}
             }
         }
+        *revision.env.write().expect("env poisoned") = Arc::new(env);
         let mut bound = BoundResources::default();
         for spec in revision.definition.resources() {
             let env = &self.env;

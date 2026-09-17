@@ -5,17 +5,37 @@
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
-    "./config": { "types": "./dist/config.d.ts", "import": "./dist/config.js" }
+    ".": {
+      "types": "./dist/index.d.ts",
+      "usai": "./src/index.ts",
+      "import": "./dist/index.js"
+    },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "usai": "./src/config.ts",
+      "import": "./dist/config.js"
+    },
+    "./package.json": "./package.json",
+    "./build/*": "./build/*"
   },
-  "files": ["dist", "guest"],
+  "files": [
+    "dist",
+    "build",
+    "src"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test src/**/*.test.ts"
   },
   "devDependencies": {
-    "typescript": "^5.9.0",
-    "@types/node": "^24.0.0"
+    "typescript": "^5.9.0"
+  },
+  "sideEffects": [
+    "./dist/index.js",
+    "./dist/runtime/sdk.js"
+  ],
+  "dependencies": {
+    "esbuild": "^0.27.0"
   }
 }

@@ -11,7 +11,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use crate::definition::ApplicationDefinition;
+use crate::definition::{ApplicationDefinition, Code};
 
 pub mod quickjs;
 
@@ -82,7 +82,11 @@ pub trait Engine: Send + Sync {
     async fn compile(
         &self,
         definition: &ApplicationDefinition,
-    ) -> Result<Arc<dyn Compiled>, EngineError>;
+    ) -> Result<Arc<dyn Compiled>, EngineError> {
+        self.compile_code(definition.code()).await
+    }
+    /// Same, from code alone (the build phase has no manifest yet).
+    async fn compile_code(&self, code: &Code) -> Result<Arc<dyn Compiled>, EngineError>;
     /// World-lifetime work: a fresh instance with the bridge installed and
     /// the application module evaluated to its baseline.
     async fn instantiate(
@@ -90,6 +94,32 @@ pub trait Engine: Send + Sync {
         compiled: &Arc<dyn Compiled>,
         bindings: Arc<dyn HostBindings>,
     ) -> Result<Box<dyn WorldInstance>, EngineError>;
+    /// Build-time: evaluates the module in a capability-less instance and
+    /// returns `__usai_sdk.describe(__usai_app)` (ADR-0009).
+    async fn describe(
+        &self,
+        compiled: &Arc<dyn Compiled>,
+    ) -> Result<serde_json::Value, EngineError>;
+    /// Build-time: evaluates the module in a capability-less instance and
+    /// returns its default export as JSON (used for `usai.config.ts`).
+    async fn export_default(
+        &self,
+        compiled: &Arc<dyn Compiled>,
+    ) -> Result<serde_json::Value, EngineError>;
+}
+
+/// Bindings for the build phase: every operation is refused, so a
+/// declaration that tries to do I/O fails loudly instead of running.
+pub struct RefusingBindings;
+
+impl HostBindings for RefusingBindings {
+    fn start(&self, _kind: &str, _payload: &str) -> i64 {
+        0
+    }
+    fn cancel_op(&self, _op: u64) {}
+    fn log(&self, level: &str, message: &str) {
+        tracing::debug!(level, "{message}");
+    }
 }
 
 /// One live guest. Single-owner by construction: only the world driver holds
@@ -109,4 +139,5 @@ pub trait WorldInstance: Send {
     /// Setting this flag aborts guest execution at its next safe point. Used
     /// by the driver's watchdog for runaway synchronous code.
     fn interrupter(&self) -> Arc<std::sync::atomic::AtomicBool>;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 }

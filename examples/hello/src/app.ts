@@ -1,5 +1,20 @@
-// The smallest Usai application. The `usai` SDK surface arrives with D2;
-// until then this file only pins the manifest version it will target.
-import { MANIFEST_VERSION } from "usai";
+// The smallest Usai application.
+//
+//   pnpm install
+//   cargo run -p usai-cli -- dev --root examples/hello
+//   curl http://localhost:3000/hello/world
+import { defineApp, http, errors } from "usai";
+import { z } from "zod";
 
-export const manifestVersion: number = MANIFEST_VERSION;
+const Params = z.object({ name: z.string().min(1).max(40) });
+const Greeting = z.object({ hello: z.string() });
+
+export const hello = http.get("/hello/:name", { params: Params, response: Greeting }, async (ctx) => {
+  if (ctx.params.name === "nobody") throw errors.notFound("nobody is not here");
+  return { hello: ctx.params.name };
+});
+
+export default defineApp({
+  name: "hello",
+  workloads: [hello],
+});

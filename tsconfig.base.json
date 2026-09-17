@@ -10,6 +10,7 @@
     "verbatimModuleSyntax": true,
     "erasableSyntaxOnly": true,
     "isolatedModules": true,
+    "rewriteRelativeImportExtensions": true,
     "declaration": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true

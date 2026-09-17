@@ -62,6 +62,8 @@ struct Inner {
 /// work has settled; tests assert exactly that.
 #[derive(Debug, Default)]
 pub struct Gauges {
+    /// Monotonic: every world ever created by this runtime.
+    pub worlds_created: AtomicU64,
     pub live_worlds: AtomicU64,
     pub live_ops: AtomicU64,
     pub completions_delivered: AtomicU64,
@@ -72,6 +74,7 @@ pub struct Gauges {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct GaugeSnapshot {
+    pub worlds_created: u64,
     pub live_worlds: u64,
     pub live_ops: u64,
     pub completions_delivered: u64,
@@ -83,6 +86,7 @@ pub struct GaugeSnapshot {
 impl Gauges {
     pub fn snapshot(&self) -> GaugeSnapshot {
         GaugeSnapshot {
+            worlds_created: self.worlds_created.load(Ordering::SeqCst),
             live_worlds: self.live_worlds.load(Ordering::SeqCst),
             live_ops: self.live_ops.load(Ordering::SeqCst),
             completions_delivered: self.completions_delivered.load(Ordering::SeqCst),

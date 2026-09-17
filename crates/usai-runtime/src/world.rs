@@ -210,6 +210,7 @@ impl WorldDriver {
         // the driver that lowers it exists.
         let gauges = Arc::clone(&ledger.gauges);
         inc(&gauges.live_worlds);
+        inc(&gauges.worlds_created);
         tracing::debug!(world = %id, workload = spec.definition.workload_by_index(spec.workload_index).map(|w| w.id.as_str()).unwrap_or("?"), "world created");
         Ok(Self {
             id,

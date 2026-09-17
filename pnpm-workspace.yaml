@@ -1,3 +1,6 @@
 packages:
   - packages/*
   - examples/*
+  - crates/usai-runtime/tests/fixtures/*
+allowBuilds:
+  esbuild: true

@@ -17,7 +17,7 @@ use rquickjs::{
 use super::{
     Compiled, Engine, EngineError, GUEST_BRIDGE, HostBindings, Outcome, Pending, WorldInstance,
 };
-use crate::definition::ApplicationDefinition;
+use crate::definition::Code;
 
 const MODULE_NAME: &str = "usai:app";
 
@@ -114,15 +114,26 @@ impl Engine for QuickJsEngine {
         "quickjs"
     }
 
-    async fn compile(
+    async fn describe(
         &self,
-        definition: &ApplicationDefinition,
-    ) -> Result<Arc<dyn Compiled>, EngineError> {
+        compiled: &Arc<dyn Compiled>,
+    ) -> Result<serde_json::Value, EngineError> {
+        self.eval_in(compiled, "(() => { const s = globalThis.__usai_sdk; if (!s || typeof s.describe !== 'function') return null; return JSON.stringify(s.describe(globalThis.__usai_app)); })()", "the application bundle did not register __usai_sdk.describe; is `usai` imported?").await
+    }
+
+    async fn export_default(
+        &self,
+        compiled: &Arc<dyn Compiled>,
+    ) -> Result<serde_json::Value, EngineError> {
+        self.eval_in(compiled, "(() => { const v = globalThis.__usai_app; return v === undefined ? null : JSON.stringify(v); })()", "the module has no default export").await
+    }
+
+    async fn compile_code(&self, code: &Code) -> Result<Arc<dyn Compiled>, EngineError> {
         let (runtime, _) = new_runtime(&self.config).await?;
         let context = AsyncContext::full(&runtime)
             .await
             .map_err(|e| EngineError::Compile(e.to_string()))?;
-        let source: Arc<str> = Arc::clone(&definition.code().source);
+        let source: Arc<str> = Arc::clone(&code.source);
         let bytes = context
             .with(move |ctx| {
                 let module = Module::declare(ctx.clone(), MODULE_NAME, source.as_bytes().to_vec())
@@ -211,6 +222,37 @@ impl Engine for QuickJsEngine {
             context,
             interrupt,
         }))
+    }
+}
+
+impl QuickJsEngine {
+    /// Evaluates `expression` (which must return a JSON string or null) in a
+    /// capability-less world over the compiled module.
+    async fn eval_in(
+        &self,
+        compiled: &Arc<dyn Compiled>,
+        expression: &'static str,
+        missing: &'static str,
+    ) -> Result<serde_json::Value, EngineError> {
+        let bindings: Arc<dyn HostBindings> = Arc::new(super::RefusingBindings);
+        let mut world = self.instantiate(compiled, bindings).await?;
+        let instance = world
+            .as_any_mut()
+            .downcast_mut::<QuickJsWorld>()
+            .ok_or_else(|| EngineError::Guest("world is not a QuickJS world".into()))?;
+        instance
+            .context
+            .with(move |ctx| {
+                let result = ctx
+                    .eval::<Option<String>, _>(expression)
+                    .map_err(|e| EngineError::Guest(describe(&ctx, e)))?;
+                match result {
+                    None => Err(EngineError::Guest(missing.into())),
+                    Some(json) => serde_json::from_str(&json)
+                        .map_err(|e| EngineError::Guest(format!("result is not decodable: {e}"))),
+                }
+            })
+            .await
     }
 }
 
@@ -325,5 +367,9 @@ impl WorldInstance for QuickJsWorld {
 
     fn interrupter(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.interrupt)
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
     }
 }

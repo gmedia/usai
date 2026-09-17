@@ -21,7 +21,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 rquickjs = { version = "0.13", features = ["futures", "parallel"] }
 hyper = { version = "1", features = ["http1", "server"] }
-hyper-util = { version = "0.1", features = ["tokio", "server", "service", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "server-graceful", "service", "http1"] }
 http-body-util = "0.1"
 bytes = "1"
 matchit = "0.9"
@@ -30,6 +30,9 @@ sha2 = "0.10"
 hex = "0.4"
 clap = { version = "4", features = ["derive"] }
 notify = "9.0.0-rc.5"
+form_urlencoded = "1"
+base64 = "0.22"
+http = "1"
 async-trait = "0.1"
 
 [profile.release]

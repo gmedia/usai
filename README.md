@@ -123,30 +123,37 @@ Destroying an execution world does not automatically mean an external
 operation has terminated or that a resource is safe to reuse. Resource reuse
 requires explicit ownership and terminal-state rules.
 
-## Developer direction
-
-The initial developer surface is TypeScript.
-
-A future Usai application should feel roughly like:
-
-```ts
-import { app } from "usai";
-
-app.get("/hello", () => {
-  return { hello: "world" };
-});
-```
-
-with a standalone workflow such as:
+## Try it
 
 ```bash
-usai dev
-usai build
-usai run
+pnpm install
+cargo run -p usai-cli -- dev --root examples/hello
+curl http://localhost:3000/hello/world
 ```
 
-The implementation behind that surface may evolve as evidence and production
-engineering demand.
+`examples/hello/src/app.ts`:
+
+```ts
+import { defineApp, http, errors } from "usai";
+import { z } from "zod";
+
+const Params = z.object({ name: z.string().min(1).max(40) });
+const Greeting = z.object({ hello: z.string() });
+
+export const hello = http.get("/hello/:name", { params: Params, response: Greeting }, async (ctx) => {
+  if (ctx.params.name === "nobody") throw errors.notFound("nobody is not here");
+  return { hello: ctx.params.name };
+});
+
+export default defineApp({ name: "hello", workloads: [hello] });
+```
+
+Each request runs in a fresh execution world; invalid params are rejected
+before a world exists; `usai inspect` shows exactly what the runtime
+understood. See `docs/STATUS.md` for what is implemented and what is not.
+
+The developer surface is TypeScript and will change before the first
+developer preview.
 
 ## Current implementation direction
 

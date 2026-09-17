@@ -4,7 +4,17 @@
     "noEmit": true,
     "types": [],
     "baseUrl": ".",
-    "paths": { "usai": ["../../packages/usai/src/index.ts"], "usai/config": ["../../packages/usai/src/config.ts"] }
+    "paths": {
+      "usai": [
+        "../../packages/usai/src/index.ts"
+      ],
+      "usai/config": [
+        "../../packages/usai/src/config.ts"
+      ]
+    }
   },
-  "include": ["src"]
+  "include": [
+    "src",
+    "usai.config.ts"
+  ]
 }

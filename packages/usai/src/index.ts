@@ -1,6 +1,25 @@
-// Usai SDK — developer surface. Filled in by milestone D2 (HTTP contract
-// workload) and D3 (project model). Until then it only carries the manifest
-// version the runtime expects, so the workspace has something to typecheck.
+// Usai SDK — declare work and resources; the runtime gives each its natural
+// lifetime. Public surface for v0 (breaking changes allowed before alpha).
 
-/** Manifest format the runtime in this repository reads. */
-export const MANIFEST_VERSION = 1 as const;
+export { defineApp, defineModule } from "./declarations.ts";
+export type { AppDeclaration, ModuleDeclaration, Workload, ResourceDeclaration, AuthDeclaration, DeclaredError, Method } from "./declarations.ts";
+export { http } from "./http.ts";
+export type { HttpContext, RawContext, HttpResponse, RawResponse } from "./http.ts";
+export { auth } from "./auth.ts";
+export { task, cron, command, service, dispatches } from "./workloads.ts";
+export type { TaskContext, CronContext, CommandContext, ServiceContext } from "./workloads.ts";
+export { cache } from "./resources.ts";
+export type { CacheLocalHandle } from "./resources.ts";
+export { errors, UsaiError, isUsaiError } from "./errors.ts";
+export { env, resolveEnv } from "./env.ts";
+export type { EnvValues } from "./env.ts";
+export type { StandardSchemaV1 } from "./schema.ts";
+export type { BaseContext, UsaiAbortSignal } from "./runtime/context.ts";
+export { describe, MANIFEST_VERSION } from "./manifest.ts";
+export type { Manifest } from "./manifest.ts";
+
+import { install } from "./runtime/sdk.ts";
+
+// Registers `__usai_sdk` when evaluated inside a Usai world (or the build
+// phase). Harmless elsewhere: it only sets a global.
+install();

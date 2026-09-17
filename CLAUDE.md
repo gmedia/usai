@@ -23,10 +23,19 @@ make build        # release build + tsc for packages
 make fmt          # cargo fmt --all
 ```
 
+Developer loop on an example:
+
+```bash
+cargo run -p usai-cli -- dev --root examples/hello        # build, serve on :3000, rebuild on change
+cargo run -p usai-cli -- inspect --root examples/hello    # what the runtime understood (add --json for the manifest)
+cargo run -p usai-cli -- config --root examples/hello     # effective project config + sources
+```
+
 Single tests:
 
 ```bash
 cargo test -p usai-runtime --test lifecycle detached_timer          # one integration test by name
+cargo test -p usai-runtime --test http auth_boundary                # HTTP tests need node + `pnpm install` (they skip otherwise)
 cargo test -p usai-runtime --lib ownership::                        # one module's unit tests
 node --test packages/usai/src/index.test.ts                         # one TS test file (Node 24 strips types natively)
 ```
@@ -37,7 +46,7 @@ Toolchain pins: Rust 1.98.1 (`rust-toolchain.toml`), Node ≥ 24, pnpm 12.3.4 (`
 
 ## Architecture in one screen
 
-Five lifetimes, always distinct in code (`docs/LIFECYCLE-CONTRACTS.md` C1). In `crates/usai-runtime/src`: `runtime.rs` (persistent, revisions) → `definition.rs` (immutable) → `world.rs` (`WorldDriver`, one routing gate) → `host_ops.rs` (operation owners) / `resource/` (leases, terminal proof); `ownership.rs` is the bounded ledger; `engine/` is the substrate boundary (only `engine/quickjs.rs` may import `rquickjs`); `engine/guest-bridge.js` + `docs/GUEST-ABI.md` is the host↔guest contract.
+Five lifetimes, always distinct in code (`docs/LIFECYCLE-CONTRACTS.md` C1). In `crates/usai-runtime/src`: `runtime.rs` (persistent, revisions) → `definition.rs` (immutable) → `world.rs` (`WorldDriver`, one routing gate) → `host_ops.rs` (operation owners) / `resource/` (leases, terminal proof); `ownership.rs` is the bounded ledger; `engine/` is the substrate boundary (only `engine/quickjs.rs` may import `rquickjs`); `engine/guest-bridge.js` + `docs/GUEST-ABI.md` is the host↔guest contract; `http/` is the request pipeline (route → decode → validate → admit → world → encode); `build.rs` is the build phase (esbuild via the SDK's `build/bundle.mjs`, then manifest extraction in a capability-less world). The TypeScript side is `packages/usai/src`: declarations → `manifest.ts` (`describe`) and `runtime/sdk.ts` (`invoke`) must agree on workload ordinals via `flatten()`.
 
 ```text
 persistent runtime state  →  immutable ApplicationDefinition  →  execution world

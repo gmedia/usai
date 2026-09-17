@@ -165,6 +165,66 @@
     Promise.resolve().then(fn);
   };
 
+  // Web-standard encoding primitives QuickJS does not ship (ADR-0013).
+  const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  globalThis.btoa = function (data) {
+    const s = String(data);
+    let out = "";
+    for (let i = 0; i < s.length; i += 3) {
+      const a = s.charCodeAt(i), b = s.charCodeAt(i + 1), c = s.charCodeAt(i + 2);
+      if (a > 255 || b > 255 || c > 255) throw new Error("btoa: character out of Latin1 range");
+      const n = (a << 16) | ((b || 0) << 8) | (c || 0);
+      out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (i + 1 < s.length ? B64[(n >> 6) & 63] : "=") + (i + 2 < s.length ? B64[n & 63] : "=");
+    }
+    return out;
+  };
+  globalThis.atob = function (data) {
+    const s = String(data).replace(/[\s=]+$/g, "").replace(/\s+/g, "");
+    let out = "", bits = 0, acc = 0;
+    for (let i = 0; i < s.length; i++) {
+      const v = B64.indexOf(s[i]);
+      if (v < 0) throw new Error("atob: invalid character");
+      acc = (acc << 6) | v; bits += 6;
+      if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); }
+    }
+    return out;
+  };
+  globalThis.TextEncoder = class TextEncoder {
+    encode(input) {
+      const s = input === undefined ? "" : String(input);
+      const bytes = [];
+      for (let i = 0; i < s.length; i++) {
+        let c = s.codePointAt(i);
+        if (c > 0xffff) i++;
+        if (c < 0x80) bytes.push(c);
+        else if (c < 0x800) bytes.push(0xc0 | (c >> 6), 0x80 | (c & 63));
+        else if (c < 0x10000) bytes.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+        else bytes.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+      }
+      return Uint8Array.from(bytes);
+    }
+  };
+  globalThis.TextDecoder = class TextDecoder {
+    constructor(label) { this.encoding = (label || "utf-8").toLowerCase(); }
+    decode(input) {
+      if (input === undefined) return "";
+      const b = input instanceof Uint8Array ? input : new Uint8Array(input.buffer || input);
+      let out = "";
+      for (let i = 0; i < b.length;) {
+        const x = b[i];
+        let cp, n;
+        if (x < 0x80) { cp = x; n = 1; }
+        else if ((x & 0xe0) === 0xc0) { cp = x & 31; n = 2; }
+        else if ((x & 0xf0) === 0xe0) { cp = x & 15; n = 3; }
+        else { cp = x & 7; n = 4; }
+        for (let j = 1; j < n; j++) cp = (cp << 6) | (b[i + j] & 63);
+        out += String.fromCodePoint(cp);
+        i += n;
+      }
+      return out;
+    }
+  };
+
   function fmt(args) {
     return args.map((a) => (typeof a === "string" ? a : safeStringify(a))).join(" ");
   }

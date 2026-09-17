@@ -1,7 +1,72 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { MANIFEST_VERSION } from "./index.ts";
+
+// Provide the bridge the SDK expects, as a Node stand-in.
+(globalThis as unknown as { __usai: unknown }).__usai = {
+  op: async () => "",
+  onCancel: () => {},
+  isCancelled: () => false,
+};
+
+const { defineApp, defineModule, http, task, cache, describe, MANIFEST_VERSION, errors, env } = await import("./index.ts");
+
+const stringSchema = {
+  "~standard": {
+    version: 1 as const,
+    vendor: "test",
+    validate: (v: unknown) => (typeof v === "string" ? { value: v } : { issues: [{ message: "expected string" }] }),
+    jsonSchema: { input: () => ({ type: "string" }), output: () => ({ type: "string" }) },
+  },
+};
+const opaqueSchema = {
+  "~standard": { version: 1 as const, vendor: "test", validate: (v: unknown) => ({ value: v }) },
+};
 
 test("manifest version matches the runtime", () => {
   assert.equal(MANIFEST_VERSION, 1);
+});
+
+test("describe flattens modules deterministically and extracts JSON Schema", () => {
+  const hits = cache.local("hits");
+  const users = defineModule({
+    name: "users",
+    workloads: [http.get("/users/:id", { params: opaqueSchema, response: { 200: stringSchema } }, async (ctx) => ctx.params as never)],
+    migrations: "./migrations/*.sql",
+  });
+  const cleanup = task("cleanup", { input: stringSchema, resources: [hits] }, async () => {});
+  const app = defineApp({ name: "shop", modules: [users], workloads: [cleanup], env: env({ APP_ENV: env.enum(["dev", "prod"]) }) });
+  const m = describe(app);
+  assert.equal(m.name, "shop");
+  assert.deepEqual(m.modules, [{ name: "users", migrations: ["./migrations/*.sql"], seeders: [] }]);
+  assert.equal(m.workloads.length, 2);
+  assert.equal(m.workloads[0]!.id, "http:GET /users/:id");
+  assert.equal(m.workloads[0]!.module, "users");
+  assert.deepEqual(m.workloads[0]!.contracts.inWorldOnly, ["params"]);
+  assert.deepEqual(m.workloads[0]!.contracts.response, { "200": { type: "string" } });
+  assert.equal(m.workloads[1]!.id, "task:cleanup");
+  assert.deepEqual(m.workloads[1]!.contracts.input, { type: "string" });
+  assert.deepEqual(m.resources.map((r) => r.name), ["hits"]);
+  assert.deepEqual(m.env, [{ name: "APP_ENV", kind: "enum", required: true, values: ["dev", "prod"] }]);
+});
+
+test("errors carry a stable contract", () => {
+  const e = errors.notFound("no user", { id: 1 });
+  assert.deepEqual(e.usai, { code: "not_found", status: 404, details: { id: 1 } });
+  assert.equal(e.message, "no user");
+});
+
+test("invoke runs an http handler with parsed boundaries and encodes the response", async () => {
+  const sdk = globalThis.__usai_sdk as { invoke(app: unknown, i: number, input: string): Promise<unknown> };
+  const app = defineApp({
+    workloads: [
+      http.post("/echo", { body: stringSchema, response: { 201: stringSchema } }, async (ctx) => http.created(ctx.body.toUpperCase())),
+      http.get("/plain", {}, async () => ({ ok: true })),
+      http.get("/bad", { response: stringSchema }, async () => 42 as never),
+    ],
+  });
+  const input = (i: number, body: unknown) => JSON.stringify({ kind: "http", env: {}, request: { method: "POST", path: "/echo", url: "/echo", params: {}, query: {}, headers: {}, body: body === undefined ? null : { json: body } } });
+  assert.deepEqual(await sdk.invoke(app, 0, input(0, "hi")), { status: 201, headers: {}, json: "HI" });
+  assert.deepEqual(await sdk.invoke(app, 1, input(1, undefined)), { status: 200, headers: {}, json: { ok: true } });
+  await assert.rejects(sdk.invoke(app, 0, input(0, 5)), (e: { usai: { code: string; status: number } }) => e.usai.code === "validation_failed" && e.usai.status === 400);
+  await assert.rejects(sdk.invoke(app, 2, input(2, undefined)), (e: { usai: { code: string } }) => e.usai.code === "response_contract_violation");
 });
