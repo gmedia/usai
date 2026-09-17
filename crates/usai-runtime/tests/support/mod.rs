@@ -11,8 +11,8 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::OnceLock;
 
-const VERSION: &str = "17.11.0";
-const ASSET: &str = "https://github.com/theseus-rs/postgresql-binaries/releases/download/17.11.0/postgresql-17.11.0-x86_64-unknown-linux-gnu.tar.gz";
+const VERSION: &str = "18.6.0";
+const ASSET: &str = "https://github.com/theseus-rs/postgresql-binaries/releases/download/18.6.0/postgresql-18.6.0-x86_64-unknown-linux-gnu.tar.gz";
 
 struct Embedded {
     bin: PathBuf,
