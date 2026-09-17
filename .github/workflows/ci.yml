@@ -12,6 +12,21 @@ env:
 jobs:
   check:
     runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: usai
+          POSTGRES_PASSWORD: usai
+          POSTGRES_DB: usai
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U usai"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      USAI_TEST_DATABASE_URL: postgres://usai:usai@127.0.0.1:5432/usai
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

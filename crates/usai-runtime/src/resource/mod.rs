@@ -7,6 +7,7 @@
 //! an external operation with its own owner and terminal proof.
 
 pub mod cache_local;
+pub mod postgres;
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
@@ -32,7 +33,11 @@ pub struct ResourceIdentity {
 impl ResourceIdentity {
     /// The fingerprint covers the declared config plus the resolved values of
     /// the env names the spec lists. Secret values are hashed, never kept.
-    pub fn compute(spec: &ResourceSpec, env: &dyn Fn(&str) -> Option<String>, compat: u32) -> Self {
+    pub fn compute(
+        spec: &ResourceSpec,
+        env: &(dyn for<'a> Fn(&'a str) -> Option<String> + Sync),
+        compat: u32,
+    ) -> Self {
         let mut hasher = Sha256::new();
         hasher.update(serde_json::to_vec(&spec.config).expect("config serializes"));
         for name in &spec.env {
@@ -159,7 +164,7 @@ pub trait ResourceProvider: Send + Sync {
         &self,
         spec: &ResourceSpec,
         identity: ResourceIdentity,
-        env: &dyn Fn(&str) -> Option<String>,
+        env: &(dyn for<'a> Fn(&'a str) -> Option<String> + Sync),
     ) -> Result<Arc<dyn ResourceManager>, ResourceError>;
 }
 
@@ -174,6 +179,7 @@ impl ResourceRegistry {
     pub fn new() -> Self {
         let registry = Self::default();
         registry.register_provider(Arc::new(cache_local::CacheLocalProvider));
+        registry.register_provider(Arc::new(postgres::PostgresProvider));
         registry
     }
 
@@ -189,7 +195,7 @@ impl ResourceRegistry {
     pub async fn open(
         &self,
         spec: &ResourceSpec,
-        env: &(dyn Fn(&str) -> Option<String> + Sync),
+        env: &(dyn for<'a> Fn(&'a str) -> Option<String> + Sync),
     ) -> Result<Arc<dyn ResourceManager>, ResourceError> {
         let provider = self
             .providers

@@ -33,7 +33,7 @@ impl ResourceProvider for CacheLocalProvider {
         &self,
         spec: &ResourceSpec,
         identity: ResourceIdentity,
-        _env: &dyn Fn(&str) -> Option<String>,
+        _env: &(dyn for<'a> Fn(&'a str) -> Option<String> + Sync),
     ) -> Result<Arc<dyn ResourceManager>, ResourceError> {
         let max_entries = spec
             .config

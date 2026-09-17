@@ -3,7 +3,7 @@
 // operation; nothing escapes the world's ownership.
 
 import type { ResourceDeclaration, Workload } from "../declarations.ts";
-import type { CacheLocalHandle } from "../resources.ts";
+import type { CacheLocalHandle, PostgresHandle } from "../resources.ts";
 import { UsaiError } from "../errors.ts";
 
 declare global {
@@ -105,6 +105,14 @@ function cacheLocalHandle(name: string): CacheLocalHandle {
   };
 }
 
+function postgresHandle(name: string): PostgresHandle {
+  return {
+    query: (sql, params = []) => resourceCall(name, "query", { sql, params }) as Promise<never[]>,
+    one: (sql, params = []) => resourceCall(name, "one", { sql, params }) as Promise<never>,
+    execute: (sql, params = []) => resourceCall(name, "execute", { sql, params }) as Promise<number>,
+  };
+}
+
 function genericHandle(declaration: ResourceDeclaration): Record<string, (args?: Record<string, unknown>) => Promise<unknown>> {
   const handle: Record<string, (args?: Record<string, unknown>) => Promise<unknown>> = {};
   for (const method of declaration.methods) {
@@ -116,7 +124,10 @@ function genericHandle(declaration: ResourceDeclaration): Record<string, (args?:
 export function makeResources(declarations: readonly ResourceDeclaration[]): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const declaration of declarations) {
-    out[declaration.name] = declaration.kind === "cache.local" ? cacheLocalHandle(declaration.name) : genericHandle(declaration);
+    out[declaration.name] =
+      declaration.kind === "cache.local" ? cacheLocalHandle(declaration.name)
+      : declaration.kind === "postgres" ? postgresHandle(declaration.name)
+      : genericHandle(declaration);
   }
   return out;
 }

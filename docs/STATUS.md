@@ -6,7 +6,7 @@
 
 ## Current milestone
 
-**D6 — PostgreSQL Capability** (next). D0–D5 are done.
+**D7 — Project Model: Modules, Migrations, Seeders, Config** (next). D0–D6 are done.
 
 ## Done
 
@@ -16,17 +16,19 @@
 - **D3 developer loop.** `usai build`, `usai run`, `usai dev` (watch → rebuild → install → activate → drain previous; failed builds keep the previous revision serving), `usai inspect` (+`--json`), `usai config` (effective values with sources; `usai.config.ts` evaluated declaratively). `examples/hello` runs.
 - **D4 tasks + explicit ownership transfer.** `ctx.tasks.invoke` = owned child world (cancelled with the parent, outcome returned as a contract); `ctx.tasks.dispatch` = ownership transferred to the runtime-owned, bounded, non-durable `TaskQueue` (ADR-0010; losses at shutdown are counted). Child records on `WorkResult`; dispatch is not detached work; draining waits for dispatched tasks; parent globals invisible in the child world.
 - **D5 cron + commands.** Per-revision cron schedulers (croner, 5/6-field), fresh world per tick, overlap `skip`/`allow`, invalid schedules fail at install, schedulers stop at drain; `RuntimeConfig.cron_scheduler` for instances that must not tick. `Runtime::run_cron` / `run_command` / `run_task` for deterministic invocation; CLI `usai cron run`, `usai app <cmd> [args]`, `usai task run --input`. 9 acceptance tests in `tests/workloads.rs`.
+- **D6 PostgreSQL capability.** `resource/postgres.rs` (tokio-postgres + deadpool): pool at runtime lifetime, one lease per operation, prepared statements cached per physical connection, JSON↔SQL typing by prepared-statement parameter types (int/float/numeric/bool/text/uuid/json/timestamps/date/arrays) and by column types. C5 paths: normal/SQL error → terminal → return; cooperative cancel → `CancelRequest` → await the original query's 57014 → return; abandonment without terminal proof → quarantine (removed from pool); session state reset on checkout (`pool.recycling: clean` default). Unreachable database fails activation. SDK `postgres("main", { urlEnv, pool })` + `query/one/execute`. 8 acceptance tests in `tests/postgres.rs` against a real server (`USAI_TEST_DATABASE_URL`, else a portable PostgreSQL 17 the tests download to `~/.cache/usai/postgresql`). `examples/postgres`.
 - Design review closed 14 of 16 open questions as ADR-0001…0014; ADR-0015 records the engine decision.
 
 ## In progress
 
 - nothing
 
-## Next (D6 acceptance: connection reuse only after terminal knowledge; no connection-state leak across worlds; cancellation covered; abandoned-world behaviour covered; recovery request succeeds after abnormal cases)
+## Next (D7 acceptance: centralized and colocated layouts both work; organization does not change runtime semantics; module metadata composes deterministically; config declarative and inspectable; missing env fails before serving)
 
-1. `postgres` resource provider (`tokio-postgres` + `deadpool-postgres`): per-operation lease; normal/SQL-error → terminal → return; cooperative cancel → `CancelRequest` then await 57014 → return; hard abandonment → `Ambiguous` → quarantine (remove from pool); backend identity per physical connection.
-2. SDK `postgres("main", { url: env ref })` declaration and in-world handle (`query`, `one`, `execute`, `transaction` later).
-3. Tests against a docker PostgreSQL (gated on `USAI_TEST_DATABASE_URL`); all four C5 paths plus recovery.
+1. Migration discovery from `usai.config.ts` globs + module `migrations:` declarations; `usai db migrate` running SQL files in order under runtime ownership with a `usai_migrations` ledger table.
+2. Seeder discovery + `usai db seed [name]` running seeder workloads (finite worlds).
+3. Typed env: `resolveEnv` in-world (`ctx.env` typed) and activation-time validation of `kind` (url/int/bool/enum), not only presence.
+4. `usai inspect` shows module contributions; tests for both layouts.
 
 ## Known gaps / debt
 
@@ -34,5 +36,5 @@
 - Boundary contracts are validated twice when a JSON Schema exists (host before the world, provider inside it to obtain parsed values). Acceptable for v0; `GOAL.md` §13 asks to collapse this later.
 - Auth resolvers run inside the world (after structural validation); `inspect` says so.
 - `create-usai` is a placeholder; `examples/hello` is the onboarding path for now.
-- No PostgreSQL provider yet (D6). No OpenAPI yet (D8).
+- No OpenAPI yet (D8). PostgreSQL is `NoTls` only in v0 (expected behind a private network or a TLS proxy); no transactions across operations yet.
 - HTTP/1.1 only; no TLS termination (expected behind a proxy in v0).

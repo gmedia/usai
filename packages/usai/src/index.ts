@@ -8,8 +8,8 @@ export type { HttpContext, RawContext, HttpResponse, RawResponse } from "./http.
 export { auth } from "./auth.ts";
 export { task, cron, command, service, dispatches } from "./workloads.ts";
 export type { TaskContext, CronContext, CommandContext, ServiceContext } from "./workloads.ts";
-export { cache } from "./resources.ts";
-export type { CacheLocalHandle } from "./resources.ts";
+export { cache, postgres } from "./resources.ts";
+export type { CacheLocalHandle, PostgresHandle, SqlParam } from "./resources.ts";
 export { errors, UsaiError, isUsaiError } from "./errors.ts";
 export { env, resolveEnv } from "./env.ts";
 export type { EnvValues } from "./env.ts";

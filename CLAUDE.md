@@ -40,6 +40,7 @@ Single tests:
 cargo test -p usai-runtime --test lifecycle detached_timer          # one integration test by name
 cargo test -p usai-runtime --test http auth_boundary                # HTTP/workload tests need node + `pnpm install` (they skip otherwise)
 cargo test -p usai-runtime --test workloads cron_scheduler
+cargo test -p usai-runtime --test postgres                          # needs PostgreSQL: USAI_TEST_DATABASE_URL, else downloads a portable PG 17 once (~12 MB)
 cargo test -p usai-runtime --lib ownership::                        # one module's unit tests
 node --test packages/usai/src/index.test.ts                         # one TS test file (Node 24 strips types natively)
 ```
@@ -50,7 +51,7 @@ Toolchain pins: Rust 1.98.1 (`rust-toolchain.toml`), Node ≥ 24, pnpm 12.3.4 (`
 
 ## Architecture in one screen
 
-Five lifetimes, always distinct in code (`docs/LIFECYCLE-CONTRACTS.md` C1). In `crates/usai-runtime/src`: `runtime.rs` (persistent, revisions) → `definition.rs` (immutable) → `world.rs` (`WorldDriver`, one routing gate) → `host_ops.rs` (operation owners) / `resource/` (leases, terminal proof); `ownership.rs` is the bounded ledger; `engine/` is the substrate boundary (only `engine/quickjs.rs` may import `rquickjs`); `engine/guest-bridge.js` + `docs/GUEST-ABI.md` is the host↔guest contract; `http/` is the request pipeline (route → decode → validate → admit → world → encode); `workloads/` is tasks (invoke/dispatch ops + `TaskQueue`) and cron (per-revision schedulers); `build.rs` is the build phase (esbuild via the SDK's `build/bundle.mjs`, then manifest extraction in a capability-less world). The TypeScript side is `packages/usai/src`: declarations → `manifest.ts` (`describe`) and `runtime/sdk.ts` (`invoke`) must agree on workload ordinals via `flatten()`.
+Five lifetimes, always distinct in code (`docs/LIFECYCLE-CONTRACTS.md` C1). In `crates/usai-runtime/src`: `runtime.rs` (persistent, revisions) → `definition.rs` (immutable) → `world.rs` (`WorldDriver`, one routing gate) → `host_ops.rs` (operation owners) / `resource/` (leases, terminal proof; `postgres.rs` is the C5 reference implementation); `ownership.rs` is the bounded ledger; `engine/` is the substrate boundary (only `engine/quickjs.rs` may import `rquickjs`); `engine/guest-bridge.js` + `docs/GUEST-ABI.md` is the host↔guest contract; `http/` is the request pipeline (route → decode → validate → admit → world → encode); `workloads/` is tasks (invoke/dispatch ops + `TaskQueue`) and cron (per-revision schedulers); `build.rs` is the build phase (esbuild via the SDK's `build/bundle.mjs`, then manifest extraction in a capability-less world). The TypeScript side is `packages/usai/src`: declarations → `manifest.ts` (`describe`) and `runtime/sdk.ts` (`invoke`) must agree on workload ordinals via `flatten()`.
 
 ```text
 persistent runtime state  →  immutable ApplicationDefinition  →  execution world
