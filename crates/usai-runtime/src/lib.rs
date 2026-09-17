@@ -18,6 +18,7 @@ pub mod definition;
 pub mod engine;
 pub mod host_ops;
 pub mod http;
+pub mod openapi;
 pub mod ownership;
 pub mod resource;
 pub mod runtime;

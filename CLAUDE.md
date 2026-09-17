@@ -33,6 +33,7 @@ cargo run -p usai-cli -- --root <project> app <command> [args]   # run a declare
 cargo run -p usai-cli -- --root <project> cron run <name>        # one cron invocation, no wall clock
 cargo run -p usai-cli -- --root <project> task run <name> --input '{...}'
 cargo run -p usai-cli -- --root <project> db migrate | db status | db seed [name]
+cargo run -p usai-cli -- --root <project> generate openapi [--out openapi.json]
 ```
 
 Single tests:

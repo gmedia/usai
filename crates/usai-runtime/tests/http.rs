@@ -55,6 +55,9 @@ async fn start() -> Option<Server> {
         engine,
         RuntimeConfig {
             default_timeout: Duration::from_secs(5),
+            // The fixture declares crons for the workload tests; ticking
+            // them here would leave live worlds behind the baseline checks.
+            cron_scheduler: false,
             ..RuntimeConfig::default()
         },
         |name| (name == "GREETING").then(|| "hi".to_owned()),
@@ -395,5 +398,111 @@ async fn manifest_describes_the_application() {
     assert_eq!(m.resources[0].kind, "cache.local");
     assert_eq!(m.env[0].name, "GREETING");
     assert!(rev.definition.workload("task:send-receipt").is_some());
+    s.shutdown.cancel();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn openapi_is_generated_from_the_definition() {
+    let Some(s) = start().await else { return };
+    let rev = s.runtime.active().unwrap();
+    let doc = usai_runtime::openapi::generate(&rev.definition);
+    assert_eq!(doc["openapi"], "3.1.0");
+    assert_eq!(doc["info"]["title"], "http-fixture");
+    assert_eq!(doc["info"]["version"], rev.definition.identity());
+    let get_user = &doc["paths"]["/users/{id}"]["get"];
+    assert_eq!(get_user["tags"], json!(["users"]));
+    let params: Vec<(String, String, bool)> = get_user["parameters"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| {
+            (
+                p["name"].as_str().unwrap().into(),
+                p["in"].as_str().unwrap().into(),
+                p["required"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    assert!(params.contains(&("id".into(), "path".into(), true)));
+    assert!(params.contains(&("page".into(), "query".into(), false)));
+    assert_eq!(
+        get_user["responses"]["200"]["content"]["application/json"]["schema"]["type"],
+        "object"
+    );
+    assert!(
+        get_user["responses"]["400"].is_object(),
+        "validated endpoints document 400"
+    );
+    assert_eq!(
+        doc["paths"]["/users"]["post"]["requestBody"]["required"],
+        true
+    );
+    assert_eq!(
+        doc["paths"]["/users"]["post"]["responses"]["201"]["content"]["application/json"]["schema"]
+            ["required"],
+        json!(["id", "name", "email"])
+    );
+    assert_eq!(
+        doc["paths"]["/me"]["get"]["security"],
+        json!([{ "token": [] }])
+    );
+    assert_eq!(
+        doc["components"]["securitySchemes"]["token"]["scheme"],
+        "bearer"
+    );
+    let webhook = &doc["paths"]["/webhook"]["post"];
+    assert_eq!(
+        webhook["x-usai-raw"], true,
+        "raw endpoints are opaque, not invented"
+    );
+    assert!(webhook.get("parameters").is_none());
+    assert!(
+        doc.to_string().find("$schema").is_none_or(|_| false)
+            || !doc["paths"].to_string().contains("\"$schema\"")
+    );
+    // The dev server serves the same document.
+    let host = HttpHost::new(
+        Arc::clone(&s.runtime),
+        HttpConfig {
+            addr: ([127, 0, 0, 1], 0).into(),
+            serve_docs: true,
+            ..HttpConfig::default()
+        },
+    );
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let token = CancellationToken::new();
+    let t = token.clone();
+    tokio::spawn(async move {
+        serve(host, t, |addr| {
+            let _ = tx.send(addr);
+        })
+        .await
+        .unwrap()
+    });
+    let addr = rx.await.unwrap();
+    let served: Value = s
+        .client
+        .get(format!("http://{addr}/_usai/openapi.json"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(served, doc);
+    let docs = s
+        .client
+        .get(format!("http://{addr}/_usai/docs"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        docs.headers().get("content-type").unwrap(),
+        "text/html; charset=utf-8"
+    );
+    // Not served on a production host.
+    let (status, _) = s.get("/_usai/openapi.json").await;
+    assert_eq!(status, 404);
+    token.cancel();
     s.shutdown.cancel();
 }

@@ -6,7 +6,7 @@
 
 ## Current milestone
 
-**D8 — API Metadata + OpenAPI** (next). D0–D7 are done.
+**D9 — Service Workload** (next). D0–D8 are done.
 
 ## Done
 
@@ -18,17 +18,18 @@
 - **D5 cron + commands.** Per-revision cron schedulers (croner, 5/6-field), fresh world per tick, overlap `skip`/`allow`, invalid schedules fail at install, schedulers stop at drain; `RuntimeConfig.cron_scheduler` for instances that must not tick. `Runtime::run_cron` / `run_command` / `run_task` for deterministic invocation; CLI `usai cron run`, `usai app <cmd> [args]`, `usai task run --input`. 9 acceptance tests in `tests/workloads.rs`.
 - **D6 PostgreSQL capability.** `resource/postgres.rs` (tokio-postgres + deadpool): pool at runtime lifetime, one lease per operation, prepared statements cached per physical connection, JSON↔SQL typing by prepared-statement parameter types (int/float/numeric/bool/text/uuid/json/timestamps/date/arrays) and by column types. C5 paths: normal/SQL error → terminal → return; cooperative cancel → `CancelRequest` → await the original query's 57014 → return; abandonment without terminal proof → quarantine (removed from pool); session state reset on checkout (`pool.recycling: clean` default). Unreachable database fails activation. SDK `postgres("main", { urlEnv, pool })` + `query/one/execute`. 8 acceptance tests in `tests/postgres.rs` against a real server (`USAI_TEST_DATABASE_URL`, else a portable PostgreSQL 17 the tests download to `~/.cache/usai/postgresql`). `examples/postgres`.
 - **D7 project model.** Module contributions (`migrations:`/`seeders:` globs, resources declared by several modules dedupe when identical and error when they conflict); migration discovery from `usai.config.ts` includes + module globs (root-relative, ordered by file name); `usai db migrate` applies each SQL file in its own transaction on a leased connection with a `usai_migrations` ledger row in the same transaction, refuses tampered applied files, never runs at startup; `usai db status`; seeders are `seeder(...)` default exports discovered by glob and run by `usai db seed [name]` as `command:seed:<name>` in a synthetic definition that borrows the app's resources and env; typed env validated for shape at activation (url/int/bool/enum) and delivered typed in `ctx.env`; `execute()` always injects the revision env. Fixture `tests/fixtures/project-app` uses colocated and centralized layouts at once. 3 acceptance tests in `tests/project.rs`.
+- **D8 API metadata + OpenAPI.** `openapi.rs` generates OpenAPI 3.1 from the ApplicationDefinition: paths from HTTP triggers, path/query/header parameters from the extracted JSON Schemas, request bodies, responses by declared status, declared errors and the standard error envelope, security schemes from auth declarations, module names as tags; raw endpoints are opaque (`x-usai-raw`), in-world-only contracts are flagged (`x-usai-validated-in-world`). `usai generate openapi [--out]`; the dev server serves `/_usai/openapi.json` and a dependency-free `/_usai/docs`. 1 acceptance test (served document == generated document; not served on a production host).
 - Design review closed 14 of 16 open questions as ADR-0001…0014; ADR-0015 records the engine decision.
 
 ## In progress
 
 - nothing
 
-## Next (D8 acceptance: docs match runtime behaviour; no duplicate endpoint-definition system; raw endpoints represented as opaque)
+## Next (D9 acceptance: service state persists for the service lifetime; service lifetime is separate from runtime lifetime; graceful stop returns ownership to baseline; service API does not weaken finite-work isolation)
 
-1. `openapi.rs`: OpenAPI 3.1 document generated from the ApplicationDefinition — paths from HTTP triggers, parameters from `params`/`query`/`headers` JSON Schema, request bodies, responses by status, declared errors as error responses, security schemes from auth declarations, raw endpoints as opaque operations.
-2. `usai generate openapi [--out]`; dev server serves `/_usai/openapi.json` and a minimal docs page at `/_usai/docs`.
-3. Tests: generated document validates structurally and reflects the fixture.
+1. Persistent worlds: a `service` workload starts one world at revision activation and keeps it until drain/stop; `ctx.signal` fires on stop; the handler's promise settling ends the service (restart policy later).
+2. Runtime: per-revision service supervisor (start/ready/cancel/drain/stop), status in `RuntimeStatus`, `usai dev` banner.
+3. Tests: mutable state survives across service iterations; finite worlds cannot see it; drain stops the service and ownership returns to baseline.
 
 ## Known gaps / debt
 
@@ -36,5 +37,5 @@
 - Boundary contracts are validated twice when a JSON Schema exists (host before the world, provider inside it to obtain parsed values). Acceptable for v0; `GOAL.md` §13 asks to collapse this later.
 - Auth resolvers run inside the world (after structural validation); `inspect` says so.
 - `create-usai` is a placeholder; `examples/hello` is the onboarding path for now.
-- No OpenAPI yet (D8). Module-level `migrations:`/`seeders:` globs are root-relative, not module-relative (the bundle has no source locations); documented on `defineModule`. PostgreSQL is `NoTls` only in v0 (expected behind a private network or a TLS proxy); no transactions across operations yet.
+- Module-level `migrations:`/`seeders:` globs are root-relative, not module-relative (the bundle has no source locations); documented on `defineModule`. PostgreSQL is `NoTls` only in v0 (expected behind a private network or a TLS proxy); no transactions across operations yet.
 - HTTP/1.1 only; no TLS termination (expected behind a proxy in v0).

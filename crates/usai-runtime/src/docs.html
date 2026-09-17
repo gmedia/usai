@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API docs</title>
+<style>
+  :root { --bg: #ffffff; --fg: #1a1a1a; --muted: #6b6b6b; --line: #e6e6e6; --accent: #0b5fff; --code: #f4f4f4; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #111; --fg: #eee; --muted: #999; --line: #2a2a2a; --accent: #6ea8ff; --code: #1c1c1c; } }
+  body { margin: 0; padding: 24px 16px; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; max-width: 960px; margin-inline: auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; } .muted { color: var(--muted); }
+  .op { border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; margin: 12px 0; }
+  .method { display: inline-block; min-width: 56px; font-weight: 700; color: var(--accent); }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  pre { background: var(--code); padding: 10px; border-radius: 6px; overflow: auto; }
+  details > summary { cursor: pointer; color: var(--muted); }
+  .tag { font-size: 12px; color: var(--muted); margin-left: 8px; }
+</style>
+</head>
+<body>
+<h1 id="title">API</h1>
+<div class="muted" id="subtitle"></div>
+<div id="ops"></div>
+<script>
+(async () => {
+  const doc = await (await fetch("openapi.json")).json();
+  document.getElementById("title").textContent = doc.info.title;
+  document.getElementById("subtitle").textContent = "revision " + doc.info.version + " · generated from the ApplicationDefinition";
+  const ops = document.getElementById("ops");
+  for (const [path, methods] of Object.entries(doc.paths)) {
+    for (const [method, op] of Object.entries(methods)) {
+      const el = document.createElement("div"); el.className = "op";
+      const tags = (op.tags || []).map(t => `<span class="tag">${t}</span>`).join("");
+      const raw = op["x-usai-raw"] ? `<span class="tag">raw · contracts not described</span>` : "";
+      const inWorld = op["x-usai-validated-in-world"] ? `<span class="tag">validated in world: ${op["x-usai-validated-in-world"].join(", ")}</span>` : "";
+      const sec = op.security ? `<span class="tag">auth: ${Object.keys(op.security[0]).join(", ")}</span>` : "";
+      let html = `<div><span class="method">${method.toUpperCase()}</span><code>${path}</code>${tags}${raw}${inWorld}${sec}</div>`;
+      if (op.description) html += `<div class="muted">${op.description}</div>`;
+      if (op.parameters?.length) html += `<details><summary>parameters</summary><pre>${JSON.stringify(op.parameters, null, 2)}</pre></details>`;
+      if (op.requestBody) html += `<details><summary>request body</summary><pre>${JSON.stringify(op.requestBody, null, 2)}</pre></details>`;
+      html += `<details><summary>responses: ${Object.keys(op.responses).join(", ")}</summary><pre>${JSON.stringify(op.responses, null, 2)}</pre></details>`;
+      el.innerHTML = html; ops.appendChild(el);
+    }
+  }
+})();
+</script>
+</body>
+</html>

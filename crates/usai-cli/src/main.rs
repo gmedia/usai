@@ -76,6 +76,21 @@ enum Command {
         #[command(subcommand)]
         action: DbAction,
     },
+    /// Generate artifacts from the application definition
+    Generate {
+        #[command(subcommand)]
+        action: GenerateAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum GenerateAction {
+    /// OpenAPI 3.1 document
+    Openapi {
+        /// Write to a file instead of stdout
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -154,6 +169,9 @@ async fn main() {
         Command::Db {
             action: DbAction::Seed { name },
         } => commands::db_seed(&root, name.as_deref()).await,
+        Command::Generate {
+            action: GenerateAction::Openapi { out },
+        } => commands::generate_openapi(&root, out).await,
     };
     if let Err(error) = result {
         eprintln!("error: {error:#}");

@@ -24,6 +24,7 @@ pub fn banner(
     revision: &str,
     base_url: Option<&str>,
     status: Option<&RuntimeStatus>,
+    docs: bool,
 ) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "Usai\n");
@@ -98,6 +99,10 @@ pub fn banner(
     }
     if let Some(url) = base_url {
         let _ = writeln!(out, "\nApp       {url}");
+        if docs {
+            let _ = writeln!(out, "API Docs  {url}/_usai/docs");
+            let _ = writeln!(out, "OpenAPI   {url}/_usai/openapi.json");
+        }
     }
     out
 }

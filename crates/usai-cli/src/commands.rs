@@ -99,7 +99,8 @@ async fn serve_until_signal(
                         &revision.definition,
                         &format!("{} ({})", revision.id, revision.definition.identity()),
                         Some(&url),
-                        Some(&runtime.status())
+                        Some(&runtime.status()),
+                        expose_diagnostics,
                     )
                 );
             }
@@ -285,7 +286,8 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
                     &revision.definition,
                     &format!("{} ({})", revision.id, revision.definition.identity()),
                     Some(&url),
-                    Some(&banner_runtime.status())
+                    Some(&banner_runtime.status()),
+                    true,
                 )
             );
             println!("\nwatching for changes (ctrl-c to stop)");
@@ -481,6 +483,20 @@ pub async fn db_seed(root: &Path, name: Option<&str>) -> Result<()> {
             }
             (t, _) => anyhow::bail!("seeder {} ended without a result: {t:?}", seeder.name),
         }
+    }
+    Ok(())
+}
+
+pub async fn generate_openapi(root: &Path, out: Option<PathBuf>) -> Result<()> {
+    let (definition, _) = definition_for(root, None).await?;
+    let document = usai_runtime::openapi::generate(&definition);
+    let text = serde_json::to_string_pretty(&document)?;
+    match out {
+        Some(path) => {
+            tokio::fs::write(&path, text).await?;
+            eprintln!("wrote {}", path.display());
+        }
+        None => println!("{text}"),
     }
     Ok(())
 }

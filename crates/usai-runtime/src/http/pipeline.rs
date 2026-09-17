@@ -27,6 +27,9 @@ pub struct HttpConfig {
     /// Include diagnostic detail (violations, fault text) in responses.
     /// Development only; never enable in production.
     pub expose_diagnostics: bool,
+    /// Serve `/_usai/openapi.json` and `/_usai/docs` from the active
+    /// definition.
+    pub serve_docs: bool,
 }
 
 impl Default for HttpConfig {
@@ -35,6 +38,7 @@ impl Default for HttpConfig {
             addr: ([127, 0, 0, 1], 3000).into(),
             max_body_bytes: 1024 * 1024,
             expose_diagnostics: false,
+            serve_docs: false,
         }
     }
 }
@@ -251,6 +255,28 @@ impl HttpHost {
         let compiled = self.compiled()?;
         let (parts, body) = request.into_parts();
         let path = parts.uri.path().to_owned();
+
+        // 0. runtime-owned surfaces (never application work)
+        if self.config.serve_docs && parts.method == Method::GET {
+            match path.as_str() {
+                "/_usai/openapi.json" => {
+                    return Ok(json_response(
+                        StatusCode::OK,
+                        &crate::openapi::generate(&compiled.revision.definition),
+                    ));
+                }
+                "/_usai/docs" | "/_usai/docs/" => {
+                    return Ok(Response::builder()
+                        .status(StatusCode::OK)
+                        .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+                        .body(Full::new(Bytes::from_static(
+                            crate::openapi::DOCS_HTML.as_bytes(),
+                        )))
+                        .expect("static response"));
+                }
+                _ => {}
+            }
+        }
 
         // 1. route
         let matched = compiled.router.at(&path).map_err(|_| {
