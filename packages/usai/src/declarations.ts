@@ -97,7 +97,11 @@ export interface DefineModuleOptions {
   name: string;
   workloads?: Workload[];
   resources?: ResourceDeclaration[];
+  /** Glob(s) for this module's SQL migrations, relative to the project root
+   * (e.g. `./src/billing/migrations/*.sql`). The bundle carries no source
+   * locations, so module-relative paths are not supported in v0. */
   migrations?: string | string[];
+  /** Glob(s) for this module's seeder files, relative to the project root. */
   seeders?: string | string[];
 }
 
@@ -142,22 +146,30 @@ function toList(value: string | string[] | undefined): string[] {
 export function flatten(app: AppDeclaration): { workloads: Array<{ workload: Workload; module?: string }>; resources: Array<{ resource: ResourceDeclaration; module?: string }> } {
   const workloads: Array<{ workload: Workload; module?: string }> = [];
   const resources: Array<{ resource: ResourceDeclaration; module?: string }> = [];
+  // One logical resource may be declared by several modules (a shared
+  // database). Same name + same kind + same config is one resource, owned by
+  // the first declarer; a conflicting redeclaration is a build error.
+  const add = (resource: ResourceDeclaration, module: string | undefined, where: string) => {
+    const existing = resources.find((r) => r.resource.name === resource.name);
+    if (!existing) {
+      resources.push(module === undefined ? { resource } : { resource, module });
+      return;
+    }
+    const same = existing.resource.kind === resource.kind && JSON.stringify(existing.resource.config) === JSON.stringify(resource.config) && JSON.stringify(existing.resource.env) === JSON.stringify(resource.env);
+    if (!same) {
+      throw new Error(`resource "${resource.name}" is declared twice with different configuration (${existing.module ?? "app"} and ${where})`);
+    }
+  };
   for (const module of app.modules) {
     for (const workload of module.workloads) workloads.push({ workload, module: module.name });
-    for (const resource of module.resources) resources.push({ resource, module: module.name });
+    for (const resource of module.resources) add(resource, module.name, `module ${module.name}`);
   }
   for (const workload of app.workloads) workloads.push({ workload });
-  for (const resource of app.resources) resources.push({ resource });
+  for (const resource of app.resources) add(resource, undefined, "app");
   // Resources referenced by workloads but declared nowhere are implicitly
   // application-level, so a developer can declare once and reference.
-  const seen = new Set(resources.map((r) => r.resource.name));
-  for (const { workload } of workloads) {
-    for (const resource of workload.resources) {
-      if (!seen.has(resource.name)) {
-        seen.add(resource.name);
-        resources.push({ resource });
-      }
-    }
+  for (const { workload, module } of workloads) {
+    for (const resource of workload.resources) add(resource, undefined, module ? `workload ${workload.name} in ${module}` : `workload ${workload.name}`);
   }
   return { workloads, resources };
 }

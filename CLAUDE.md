@@ -32,6 +32,7 @@ cargo run -p usai-cli -- config --root examples/hello     # effective project co
 cargo run -p usai-cli -- --root <project> app <command> [args]   # run a declared command in a fresh world
 cargo run -p usai-cli -- --root <project> cron run <name>        # one cron invocation, no wall clock
 cargo run -p usai-cli -- --root <project> task run <name> --input '{...}'
+cargo run -p usai-cli -- --root <project> db migrate | db status | db seed [name]
 ```
 
 Single tests:

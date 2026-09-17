@@ -315,3 +315,64 @@ pub async fn load_artifact(dir: &Path) -> Result<Arc<ApplicationDefinition>, Bui
     let code = Code::new(tokio::fs::read_to_string(dir.join("app.js")).await?);
     Ok(ApplicationDefinition::new(manifest, code)?)
 }
+
+/// Builds a definition whose only workload is `command:seed:<name>` running
+/// the seeder file's default export with the application's resources and
+/// env (`GOAL.md` §34). Seeders are finite application work, never part of
+/// the application's own definition.
+pub async fn build_seeder(
+    engine: &dyn Engine,
+    options: &BuildOptions,
+    seeder_path: &Path,
+    name: &str,
+) -> Result<BuildOutput, BuildError> {
+    let entry_dir = options.root.join(".usai/seed");
+    tokio::fs::create_dir_all(&entry_dir).await?;
+    let app_entry = if options.entry.is_absolute() {
+        options.entry.clone()
+    } else {
+        options.root.join(&options.entry)
+    };
+    let rel = |p: &Path| -> String {
+        let rel = pathdiff(&entry_dir, p);
+        rel.to_string_lossy().replace('\\', "/")
+    };
+    let entry_source = format!(
+        "import app from {app:?};\nimport seed from {seed:?};\nimport {{ defineApp, command }} from \"usai\";\n\
+         const run = command({name:?}, {{ resources: [...(seed.resources ?? [])] }}, async (ctx) => seed.run(ctx));\n\
+         export default defineApp({{ name: app.name + \":seed\", workloads: [run], resources: [...app.resources, ...app.modules.flatMap((m) => m.resources)], ...(app.env ? {{ env: app.env }} : {{}}) }});\n",
+        app = rel(&app_entry),
+        seed = rel(seeder_path),
+        name = format!("seed:{name}"),
+    );
+    let entry_path = entry_dir.join(format!("{name}.entry.ts"));
+    tokio::fs::write(&entry_path, entry_source).await?;
+    let seed_options = BuildOptions {
+        root: options.root.clone(),
+        entry: entry_path,
+        out_dir: entry_dir.join(name),
+    };
+    build(engine, &seed_options).await
+}
+
+/// Relative path from `from` (a directory) to `to`, with `./` prefix.
+fn pathdiff(from: &Path, to: &Path) -> PathBuf {
+    let from: Vec<_> = from.components().collect();
+    let to_components: Vec<_> = to.components().collect();
+    let common = from
+        .iter()
+        .zip(&to_components)
+        .take_while(|(a, b)| a == b)
+        .count();
+    let mut out = PathBuf::new();
+    if from.len() == common {
+        out.push(".");
+    }
+    for _ in common..from.len() {
+        out.push("..");
+    }
+    for c in &to_components[common..] {
+        out.push(c);
+    }
+    out
+}

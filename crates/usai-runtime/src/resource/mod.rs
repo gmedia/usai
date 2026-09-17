@@ -153,6 +153,7 @@ pub trait ResourceManager: Send + Sync {
     ) -> Result<serde_json::Value, ResourceError>;
     fn status(&self) -> ResourceStatus;
     async fn shutdown(&self);
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 /// Constructs managers for a resource kind from a spec.

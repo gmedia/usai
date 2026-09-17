@@ -182,4 +182,8 @@ impl ResourceManager for CacheLocal {
     async fn shutdown(&self) {
         self.entries.lock().expect("cache poisoned").clear();
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }

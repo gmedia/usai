@@ -178,6 +178,8 @@ pub enum RuntimeError {
     UnknownWorkload(String),
     #[error("missing required environment: {0}")]
     MissingEnv(String),
+    #[error("invalid environment: {0}")]
+    InvalidEnv(String),
     #[error("revision {0} did not drain within {1:?}")]
     DrainTimeout(RevisionId, Duration),
     #[error("invalid definition: {0}")]
@@ -350,8 +352,10 @@ impl Runtime {
         let revision = self.revision(id)?;
         let mut env = BTreeMap::new();
         for requirement in &revision.definition.manifest().env {
-            match (self.env)(&requirement.name) {
+            match (self.env)(&requirement.name).filter(|v| !v.is_empty()) {
                 Some(value) => {
+                    crate::definition::validate_env(requirement, &value)
+                        .map_err(RuntimeError::InvalidEnv)?;
                     env.insert(requirement.name.clone(), value);
                 }
                 None if requirement.required => {
@@ -564,7 +568,7 @@ impl Runtime {
     pub async fn execute(
         &self,
         admission: Admission,
-        input: serde_json::Value,
+        mut input: serde_json::Value,
         cancel: CancellationToken,
     ) -> Result<WorkResult, RuntimeError> {
         let Admission {
@@ -572,6 +576,14 @@ impl Runtime {
             workload_index,
             in_flight,
         } = admission;
+        // The world always sees the revision's resolved environment,
+        // whatever the caller put in the envelope.
+        if let serde_json::Value::Object(envelope) = &mut input {
+            envelope.insert(
+                "env".into(),
+                serde_json::to_value(&*revision.env()).expect("env serializes"),
+            );
+        }
         let workload = revision
             .definition
             .workload_by_index(workload_index)

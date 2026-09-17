@@ -6,7 +6,8 @@ export type { AppDeclaration, ModuleDeclaration, Workload, ResourceDeclaration, 
 export { http } from "./http.ts";
 export type { HttpContext, RawContext, HttpResponse, RawResponse } from "./http.ts";
 export { auth } from "./auth.ts";
-export { task, cron, command, service, dispatches } from "./workloads.ts";
+export { task, cron, command, service, dispatches, seeder } from "./workloads.ts";
+export type { SeederDeclaration, SeederContext } from "./workloads.ts";
 export type { TaskContext, CronContext, CommandContext, ServiceContext } from "./workloads.ts";
 export { cache, postgres } from "./resources.ts";
 export type { CacheLocalHandle, PostgresHandle, SqlParam } from "./resources.ts";

@@ -560,4 +560,148 @@ impl ResourceManager for Postgres {
     async fn shutdown(&self) {
         self.pool.close();
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+/// A migration applied (or to apply) against this database.
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppliedMigration {
+    pub name: String,
+    pub checksum: String,
+    pub applied_at: String,
+}
+
+impl Postgres {
+    async fn lease(&self, cancel: &CancellationToken) -> Result<Object, ResourceError> {
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => Err(ResourceError::Cancelled),
+            got = self.pool.get() => got.map_err(|e| ResourceError::Operation { code: "pool_error".into(), message: e.to_string(), proof: TerminalProof::Terminal }),
+        }
+    }
+
+    /// Runs a multi-statement script under runtime ownership (migrations):
+    /// one connection, one transaction, ledger row in the same transaction.
+    /// The lease follows C5 exactly like a query does.
+    pub async fn apply_migration(
+        &self,
+        name: &str,
+        sql: &str,
+        checksum: &str,
+        cancel: CancellationToken,
+    ) -> Result<(), ResourceError> {
+        let object = self.lease(&cancel).await?;
+        let mut lease = Lease {
+            object: Some(object),
+            terminal: false,
+            counters: &self.counters,
+        };
+        let script = format!(
+            "BEGIN;\n{sql}\n;INSERT INTO usai_migrations (name, checksum) VALUES ({}, {});\nCOMMIT;",
+            quote_literal(name),
+            quote_literal(checksum)
+        );
+        let finished = {
+            let client = lease.client();
+            run_cancellable(client, &cancel, &self.counters, async {
+                match client.batch_execute(&script).await {
+                    Ok(()) => Ok(()),
+                    Err(e) => {
+                        // The transaction is aborted; roll back explicitly so the
+                        // connection is clean before it is judged reusable.
+                        let _ = client.batch_execute("ROLLBACK").await;
+                        Err(e)
+                    }
+                }
+            })
+            .await
+        };
+        match finished {
+            Finished::Terminal(result) => {
+                if !matches!(&result, Err(ResourceError::Operation { proof: TerminalProof::Ambiguous, .. })) {
+                    lease.mark_terminal();
+                }
+                result
+            }
+            Finished::Ambiguous => Err(ResourceError::Operation {
+                code: "cancel_unconfirmed".into(),
+                message: "the migration did not reach a terminal state after cancellation; connection quarantined".into(),
+                proof: TerminalProof::Ambiguous,
+            }),
+        }
+    }
+
+    pub async fn ensure_migration_ledger(
+        &self,
+        cancel: CancellationToken,
+    ) -> Result<(), ResourceError> {
+        let object = self.lease(&cancel).await?;
+        let mut lease = Lease {
+            object: Some(object),
+            terminal: false,
+            counters: &self.counters,
+        };
+        let result = lease
+            .client()
+            .batch_execute("CREATE TABLE IF NOT EXISTS usai_migrations (name text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())")
+            .await
+            .map_err(sql_error);
+        if !matches!(
+            &result,
+            Err(ResourceError::Operation {
+                proof: TerminalProof::Ambiguous,
+                ..
+            })
+        ) {
+            lease.mark_terminal();
+        }
+        result
+    }
+
+    pub async fn applied_migrations(
+        &self,
+        cancel: CancellationToken,
+    ) -> Result<Vec<AppliedMigration>, ResourceError> {
+        let object = self.lease(&cancel).await?;
+        let mut lease = Lease {
+            object: Some(object),
+            terminal: false,
+            counters: &self.counters,
+        };
+        let result = lease
+            .client()
+            .query(
+                "SELECT name, checksum, applied_at FROM usai_migrations ORDER BY applied_at, name",
+                &[],
+            )
+            .await
+            .map_err(sql_error)
+            .map(|rows| {
+                rows.iter()
+                    .map(|r| AppliedMigration {
+                        name: r.get(0),
+                        checksum: r.get(1),
+                        applied_at: r.get::<_, chrono::DateTime<chrono::Utc>>(2).to_rfc3339(),
+                    })
+                    .collect()
+            });
+        if !matches!(
+            &result,
+            Err(ResourceError::Operation {
+                proof: TerminalProof::Ambiguous,
+                ..
+            })
+        ) {
+            lease.mark_terminal();
+        }
+        result
+    }
+}
+
+fn quote_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
 }

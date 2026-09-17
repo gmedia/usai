@@ -119,3 +119,22 @@ export function dispatches(from: Workload, ...to: Workload[]): Workload {
   (from.dispatches as Workload[]).push(...to);
   return from;
 }
+
+export interface SeederContext extends BaseContext {}
+
+/** A seeder file's default export. Discovered by `usai db seed`, run as
+ * finite work with access to the declared resources; never part of
+ * startup. */
+export interface SeederDeclaration {
+  readonly __usai: "seeder";
+  readonly resources: readonly ResourceDeclaration[];
+  readonly run: (ctx: SeederContext) => unknown;
+}
+
+export function seeder(options: { resources?: ResourceDeclaration[] }, run: (ctx: SeederContext) => unknown): SeederDeclaration;
+export function seeder(run: (ctx: SeederContext) => unknown): SeederDeclaration;
+export function seeder(a: unknown, b?: unknown): SeederDeclaration {
+  const options = (typeof a === "function" ? {} : a) as { resources?: ResourceDeclaration[] };
+  const run = (typeof a === "function" ? a : b) as (ctx: SeederContext) => unknown;
+  return { __usai: "seeder", resources: options.resources ?? [], run };
+}

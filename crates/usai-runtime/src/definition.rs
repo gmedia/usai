@@ -207,6 +207,27 @@ pub struct EnvRequirement {
     pub values: Vec<String>,
 }
 
+/// Checks a resolved value against its declared kind. Presence is checked
+/// by the caller; this is about shape, so a typo fails activation rather
+/// than the first request (`GOAL.md` §32).
+pub fn validate_env(requirement: &EnvRequirement, value: &str) -> Result<(), String> {
+    let problem = match requirement.kind.as_str() {
+        "url" if !value.contains("://") => Some("expected a URL".to_owned()),
+        "int" if value.parse::<i64>().is_err() => Some("expected an integer".to_owned()),
+        "bool" if !matches!(value, "true" | "false" | "1" | "0") => {
+            Some("expected true/false".to_owned())
+        }
+        "enum" if !requirement.values.iter().any(|v| v == value) => {
+            Some(format!("expected one of {}", requirement.values.join(", ")))
+        }
+        _ => None,
+    };
+    match problem {
+        Some(detail) => Err(format!("{}: {detail}", requirement.name)),
+        None => Ok(()),
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ModuleSpec {

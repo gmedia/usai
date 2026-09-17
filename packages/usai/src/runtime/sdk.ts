@@ -8,6 +8,7 @@ import { isHttpResponse, isRawResponse } from "../http.ts";
 import { type AnySchema, validateWith } from "../schema.ts";
 import { type BaseContext, makeBase } from "./context.ts";
 import { describe } from "../manifest.ts";
+import { resolveEnv } from "../env.ts";
 
 interface HttpInput {
   kind: "http";
@@ -184,6 +185,9 @@ export async function invoke(app: AppDeclaration, index: number, inputJson: stri
   const entry = flatten(app).workloads[index];
   if (!entry) throw new UsaiError("unknown_workload", 500, `no workload at index ${index}`);
   const input = JSON.parse(inputJson) as Input;
+  // ctx.env carries typed values when the application declared them;
+  // the host already validated presence and shape at activation.
+  if (app.env) input.env = resolveEnv(app.env, input.env) as unknown as Record<string, string>;
   const { workload } = entry;
   try {
     switch (input.kind) {

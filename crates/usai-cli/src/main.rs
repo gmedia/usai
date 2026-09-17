@@ -71,6 +71,30 @@ enum Command {
         #[command(subcommand)]
         action: TaskAction,
     },
+    /// Database: migrations and seeders
+    Db {
+        #[command(subcommand)]
+        action: DbAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum DbAction {
+    /// Apply pending migrations in order
+    Migrate {
+        /// Postgres resource to migrate (default: the first declared)
+        #[arg(long)]
+        resource: Option<String>,
+    },
+    /// Show applied and pending migrations
+    Status {
+        #[arg(long)]
+        resource: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Run seeders (all, or one by name)
+    Seed { name: Option<String> },
 }
 
 #[derive(Subcommand)]
@@ -121,6 +145,15 @@ async fn main() {
         Command::Task {
             action: TaskAction::Run { name, input },
         } => commands::task_run(&root, &name, &input).await,
+        Command::Db {
+            action: DbAction::Migrate { resource },
+        } => commands::db_migrate(&root, resource.as_deref()).await,
+        Command::Db {
+            action: DbAction::Status { resource, json },
+        } => commands::db_status(&root, resource.as_deref(), json).await,
+        Command::Db {
+            action: DbAction::Seed { name },
+        } => commands::db_seed(&root, name.as_deref()).await,
     };
     if let Err(error) = result {
         eprintln!("error: {error:#}");

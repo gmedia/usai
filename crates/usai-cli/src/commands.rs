@@ -4,7 +4,8 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result};
 use tokio_util::sync::CancellationToken;
-use usai_runtime::build::{BuildOptions, load_artifact, load_config};
+use usai_runtime::build::{BuildOptions, build_seeder, load_artifact, load_config};
+use usai_runtime::db;
 use usai_runtime::http::{HttpConfig, HttpHost, serve};
 use usai_runtime::*;
 
@@ -351,4 +352,135 @@ pub async fn cron_run(root: &Path, name: &str) -> Result<()> {
 pub async fn task_run(root: &Path, name: &str, input: &str) -> Result<()> {
     let input: serde_json::Value = serde_json::from_str(input).context("--input must be JSON")?;
     one_shot(root, async |rt| rt.run_task(name, input).await).await
+}
+
+/// Builds, activates (binding resources), runs `f`, and shuts down.
+async fn with_active_runtime<T>(
+    root: &Path,
+    f: impl AsyncFnOnce(&Runtime, &usai_runtime::build::ProjectConfig) -> Result<T>,
+) -> Result<T> {
+    let engine = engine();
+    let config = load_config(engine.as_ref(), root).await?;
+    let out =
+        usai_runtime::build::build(engine.as_ref(), &BuildOptions::from_config(&config)).await?;
+    let runtime = Runtime::new(
+        engine,
+        RuntimeConfig {
+            cron_scheduler: false,
+            ..RuntimeConfig::default()
+        },
+    );
+    let revision = runtime.install(out.definition).await?;
+    runtime.activate(revision.id).await?;
+    let result = f(&runtime, &config).await;
+    runtime.shutdown().await;
+    result
+}
+
+pub async fn db_migrate(root: &Path, resource: Option<&str>) -> Result<()> {
+    with_active_runtime(root, async |runtime, config| {
+        let revision = runtime.active()?;
+        let globs = db::migration_globs(&revision.definition, &config.migrations.value);
+        let files = db::discover_migrations(&config.root, &globs)?;
+        let manager = db::database(&revision, resource)?;
+        let applied = db::migrate(manager.as_ref(), &files, CancellationToken::new()).await?;
+        if applied.is_empty() {
+            println!(
+                "nothing to apply ({} migrations already applied)",
+                files.len()
+            );
+        } else {
+            for name in &applied {
+                println!("applied {name}");
+            }
+        }
+        Ok(())
+    })
+    .await
+}
+
+pub async fn db_status(root: &Path, resource: Option<&str>, json: bool) -> Result<()> {
+    with_active_runtime(root, async |runtime, config| {
+        let revision = runtime.active()?;
+        let globs = db::migration_globs(&revision.definition, &config.migrations.value);
+        let files = db::discover_migrations(&config.root, &globs)?;
+        let manager = db::database(&revision, resource)?;
+        let status = db::status(manager.as_ref(), &files).await?;
+        if json {
+            println!("{}", serde_json::to_string_pretty(&status)?);
+            return Ok(());
+        }
+        println!("{:<40} {:<18} applied", "migration", "checksum");
+        for s in status {
+            let applied = s.applied_at.as_deref().unwrap_or("pending");
+            let missing = if s.path.is_none() {
+                "  (file missing)"
+            } else {
+                ""
+            };
+            println!("{:<40} {:<18} {applied}{missing}", s.name, s.checksum);
+        }
+        Ok(())
+    })
+    .await
+}
+
+pub async fn db_seed(root: &Path, name: Option<&str>) -> Result<()> {
+    let engine = engine();
+    let config = load_config(engine.as_ref(), root).await?;
+    let options = BuildOptions::from_config(&config);
+    let app = usai_runtime::build::build(engine.as_ref(), &options).await?;
+    let globs = db::seeder_globs(&app.definition, &config.seeders.value);
+    let seeders = db::discover_seeders(&config.root, &globs)?;
+    let selected: Vec<_> = seeders
+        .iter()
+        .filter(|s| name.is_none_or(|n| s.name == n))
+        .collect();
+    if selected.is_empty() {
+        anyhow::bail!(
+            "no seeder {}found; looked in:\n  {}",
+            name.map(|n| format!("named {n} ")).unwrap_or_default(),
+            globs
+                .iter()
+                .map(|(g, s)| format!("{g}  ({s})"))
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        );
+    }
+    for seeder in selected {
+        let out = build_seeder(engine.as_ref(), &options, &seeder.path, &seeder.name).await?;
+        let runtime = Runtime::new(
+            Arc::clone(&engine) as Arc<dyn usai_runtime::engine::Engine>,
+            RuntimeConfig {
+                cron_scheduler: false,
+                ..RuntimeConfig::default()
+            },
+        );
+        let revision = runtime.install(out.definition).await?;
+        runtime.activate(revision.id).await?;
+        let result = runtime
+            .run_command(&format!("seed:{}", seeder.name), vec![])
+            .await;
+        runtime.shutdown().await;
+        let result = result?;
+        for line in &result.logs {
+            eprintln!("[{}] {}", line.level, line.message);
+        }
+        match (&result.termination, &result.outcome) {
+            (Termination::Completed, Some(Ok(_))) => println!(
+                "seeded {} ({})",
+                seeder.name,
+                seeder
+                    .path
+                    .strip_prefix(&config.root)
+                    .unwrap_or(&seeder.path)
+                    .display()
+            ),
+            (Termination::Completed, Some(Err(e))) => {
+                anyhow::bail!("seeder {} failed: {}: {}", seeder.name, e.name, e.message)
+            }
+            (t, _) => anyhow::bail!("seeder {} ended without a result: {t:?}", seeder.name),
+        }
+    }
+    Ok(())
 }
