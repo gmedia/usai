@@ -272,3 +272,18 @@ and the tokio hand-off, not the watchdog.
 
 The eval floor (0.24 ms of 1.05) is now the largest fixed cost and the next
 candidate (#5), after a soak proves the new reset path stable.
+
+## 8. Soak (VM, 1 h, `usai bench -c 16 -d 3600`, hello, warmed artifact)
+
+```text
+requests      49 140 215 ok, 0 errors (13 650 req/s)
+latency ms    p50 1.11  p90 1.37  p99 2.03  max 32.28
+worlds        49 140 231 created, 0 live after drain, 0 live ops
+RSS           288 420 kB at start → 291 068 kB at the end (+0.9 %; +0.3 % after the first 10 minutes)
+throughput    12.4k–14.0k req/s per 10 s window, no trend
+```
+
+RSS sampled every 30 s from `/proc/<pid>/status` (359 samples), threads
+steady at 37–38. The bench client keeps a fixed-size histogram, so the
+process's memory is the runtime's. No fault, no leak, no drift on the new
+slot-reset path over 49 M worlds.

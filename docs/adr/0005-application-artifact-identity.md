@@ -21,6 +21,8 @@ content identity               hash over the above
 
 Engine-specific compiled representations (e.g. a Wasmtime-compiled module, a pre-initialized image) are **host cache**, keyed by artifact identity + engine identity, never part of the artifact's public identity.
 
+**Addendum (2026-09-18).** `usai build` writes the engine's serialized compiled form next to the artifact (`image.cwasm` + `image.json` with the engine name, the engine's fingerprint — Wasmtime build, guest core digest, host target — and the digests of the code it was built from and of the file itself). Installing the artifact loads it (~15 ms) instead of compiling (seconds on every core); any mismatch of code digest, file digest, engine or fingerprint makes it ignored with a log line, and the engine compiles from `app.js`. It is host cache in the sense of this ADR: the identity of the artifact is unchanged by its presence, and a deployment may delete it. It is native code, so the artifact directory's trust boundary applies to it (`docs/THREAT-MODEL.md`).
+
 ## Consequences
 
 - Easier: engine changes do not invalidate artifacts; `inspect`, Sakala, and docs read the artifact without an engine; content addressing and rollback key on Usai identity.

@@ -136,7 +136,7 @@ this file when an item moves.
 
 | Exercise | Status | Evidence |
 |---|---|---|
-| long-duration soak | ◐ | 1 h at c=16 on the research VM running at audit time (`docs/measurements/…` §8 when complete); RSS flat at 290 MB after 10 min |
+| long-duration soak | ✓ | 1 h at c=16 on the research VM: 49.1 M requests, 0 errors, 13.65k req/s, p99 2.03 ms, RSS +0.9 % (`docs/measurements/2026-09-18-execution-path-attribution.md` §8) |
 | sustained concurrency | ✓ | `usai bench` c=16/64 on the VM: 13.6k / 14.1k req/s, 0 errors |
 | overload/backpressure | ✓ | `budget_exhaustion_refuses_promptly_and_recovers`, `pool_exhaustion_is_resource_aware_backpressure`, `admission_is_refused_at_the_boundary_when_budget_is_exhausted` |
 | graceful shutdown | ✓ | `shutdown_drains_then_cancels_live_work_and_returns_to_baseline` (found and fixed during this audit: shutdown used to cancel every world before draining) |
@@ -176,6 +176,5 @@ this file when an item moves.
 
 ## Open items (in priority order)
 
-1. Soak result to record (§8 of the measurements doc) — running.
-2. First tagged release (`v0.0.1`) and npm token.
+1. First tagged release (`v0.0.1`) and npm token.
 3. Per-workload CPU fairness on top of the accounting.

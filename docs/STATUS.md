@@ -11,7 +11,7 @@ D0–D15                      FIRST IMPLEMENTATION PRESENT (each has acceptance 
 Product breadth             ESTABLISHED — stop broadening; depth now
 Milestone acceptance        AUDITED — docs/ACCEPTANCE-AUDIT.md: all D0–D15 items ✓ or ◐, no ✗
 Production substrate        Wasm image + pooling/COW (ADR-0016); attributed and fixed on the research VM
-                            (hello 1.01 ms p50, 13.6k req/s at c=16, 0 faults); 1 h soak in progress
+                            (hello 1.01 ms p50, 13.6k req/s at c=16, 0 faults); 1 h soak: 49 M requests, 0 errors, RSS +0.9 %
 Developer preview           READY TO TAG — release workflow in place, PG TLS done; artifact byte format not final
 Production ready            NO
 ```
@@ -71,6 +71,7 @@ bookkeeping, 0.02 create.
 - **`usai/test` harness** (`GOAL.md` §36): `testApp({ root })` spawns `usai run --port 0 --control 127.0.0.1:0 --announce`, drives HTTP, and invokes tasks / cron ticks / commands deterministically through the control surface's `POST /invoke`. Tested against `examples/hello` with the repository binary.
 - `usai test` runs the project's `node --test` files with `USAI_BIN` set to the running binary and the `usai` export condition (workspace checkouts need no `dist/`). OpenAPI describes streams (`x-usai-stream`) and sockets (`x-usai-socket`, 101/426) explicitly. WebSocket idle timeout (`HttpConfig.socket_idle_timeout`, 300 s default, close 1008; tested). ADR-0015 records the measured per-world numbers and states that its revisit trigger has fired.
 - Measured bundle composition (release): SDK only 1.0 ms/world, `zod/mini` 1.3 ms/world, `zod` 6.6 ms/world (`tests/profile_bundles.rs`). `zod/mini` lacks Standard JSON Schema, so before-world validation and OpenAPI degrade with it; documented in the guide.
+- **Precompiled image in the artifact** (`image.cwasm` + `image.json`, ADR-0005 addendum): install loads in ~15 ms instead of compiling for seconds on every core; ignored on any digest/engine/fingerprint mismatch; tested (match, corruption, other code).
 - **Tutorial application** `examples/todos` (modules, colocated migrations and seeders, typed env, HTTP CRUD with boundary contracts, dispatched task, cron, command; `usai/test` with `migrate: { seed: true }`); `docs/GUIDE.md` §14 walks it. Runs in CI against the service database.
 - **PostgreSQL TLS** (rustls, `sslmode` from the URL, roots = Mozilla + `tls.caFile`/`PGSSLROOTCERT`, always verified; refused at activation otherwise). Tested against an embedded TLS server with a private CA.
 - **`usai dev` reload acceptance** (`crates/usai-cli/tests/dev_reload.rs`): edit → new revision, no failed request during the swap; a broken edit keeps the previous revision serving. Control surface: rollback = reinstall + activate (tested).
@@ -101,14 +102,14 @@ hello bundle (765 KB, zod evaluated per world) 6.52 ms/world
 
 ## Next
 
-1. **Soak** (≥ 1 h at c=16 on the VM) on the new reset path, watching RSS and the gauge baseline; then propose the Wasmtime region-budget change upstream. Remaining lever: the eval-based invoke/outcome/pending floor (0.24 ms of 1.05) — a core ABI change, after the soak.
+1. Propose the Wasmtime region-budget change upstream (soak done: 49 M worlds, 0 errors, no drift). Remaining lever: the eval-based invoke/outcome/pending floor (0.24 ms of 1.05) — a core ABI change.
 2. Acceptance audit done (`docs/ACCEPTANCE-AUDIT.md`); remaining ◐: crash/restart recovery is the orchestrator's, tutorial application, first tag.
 3. Per-world CPU accounting (threat model "Open").
 5. D14 alpha checklist still open: publish `usai` / `create-usai` to npm and a `usai` binary (today the CLI is `cargo run -p usai-cli`); artifact byte format + signing (ADR-0005 follow-up).
 
 ## Known gaps / debt
 
-- Installing a revision compiles its image with Cranelift on every core (the Wizer output is a new module, so the compilation cache misses); on a two-core host that starves request serving for seconds. Candidate fix: ship the precompiled image (`.cwasm`, host- and Wasmtime-version-specific) next to the artifact so install is O(load), and/or bound the compiler's thread pool below the core count.
+- `usai dev` still compiles each rebuilt image with Cranelift on every core (seconds; on a two-core host requests stall meanwhile). Production installs load the precompiled `image.cwasm` from the artifact instead (~15 ms).
 
 - The Wasm substrate is the research representation (ADR-0016); its per-world cost is now attributed on the research VM but not yet reduced, and no soak has run. Do not cite EXP-012B numbers for this codebase. The native QuickJS engine stays as reference; do not use it for economics.
 - Boundary contracts are validated twice when a JSON Schema exists (host before the world, provider inside it to obtain parsed values). Acceptable for v0; `GOAL.md` §13 asks to collapse this later.
