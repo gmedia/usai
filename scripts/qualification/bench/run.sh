@@ -18,8 +18,8 @@ bench() {
   local name="$1" pid="$2"
   wait_up "$port" || { echo "$name did not start"; kill "$pid" 2>/dev/null; return; }
   for c in ${CONCS[*]}; do
-    local out; out=$(oha -z "${DUR}s" -c "$c" --no-tui -j "http://127.0.0.1:$port/hello/world")
-    local rps p50 p99; rps=$(echo "$out" | node -pe 'JSON.parse(require("fs").readFileSync(0)).summary.requestsPerSec.toFixed(0)'); p50=$(echo "$out" | node -pe '(JSON.parse(require("fs").readFileSync(0)).latencyPercentiles.p50*1000).toFixed(2)'); p99=$(echo "$out" | node -pe '(JSON.parse(require("fs").readFileSync(0)).latencyPercentiles.p99*1000).toFixed(2)')
+    local out; out=$(oha -z "${DUR}s" -c "$c" --no-tui --output-format json "http://127.0.0.1:$port/hello/world" 2>/dev/null)
+    local rps p50 p99; rps=$(echo "$out" | node -pe 'JSON.parse(require("fs").readFileSync(0)).summary.requestsPerSec.toFixed(0)'); p50=$(echo "$out" | node -pe 'JSON.parse(require("fs").readFileSync(0)).metrics.latency_ms.p50.toFixed(2)'); p99=$(echo "$out" | node -pe 'JSON.parse(require("fs").readFileSync(0)).metrics.latency_ms.p99.toFixed(2)')
     local rss; rss=$(ps -o rss= -p "$pid" | awk '{printf "%d", $1/1024}')
     echo "| $name | $c | $rps | $p50 | $p99 | $rss |"
   done
