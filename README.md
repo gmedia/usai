@@ -133,6 +133,10 @@ cargo run -p usai-cli -- --root examples/hello test      # tests through the rea
 cargo run -p usai-cli -- --root examples/hello inspect   # what the runtime understood
 ```
 
+A realistic application — modules, migrations, seeders, a dispatched task,
+a cron, a command, and tests — is `examples/todos`; `docs/GUIDE.md` §14
+walks through it.
+
 What exists today (each with acceptance tests): contract-aware HTTP with
 validation before a world exists, tasks with explicit ownership transfer,
 cron, commands, PostgreSQL with terminal-proof connection reuse, migrations

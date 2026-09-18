@@ -30,6 +30,8 @@ jobs:
           --health-retries 10
     env:
       USAI_TEST_DATABASE_URL: postgres://usai:usai@127.0.0.1:5432/usai
+      # examples/todos migrates and seeds this database in its test.
+      DATABASE_URL: postgres://usai:usai@127.0.0.1:5432/usai
     steps:
       # The hosted runner ships ~14 GB free; a wasmtime + QuickJS workspace
       # with clippy --all-targets and the test binaries needs more.

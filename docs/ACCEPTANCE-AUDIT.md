@@ -164,7 +164,7 @@ this file when an item moves.
 | API docs from runtime truth | ✓ | D8 |
 | lifecycle integration tests green | ✓ | 79 Rust acceptance tests + 7 TS, both engines |
 | observability sufficient to debug failures | ✓ | D12 |
-| docs let a new developer build a real application | ◐ | `docs/GUIDE.md` covers every workload kind; no end-to-end tutorial application beyond `examples/hello` and `examples/postgres` |
+| docs let a new developer build a real application | ✓ | `docs/GUIDE.md` §14 walks `examples/todos` (modules, migrations, seeders, typed env, HTTP CRUD, dispatched task, cron, command, tests); the example's test runs in CI |
 | published packages / binaries | ◐ | release workflow in place (`.github/workflows/release.yml`); no tag cut yet, npm token not configured |
 
 ## D15 — Control surface
@@ -178,5 +178,4 @@ this file when an item moves.
 
 1. Soak result to record (§8 of the measurements doc) — running.
 2. First tagged release (`v0.0.1`) and npm token.
-3. A tutorial application beyond the examples.
-4. Per-workload CPU fairness on top of the accounting.
+3. Per-workload CPU fairness on top of the accounting.

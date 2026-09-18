@@ -25,6 +25,10 @@ export interface TestAppOptions {
   startTimeoutMs?: number;
   /** Extra CLI arguments (e.g. ["--status"]). */
   args?: string[];
+  /** Run `usai db migrate` (and optionally `usai db seed`) against the
+   * configured database before starting — for tests on a throwaway
+   * database. Migrations are never run at startup by the runtime itself. */
+  migrate?: boolean | { seed?: boolean | string };
 }
 
 export interface TestResponse {
@@ -78,9 +82,25 @@ export class UsaiTestError extends Error {
   }
 }
 
+function runCli(binary: string, args: string[], env: Record<string, string>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(binary, args, { env: { ...process.env, ...env }, stdio: ["ignore", "ignore", "pipe"] });
+    let stderr = "";
+    child.stderr!.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+    child.once("error", (error) => reject(new UsaiTestError(`could not spawn ${binary}: ${error.message}`)));
+    child.once("exit", (code) => (code === 0 ? resolve() : reject(new UsaiTestError(`usai ${args.join(" ")} exited with code ${code}\n${stderr}`))));
+  });
+}
+
 export async function testApp(options: TestAppOptions = {}): Promise<TestApp> {
   const binary = options.binary ?? process.env["USAI_BIN"] ?? "usai";
   const root = options.root ?? process.cwd();
+  if (options.migrate) {
+    const env = { RUST_LOG: process.env["RUST_LOG"] ?? "warn", ...(options.env ?? {}) };
+    await runCli(binary, ["--root", root, "db", "migrate"], env);
+    const seed = typeof options.migrate === "object" ? options.migrate.seed : undefined;
+    if (seed) await runCli(binary, ["--root", root, "db", "seed", ...(typeof seed === "string" ? [seed] : [])], env);
+  }
   const token = `test-${Math.random().toString(36).slice(2)}`;
   const args = ["--root", root, "run", "--port", "0", "--control", "127.0.0.1:0", "--announce", ...(options.args ?? [])];
   const child: ChildProcess = spawn(binary, args, {

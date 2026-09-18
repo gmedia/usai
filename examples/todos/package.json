@@ -1,0 +1,19 @@
+{
+  "name": "@usai-examples/todos",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "A realistic Usai application: modules, migrations, seeders, typed env, tasks, cron, a command, and tests.",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "node --conditions=usai --test test/**/*.test.ts"
+  },
+  "dependencies": {
+    "usai": "workspace:*",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "@types/node": "^24.0.0"
+  }
+}

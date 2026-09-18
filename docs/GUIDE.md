@@ -231,8 +231,42 @@ test("users", async () => {
 });
 ```
 
-`testApp` needs the `usai` binary (`USAI_BIN` or on `PATH`) and the project's declared environment (pass `env: { DATABASE_URL }`). Lifecycle-specific tests are ordinary: mutate in one request, read in the next, and assert the mutation is gone.
+`testApp` needs the `usai` binary (`USAI_BIN` or on `PATH`) and the project's declared environment (pass `env: { DATABASE_URL }`). With `migrate: true` (or `migrate: { seed: true }`) it runs `usai db migrate` / `usai db seed` first — for a throwaway database. Lifecycle-specific tests are ordinary: mutate in one request, read in the next, and assert the mutation is gone.
 
-## 14. Performance note (v0)
+## 14. A realistic application: `examples/todos`
 
-Every world evaluates the application module afresh. The SDK itself costs ~1 ms per world on the current substrate; a full Zod build adds ~5 ms because Zod initializes per world (measured: `zod` 6.6 ms/world, `zod/mini` 1.3 ms/world, SDK only 1.0 ms/world, release build). `zod/mini` is much cheaper but does not expose JSON Schema, so contracts are validated inside the world and OpenAPI is degraded for them. Pick per endpoint; keep validation libraries small; this cost is the engine substrate's, not the lifecycle model's, and is the top item on the roadmap (`docs/STATUS.md`).
+Everything above in one project — read it in this order.
+
+```text
+examples/todos/
+  usai.config.ts                  app entry + where migrations/seeders live (globs)
+  src/app.ts                      defineApp: modules + typed env
+  src/resources.ts                one PostgreSQL pool, shared by both modules
+  src/todos/module.ts             HTTP CRUD, a cron, a command; dispatches a task
+  src/todos/migrations/001_todos.sql
+  src/todos/seeders/sample.ts
+  src/activity/module.ts          the task that records activity in its own world
+  src/activity/migrations/002_activity.sql
+  test/todos.test.ts              usai/test: migrate + seed, HTTP, task, cron, command
+```
+
+1. **Resources first** (`src/resources.ts`): `postgres("main", { pool: { max: 8 } })`. The pool is runtime-lifetime; nothing in a handler owns a connection for longer than one operation.
+2. **A module per concern** (`src/todos/module.ts`, `src/activity/module.ts`): `defineModule` groups workloads with the migrations and seeders that belong to them; `defineApp` composes modules and declares the env the whole application needs.
+3. **Contracts at the boundary**: `POST /todos` declares `body: NewTodo` and `response: { 201: Todo }`; `GET /todos` declares a `query` with coercion and defaults. Invalid input is refused before any world exists — `usai inspect` shows `validated before world creation`.
+4. **Work that outlives the request is transferred, not detached**: `create` calls `ctx.tasks.dispatch(record, …)` — the request answers now, the activity row is written by `record-activity` in a fresh world, and the runtime owns that hand-off. Forgetting the `await` on a bare promise instead would be reported as detached work.
+5. **Scheduled and operator work are finite worlds too**: `cron("purge-completed", …)` and `command("stats", …)` run in fresh worlds; `usai cron run purge-completed` and `usai app stats` invoke them without a server.
+6. **Migrations are a deploy step**: `usai db migrate` applies `001_todos.sql` then `002_activity.sql` (file-name order across modules) and records them; `usai db status` shows the ledger; the runtime never migrates at startup.
+7. **Tests drive the real binary** (`test/todos.test.ts`): `testApp({ migrate: { seed: true } })` migrates and seeds a throwaway database, then exercises HTTP, the task, the cron tick and the command through the control surface.
+
+```bash
+export DATABASE_URL=postgres://usai@localhost:5432/todos      # a database you can throw away
+usai db migrate --root examples/todos && usai db seed --root examples/todos
+usai dev --root examples/todos
+curl -X POST localhost:3000/todos -H 'content-type: application/json' -d '{"title":"read the guide"}'
+usai app stats --root examples/todos
+usai test --root examples/todos
+```
+
+## 15. Performance note (v0)
+
+Per-world cost on the Wasm substrate is flat with respect to application size: instantiating a world from the pre-initialized image costs ~0.02 ms whatever the bundle contains, and validators declared as contracts are prepared before the image is snapshotted, so a fresh world does not rebuild them. On the research VM a contract-validated hello request is ~1 ms p50 at c=1 and the runtime serves ~13k req/s at c=16 on 16 cores; the numbers and their attribution are in `docs/measurements/`. Handler code runs in an interpreter compiled by Cranelift: CPU-heavy loops are slower than on a JIT; keep hot loops small or move them to the database.
