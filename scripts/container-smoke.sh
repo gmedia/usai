@@ -26,7 +26,7 @@ node -e '
 const fs = require("fs"); const p = JSON.parse(fs.readFileSync("package.json", "utf8"));
 p.dependencies["@sakaladev/usai"] = "file:./sakaladev-usai.tgz";
 fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n");'
-sed -i 's#^COPY package.json #COPY sakaladev-usai.tgz package.json #' Dockerfile
+sed -i 's#^COPY --chown=node:node package.json #COPY --chown=node:node sakaladev-usai.tgz package.json #' Dockerfile
 # Point the template at the images under test.
 sed -i "s#^FROM sakaladev/usai:[^ ]*-dev AS build#FROM ${DEV_IMAGE} AS build#; s#^FROM sakaladev/usai:[^ ]*\$#FROM ${RUNTIME_IMAGE}#" Dockerfile
 sed -i "s#image: sakaladev/usai:.*-dev#image: ${DEV_IMAGE}#" compose.yaml
