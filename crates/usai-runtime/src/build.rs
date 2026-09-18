@@ -52,7 +52,7 @@ pub enum BuildError {
     #[error("node is required to build a Usai application but was not found on PATH")]
     NodeMissing,
     #[error(
-        "could not resolve the `usai` package from {root}: {detail}\n  hint: run `pnpm add usai` (or npm install) in the project"
+        "could not resolve the `@sakaladev/usai` package from {root}: {detail}\n  hint: run `pnpm add @sakaladev/usai` (or npm install) in the project"
     )]
     SdkMissing { root: PathBuf, detail: String },
     #[error("bundling failed:\n{0}")]

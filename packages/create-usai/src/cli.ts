@@ -32,7 +32,10 @@ export function scaffold(options: ScaffoldOptions): string {
   mkdirSync(target, { recursive: true });
   cpSync(source, target, { recursive: true });
   const name = basename(target).replace(/[^a-z0-9-]/gi, "-").toLowerCase();
-  const version = options.usaiVersion ?? (JSON.parse(readFileSync(resolve(here, "..", "package.json"), "utf8")) as { version: string }).version;
+  // The SDK version to depend on: `sdkVersion` in this package's manifest
+  // (kept equal to the published @sakaladev/usai by the release workflow),
+  // never this scaffolder's own version — the two have separate cadences.
+  const version = options.usaiVersion ?? (JSON.parse(readFileSync(resolve(here, "..", "package.json"), "utf8")) as { sdkVersion: string }).sdkVersion;
   walk(target, (file) => {
     const text = readFileSync(file, "utf8");
     const replaced = text.replaceAll("__NAME__", name).replaceAll("__USAI_VERSION__", `^${version}`);

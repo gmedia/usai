@@ -77,6 +77,8 @@ jobs:
         run: |
           v=$(node -p "require('./packages/usai/package.json').version")
           [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "packages/usai is $v, tag is ${GITHUB_REF_NAME}"; exit 1; }
+          s=$(node -p "require('./packages/create-usai/package.json').sdkVersion")
+          [ "$s" = "$v" ] || { echo "create-usai scaffolds @sakaladev/usai@$s but the SDK is $v; update sdkVersion"; exit 1; }
       - name: Publish
         if: env.NODE_AUTH_TOKEN != '' || vars.NPM_TRUSTED_PUBLISHING == 'true'
         env:

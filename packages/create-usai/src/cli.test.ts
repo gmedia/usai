@@ -27,4 +27,8 @@ test("runs as an executable through a symlink, the way package managers link bin
   const out = execFileSync(process.execPath, [link, "my-app"], { cwd: work, encoding: "utf8" });
   assert.match(out, /created/);
   assert.ok(existsSync(join(work, "my-app/src/app.ts")));
+  // The scaffold depends on the SDK's version, not the scaffolder's own.
+  const pkg = JSON.parse(readFileSync(join(work, "my-app/package.json"), "utf8"));
+  const own = JSON.parse(readFileSync(resolve(import.meta.dirname, "../package.json"), "utf8"));
+  assert.equal(pkg.dependencies["@sakaladev/usai"], `^${own.sdkVersion}`);
 });
