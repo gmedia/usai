@@ -57,7 +57,36 @@ jobs:
       - run: make setup
       - run: make fmt-check
       - run: make lint
+      - name: Previous release binary (upgrade/downgrade matrix)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/previous && cd /tmp/previous
+          if gh release download --repo "$GITHUB_REPOSITORY" --pattern 'usai-*-x86_64-unknown-linux-gnu.tar.gz' 2>/dev/null; then
+            tar xzf usai-*.tar.gz
+            echo "USAI_PREVIOUS_BIN=$(find /tmp/previous -type f -name usai | head -1)" >> "$GITHUB_ENV"
+            /tmp/previous/*/usai --version
+          else
+            echo "no previous release; the matrix test skips"
+          fi
       - run: make test
+
+  supply-chain:
+    # Known-vulnerable dependencies fail the build; Rust via RustSec, npm via
+    # the registry's advisories (production dependencies only).
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.3.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: pnpm audit --prod --audit-level high
 
   container:
     # The two images build and the scaffold's Docker paths work — before a

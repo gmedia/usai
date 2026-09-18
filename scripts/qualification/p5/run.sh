@@ -78,9 +78,9 @@ scenario() {
     baseline)            : ;;
     pg-kill)             docker compose kill -s SIGKILL postgres; sleep 10; docker compose start postgres ;;
     pg-restart)          docker compose restart postgres ;;
-    network-partition)   docker network disconnect usai-p5_default usai-p5-postgres-1; sleep 10; docker network connect usai-p5_default usai-p5-postgres-1 ;;
-    app-sigterm)         docker compose kill -s SIGTERM app; sleep 3; docker compose start app ;;
-    app-sigkill)         docker compose kill -s SIGKILL app; sleep 1; docker compose start app ;;
+    network-partition)   docker network disconnect usai-p5_default usai-p5-postgres-1; sleep 10; docker network connect --alias postgres usai-p5_default usai-p5-postgres-1 ;;
+    app-sigterm)         docker compose kill -s SIGTERM app ;;   # restart: unless-stopped brings it back after the drain
+    app-sigkill)         docker compose kill -s SIGKILL app ;;
     app-restart)         docker compose restart app ;;
     bad-deploy)          # install an artifact whose manifest is broken through the control surface
                          docker compose exec -T app sh -c 'mkdir -p /tmp/bad && cp -r /app/.usai/build/. /tmp/bad/ && sed -i "s/\"manifestVersion\": 1/\"manifestVersion\": 99/" /tmp/bad/manifest.json'

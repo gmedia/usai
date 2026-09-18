@@ -48,9 +48,24 @@ impl OpOutcome {
     }
 
     pub fn from_resource_error(error: &ResourceError) -> Self {
+        // A dependency that is full, gone or unreachable is the caller's cue
+        // to retry later (503), not a bug in the handler (500).
         let status = match error {
             ResourceError::Exhausted { .. } => 503,
             ResourceError::Cancelled => 499,
+            ResourceError::Operation { code, .. }
+                if matches!(
+                    code.as_str(),
+                    "pool_error"
+                        | "connection_closed"
+                        | "cancel_unconfirmed"
+                        | "http_connect"
+                        | "http_timeout"
+                ) || code.starts_with("sql_08")
+                    || matches!(code.as_str(), "sql_57p01" | "sql_57p02" | "sql_57p03") =>
+            {
+                503
+            }
             _ => 500,
         };
         Self::err(error.code(), status, error.to_string())
