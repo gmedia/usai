@@ -1,0 +1,11 @@
+--- a/src/runtime/vm/sys/unix/pagemap.rs
++++ b/src/runtime/vm/sys/unix/pagemap.rs
+@@ -279,7 +279,7 @@
+     // For now use a fixed set of regions on the stack, but in the future this
+     // may want to use a dynamically allocated vector for more regions for
+     // example.
+-    const MAX_REGIONS: usize = 32;
++    const MAX_REGIONS: usize = 1024;
+     let mut storage = [MaybeUninit::uninit(); MAX_REGIONS];
+ 
+     let scan_arg = PageMapScanBuilder::new(ptr::slice_from_raw_parts(ptr, len.byte_count()))

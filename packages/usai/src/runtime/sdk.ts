@@ -3,6 +3,7 @@
 // invokes the handler, and encodes the outcome for the host.
 
 import { type AppDeclaration, type Workload, flatten } from "../declarations.ts";
+import { prepareSchema } from "./prepare.ts";
 import { UsaiError, isUsaiError } from "../errors.ts";
 import { isHttpResponse, isRawResponse } from "../http.ts";
 import { type AnySchema, validateWith } from "../schema.ts";
@@ -299,8 +300,24 @@ export async function invoke(app: AppDeclaration, index: number, inputJson: stri
   }
 }
 
+/** Prepares every declared schema at definition time so that lazily built
+ * validator state (zod 4 computes schema internals on first use) lands in
+ * the pre-initialized image instead of being rebuilt by every world.
+ * Structural only: no handler, transform, refinement or default runs.
+ * Measured: the first zod parse in a fresh world cost ~1.6 ms, later ones
+ * ~0.03 ms. Returns the number of schema nodes touched. */
+export function warm(app: AppDeclaration): number {
+  let touched = 0;
+  for (const { workload } of flatten(app).workloads) {
+    const c = workload.contracts;
+    for (const s of [c.params, c.query, c.headers, c.body, c.input, c.message]) if (s) touched += prepareSchema(s);
+    for (const s of Object.values(c.response ?? {})) if (s) touched += prepareSchema(s);
+  }
+  return touched;
+}
+
 /** Installs the SDK on the guest global. Idempotent; the last SDK evaluated
  * in a bundle wins, which is the one the application imported. */
 export function install(): void {
-  globalThis.__usai_sdk = { invoke, describe };
+  globalThis.__usai_sdk = { invoke, describe, warm };
 }

@@ -62,7 +62,10 @@ pub struct WasmConfig {
     /// Per-world linear memory cap.
     pub max_memory_bytes: usize,
     /// Bytes of a recycled slot's memory kept resident instead of madvised
-    /// away (the research's measured sweet spot is 2 MiB).
+    /// away. With the pagemap scan this is the *budget* of dirty pages reset
+    /// in place (the rest is decommitted and refaults); it must cover a
+    /// request's heap growth, which is why it is generous. See
+    /// `vendor/README.md` for the region-count patch that makes this work.
     pub linear_memory_keep_resident: usize,
     pub table_keep_resident: usize,
     /// Use the kernel's PAGEMAP_SCAN to reset only dirtied pages, when available.
@@ -74,7 +77,7 @@ impl Default for WasmConfig {
         Self {
             capacity: 256,
             max_memory_bytes: 64 * 1024 * 1024,
-            linear_memory_keep_resident: 2 * 1024 * 1024,
+            linear_memory_keep_resident: 8 * 1024 * 1024,
             table_keep_resident: 64 * 1024,
             pagemap_scan: true,
         }
@@ -509,6 +512,18 @@ impl WasmEngine {
                 EngineError::Compile(format!("application module evaluation failed: {e}"))
             })?;
         guest.run_jobs(&mut store).await?;
+        // Warm the validators so their lazily built state is in the image
+        // (every world would otherwise rebuild it; measured 1.6 ms for zod).
+        let warmed = guest
+            .eval(
+                &mut store,
+                "(function () { const sdk = globalThis.__usai_sdk; const app = globalThis.__usai_app ?? (typeof __usai_app_ns === 'object' ? __usai_app_ns.default : undefined); return String(sdk && typeof sdk.warm === 'function' && app ? sdk.warm(app) : 0); })()",
+                "usai:warm",
+            )
+            .await
+            .map_err(|e| EngineError::Compile(format!("validator warm-up failed: {e}")))?;
+        guest.run_jobs(&mut store).await?;
+        tracing::debug!(parses = warmed, "validators warmed before snapshot");
         let pending = guest
             .call1::<(), i32>(&mut store, "qjs_usai_pending_op_count", ())
             .await?;

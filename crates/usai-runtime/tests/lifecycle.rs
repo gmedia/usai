@@ -40,6 +40,25 @@ const workloads = {
     try { await sleep(10000); } catch (e) { return { caught: e.usai.code, reason }; }
     return { caught: null };
   },
+  "task:timer-zero-order": async () => {
+    // A zero-delay timer is asynchronous ("later"), runs after microtasks
+    // queued in the same turn, and keeps its order against longer timers.
+    const order = [];
+    const done = new Promise((resolve) => {
+      setTimeout(() => { order.push("t5"); resolve(); }, 5);
+      setTimeout(() => order.push("t0"), 0);
+      Promise.resolve().then(() => order.push("micro"));
+      order.push("sync");
+    });
+    await done;
+    return { order };
+  },
+  "task:timer-zero-cancelled": async () => {
+    // Cancellation reaches a zero-delay timer that is still outstanding.
+    let reason = null;
+    __usai.onCancel((r) => { reason = r; });
+    try { for (;;) await sleep(0); } catch (e) { return { caught: e.usai.code, reason }; }
+  },
 };
 const ids = Object.keys(workloads);
 globalThis.__usai_sdk = {
@@ -80,6 +99,8 @@ fn workload_ids() -> Vec<&'static str> {
         "task:awaited",
         "task:unknown-op",
         "task:cancel-aware",
+        "task:timer-zero-order",
+        "task:timer-zero-cancelled",
     ]
 }
 
@@ -177,6 +198,47 @@ async fn awaited_timer_is_owned_and_delivered() {
     let r = rt.invoke("task:awaited", json!(null)).await.unwrap();
     assert_eq!(value(&r)["hit"], true);
     assert!(r.violations.is_empty());
+    assert_baseline(&rt);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn zero_delay_timer_is_asynchronous_ordered_and_cancellable() {
+    let rt = runtime().await;
+    let r = rt
+        .invoke("task:timer-zero-order", json!(null))
+        .await
+        .unwrap();
+    assert_eq!(
+        r.outcome.as_ref().unwrap().as_ref().unwrap()["order"],
+        json!(["sync", "micro", "t0", "t5"]),
+        "{:?} {:?}",
+        r.termination,
+        r.outcome
+    );
+    assert!(r.violations.is_empty());
+    let revision = rt.active().unwrap();
+    let admission = rt.admit(&revision, "task:timer-zero-cancelled").unwrap();
+    let cancel = CancellationToken::new();
+    let c = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        c.cancel();
+    });
+    let r = tokio::time::timeout(
+        Duration::from_secs(2),
+        rt.execute(admission, json!(null), cancel),
+    )
+    .await
+    .expect("a cancelled zero-delay loop ends promptly")
+    .unwrap();
+    assert!(
+        matches!(r.termination, Termination::Cancelled { .. }),
+        "{:?}",
+        r.termination
+    );
+    if let Some(Ok(v)) = &r.outcome {
+        assert_eq!(v["caught"], "cancelled");
+    }
     assert_baseline(&rt);
 }
 

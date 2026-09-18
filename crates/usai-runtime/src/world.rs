@@ -200,6 +200,7 @@ pub struct WorldDriver {
     dropped: u32,
     finished: bool,
     instantiate: Duration,
+    watch: Arc<WatchSlot>,
 }
 
 impl WorldDriver {
@@ -227,6 +228,7 @@ impl WorldDriver {
         let bindings: Arc<dyn HostBindings> = Arc::clone(&shared) as Arc<dyn HostBindings>;
         let t_inst = std::time::Instant::now();
         let instance = engine.instantiate(&spec.compiled, bindings).await?;
+        let watch = WatchSlot::register(instance.interrupter());
         tracing::debug!(
             engine_instantiate_ms = t_inst.elapsed().as_secs_f64() * 1000.0,
             "driver create"
@@ -254,6 +256,7 @@ impl WorldDriver {
             dropped: 0,
             finished: false,
             instantiate: t_inst.elapsed(),
+            watch,
         })
     }
 
@@ -269,7 +272,7 @@ impl WorldDriver {
 
     /// Arms the CPU-slice watchdog for one guest entry.
     fn watchdog(&self) -> Watchdog {
-        Watchdog::arm(self.instance.interrupter(), self.cpu_slice)
+        Watchdog::arm(&self.watch, self.cpu_slice)
     }
 
     /// The one routing gate. Identity first, then ledger deliverability,
@@ -483,79 +486,56 @@ impl WorldDriver {
 /// Interrupts the guest if one synchronous run exceeds its slice.
 ///
 /// Guest execution blocks the thread it runs on, so the watchdog cannot be a
-/// task on the same executor. One persistent thread serves every world; its
-/// queue is bounded by (arm rate x slice) because disarmed entries are
-/// discarded as their deadlines pass.
+/// task on the same executor. One persistent thread serves every world by
+/// ticking every few milliseconds over the registered slots; arming and
+/// disarming are atomic stores (no lock, no wake-up, no context switch on
+/// the request path — the previous heap + condvar design cost ~4 context
+/// switches per request). Precision is the tick, which is far below any
+/// sensible slice.
 struct Watchdog {
-    armed: Arc<AtomicBool>,
-    flag: Arc<AtomicBool>,
+    slot: Arc<WatchSlot>,
     slice: Duration,
 }
 
-struct WatchdogEntry {
-    deadline: Instant,
-    armed: Arc<AtomicBool>,
+/// One world's watch: the deadline the guest must return by (0 = disarmed)
+/// as nanoseconds since the service's epoch, and the engine's interrupt flag.
+struct WatchSlot {
+    deadline_ns: std::sync::atomic::AtomicU64,
     flag: Arc<AtomicBool>,
 }
 
-impl PartialEq for WatchdogEntry {
-    fn eq(&self, other: &Self) -> bool {
-        self.deadline == other.deadline
-    }
-}
-impl Eq for WatchdogEntry {}
-impl PartialOrd for WatchdogEntry {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-impl Ord for WatchdogEntry {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // BinaryHeap is a max-heap; the earliest deadline must come out first.
-        other.deadline.cmp(&self.deadline)
-    }
-}
+const WATCHDOG_TICK: Duration = Duration::from_millis(5);
 
 struct WatchdogService {
-    queue: Mutex<std::collections::BinaryHeap<WatchdogEntry>>,
-    wake: std::sync::Condvar,
+    epoch: Instant,
+    slots: Mutex<Vec<std::sync::Weak<WatchSlot>>>,
 }
 
 fn watchdog_service() -> &'static WatchdogService {
     static SERVICE: std::sync::OnceLock<&'static WatchdogService> = std::sync::OnceLock::new();
     SERVICE.get_or_init(|| {
         let service: &'static WatchdogService = Box::leak(Box::new(WatchdogService {
-            queue: Mutex::new(std::collections::BinaryHeap::new()),
-            wake: std::sync::Condvar::new(),
+            epoch: Instant::now(),
+            slots: Mutex::new(Vec::new()),
         }));
         std::thread::Builder::new()
             .name("usai-watchdog".into())
             .spawn(move || {
-                let mut queue = service.queue.lock().expect("watchdog poisoned");
                 loop {
-                    let now = Instant::now();
-                    while let Some(next) = queue.peek() {
-                        if next.deadline > now {
-                            break;
+                    std::thread::sleep(WATCHDOG_TICK);
+                    let now = service.epoch.elapsed().as_nanos() as u64;
+                    let mut slots = service.slots.lock().expect("watchdog poisoned");
+                    // Drop slots whose world is gone; fire the ones past due.
+                    slots.retain(|weak| match weak.upgrade() {
+                        None => false,
+                        Some(slot) => {
+                            let deadline = slot.deadline_ns.load(Ordering::Acquire);
+                            if deadline != 0 && now >= deadline {
+                                slot.flag.store(true, Ordering::SeqCst);
+                            }
+                            true
                         }
-                        let entry = queue.pop().expect("peeked");
-                        if entry.armed.load(Ordering::SeqCst) {
-                            entry.flag.store(true, Ordering::SeqCst);
-                        }
-                    }
-                    let wait = queue
-                        .peek()
-                        .map(|e| e.deadline.saturating_duration_since(now));
-                    queue = match wait {
-                        Some(wait) => {
-                            service
-                                .wake
-                                .wait_timeout(queue, wait)
-                                .expect("watchdog poisoned")
-                                .0
-                        }
-                        None => service.wake.wait(queue).expect("watchdog poisoned"),
-                    };
+                    });
                 }
             })
             .expect("watchdog thread");
@@ -563,27 +543,37 @@ fn watchdog_service() -> &'static WatchdogService {
     })
 }
 
-impl Watchdog {
-    fn arm(flag: Arc<AtomicBool>, slice: Duration) -> Self {
-        flag.store(false, Ordering::SeqCst);
-        let armed = Arc::new(AtomicBool::new(true));
+impl WatchSlot {
+    /// Registers a slot for a world (one lock per world, not per guest call).
+    fn register(flag: Arc<AtomicBool>) -> Arc<Self> {
+        let slot = Arc::new(Self {
+            deadline_ns: std::sync::atomic::AtomicU64::new(0),
+            flag,
+        });
         let service = watchdog_service();
         service
-            .queue
+            .slots
             .lock()
             .expect("watchdog poisoned")
-            .push(WatchdogEntry {
-                deadline: Instant::now() + slice,
-                armed: Arc::clone(&armed),
-                flag: Arc::clone(&flag),
-            });
-        service.wake.notify_one();
-        Self { armed, flag, slice }
+            .push(Arc::downgrade(&slot));
+        slot
+    }
+}
+
+impl Watchdog {
+    fn arm(slot: &Arc<WatchSlot>, slice: Duration) -> Self {
+        slot.flag.store(false, Ordering::SeqCst);
+        let deadline = (watchdog_service().epoch.elapsed() + slice).as_nanos() as u64;
+        slot.deadline_ns.store(deadline.max(1), Ordering::Release);
+        Self {
+            slot: Arc::clone(slot),
+            slice,
+        }
     }
 
     fn finish<T>(self, result: Result<T, EngineError>) -> Result<T, EngineError> {
-        self.armed.store(false, Ordering::SeqCst);
-        if self.flag.load(Ordering::SeqCst) {
+        self.slot.deadline_ns.store(0, Ordering::Release);
+        if self.slot.flag.load(Ordering::SeqCst) {
             return Err(EngineError::Guest(format!(
                 "guest exceeded the synchronous CPU slice of {:?}",
                 self.slice
@@ -595,7 +585,7 @@ impl Watchdog {
 
 impl Drop for Watchdog {
     fn drop(&mut self) {
-        self.armed.store(false, Ordering::SeqCst);
+        self.slot.deadline_ns.store(0, Ordering::Release);
     }
 }
 
@@ -612,7 +602,8 @@ mod tests {
     #[test]
     fn watchdog_sets_the_flag_after_the_slice() {
         let flag = Arc::new(AtomicBool::new(false));
-        let w = Watchdog::arm(Arc::clone(&flag), Duration::from_millis(50));
+        let slot = WatchSlot::register(Arc::clone(&flag));
+        let w = Watchdog::arm(&slot, Duration::from_millis(50));
         std::thread::sleep(Duration::from_millis(120));
         assert!(flag.load(Ordering::SeqCst));
         assert!(w.finish(Ok(())).is_err());
@@ -621,9 +612,21 @@ mod tests {
     #[test]
     fn disarmed_watchdog_never_fires() {
         let flag = Arc::new(AtomicBool::new(false));
-        let w = Watchdog::arm(Arc::clone(&flag), Duration::from_millis(30));
+        let slot = WatchSlot::register(Arc::clone(&flag));
+        let w = Watchdog::arm(&slot, Duration::from_millis(30));
         drop(w);
         std::thread::sleep(Duration::from_millis(80));
         assert!(!flag.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn re_armed_watchdog_measures_each_run_separately() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let slot = WatchSlot::register(Arc::clone(&flag));
+        for _ in 0..5 {
+            let w = Watchdog::arm(&slot, Duration::from_millis(40));
+            std::thread::sleep(Duration::from_millis(15));
+            assert!(w.finish(Ok(())).is_ok());
+        }
     }
 }

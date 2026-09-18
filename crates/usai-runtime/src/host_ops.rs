@@ -134,6 +134,18 @@ pub fn start_builtin(kind: &str, ctx: OpContext, payload: String) -> Result<OpFu
 
 async fn timer(ctx: OpContext, payload: String) -> OpOutcome {
     let ms: u64 = payload.trim().parse().unwrap_or(0);
+    if ms == 0 {
+        // A zero-delay timer means "later, not now": it stays asynchronous
+        // (the completion is delivered on a later turn, after the current
+        // synchronous run and its microtasks) but does not wait for the
+        // timer wheel's millisecond tick, which measured as 1.0–1.3 ms per
+        // `setTimeout(fn, 0)` on both engines.
+        if ctx.cancel.is_cancelled() {
+            return OpOutcome::err("cancelled", 499, "timer cancelled with its world");
+        }
+        tokio::task::yield_now().await;
+        return OpOutcome::ok(&serde_json::Value::Null);
+    }
     tokio::select! {
         _ = tokio::time::sleep(Duration::from_millis(ms)) => OpOutcome::ok(&serde_json::Value::Null),
         _ = ctx.cancel.cancelled() => OpOutcome::err("cancelled", 499, "timer cancelled with its world"),

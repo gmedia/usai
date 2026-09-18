@@ -63,3 +63,6 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.rquickjs-sys]
 opt-level = 3
+
+[patch.crates-io]
+wasmtime = { path = "vendor/wasmtime" }
