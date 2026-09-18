@@ -189,7 +189,10 @@ async fn revision_replacement_under_load_loses_no_request() {
                         );
                         bad += 1;
                     }
-                    Err(_) => bad += 1,
+                    Err(e) => {
+                        eprintln!("request error during replacement: {e}");
+                        bad += 1;
+                    }
                 }
             }
             (ok, bad)
