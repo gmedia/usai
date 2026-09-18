@@ -175,7 +175,7 @@ this file when an item moves.
 | dev image + `docker compose up` path | ✓ | same script (compose path serves; installs on first start) |
 | multi-arch, one tag = binaries + npm + images | ✓ | `.github/workflows/release.yml` (`docker` job, linux/amd64+arm64, Docker Hub + GHCR) |
 | artifact ↔ runtime compatibility refused before serving | ✓ | `crates/usai-cli/tests/artifact_compat.rs`; `malformed_artifacts_are_refused_with_clear_errors` |
-| npm-assisted binary (`pnpm usai …` at the SDK's version, verified fetch, PATH/USAI_BINARY first) | ✓ | `packages/usai/src/bin.test.ts` |
+| npm-assisted binary (`pnpm usai …` at the SDK's version, verified fetch, PATH/USAI_BIN first) | ✓ | `packages/usai/src/bin.test.ts` |
 
 ## D15 — Control surface
 

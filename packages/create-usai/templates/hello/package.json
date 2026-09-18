@@ -7,13 +7,14 @@
     "dev": "usai dev",
     "build": "usai build",
     "test": "usai test",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit"
   },
   "dependencies": {
     "@sakaladev/usai": "__USAI_VERSION__",
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@types/node": "^24.0.0",
     "typescript": "^5.9.0"
   }
 }

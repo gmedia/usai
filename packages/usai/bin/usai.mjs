@@ -5,7 +5,7 @@
 //   pnpm usai dev        (or `pnpm dev` through the scaffold's scripts)
 //
 // Resolution order, so the native binary stays first-class:
-//   1. $USAI_BINARY                        — an explicit binary, used as is
+//   1. $USAI_BIN                        — an explicit binary, used as is
 //   2. `usai` on PATH at the same version  — already installed, nothing fetched
 //   3. ~/.cache/usai/<version>/usai        — fetched once, SHA-256 verified
 //      ($USAI_CACHE_DIR / $XDG_CACHE_HOME respected; $USAI_RELEASE_BASE for a mirror)
@@ -43,11 +43,29 @@ export function releaseUrl(name, env = process.env) {
   return `${base.replace(/\/$/, "")}/${name}`;
 }
 
-/** `usai` on PATH when it reports exactly this version. */
-function onPath() {
-  const r = spawnSync("usai", ["--version"], { encoding: "utf8" });
-  if (r.status !== 0) return null;
-  return r.stdout.trim() === `usai ${version}` ? "usai" : null;
+/**
+ * A native `usai` on PATH that reports exactly this version. Under `pnpm usai`
+ * PATH starts with node_modules/.bin, where `usai` is this wrapper: shims that
+ * live under node_modules are skipped, and a probe carries USAI_PROBE so a
+ * wrapper reached anyway answers nothing instead of probing again.
+ */
+function onPath(env = process.env) {
+  if (env.USAI_PROBE) return null;
+  const self = realpathSync(fileURLToPath(import.meta.url));
+  for (const dir of (env.PATH ?? "").split(":")) {
+    if (!dir) continue;
+    const candidate = join(dir, "usai");
+    let real;
+    try {
+      real = realpathSync(candidate);
+    } catch {
+      continue;
+    }
+    if (real === self || real.split("/").includes("node_modules")) continue;
+    const r = spawnSync(candidate, ["--version"], { encoding: "utf8", env: { ...env, USAI_PROBE: "1" } });
+    if (r.status === 0 && r.stdout.trim() === `usai ${version}`) return candidate;
+  }
+  return null;
 }
 
 async function fetchBytes(url) {
@@ -80,14 +98,15 @@ async function download(triple) {
 }
 
 export async function binary() {
-  if (process.env.USAI_BINARY) return process.env.USAI_BINARY;
+  if (process.env.USAI_BIN) return process.env.USAI_BIN;
+  if (process.env.USAI_PROBE) return null;
   const found = onPath();
   if (found) return found;
   const triple = target();
   if (!triple) {
     throw new Error(
       `no prebuilt usai binary for ${process.platform}-${process.arch}. ` +
-        `Build one with \`cargo build --release -p usai-cli\` and set USAI_BINARY, ` +
+        `Build one with \`cargo build --release -p usai-cli\` and set USAI_BIN, ` +
         `or use the Docker path (docker compose up). See https://github.com/${REPO}#install.`,
     );
   }
@@ -96,6 +115,10 @@ export async function binary() {
 
 async function main() {
   const bin = await binary();
+  if (bin === null) {
+    // Probed by another wrapper: not a native binary, so say nothing.
+    process.exit(1);
+  }
   const child = spawn(bin, process.argv.slice(2), { stdio: "inherit" });
   // Ctrl-C reaches the child through the process group already; forwarding
   // it too would be the "second signal" that forces the exit. SIGTERM/SIGHUP

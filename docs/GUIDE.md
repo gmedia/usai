@@ -26,10 +26,10 @@ docker compose up
 docker build -t my-app . && docker run --rm -p 3000:3000 my-app
 ```
 
-The npm wrapper honours `USAI_BINARY` (use exactly this binary), `USAI_CACHE_DIR`
+The npm wrapper honours `USAI_BIN` (use exactly this binary), `USAI_CACHE_DIR`
 / `XDG_CACHE_HOME` (where fetched binaries live) and `USAI_RELEASE_BASE` (a
 mirror of the release assets, for air-gapped or proxied networks). Other
-platforms: build with `cargo build --release -p usai-cli` and set `USAI_BINARY`,
+platforms: build with `cargo build --release -p usai-cli` and set `USAI_BIN`,
 or use Docker.
 
 Images: `sakaladev/usai:X.Y.Z` (runtime: the binary, CA roots, user `usai`

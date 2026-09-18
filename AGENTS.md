@@ -16,7 +16,7 @@ Read order for a new session:
 
 `gmedia/usai` is the **production** implementation of Usai: a lifecycle-native backend runtime. Persistent Rust host, immutable application definition, fresh execution world per unit of work, TypeScript developer surface.
 
-It is **not** the research repository. The research repository is `HasanH47/usai` (local checkout: `~/Projects/pribadi/experiments/usai/`). That repo proved the model through sealed, one-shot experiments and remains the source of evidence. This repo inherits its **contracts and lessons, not its code, structure, or ceremony**. See `docs/RESEARCH-REFERENCE.md` for the map.
+It is **not** the research repository. The research repository is **private** (maintainers only; never name or link it in public-facing text — say "the research programme"). That repo proved the model through sealed, one-shot experiments and remains the source of evidence. This repo inherits its **contracts and lessons, not its code, structure, or ceremony**. See `docs/RESEARCH-REFERENCE.md` for the map.
 
 Hard rules about the boundary:
 

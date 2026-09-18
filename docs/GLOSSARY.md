@@ -52,7 +52,7 @@ Shared vocabulary for this repository. Production terms first; research-era term
 
 **Sakala** — a separate open-source deployment/orchestration project in the same ecosystem. Future first-class integration; never a runtime dependency.
 
-## Research-era terms (you will meet these in `HasanH47/usai`)
+## Research-era terms (you will meet these in the private research repository)
 
 **EXP-NNN** — a preregistered experiment. `*-RESULT.md` is sealed and immutable. `*-FREEZE.json` binds the exact source/binaries for a one-shot attempt.
 

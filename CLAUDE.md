@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The **production** repository for Usai (`gmedia/usai`): a lifecycle-native backend runtime — persistent Rust host, immutable application definition, fresh execution world per unit of work, TypeScript developer surface. Apache-2.0.
 
-The model was proven in the separate research repository `HasanH47/usai` (local checkout `~/Projects/pribadi/experiments/usai/`). This repo inherits its contracts and lessons, **not** its code, structure, or research ceremony (ADR-0001). `docs/RESEARCH-REFERENCE.md` maps every contract to its evidence and tells you which research files to read.
+The model was proven in a separate, **private** research repository (maintainers only; a local checkout may exist — ask the user for its path; never name or link it in public-facing text). This repo inherits its contracts and lessons, **not** its code, structure, or research ceremony (ADR-0001). `docs/RESEARCH-REFERENCE.md` maps every contract to its evidence and tells you which research files to read.
 
 Session start: `docs/STATUS.md` (where we are) → the `GOAL.md` section relevant to the task → `docs/LIFECYCLE-CONTRACTS.md` (what code must uphold).
 

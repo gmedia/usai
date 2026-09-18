@@ -6,7 +6,7 @@
 
 ## Context
 
-`HasanH47/usai` holds ~35 experiment crates, a Makefile of ~100 experiment targets, benchmark controllers, judges, freeze/seal machinery, and sealed evidence. Its code was written to make one-shot measurements trustworthy: source-scanning guard tests, pinned SHA-256 constants, evidence builders, registered-string classifications. That structure is correct for research and wrong for a maintainable, developer-facing runtime.
+The research repository (private) holds ~35 experiment crates, a Makefile of ~100 experiment targets, benchmark controllers, judges, freeze/seal machinery, and sealed evidence. Its code was written to make one-shot measurements trustworthy: source-scanning guard tests, pinned SHA-256 constants, evidence builders, registered-string classifications. That structure is correct for research and wrong for a maintainable, developer-facing runtime.
 
 EXP-012B established that the lifecycle model is worth building (`docs/RESEARCH-REFERENCE.md`). It did not establish that the R3 candidate crate is good product architecture.
 

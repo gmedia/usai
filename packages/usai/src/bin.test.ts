@@ -40,15 +40,15 @@ test("cache dir and release URL follow the environment", () => {
   assert.equal(releaseUrl("a.tar.gz", { USAI_RELEASE_BASE: "http://mirror/" }), "http://mirror/a.tar.gz");
 });
 
-test("USAI_BINARY is used as is; a same-version usai on PATH wins over a fetch", () => {
+test("USAI_BIN is used as is; a same-version usai on PATH wins over a fetch", () => {
   const dir = mkdtempSync(join(tmpdir(), "usai-bin-"));
   const fake = join(dir, "usai");
   writeFileSync(fake, `#!/bin/sh\nif [ "$1" = "--version" ]; then echo "usai ${version}"; else echo "args: $@"; fi\n`);
   chmodSync(fake, 0o755);
-  const explicit = execFileSync(process.execPath, [wrapper, "dev", "--port", "1"], { env: { ...process.env, USAI_BINARY: fake }, encoding: "utf8" });
+  const explicit = execFileSync(process.execPath, [wrapper, "dev", "--port", "1"], { env: { ...process.env, USAI_BIN: fake }, encoding: "utf8" });
   assert.match(explicit, /args: dev --port 1/);
   const onPath = execFileSync(process.execPath, [wrapper, "--version"], {
-    env: { ...process.env, USAI_BINARY: "", PATH: `${dir}:${process.env["PATH"]}`, USAI_CACHE_DIR: join(dir, "never") },
+    env: { ...process.env, USAI_BIN: "", PATH: `${dir}:${process.env["PATH"]}`, USAI_CACHE_DIR: join(dir, "never") },
     encoding: "utf8",
   });
   assert.match(onPath, new RegExp(`usai ${version.replaceAll(".", "\\.")}`));
@@ -73,7 +73,7 @@ test("first use fetches the release tarball, verifies its SHA-256, caches the bi
   });
   await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
   const port = (server.address() as { port: number }).port;
-  const env = { ...process.env, USAI_BINARY: "", PATH: "/usr/bin:/bin", USAI_CACHE_DIR: join(dir, "cache"), USAI_RELEASE_BASE: `http://127.0.0.1:${port}` };
+  const env = { ...process.env, USAI_BIN: "", PATH: "/usr/bin:/bin", USAI_CACHE_DIR: join(dir, "cache"), USAI_RELEASE_BASE: `http://127.0.0.1:${port}` };
   try {
     corrupt = true;
     const refused = await run(env);
@@ -92,4 +92,21 @@ test("first use fetches the release tarball, verifies its SHA-256, caches the bi
     server.closeAllConnections();
     server.close();
   }
+});
+
+test("under `pnpm usai` the wrapper is itself on PATH and must not probe itself", () => {
+  // node_modules/.bin/usai → the wrapper, exactly what pnpm puts first on PATH.
+  const dir = mkdtempSync(join(tmpdir(), "usai-self-"));
+  const bin = join(dir, "node_modules", ".bin");
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, "usai"), `#!/bin/sh\nexec "${process.execPath}" "${wrapper}" "$@"\n`);
+  chmodSync(join(bin, "usai"), 0o755);
+  const r = spawnSync(join(bin, "usai"), ["--version"], {
+    env: { ...process.env, USAI_BIN: "", PATH: `${bin}:/usr/bin:/bin`, USAI_CACHE_DIR: join(dir, "cache"), USAI_RELEASE_BASE: "http://127.0.0.1:9" },
+    encoding: "utf8",
+    timeout: 20_000,
+  });
+  assert.notEqual(r.signal, "SIGTERM", "the wrapper hung (recursion)");
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /fetching|ECONNREFUSED|fetch failed/);
 });

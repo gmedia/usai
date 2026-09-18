@@ -2,13 +2,12 @@
 
 > Map from production concepts to the research evidence that justifies them.
 
-This is the "research-reference document" required by `GOAL.md` D0. It tells an agent **where to look** in the research repository and **what each result is allowed to mean**. It does not restate the results; the sealed documents are authoritative.
+This is the "research-reference document" required by `GOAL.md` D0. It tells a maintainer **where to look** in the research repository and **what each result is allowed to mean**. The research repository is **private**; readers without access should rely on `docs/LIFECYCLE-CONTRACTS.md`, the ADRs and `docs/measurements/` in this repository, which carry every conclusion the production code depends on. It does not restate the results; the sealed documents are authoritative.
 
 ## The research repository
 
 ```text
-GitHub        HasanH47/usai
-Local         ~/Projects/pribadi/experiments/usai/
+Access        private — Sakala maintainers (ask a maintainer for the checkout)
 Referenced at c1a57a8ba310488a055613471481d183a851eace  (2026-09-17)
 Sealed head   EXP-012B, seal commit 80830805c3cf9d761bd1fe976fd8888299fc2ec7
 ```

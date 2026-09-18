@@ -34,7 +34,7 @@ docs/
   GUIDE.md                  developer guide (v0 preview)
   LIFECYCLE-CONTRACTS.md    binding invariants C1–C13
   GLOSSARY.md               vocabulary (production + research-era)
-  RESEARCH-REFERENCE.md     map to HasanH47/usai evidence
+  RESEARCH-REFERENCE.md     map to the (private) research evidence
   OPEN-QUESTIONS.md         living: undecided design questions
   GUEST-ABI.md              host <-> guest contract
   THREAT-MODEL.md           what v0 promises and does not

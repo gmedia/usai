@@ -12,10 +12,33 @@ Product breadth             ESTABLISHED — stop broadening; depth now
 Milestone acceptance        AUDITED — docs/ACCEPTANCE-AUDIT.md: all D0–D15 items ✓ or ◐, no ✗
 Production substrate        Wasm image + pooling/COW (ADR-0016); attributed and fixed on the research VM
                             (hello 1.01 ms p50, 13.6k req/s at c=16, 0 faults); 1 h soak: 49 M requests, 0 errors, RSS +0.9 %
-Developer preview           v0.0.1 TAGGED 2026-09-18 — binaries on the GitHub release (linux x86_64/aarch64, macOS arm64),
-                            @sakaladev/usai 0.0.1 + @sakaladev/create-usai 0.0.5 on npm (Trusted Publishing); pre-alpha, not production-ready
-Production ready            NO
+Developer preview           v0.0.3 (2026-09-18) — one tag publishes binaries (linux x86_64/aarch64, macOS arm64), npm
+                            (@sakaladev/usai, @sakaladev/create-usai) and Docker images (runtime + dev, amd64 + arm64)
+Production ready            NO — see "Production readiness" below
 ```
+
+## Production readiness (honest report, 2026-09-18)
+
+Usai is a **developer preview**. Run it for development, evaluation and
+internal tools you can afford to restart; do not put it in front of paying
+traffic yet. The gates in `docs/ROADMAP.md`, with where each stands:
+
+| Gate | State | What exists / what is missing |
+|---|---|---|
+| Correctness of the lifecycle model | ✓ automated | C1–C18 have acceptance tests; malformed artifacts, budget exhaustion, forced shutdown, revision replacement under load are tested; 1 h soak on a VM: 49 M requests, 0 errors, flat RSS |
+| Distribution (P3.5) | ✓ | native binary, `pnpm usai` wrapper, Docker runtime/dev images, compose path, artifact↔runtime compatibility refused before serving, smoke test in CI and after every release |
+| Real application built as a user (P4) | ✗ | `examples/todos` is the author's; no outbound HTTP (`fetch`) or `crypto` host operations yet — a real app will hit this first |
+| Operational qualification (P5) | ✗ | no runbooks (DB down/restart, bad deploy, rollback, disk full); HTTP/1.1 only, TLS termination is the proxy's; latency histogram / error-rate metrics not yet exposed |
+| Reliability qualification (P6) | ✗ | 1 h soak only; no 24 h / 72 h soaks, no revision-churn-under-traffic campaign, no DB-flap campaign |
+| External developer validation (P7) | ✗ | one fresh-eyes dogfood run (issues fixed in 0.0.2); no outside developers yet |
+| Frozen contracts, `SUPPORTED.md`, upgrade matrix (RC) | ✗ | contracts still move within 0.0.x; artifact format 1 |
+| Supply chain | ◐ | binaries have SHA-256, npm via Trusted Publishing, images by digest; **no artifact signing/attestation** (`cache/image.cwasm` is native code), no dependency scanning in CI |
+| Security qualification | ◐ | threat model written; worlds are semantic isolation, **not** a hostile multi-tenant sandbox (ADR-0008); no fuzzing of contracts/artifacts/control API |
+| Vendored Wasmtime patch | ◐ | `vendor/wasmtime` carries a pagemap-reset fix with documented provenance; not yet upstreamed, no rebase test |
+
+Next gate to open: **P4** — build one realistic application without touching
+runtime internals; add `fetch`/`crypto` as ownership-aware host operations
+when it demands them.
 
 Current phase (`docs/ROADMAP.md`): **P3.5 Distribution done → P4 Real application.** Depth, not breadth.
 
@@ -128,7 +151,7 @@ capabilities (design), latency histogram in metrics, an API reference page.
 1. Propose the Wasmtime pagemap-reset patch upstream (complete traversal from `walk_end`; **paged-out dirty pages must be reset** — a freshness hole found here, `docs/measurements/…` §9). Remaining lever: the eval-based invoke/outcome/pending floor (0.24 ms of 1.05) — a core ABI change.
 2. Acceptance audit done (`docs/ACCEPTANCE-AUDIT.md`); remaining ◐: crash/restart recovery is the orchestrator's, tutorial application, first tag.
 3. Per-world CPU accounting (threat model "Open").
-5. Released: `v0.0.1` (2026-09-18) — binaries from `release.yml`, npm `@sakaladev/usai` + `@sakaladev/create-usai` through Trusted Publishing (OIDC, `workflow_dispatch` for scaffolder-only fixes). The unscoped `usai` name is refused by npm as too similar to existing packages. Open: artifact signing (ADR-0005 follow-up).
+5. Released: `v0.0.1`–`v0.0.3` (2026-09-18) — `release.yml` publishes binaries, npm `@sakaladev/usai` + `@sakaladev/create-usai` (Trusted Publishing/OIDC; `workflow_dispatch` for scaffolder-only fixes) and Docker images (GHCR always; Docker Hub `sakaladev/usai` when the repository has `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN`). The unscoped `usai` name is refused by npm as too similar to existing packages. Open: artifact signing (ADR-0005 follow-up).
 
 ## Known gaps / debt
 

@@ -27,7 +27,7 @@ research core   (OPT=-Oz)   sha256 6b33cb45e2806fbd1c7add768b613985d4c841d0650f2
 
 The patches are vendored in `patches/`; `build.sh` fetches the pinned
 sources and the WASI SDK (no root needed), applies them, and builds. The
-research repository (`HasanH47/usai`, `artifacts/exp011c/patched-base-build.json`)
+research repository (private; `artifacts/exp011c/patched-base-build.json`)
 holds the original record. A checksum test refuses a modified core.
 
 ## ABI the runtime relies on

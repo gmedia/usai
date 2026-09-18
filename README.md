@@ -11,19 +11,22 @@ build, and run on Usai without requiring Sakala or another deployment platform.
 
 ## Status
 
-**Early development. Not production-ready yet.**
+**Developer preview (0.0.x). Not production-ready.** Everything that exists
+has acceptance tests and ships from one tag (binaries, npm, Docker), but the
+gates that make a runtime trustworthy in production — a real application
+built as a user, operational and reliability qualification, external
+developer validation, frozen contracts — are still open. `docs/STATUS.md`
+("Production readiness") says exactly which, and `docs/ROADMAP.md` how they
+close. Use it for development, evaluation and internal tools you can restart.
 
 The research phase established enough evidence to justify building a real
 runtime. This repository is the clean production-oriented implementation.
 
-The historical research repository remains separate and should be treated as
-evidence and technical reference, not as the production codebase:
-
-- Research repository: `HasanH47/usai`
-- Production repository: `gmedia/usai`
-
-The production runtime should inherit proven contracts and lessons from the
-research, not its experiment-oriented repository structure.
+The model was validated first in a separate research programme (a private
+repository, maintainers only). This production repository inherits its
+proven contracts and lessons — recorded here as `docs/LIFECYCLE-CONTRACTS.md`,
+the ADRs and `docs/measurements/` — not its experiment-oriented code or
+structure, and has no dependency on it (ADR-0001).
 
 ## Why Usai?
 
@@ -203,7 +206,7 @@ preserves the same semantics and improves the total system.
 
 ## Research foundation
 
-The research repository tested the runtime model through disposable-world
+The research programme tested the runtime model through disposable-world
 semantics, asynchronous suspension, cancellation and reclamation, persistent
 PostgreSQL capabilities, real HTTP composition, simultaneous execution worlds,
 and concurrency economics.

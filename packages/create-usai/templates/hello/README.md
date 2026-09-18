@@ -19,6 +19,7 @@ docker compose up            # runtime + toolchain in the image, your source mou
 docker build -t my-app . && docker run --rm -p 3000:3000 my-app
 ```
 
+- `test/hello.test.ts` — a test through the real runtime (`pnpm test` finds `src|test|tests/**/*.test.ts`).
 - `src/app.ts` — the application root. Add workloads and resources here or compose modules.
 - `usai.config.ts` — project structure only (entry, migrations, seeders).
 - `compose.yaml` / `Dockerfile` — the Docker paths above; delete them if you do not use Docker.
