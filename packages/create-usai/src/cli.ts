@@ -2,7 +2,7 @@
 // create-usai: scaffold a Usai application from a template.
 //
 //   pnpm dlx @sakaladev/create-usai <dir> [--template hello]
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -58,6 +58,10 @@ function main(argv: string[]): void {
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Run when invoked as the executable. Package managers reach this file
+// through a symlink (`node_modules/.bin/create-usai`), so compare real paths:
+// `import.meta.url` is already resolved, `process.argv[1]` may not be.
+const invokedAs = process.argv[1] ? (() => { try { return realpathSync(process.argv[1]); } catch { return resolve(process.argv[1]); } })() : "";
+if (invokedAs === fileURLToPath(import.meta.url)) {
   main(process.argv.slice(2));
 }
