@@ -48,6 +48,8 @@ Each workload kind has a natural lifetime and the runtime gives it exactly that:
 
 Every unit of work runs in a **fresh execution world**: fresh globals, nothing inherited from the previous request. Anything that must persist is a **resource**.
 
+The full API surface is the SDK's type declarations — `node_modules/@sakaladev/usai/dist/*.d.ts` (`http.ts`, `workloads.ts`, `resources.ts`, `queue.ts`, `connection.ts`, `env.ts`, `test.ts`); every option shown below is documented there.
+
 ## 3. Project layout
 
 ```text
@@ -95,7 +97,10 @@ export const createUser = http.post("/users", { body: NewUser, response: { 201: 
 
 - Any Standard Schema library works (Zod 4, Valibot, ArkType …). When the library can describe itself as JSON Schema (Zod 4 does), invalid input is rejected **before a world exists**; otherwise it is validated inside the world.
 - Return a plain value for the default status, `http.created(...)` / `http.response(status, body, headers)` for explicit ones, `http.noContent()` for 204.
-- Errors: `errors.notFound()`, `errors.conflict()`, `errors.custom(code, status, message)`. Unknown exceptions are sanitized to `internal`; details go to logs.
+- Errors: `errors.notFound()`, `errors.conflict()`, `errors.custom(code, status, message)`. Unknown exceptions are sanitized to `internal` under `usai run`; `usai dev` returns the exception message and stack to the client (`expose_diagnostics`) — details always go to the logs. A response that does not match its declared contract is a `500 response_contract_violation`; the failing paths are in the log and, in dev, in `error.details.issues`.
+- Declare what you throw and return: OpenAPI and `usai inspect` only know the statuses you put in `response: { … }` and the codes in `errors: [...]`; `errors.notFound()` in a handler does not add a 404 to the document by itself.
+- Validation issues use JSON-pointer paths (`/tags/0`) wherever the check ran — at the boundary or in the world.
+- A resource the workload did not declare (`ctx.resources["x"]` without `resources: [x]`) is a `500 resource_not_declared` that names the fix.
 - Raw endpoints: `http.raw("/webhook", async (ctx) => http.rawResponse(200, "ok"))` — exact bytes via `ctx.request.bytes()`, no contracts, documented as opaque.
 - Auth is a declared boundary: `const authed = auth.bearer({ resolve: async (ctx, token) => … })`, then `http.get("/me", { auth: authed }, async (ctx) => ctx.auth)`.
 
@@ -131,9 +136,10 @@ usai app reconcile -- --dry-run
 import { postgres, env, type PostgresHandle } from "@sakaladev/usai";
 const db = postgres("main", { pool: { max: 16 } });   // URL from DATABASE_URL
 
-export const listUsers = http.get("/users", { resources: [db] }, async (ctx) => {
+type UserRow = { id: number; name: string };
+export const listUsers = http.get("/users", { response: { 200: z.array(User) }, resources: [db] }, async (ctx) => {
   const sql = ctx.resources["main"] as PostgresHandle;
-  return sql.query(`select id, name from users order by id`);
+  return sql.query<UserRow>(`select id, name from users order by id`);   // rows are Record<string, unknown> unless you say otherwise
 });
 
 export default defineApp({ workloads: [listUsers], resources: [db], env: env({ DATABASE_URL: env.url() }) });
@@ -184,7 +190,19 @@ export const ledgerSync = service("ledger-sync", { restart: { mode: "on-failure"
 
 A service world starts with the revision and stops when the revision drains: the signal fires, `ctx.sleep` returns, the loop exits. Finite worlds cannot see its state.
 
-## 11. Configuration and environment
+## 11. What a world can use
+
+A world is a bare JavaScript engine with exactly these globals, no more: `console`, `setTimeout`/`clearTimeout`/`setInterval`/`clearInterval`, `queueMicrotask`, `atob`/`btoa`, `TextEncoder`/`TextDecoder`, `URL`/`URLSearchParams`, `structuredClone`, plus the SDK's `ctx`. Put `"types": ["@sakaladev/usai/globals"]` in `tsconfig.json` (the scaffold does) instead of the `DOM` lib or `@types/node`, so the compiler knows the same set.
+
+Deliberately absent, and why:
+
+- **`fetch` / outbound HTTP** — an outbound call is an external operation that needs an owner (cancellation, deadline, terminal knowledge), so it will arrive as a host operation on `ctx`, not as a global. Until then, world code cannot make network calls.
+- **`crypto`** — randomness for secrets must come from the host; `Math.random` is seeded per world but is not a CSPRNG. Do not generate tokens in a world yet.
+- **`process`, `fs`, `require`** — there is no filesystem or process in a world; declare what you need as a resource.
+
+Zod checks that need one of the absent globals fail inside the world for every input (that was the case for `z.string().url()` before `URL` was provided).
+
+## 12. Configuration and environment
 
 ```ts
 export default defineApp({
@@ -193,15 +211,17 @@ export default defineApp({
 });
 ```
 
-Missing or malformed values fail **activation**, not the first request. Inside a world, `ctx.env.WORKERS` is a number.
+Missing or malformed values fail **activation**, not the first request. Inside a world, `ctx.env.WORKERS` is a number (`ctx.env` is typed `Record<string, string | number | boolean | undefined>`; narrow per key, or `const e = ctx.env as EnvValues<typeof spec>`).
+
+Where values come from: the process environment. For local work, `usai dev`, `usai test`, `usai db …`, `usai app/cron/task …` also read `<root>/.env` (`KEY=VALUE`, `#` comments, quotes; never overriding what the shell set). `usai run` does **not** read `.env` — production configuration belongs to the deployment environment.
 
 Deployment settings (port, budgets, limits) are runtime flags and environment, not application code: `usai run --port 8080 --status`.
 
-## 12. Operate
+## 13. Operate
 
 ```bash
 usai build                     # .usai/build/{manifest.json, app.js} + cache/image.cwasm (engine cache for this host; install loads it in ms, drop it and install compiles)
-usai run --artifact .usai/build --port 8080 --status
+usai run --artifact .usai/build --port 8080 --status    # /_usai/status + /_usai/metrics; /_usai/docs and openapi.json are dev-only
 curl :8080/_usai/status        # runtime truth: gauges, revisions, services, tasks, resources
 curl :8080/_usai/metrics       # Prometheus text
 usai generate openapi --out openapi.json
@@ -211,7 +231,7 @@ usai bench --path /users -c 16 -d 30   # engineering load test
 
 Ctrl-C drains in-flight work with a bound; a second Ctrl-C forces exit. Read `docs/THREAT-MODEL.md` before exposing anything.
 
-## 13. Testing
+## 14. Testing
 
 Tests run the same application model as production:
 
@@ -237,7 +257,7 @@ test("users", async () => {
 
 `testApp` needs the `usai` binary (`USAI_BIN` or on `PATH`) and the project's declared environment (pass `env: { DATABASE_URL }`). With `migrate: true` (or `migrate: { seed: true }`) it runs `usai db migrate` / `usai db seed` first — for a throwaway database. Lifecycle-specific tests are ordinary: mutate in one request, read in the next, and assert the mutation is gone.
 
-## 14. A realistic application: `examples/todos`
+## 15. A realistic application: `examples/todos`
 
 Everything above in one project — read it in this order.
 
@@ -271,6 +291,6 @@ usai app stats --root examples/todos
 usai test --root examples/todos
 ```
 
-## 15. Performance note (v0)
+## 16. Performance note (v0)
 
 Per-world cost on the Wasm substrate is flat with respect to application size: instantiating a world from the pre-initialized image costs ~0.02 ms whatever the bundle contains, and validators declared as contracts are prepared before the image is snapshotted, so a fresh world does not rebuild them. On the research VM a contract-validated hello request is ~1 ms p50 at c=1 and the runtime serves ~13k req/s at c=16 on 16 cores; the numbers and their attribution are in `docs/measurements/`. Handler code runs in an interpreter compiled by Cranelift: CPU-heavy loops are slower than on a JIT; keep hot loops small or move them to the database.

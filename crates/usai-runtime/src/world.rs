@@ -42,17 +42,31 @@ impl LifecycleViolation {
             .map(|(k, n)| format!("{n} {k}"))
             .collect::<Vec<_>>()
             .join(", ");
+        // A pending `task.dispatch` is a hand-off whose acknowledgement was
+        // not awaited: the transfer already happened and the task runs. Every
+        // other pending kind (timers, owned invokes, resource calls) was cut
+        // off with the world. Say which.
+        let only_dispatch = summary.keys().all(|k| *k == "task.dispatch");
+        let outcome = if only_dispatch {
+            "The hand-off itself already happened — the dispatched task runs in its own world — \
+             but this world returned before the runtime acknowledged it. Add `await` in front of \
+             `ctx.tasks.dispatch(...)` so the request only answers once the transfer is recorded."
+                .to_owned()
+        } else {
+            format!(
+                "The {kind} lifetime ended when its result was produced. Work that is still \
+                 pending cannot remain owned by this world, so it was cancelled.\n\n\
+                 Use:\n  \
+                 task()    for independent finite work (ctx.tasks.dispatch, awaited)\n  \
+                 cron()    for scheduled work\n  \
+                 service() for intentional long-running work\n\
+                 or await the work before returning."
+            )
+        };
         Self {
             code: "detached_work",
             message: format!(
-                "{kind} work `{}` ended with live asynchronous work ({live}).\n\n\
-                 The {kind} lifetime ended when its result was produced. Work that is still \
-                 pending cannot remain owned by this world, so it was cancelled.\n\n\
-                 Use:\n  \
-                 task()    for independent finite work (ctx.tasks.dispatch)\n  \
-                 cron()    for scheduled work\n  \
-                 service() for intentional long-running work\n\
-                 or await the work before returning.",
+                "{kind} work `{}` ended with live asynchronous work ({live}).\n\n{outcome}",
                 workload.name
             ),
         }
@@ -204,6 +218,9 @@ pub struct WorldDriver {
     finished: bool,
     instantiate: Duration,
     watch: Arc<WatchSlot>,
+    /// When the deadline elapses, as an instant, so synchronous guest runs
+    /// can be bounded by it too (see `watchdog`).
+    deadline_at: Option<Instant>,
 }
 
 impl WorldDriver {
@@ -260,6 +277,7 @@ impl WorldDriver {
             finished: false,
             instantiate: t_inst.elapsed(),
             watch,
+            deadline_at: spec.deadline.map(|d| Instant::now() + d),
         })
     }
 
@@ -273,9 +291,24 @@ impl WorldDriver {
             .expect("workload index was validated at admission")
     }
 
-    /// Arms the CPU-slice watchdog for one guest entry.
+    /// Arms the watchdog for one guest entry: the CPU slice, or what is
+    /// left of the deadline if that is shorter, so a deadline also bounds
+    /// synchronous work that never reaches an `await`.
     fn watchdog(&self) -> Watchdog {
-        Watchdog::arm(&self.watch, self.cpu_slice)
+        let remaining = self
+            .deadline_at
+            .map(|at| at.saturating_duration_since(Instant::now()))
+            .unwrap_or(Duration::MAX);
+        Watchdog::arm(
+            &self.watch,
+            self.cpu_slice.min(remaining.max(Duration::from_millis(1))),
+        )
+    }
+
+    /// Whether a guest fault happened because the deadline elapsed while the
+    /// guest was running synchronously (the watchdog interrupted it).
+    fn deadline_elapsed(&self) -> bool {
+        self.deadline_at.is_some_and(|at| Instant::now() >= at)
     }
 
     /// The one routing gate. Identity first, then ledger deliverability,
@@ -329,6 +362,7 @@ impl WorldDriver {
         let watchdog = self.watchdog();
         let termination = match watchdog.finish(self.instance.invoke(index, &input_json).await) {
             Ok(()) => self.drive().await,
+            Err(_) if self.deadline_elapsed() => self.deadline_interrupted().await,
             Err(e) => Termination::Faulted {
                 detail: e.to_string(),
             },
@@ -447,6 +481,9 @@ impl WorldDriver {
                     match completion {
                         Some(c) => {
                             if let Err(e) = self.route(c).await {
+                                if self.deadline_elapsed() {
+                                    return self.deadline_interrupted().await;
+                                }
                                 return Termination::Faulted { detail: e.to_string() };
                             }
                         }
@@ -455,6 +492,16 @@ impl WorldDriver {
                 }
             }
         }
+    }
+
+    /// The watchdog interrupted synchronous guest work at the deadline: the
+    /// world ends as deadline-exceeded (its operations are released like a
+    /// cancellation; the guest cannot be asked to unwind after a trap).
+    async fn deadline_interrupted(&mut self) -> Termination {
+        self.shared.accepting_ops.store(false, Ordering::SeqCst);
+        self.cancel.cancel();
+        self.ledger.cancel_world(self.id);
+        Termination::DeadlineExceeded
     }
 
     /// Logical cancellation: the world loses interest in its operations, the

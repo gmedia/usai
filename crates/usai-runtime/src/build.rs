@@ -227,8 +227,35 @@ pub async fn load_config(engine: &dyn Engine, root: &Path) -> Result<ProjectConf
         let outfile = root.join(".usai/config/usai.config.js");
         bundle(root, &config_path, &outfile).await?;
         let code = Code::new(tokio::fs::read_to_string(&outfile).await?);
-        let compiled = engine.compile_code(&code).await?;
-        let value = engine.export_default(&compiled).await?;
+        // Evaluating the config means building an image (hundreds of ms);
+        // the result only depends on the bundled source, so cache it by its
+        // digest next to the bundle.
+        let cached = root.join(".usai/config/usai.config.json");
+        let value = match tokio::fs::read(&cached)
+            .await
+            .ok()
+            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+        {
+            Some(v)
+                if v.get("sha256").and_then(serde_json::Value::as_str)
+                    == Some(code.sha256.as_str()) =>
+            {
+                v.get("config").cloned().unwrap_or(serde_json::Value::Null)
+            }
+            _ => {
+                let compiled = engine.compile_code(&code).await?;
+                let value = engine.export_default(&compiled).await?;
+                let _ = tokio::fs::write(
+                    &cached,
+                    serde_json::to_vec(
+                        &serde_json::json!({ "sha256": code.sha256, "config": value }),
+                    )
+                    .unwrap_or_default(),
+                )
+                .await;
+                value
+            }
+        };
         (serde_json::from_value(value)?, CONFIG_FILE)
     } else {
         (RawConfig::default(), "default")

@@ -70,3 +70,19 @@ test("invoke runs an http handler with parsed boundaries and encodes the respons
   await assert.rejects(sdk.invoke(app, 0, input(0, 5)), (e: { usai: { code: string; status: number } }) => e.usai.code === "validation_failed" && e.usai.status === 400);
   await assert.rejects(sdk.invoke(app, 2, input(2, undefined)), (e: { usai: { code: string } }) => e.usai.code === "response_contract_violation");
 });
+
+test("a hole in a declaration list is named, not an undefined crash", () => {
+  const late = undefined as unknown as ReturnType<typeof http.get>;
+  const app = defineApp({ name: "holes", modules: [defineModule({ name: "m", workloads: [late] })] });
+  assert.throws(() => describe(app), /module "m": workloads\[0\] is undefined — is it declared after/);
+  const undeclaredResources = defineApp({ name: "holes2", workloads: [late] });
+  assert.throws(() => describe(undeclaredResources), /app "holes2": workloads\[0\] is undefined/);
+});
+
+test("an undeclared resource is a named error", async () => {
+  const { makeResources } = await import("./runtime/context.ts");
+  const resources = makeResources([]);
+  assert.throws(() => (resources as Record<string, unknown>)["main"], (e: unknown) => (e as { usai?: { code: string } }).usai?.code === "resource_not_declared");
+  assert.equal("then" in resources, false);
+  assert.equal(JSON.stringify(resources), "{}");
+});

@@ -55,7 +55,18 @@ export function isSchema(value: unknown): value is StandardSchemaV1 {
 
 export interface ValidationIssue {
   message: string;
-  path: string[];
+  /** JSON pointer (`/tags/0`), the same format the host uses for
+   * boundary validation, so clients see one shape wherever the check ran. */
+  path: string;
+}
+
+function pointer(segments: readonly unknown[]): string {
+  return segments
+    .map((segment) => {
+      const key = typeof segment === "object" && segment !== null && "key" in segment ? (segment as { key: unknown }).key : segment;
+      return "/" + String(key).replaceAll("~", "~0").replaceAll("/", "~1");
+    })
+    .join("");
 }
 
 export type Validation<T> = { ok: true; value: T } | { ok: false; issues: ValidationIssue[] };
@@ -65,16 +76,14 @@ export type Validation<T> = { ok: true; value: T } | { ok: false; issues: Valida
 export function validateWith<S extends StandardSchemaV1>(schema: S, value: unknown): Validation<Output<S>> {
   const result = schema["~standard"].validate(value);
   if (result instanceof Promise) {
-    return { ok: false, issues: [{ message: "asynchronous schema validation is not supported", path: [] }] };
+    return { ok: false, issues: [{ message: "asynchronous schema validation is not supported", path: "" }] };
   }
   if (result.issues) {
     return {
       ok: false,
       issues: result.issues.map((issue) => ({
         message: issue.message,
-        path: (issue.path ?? []).map((segment) =>
-          typeof segment === "object" && segment !== null && "key" in segment ? String(segment.key) : String(segment),
-        ),
+        path: pointer(issue.path ?? []),
       })),
     };
   }

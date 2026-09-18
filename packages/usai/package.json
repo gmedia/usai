@@ -1,6 +1,6 @@
 {
   "name": "@sakaladev/usai",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Usai developer SDK: declare workloads and resources; the runtime gives each its natural lifetime.",
   "license": "Apache-2.0",
   "repository": {
@@ -44,11 +44,15 @@
       "types": "./dist/test.d.ts",
       "usai": "./src/test.ts",
       "import": "./dist/test.js"
+    },
+    "./globals": {
+      "types": "./globals.d.ts"
     }
   },
   "files": [
-    "dist",
     "build",
+    "dist",
+    "globals.d.ts",
     "src"
   ],
   "scripts": {

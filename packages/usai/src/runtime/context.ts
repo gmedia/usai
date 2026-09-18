@@ -6,31 +6,19 @@ import type { ResourceDeclaration, Workload } from "../declarations.ts";
 import type { CacheLocalHandle, PostgresHandle } from "../resources.ts";
 import { UsaiError } from "../errors.ts";
 
+/** What `ctx.log` and `console` offer inside a world. */
+export interface ConsoleLike {
+  debug(...args: unknown[]): void;
+  info(...args: unknown[]): void;
+  log(...args: unknown[]): void;
+  warn(...args: unknown[]): void;
+  error(...args: unknown[]): void;
+}
+
 declare global {
-  // Provided by the guest bridge (`docs/GUEST-ABI.md`); declared here so the
-  // SDK does not depend on DOM or Node typings for the guest surface.
-  function setTimeout(fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]): number;
-  function clearTimeout(id: number | undefined): void;
-  function setInterval(fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]): unknown;
-  function clearInterval(handle: unknown): void;
-  function queueMicrotask(fn: () => void): void;
-  function atob(data: string): string;
-  function btoa(data: string): string;
-  interface ConsoleLike {
-    debug(...args: unknown[]): void;
-    info(...args: unknown[]): void;
-    log(...args: unknown[]): void;
-    warn(...args: unknown[]): void;
-    error(...args: unknown[]): void;
-  }
-  var console: ConsoleLike;
-  class TextEncoder {
-    encode(input?: string): Uint8Array;
-  }
-  class TextDecoder {
-    constructor(label?: string);
-    decode(input?: Uint8Array): string;
-  }
+  // console / TextEncoder / TextDecoder / URL / structuredClone / timers are
+  // declared once, for the SDK and for applications, in `globals.d.ts`
+  // (`@sakaladev/usai/globals`).
   // Installed by the host before the application module evaluates.
   var __usai: {
     op(kind: string, payload: string): Promise<string>;
@@ -60,7 +48,10 @@ export interface BaseContext {
   readonly tasks: TaskHandle;
   readonly queue: import("../queue.ts").QueueHandle;
   readonly signal: UsaiAbortSignal;
-  readonly env: Record<string, string>;
+  /** The declared environment, typed: `env.int()` gives a number,
+   * `env.bool()` a boolean, `env.optional(...)` may be undefined. Narrow
+   * per key, or type it once: `const e = ctx.env as EnvValues<typeof spec>`. */
+  readonly env: Record<string, string | number | boolean | undefined>;
   readonly log: Pick<ConsoleLike, "debug" | "info" | "warn" | "error">;
   sleep(duration: string | number): Promise<void>;
 }
@@ -130,7 +121,19 @@ export function makeResources(declarations: readonly ResourceDeclaration[]): Rec
       : declaration.kind === "postgres" ? postgresHandle(declaration.name)
       : genericHandle(declaration);
   }
-  return out;
+  // A resource the workload did not declare is a lifecycle mistake, not
+  // `undefined`: say so, with the fix, instead of failing later on
+  // "cannot read property 'query' of undefined".
+  const declared = Object.keys(out);
+  return new Proxy(out, {
+    get(target, key, receiver) {
+      if (typeof key === "string" && !(key in target) && key !== "then" && key !== "toJSON") {
+        const hint = declared.length ? `declared here: ${declared.join(", ")}` : "this workload declares no resources";
+        throw new UsaiError("resource_not_declared", 500, `resource "${key}" is not declared on this workload (${hint}); add it to the workload's \`resources: [...]\``);
+      }
+      return Reflect.get(target, key, receiver);
+    },
+  });
 }
 
 export function parseDurationMs(value: string | number): number {
@@ -142,7 +145,7 @@ export function parseDurationMs(value: string | number): number {
   return unit === "s" ? n * 1000 : unit === "m" ? n * 60_000 : unit === "h" ? n * 3_600_000 : n;
 }
 
-export function makeBase(resources: readonly ResourceDeclaration[], env: Record<string, string>): BaseContext {
+export function makeBase(resources: readonly ResourceDeclaration[], env: Record<string, string | number | boolean | undefined>): BaseContext {
   return {
     resources: makeResources(resources),
     tasks: {

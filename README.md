@@ -125,6 +125,15 @@ requires explicit ownership and terminal-state rules.
 
 ## Try it
 
+As a user (binary from the [releases](https://github.com/gmedia/usai/releases), packages from npm):
+
+```bash
+pnpm dlx @sakaladev/create-usai my-app && cd my-app && pnpm install
+usai dev                                                  # http://127.0.0.1:3000/hello/world
+```
+
+From this repository:
+
 ```bash
 pnpm install
 cargo run -p usai-cli -- dev --root examples/hello       # build, serve on :3000, rebuild on change
@@ -134,7 +143,7 @@ cargo run -p usai-cli -- --root examples/hello inspect   # what the runtime unde
 ```
 
 A realistic application — modules, migrations, seeders, a dispatched task,
-a cron, a command, and tests — is `examples/todos`; `docs/GUIDE.md` §14
+a cron, a command, and tests — is `examples/todos`; `docs/GUIDE.md` §15
 walks through it.
 
 What exists today (each with acceptance tests): contract-aware HTTP with

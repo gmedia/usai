@@ -44,6 +44,10 @@ export const badShape = http.get("/bad-shape", { response: User }, async () => (
 export const detach = http.get("/detach", {}, async () => { setTimeout(() => {}, 5000); return { ok: true }; });
 export const slow = http.get("/slow", { timeout: "200ms" }, async (ctx) => { await ctx.sleep("10s"); return { ok: true }; });
 export const noContent = http.delete("/users/:id", {}, async () => http.noContent());
+// Using a resource without declaring it is named, not `undefined`.
+export const undeclared = http.get("/undeclared", {}, async (ctx) => ({ n: await (ctx.resources["hits"] as { get(k: string): Promise<unknown> }).get("x") }));
+// A deadline must end synchronous work too, not only awaiting handlers.
+export const busy = http.get("/busy", { timeout: "300ms" }, async () => { const end = Date.now() + 5000; let i = 0; while (Date.now() < end) i++; return { i }; });
 export const echoQuery = http.get("/echo", {}, async (ctx) => ({ query: ctx.query, headers: { "x-a": ctx.headers["x-a"] } }));
 
 export const webhook = http.raw("/webhook", async (ctx) => {
@@ -181,13 +185,22 @@ export const reconcile = command("reconcile", { resources: [audit] }, async (ctx
   return { args: ctx.args };
 });
 
+// Web platform globals inside a world: `z.string().url()` validates in the
+// world through `new URL`, and handlers use URL / structuredClone.
+export const inspectUrl = http.post("/url", { body: z.object({ url: z.string().url() }) }, async (ctx) => {
+  const u = new URL(ctx.body.url);
+  u.searchParams.set("seen", "1");
+  const copy = structuredClone({ when: new Date(0), tags: new Set(["a"]) });
+  return { host: u.host, path: u.pathname, href: u.href, cloned: copy.when instanceof Date && copy.tags.has("a") };
+});
+
 export default defineApp({
   name: "http-fixture",
   modules: [defineModule({ name: "users", workloads: [getUser, createUser, noContent] })],
   workloads: [
     counter, persistent, me, boom, badShape, detach, slow, echoQuery, webhook, sendReceipt,
     record, slowTask, failingTask, invokesSlow, order, auditRead, badDispatch, everySecond, overlapping, nightly, reconcile,
-    ledgerSync, serviceLocalRead, events, endless, plainStream, chat, socketLocalRead, memoryHog, crashy,
+    ledgerSync, serviceLocalRead, events, endless, plainStream, chat, socketLocalRead, memoryHog, crashy, inspectUrl, busy, undeclared,
   ],
   resources: [hits, audit],
   env: env({ GREETING: env.optional(env.string()) }),

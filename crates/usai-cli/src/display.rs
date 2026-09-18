@@ -25,6 +25,7 @@ pub fn banner(
     base_url: Option<&str>,
     status: Option<&RuntimeStatus>,
     docs: bool,
+    status_surface: bool,
 ) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "Usai\n");
@@ -102,6 +103,8 @@ pub fn banner(
         if docs {
             let _ = writeln!(out, "API Docs  {url}/_usai/docs");
             let _ = writeln!(out, "OpenAPI   {url}/_usai/openapi.json");
+        }
+        if status_surface {
             let _ = writeln!(out, "Status    {url}/_usai/status");
             let _ = writeln!(out, "Metrics   {url}/_usai/metrics");
         }
@@ -162,8 +165,9 @@ pub fn inspect(definition: &ApplicationDefinition) -> String {
             } => {
                 let _ = writeln!(
                     out,
-                    "  {}\n    schedule: {schedule}\n    overlap: {overlap:?}",
-                    w.name
+                    "  {}\n    schedule: {schedule}\n    overlap: {}",
+                    w.name,
+                    format!("{overlap:?}").to_lowercase()
                 );
             }
             _ => {

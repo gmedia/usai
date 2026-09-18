@@ -2,7 +2,7 @@
 // create-usai: scaffold a Usai application from a template.
 //
 //   pnpm dlx @sakaladev/create-usai <dir> [--template hello]
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -41,6 +41,9 @@ export function scaffold(options: ScaffoldOptions): string {
     const replaced = text.replaceAll("__NAME__", name).replaceAll("__USAI_VERSION__", `^${version}`);
     if (replaced !== text) writeFileSync(file, replaced);
   });
+  // npm strips `.gitignore` from published packages, so the template ships
+  // it as `_gitignore`.
+  if (existsSync(join(target, "_gitignore"))) renameSync(join(target, "_gitignore"), join(target, ".gitignore"));
   return target;
 }
 

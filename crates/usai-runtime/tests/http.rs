@@ -342,6 +342,16 @@ async fn deadline_maps_to_gateway_timeout() {
     let (status, body) = s.get("/slow").await;
     assert_eq!(status, 504, "{body}");
     assert_eq!(body["error"]["code"], "deadline_exceeded");
+    // Synchronous work that never awaits is bounded by the same deadline.
+    let t = std::time::Instant::now();
+    let (status, body) = s.get("/busy").await;
+    assert_eq!(status, 504, "{body}");
+    assert_eq!(body["error"]["code"], "deadline_exceeded");
+    assert!(
+        t.elapsed() < Duration::from_secs(2),
+        "interrupted at the deadline, not at the end of the loop: {:?}",
+        t.elapsed()
+    );
     tokio::time::sleep(Duration::from_millis(50)).await;
     s.baseline().await;
     s.shutdown.cancel();
@@ -395,6 +405,54 @@ async fn query_and_headers_reach_the_handler() {
     let body: Value = r.json().await.unwrap();
     assert_eq!(body["query"], json!({ "a": ["1", "2"], "b": "x" }));
     assert_eq!(body["headers"]["x-a"], "yes");
+    s.shutdown.cancel();
+}
+
+/// `ctx.resources["x"]` on a workload that did not declare `x` fails with
+/// a named error that says what to add, not with `undefined`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_undeclared_resource_is_a_named_error() {
+    let Some(s) = start().await else { return };
+    let (status, body) = s.get("/undeclared").await;
+    assert_eq!(status, 500, "{body}");
+    assert_eq!(body["error"]["code"], "resource_not_declared", "{body}");
+    s.shutdown.cancel();
+}
+
+/// A world has the Web globals a handler reasonably expects — `URL`,
+/// `URLSearchParams`, `structuredClone` — so schema checks that need them
+/// (`z.string().url()`) work in-world and handlers can use them.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn worlds_have_url_and_structured_clone() {
+    let Some(s) = start().await else { return };
+    let r = s
+        .client
+        .post(format!("{}/url", s.base))
+        .json(&json!({ "url": "https://News.ycombinator.com:443/item?id=1" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    let body: Value = r.json().await.unwrap();
+    assert_eq!(body["host"], "news.ycombinator.com");
+    assert_eq!(body["path"], "/item");
+    assert_eq!(
+        body["href"],
+        "https://news.ycombinator.com/item?id=1&seen=1"
+    );
+    assert_eq!(body["cloned"], true);
+    let r = s
+        .client
+        .post(format!("{}/url", s.base))
+        .json(&json!({ "url": "not a url" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        r.status(),
+        400,
+        "an invalid URL is refused, a valid one is not"
+    );
     s.shutdown.cancel();
 }
 

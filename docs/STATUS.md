@@ -73,7 +73,7 @@ bookkeeping, 0.02 create.
 - `usai test` runs the project's `node --test` files with `USAI_BIN` set to the running binary and the `usai` export condition (workspace checkouts need no `dist/`). OpenAPI describes streams (`x-usai-stream`) and sockets (`x-usai-socket`, 101/426) explicitly. WebSocket idle timeout (`HttpConfig.socket_idle_timeout`, 300 s default, close 1008; tested). ADR-0015 records the measured per-world numbers and states that its revisit trigger has fired.
 - Measured bundle composition (release): SDK only 1.0 ms/world, `zod/mini` 1.3 ms/world, `zod` 6.6 ms/world (`tests/profile_bundles.rs`). `zod/mini` lacks Standard JSON Schema, so before-world validation and OpenAPI degrade with it; documented in the guide.
 - **Precompiled image in the artifact** (`cache/image.cwasm` + `cache/image.json`, ADR-0005 addendum): install loads in ~15 ms instead of compiling for seconds on every core; ignored on any digest/engine/fingerprint mismatch; tested (match, corruption, other code).
-- **Tutorial application** `examples/todos` (modules, colocated migrations and seeders, typed env, HTTP CRUD with boundary contracts, dispatched task, cron, command; `usai/test` with `migrate: { seed: true }`); `docs/GUIDE.md` §14 walks it. Runs in CI against the service database.
+- **Tutorial application** `examples/todos` (modules, colocated migrations and seeders, typed env, HTTP CRUD with boundary contracts, dispatched task, cron, command; `usai/test` with `migrate: { seed: true }`); `docs/GUIDE.md` §15 walks it. Runs in CI against the service database.
 - **PostgreSQL TLS** (rustls, `sslmode` from the URL, roots = Mozilla + `tls.caFile`/`PGSSLROOTCERT`, always verified; refused at activation otherwise). Tested against an embedded TLS server with a private CA.
 - **`usai dev` reload acceptance** (`crates/usai-cli/tests/dev_reload.rs`): edit → new revision, no failed request during the swap; a broken edit keeps the previous revision serving. Control surface: rollback = reinstall + activate (tested).
 - **P1/P2 substrate economics.** Per-phase ledger (`USAI_PROFILE=1`), workload matrix (`tests/profile_matrix.rs`, `scripts/p1-attribution.sh`), research-VM attribution; slot-reset root fix (vendored Wasmtime patch), callback-free validator preparation in the image (`runtime/prepare.ts`), zero-delay timer yield, lock-free watchdog. Hello on the VM: 1.52 ms p50, 9.8k req/s at c=16, 0 faults.
@@ -100,6 +100,24 @@ hello bundle (765 KB, zod evaluated per world) 6.52 ms/world
 ```
 
 ~90% of per-world cost is **application module evaluation per world** — exactly the "definition-level work rebuilt per world" the research removed with a pre-initialized image (Wizer) + copy-on-write memory (C13, EXP-011B/012B). The native QuickJS substrate (ADR-0015) has no snapshot mechanism, so this cost is structural to v0's engine choice, not to the lifecycle model. This is the concrete trigger ADR-0015 named for revisiting the substrate.
+
+## Dogfood (2026-09-18, fresh-eyes external-user run against v0.0.1)
+
+A reviewer with no prior knowledge installed from npm + the release, built a
+bookmarks backend (PostgreSQL, migrations, seeder, dispatched task, cron,
+command, typed env, harness test) from the public docs only, and filed 21
+frictions (3 blockers). Fixed for 0.0.2: worlds have `URL`/`URLSearchParams`/
+`structuredClone` (+ `@sakaladev/usai/globals` types; `fetch`/`crypto`
+documented as absent with reasons); `usai dev` no longer rebuilds forever
+(inotify Access events) and skips an unchanged definition; `usai test` works
+from the published package; deadlines bound synchronous work; un-awaited
+`dispatch` is diagnosed correctly; undeclared resources and holes in
+declaration lists are named errors; response-contract failures carry their
+issues; issue paths are JSON pointers everywhere; `.env` for local commands;
+one-shot commands are quiet and the config is cached; `run --status` banner;
+inspect wording; scaffold ships `.gitignore`, `skipLibCheck`, `allowBuilds`.
+Still open from the report: outbound HTTP (`fetch`) and `crypto` as host
+capabilities (design), latency histogram in metrics, an API reference page.
 
 ## Next
 

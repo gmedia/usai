@@ -606,6 +606,10 @@ impl Runtime {
     /// the wall clock (tests, `usai cron run`).
     pub async fn run_cron(&self, name: &str) -> Result<WorkResult, RuntimeError> {
         let revision = self.active()?;
+        let id = format!("cron:{name}");
+        if revision.definition.workload(&id).is_none() {
+            return Err(RuntimeError::UnknownWorkload(id));
+        }
         cron::run_tick(
             self,
             &revision,

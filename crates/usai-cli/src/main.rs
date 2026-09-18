@@ -25,6 +25,9 @@ struct Cli {
     /// Execution substrate: wasm (default) or quickjs; $USAI_ENGINE also works
     #[arg(long, global = true)]
     engine: Option<String>,
+    /// Show the runtime's INFO logs for one-shot commands too (RUST_LOG overrides)
+    #[arg(long, short = 'v', global = true)]
+    verbose: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -163,17 +166,62 @@ enum TaskAction {
     },
 }
 
+/// `KEY=VALUE` lines (optional `export`, optional single/double quotes,
+/// `#` comments); returns how many variables were set.
+fn load_dotenv(path: &std::path::Path) -> usize {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return 0;
+    };
+    let mut loaded = 0;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let line = line.strip_prefix("export ").unwrap_or(line);
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        if key.is_empty() || std::env::var_os(key).is_some() {
+            continue;
+        }
+        let value = value.trim();
+        let value = value
+            .strip_prefix('"')
+            .and_then(|v| v.strip_suffix('"'))
+            .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
+            .unwrap_or(value);
+        // SAFETY: called at startup before the command runs; nothing else
+        // reads the environment concurrently yet.
+        unsafe { std::env::set_var(key, value) };
+        loaded += 1;
+    }
+    loaded
+}
+
 #[tokio::main]
 async fn main() {
+    let cli = Cli::parse();
+    // Servers narrate (revisions, images, listeners); one-shot commands print
+    // their result and stay quiet unless asked.
+    let serves = matches!(
+        cli.command,
+        Command::Run { .. } | Command::Dev { .. } | Command::Bench { .. }
+    );
+    let default_filter = if serves || cli.verbose {
+        "usai=info,usai_runtime=info"
+    } else {
+        "usai=warn,usai_runtime=warn"
+    };
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "usai=info,usai_runtime=info".into()),
+                .unwrap_or_else(|_| default_filter.into()),
         )
         .with_target(false)
         .compact()
         .init();
-    let cli = Cli::parse();
     if let Some(engine) = &cli.engine {
         // SAFETY: no other thread exists yet; the runtime reads it later.
         unsafe { std::env::set_var("USAI_ENGINE", engine) };
@@ -182,6 +230,15 @@ async fn main() {
         .root
         .map(|r| std::path::absolute(&r).unwrap_or(r))
         .unwrap_or_else(|| std::env::current_dir().expect("cwd"));
+    // Local development reads `<root>/.env` (never overriding what the shell
+    // already set); `usai run` does not — production configuration comes
+    // from the deployment environment, on purpose.
+    if !matches!(cli.command, Command::Run { .. }) {
+        let loaded = load_dotenv(&root.join(".env"));
+        if loaded > 0 && matches!(cli.command, Command::Dev { .. }) {
+            eprintln!("loaded {loaded} variable(s) from .env");
+        }
+    }
     let result = match cli.command {
         Command::Build => commands::build(&root).await,
         Command::Run {

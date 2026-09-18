@@ -160,10 +160,28 @@ export function flatten(app: AppDeclaration): { workloads: Array<{ workload: Wor
       throw new Error(`resource "${resource.name}" is declared twice with different configuration (${existing.module ?? "app"} and ${where})`);
     }
   };
-  for (const module of app.modules) {
+  // A hole in a declaration list is almost always a value used before its
+  // `const` ran (declared below the module that lists it, or a circular
+  // import). Name the slot instead of failing later on `undefined`.
+  const check = (list: readonly unknown[], what: string, where: string) => {
+    list.forEach((entry, i) => {
+      const e = entry as { __usai?: string } | undefined;
+      if (!e || typeof e !== "object" || !e.__usai) {
+        throw new Error(
+          `${where}: ${what}[${i}] is ${e === undefined ? "undefined" : typeof e} — is it declared after the \`defineModule\`/\`defineApp\` that lists it, or imported from a module that imports this one?`,
+        );
+      }
+    });
+  };
+  for (const module of app.modules ?? []) {
+    if (!module || typeof module !== "object") throw new Error(`defineApp: modules contains ${module === undefined ? "undefined" : typeof module} — declared after use or a circular import?`);
+    check(module.workloads, "workloads", `module "${module.name}"`);
+    check(module.resources, "resources", `module "${module.name}"`);
     for (const workload of module.workloads) workloads.push({ workload, module: module.name });
     for (const resource of module.resources) add(resource, module.name, `module ${module.name}`);
   }
+  check(app.workloads, "workloads", `app "${app.name}"`);
+  check(app.resources, "resources", `app "${app.name}"`);
   for (const workload of app.workloads) workloads.push({ workload });
   for (const resource of app.resources) add(resource, undefined, "app");
   // Resources referenced by workloads but declared nowhere are implicitly

@@ -13,7 +13,7 @@ import { resolveEnv } from "../env.ts";
 
 interface HttpInput {
   kind: "http";
-  env: Record<string, string>;
+  env: Record<string, string | number | boolean | undefined>;
   request: {
     method: string;
     path: string;
@@ -25,13 +25,13 @@ interface HttpInput {
   };
 }
 
-interface TaskInput { kind: "task"; env: Record<string, string>; input: unknown }
-interface CronInput { kind: "cron"; env: Record<string, string>; scheduledAt: string }
-interface CommandInput { kind: "command"; env: Record<string, string>; args: string[] }
-interface ServiceInput { kind: "service"; env: Record<string, string> }
-interface QueueInput { kind: "queue"; env: Record<string, string>; message: unknown; id: string; attempt: number }
-interface StreamInput { kind: "stream"; env: Record<string, string>; request: HttpInput["request"] }
-interface SocketInput { kind: "socket"; env: Record<string, string>; request: Omit<HttpInput["request"], "body"> }
+interface TaskInput { kind: "task"; env: Record<string, string | number | boolean | undefined>; input: unknown }
+interface CronInput { kind: "cron"; env: Record<string, string | number | boolean | undefined>; scheduledAt: string }
+interface CommandInput { kind: "command"; env: Record<string, string | number | boolean | undefined>; args: string[] }
+interface ServiceInput { kind: "service"; env: Record<string, string | number | boolean | undefined> }
+interface QueueInput { kind: "queue"; env: Record<string, string | number | boolean | undefined>; message: unknown; id: string; attempt: number }
+interface StreamInput { kind: "stream"; env: Record<string, string | number | boolean | undefined>; request: HttpInput["request"] }
+interface SocketInput { kind: "socket"; env: Record<string, string | number | boolean | undefined>; request: Omit<HttpInput["request"], "body"> }
 type Input = HttpInput | TaskInput | CronInput | CommandInput | ServiceInput | QueueInput | StreamInput | SocketInput;
 
 interface HttpOutput {
@@ -280,7 +280,7 @@ export async function invoke(app: AppDeclaration, index: number, inputJson: stri
   const input = JSON.parse(inputJson) as Input;
   // ctx.env carries typed values when the application declared them;
   // the host already validated presence and shape at activation.
-  if (app.env) input.env = resolveEnv(app.env, input.env) as unknown as Record<string, string>;
+  if (app.env) input.env = resolveEnv(app.env, input.env as Record<string, string | undefined>) as unknown as Record<string, string | number | boolean | undefined>;
   const { workload } = entry;
   try {
     switch (input.kind) {

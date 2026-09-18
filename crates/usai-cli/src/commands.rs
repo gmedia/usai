@@ -190,6 +190,7 @@ async fn serve_until_signal(
                         Some(&url),
                         Some(&runtime.status()),
                         expose_diagnostics,
+                        serve_status,
                     )
                 );
             }
@@ -297,6 +298,23 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
     let watcher_paths = Arc::clone(&watched);
     let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
         if let Ok(event) = event {
+            // Only content changes. inotify also reports reads (Access)
+            // and metadata (Other): the build reading its own inputs would
+            // otherwise re-trigger itself forever.
+            if !matches!(
+                event.kind,
+                notify::EventKind::Create(_)
+                    | notify::EventKind::Modify(_)
+                    | notify::EventKind::Remove(_)
+            ) {
+                return;
+            }
+            if event.paths.iter().any(|p| {
+                p.components()
+                    .any(|c| c.as_os_str() == ".usai" || c.as_os_str() == "node_modules")
+            }) {
+                return;
+            }
             let relevant = {
                 let paths = watcher_paths.lock().expect("watched poisoned");
                 event.paths.iter().any(|p| {
@@ -341,6 +359,21 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
                 Ok(out) => {
                     *watched.lock().expect("watched poisoned") = out.inputs;
                     let previous = rebuild_runtime.active().ok();
+                    if previous
+                        .as_ref()
+                        .is_some_and(|p| p.definition.identity() == out.definition.identity())
+                    {
+                        eprintln!(
+                            "\nrebuilt in {:?}: the application is unchanged ({}); keeping revision {}",
+                            started.elapsed(),
+                            out.definition.identity(),
+                            previous
+                                .as_ref()
+                                .map(|p| p.id.to_string())
+                                .unwrap_or_default()
+                        );
+                        continue;
+                    }
                     match rebuild_runtime.install(out.definition).await {
                         Ok(rev) => match rebuild_runtime.activate(rev.id).await {
                             Ok(rev) => {
@@ -391,6 +424,7 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
                     Some(&url),
                     Some(&banner_runtime.status()),
                     true,
+                    true,
                 )
             );
             println!("\nwatching for changes (ctrl-c to stop)");
@@ -417,7 +451,31 @@ async fn one_shot(
     runtime.activate(revision.id).await?;
     let result = run(&runtime).await;
     runtime.shutdown().await;
-    let result = result?;
+    // "unknown workload command:nope" is not a definition problem: name what
+    // exists of that kind so the typo is obvious.
+    let result = match result {
+        Err(RuntimeError::UnknownWorkload(id)) => {
+            let (kind, name) = id.split_once(':').unwrap_or(("", id.as_str()));
+            let mut available: Vec<&str> = revision
+                .definition
+                .manifest()
+                .workloads
+                .iter()
+                .filter(|w| w.id.starts_with(&format!("{kind}:")))
+                .map(|w| w.name.as_str())
+                .collect();
+            available.sort();
+            anyhow::bail!(
+                "no {kind} named {name:?}; declared {kind}s: {}",
+                if available.is_empty() {
+                    "(none)".to_owned()
+                } else {
+                    available.join(", ")
+                }
+            );
+        }
+        other => other?,
+    };
     for line in &result.logs {
         eprintln!("[{}] {}", line.level, line.message);
     }
@@ -809,9 +867,23 @@ pub async fn test(root: &Path, args: Vec<String>) -> Result<()> {
     usai_runtime::build::build(engine.as_ref(), &BuildOptions::from_config(&config)).await?;
     let me = std::env::current_exe().context("cannot locate the usai binary")?;
     let mut command = tokio::process::Command::new("node");
-    // The `usai` export condition resolves the SDK to its TypeScript sources
-    // (Node strips types), so a workspace checkout needs no `dist/`.
-    command.args(["--conditions=usai", "--test"]);
+    // In this repository's workspace the SDK is a symlink to its sources and
+    // the `usai` export condition lets Node run them without a `dist/`. From
+    // a published package (`node_modules/@sakaladev/usai` is a real
+    // directory) Node refuses to strip types, so the condition must stay
+    // off and `dist/` is used.
+    let sdk = config.root.join("node_modules/@sakaladev/usai");
+    let workspace_sdk = std::fs::symlink_metadata(&sdk)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+        && sdk.join("src/index.ts").exists()
+        && !std::fs::canonicalize(&sdk)
+            .map(|real| real.components().any(|c| c.as_os_str() == "node_modules"))
+            .unwrap_or(true);
+    if workspace_sdk {
+        command.arg("--conditions=usai");
+    }
+    command.arg("--test");
     if args.is_empty() {
         for pattern in [
             "src/**/*.test.ts",

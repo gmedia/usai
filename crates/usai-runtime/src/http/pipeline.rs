@@ -887,8 +887,16 @@ impl HttpHost {
                 body["error"]["details"] = details.clone();
             }
             if status.is_server_error() {
-                tracing::error!(world = %world, workload, code, message = %error.message, stack = error.stack.as_deref().unwrap_or(""), "application error");
-                if !self.config.expose_diagnostics {
+                // The details of a server-side contract failure (which field
+                // of the response did not match) are what the developer
+                // needs: always in the log, in the response only in dev.
+                let details = usai.get("details").cloned().unwrap_or(Value::Null);
+                tracing::error!(world = %world, workload, code, message = %error.message, %details, stack = error.stack.as_deref().unwrap_or(""), "application error");
+                if self.config.expose_diagnostics {
+                    if !details.is_null() {
+                        body["error"]["details"] = details;
+                    }
+                } else {
                     body["error"]["message"] = Value::String("internal error".into());
                 }
             }
