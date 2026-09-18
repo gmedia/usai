@@ -4,7 +4,7 @@
 // commands deterministically through the control surface: no wall clock, no
 // external server.
 //
-//   import { testApp } from "usai/test";
+//   import { testApp } from "@sakaladev/usai/test";
 //   const app = await testApp({ root: "." });
 //   const res = await app.http.post("/users", { body: { name: "Ayu" } });
 //   await app.task("send-receipt").invoke({ orderId: "o1" });

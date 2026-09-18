@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { testApp } from "usai/test";
+import { testApp } from "@sakaladev/usai/test";
 
 // Needs a database: DATABASE_URL (a throwaway one — the test migrates it).
 const url = process.env["DATABASE_URL"];

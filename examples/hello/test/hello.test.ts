@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { testApp } from "usai/test";
+import { testApp } from "@sakaladev/usai/test";
 
 test("hello greets and rejects", async () => {
   const app = await testApp({ root: new URL("..", import.meta.url).pathname });

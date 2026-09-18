@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // create-usai: scaffold a Usai application from a template.
 //
-//   create-usai <dir> [--template hello]
+//   pnpm dlx @sakaladev/create-usai <dir> [--template hello]
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";

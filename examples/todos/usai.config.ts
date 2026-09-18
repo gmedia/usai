@@ -1,4 +1,4 @@
-import { defineConfig } from "usai/config";
+import { defineConfig } from "@sakaladev/usai/config";
 
 export default defineConfig({
   app: "./src/app.ts",

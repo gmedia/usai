@@ -1,4 +1,4 @@
-import { defineApp, env, http } from "usai";
+import { defineApp, env, http } from "@sakaladev/usai";
 import { users } from "./users/module.ts";
 import { billing } from "./billing/module.ts";
 

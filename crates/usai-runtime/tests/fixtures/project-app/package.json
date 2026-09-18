@@ -4,6 +4,6 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": { "typecheck": "tsc -p tsconfig.json --noEmit" },
-  "dependencies": { "usai": "workspace:*", "zod": "^4.0.0" },
+  "dependencies": { "@sakaladev/usai": "workspace:*", "zod": "^4.0.0" },
   "devDependencies": { "typescript": "^5.9.0" }
 }

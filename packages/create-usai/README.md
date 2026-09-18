@@ -3,7 +3,7 @@
 Scaffolds a new [Usai](https://github.com/gmedia/usai) application.
 
 ```bash
-pnpm dlx create-usai my-app     # or: npm create usai@latest my-app
+pnpm dlx @sakaladev/create-usai my-app     # or: npm create @sakaladev/usai@latest my-app
 cd my-app && pnpm install
 usai dev
 ```

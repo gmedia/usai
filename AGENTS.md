@@ -169,8 +169,8 @@ docs/GUEST-ABI.md             host <-> guest contract inside a world
 docs/adr/                     architecture decision records
 crates/usai-runtime/          the runtime (lib); tests/lifecycle.rs is the D1 acceptance suite
 crates/usai-cli/              the `usai` binary
-packages/usai/                TypeScript SDK (developer surface)
-packages/create-usai/         scaffolder
+packages/usai/                TypeScript SDK (developer surface; npm: @sakaladev/usai)
+packages/create-usai/         scaffolder (npm: @sakaladev/create-usai)
 examples/                     runnable applications
 Makefile, .github/workflows/  `make check` is CI
 ```

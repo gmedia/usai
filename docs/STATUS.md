@@ -105,7 +105,7 @@ hello bundle (765 KB, zod evaluated per world) 6.52 ms/world
 1. Propose the Wasmtime pagemap-reset patch upstream (complete traversal from `walk_end`; **paged-out dirty pages must be reset** — a freshness hole found here, `docs/measurements/…` §9). Remaining lever: the eval-based invoke/outcome/pending floor (0.24 ms of 1.05) — a core ABI change.
 2. Acceptance audit done (`docs/ACCEPTANCE-AUDIT.md`); remaining ◐: crash/restart recovery is the orchestrator's, tutorial application, first tag.
 3. Per-world CPU accounting (threat model "Open").
-5. D14 alpha checklist still open: publish `usai` / `create-usai` to npm and a `usai` binary (today the CLI is `cargo run -p usai-cli`); artifact byte format + signing (ADR-0005 follow-up).
+5. D14 alpha checklist: npm packages are `@sakaladev/usai` and `@sakaladev/create-usai` (the unscoped `usai` name is refused by npm as too similar to existing packages); first publish is manual, then Trusted Publishing on tags; binaries from the release workflow; artifact byte format + signing (ADR-0005 follow-up).
 
 ## Known gaps / debt
 
@@ -114,6 +114,5 @@ hello bundle (765 KB, zod evaluated per world) 6.52 ms/world
 - The Wasm substrate is the research representation (ADR-0016); its per-world cost is now attributed on the research VM but not yet reduced, and no soak has run. Do not cite EXP-012B numbers for this codebase. The native QuickJS engine stays as reference; do not use it for economics.
 - Boundary contracts are validated twice when a JSON Schema exists (host before the world, provider inside it to obtain parsed values). Acceptable for v0; `GOAL.md` §13 asks to collapse this later.
 - Auth resolvers run inside the world (after structural validation); `inspect` says so.
-- `create-usai` is a placeholder; `examples/hello` is the onboarding path for now.
 - Module-level `migrations:`/`seeders:` globs are root-relative, not module-relative (the bundle has no source locations); documented on `defineModule`. PostgreSQL: no transactions across operations yet.
 - HTTP/1.1 only; no TLS termination (expected behind a proxy in v0).

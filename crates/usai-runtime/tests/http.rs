@@ -32,7 +32,7 @@ async fn start() -> Option<Server> {
         return None;
     }
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/http-app");
-    if !root.join("node_modules/usai").exists() {
+    if !root.join("node_modules/@sakaladev/usai").exists() {
         eprintln!("skipping: fixture not installed (run `pnpm install`)");
         return None;
     }

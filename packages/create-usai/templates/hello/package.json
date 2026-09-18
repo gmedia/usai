@@ -9,7 +9,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "usai": "__USAI_VERSION__",
+    "@sakaladev/usai": "__USAI_VERSION__",
     "zod": "^4.0.0"
   },
   "devDependencies": {

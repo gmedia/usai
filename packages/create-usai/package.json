@@ -1,5 +1,5 @@
 {
-  "name": "create-usai",
+  "name": "@sakaladev/create-usai",
   "version": "0.0.1",
   "description": "Scaffold a new Usai application.",
   "license": "Apache-2.0",

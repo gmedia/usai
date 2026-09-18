@@ -1,4 +1,4 @@
-import { defineApp, http, errors } from "usai";
+import { defineApp, http, errors } from "@sakaladev/usai";
 import { z } from "zod";
 
 const Params = z.object({ name: z.string().min(1).max(40) });

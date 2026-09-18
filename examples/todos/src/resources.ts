@@ -1,4 +1,4 @@
-import { postgres } from "usai";
+import { postgres } from "@sakaladev/usai";
 
 // One pool for the runtime's lifetime; every operation leases a connection
 // and the runtime decides reuse from terminal proof (contract C5).

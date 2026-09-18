@@ -20,7 +20,7 @@ use crate::engine::{Engine, EngineError};
 
 #[derive(Clone, Debug)]
 pub struct BuildOptions {
-    /// Project root (where `node_modules/usai` resolves from).
+    /// Project root (where `node_modules/@sakaladev/usai` resolves from).
     pub root: PathBuf,
     /// Application entry, relative to `root` or absolute.
     pub entry: PathBuf,
@@ -102,7 +102,7 @@ async fn node_available() -> bool {
 async fn resolve_bundler(root: &Path) -> Result<PathBuf, BuildError> {
     let output = tokio::process::Command::new("node")
         .arg("-p")
-        .arg("require.resolve('usai/build/bundle.mjs', { paths: [process.argv[1]] })")
+        .arg("require.resolve('@sakaladev/usai/build/bundle.mjs', { paths: [process.argv[1]] })")
         .arg(root)
         .output()
         .await?;
@@ -407,7 +407,7 @@ pub async fn build_seeder(
         rel.to_string_lossy().replace('\\', "/")
     };
     let entry_source = format!(
-        "import app from {app:?};\nimport seed from {seed:?};\nimport {{ defineApp, command }} from \"usai\";\n\
+        "import app from {app:?};\nimport seed from {seed:?};\nimport {{ defineApp, command }} from \"@sakaladev/usai\";\n\
          const run = command({name:?}, {{ resources: [...(seed.resources ?? [])] }}, async (ctx) => seed.run(ctx));\n\
          export default defineApp({{ name: app.name + \":seed\", workloads: [run], resources: [...app.resources, ...app.modules.flatMap((m) => m.resources)], ...(app.env ? {{ env: app.env }} : {{}}) }});\n",
         app = rel(&app_entry),

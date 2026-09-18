@@ -5,10 +5,10 @@
     "types": [],
     "baseUrl": ".",
     "paths": {
-      "usai": [
+      "@sakaladev/usai": [
         "../../packages/usai/src/index.ts"
       ],
-      "usai/config": [
+      "@sakaladev/usai/config": [
         "../../packages/usai/src/config.ts"
       ]
     }

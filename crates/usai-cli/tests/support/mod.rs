@@ -34,7 +34,7 @@ pub fn project(tag: &str, app_ts: &str) -> Option<PathBuf> {
         std::fs::copy(hello.join(f), dir.join(f)).ok()?;
     }
     std::fs::write(dir.join("src/app.ts"), app_ts).ok()?;
-    link(&dir.join("node_modules/usai"), &usai);
+    link(&dir.join("node_modules/@sakaladev/usai"), &usai);
     link(&dir.join("node_modules/zod"), &zod);
     Some(dir)
 }

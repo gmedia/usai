@@ -115,7 +115,7 @@ importers:
 
   crates/usai-runtime/tests/fixtures/bench-app:
     dependencies:
-      usai:
+      '@sakaladev/usai':
         specifier: workspace:*
         version: link:../../../../../packages/usai
       zod:
@@ -128,7 +128,7 @@ importers:
 
   crates/usai-runtime/tests/fixtures/http-app:
     dependencies:
-      usai:
+      '@sakaladev/usai':
         specifier: workspace:*
         version: link:../../../../../packages/usai
       zod:
@@ -141,7 +141,7 @@ importers:
 
   crates/usai-runtime/tests/fixtures/pg-app:
     dependencies:
-      usai:
+      '@sakaladev/usai':
         specifier: workspace:*
         version: link:../../../../../packages/usai
       zod:
@@ -154,7 +154,7 @@ importers:
 
   crates/usai-runtime/tests/fixtures/project-app:
     dependencies:
-      usai:
+      '@sakaladev/usai':
         specifier: workspace:*
         version: link:../../../../../packages/usai
       zod:
@@ -167,7 +167,7 @@ importers:
 
   examples/hello:
     dependencies:
-      usai:
+      '@sakaladev/usai':
         specifier: workspace:*
         version: link:../../packages/usai
       zod:
@@ -183,7 +183,7 @@ importers:
 
   examples/postgres:
     dependencies:
-      usai:
+      '@sakaladev/usai':
         specifier: workspace:*
         version: link:../../packages/usai
       zod:
@@ -196,7 +196,7 @@ importers:
 
   examples/todos:
     dependencies:
-      usai:
+      '@sakaladev/usai':
         specifier: workspace:*
         version: link:../../packages/usai
       zod:

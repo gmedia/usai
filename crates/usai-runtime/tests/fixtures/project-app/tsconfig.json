@@ -4,7 +4,7 @@
     "noEmit": true,
     "types": [],
     "baseUrl": ".",
-    "paths": { "usai": ["../../../../../packages/usai/src/index.ts"], "usai/config": ["../../../../../packages/usai/src/config.ts"] }
+    "paths": { "@sakaladev/usai": ["../../../../../packages/usai/src/index.ts"], "@sakaladev/usai/config": ["../../../../../packages/usai/src/config.ts"] }
   },
   "include": ["src", "seeders", "usai.config.ts"]
 }

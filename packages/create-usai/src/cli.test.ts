@@ -12,7 +12,7 @@ test("scaffolds the hello template with the project name substituted", () => {
   assert.ok(existsSync(join(target, "usai.config.ts")));
   const pkg = JSON.parse(readFileSync(join(target, "package.json"), "utf8"));
   assert.equal(pkg.name, "my-app");
-  assert.equal(pkg.dependencies.usai, "^0.0.1");
+  assert.equal(pkg.dependencies["@sakaladev/usai"], "^0.0.1");
   assert.match(readFileSync(join(target, "src/app.ts"), "utf8"), /name: "my-app"/);
   assert.throws(() => scaffold({ target: dir }), /not empty/);
 });

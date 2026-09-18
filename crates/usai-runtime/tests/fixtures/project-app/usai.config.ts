@@ -1,4 +1,4 @@
-import { defineConfig } from "usai/config";
+import { defineConfig } from "@sakaladev/usai/config";
 
 // Both layouts at once: colocated per module and a centralized directory.
 export default defineConfig({

@@ -1,4 +1,4 @@
-import { defineModule, task, type PostgresHandle } from "usai";
+import { defineModule, task, type PostgresHandle } from "@sakaladev/usai";
 import { z } from "zod";
 import { db } from "../resources.ts";
 

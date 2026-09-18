@@ -25,7 +25,9 @@ fn fixture_root(name: &str) -> Option<PathBuf> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
         .join(name);
-    root.join("node_modules/usai").exists().then_some(root)
+    root.join("node_modules/@sakaladev/usai")
+        .exists()
+        .then_some(root)
 }
 
 fn out_dir(tag: &str) -> PathBuf {

@@ -28,7 +28,9 @@ async fn setup() -> Option<(
     }
     let hello = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello");
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/http-app");
-    if !hello.join("node_modules/usai").exists() || !fixture.join("node_modules/usai").exists() {
+    if !hello.join("node_modules/@sakaladev/usai").exists()
+        || !fixture.join("node_modules/@sakaladev/usai").exists()
+    {
         return None;
     }
     let engine = usai_runtime::engine::from_env(64).unwrap();

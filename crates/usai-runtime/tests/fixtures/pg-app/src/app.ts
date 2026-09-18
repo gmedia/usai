@@ -1,9 +1,9 @@
 // PostgreSQL fixture for the D6 acceptance tests (contract C5).
-import { defineApp, http, task, command, postgres, errors, env, queue, cache } from "usai";
+import { defineApp, http, task, command, postgres, errors, env, queue, cache } from "@sakaladev/usai";
 import { z } from "zod";
 
 const db = postgres("main", { pool: { max: 4 } });
-type Db = import("usai").PostgresHandle;
+type Db = import("@sakaladev/usai").PostgresHandle;
 const d = (ctx: { resources: Record<string, unknown> }) => ctx.resources["main"] as Db;
 
 const User = z.object({ id: z.number().int(), name: z.string(), email: z.string() });

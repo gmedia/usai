@@ -18,7 +18,7 @@ Trusted Publishing is configured on an existing package; versions already
 on the registry are skipped.
 
 ```bash
-pnpm dlx create-usai my-app      # or: node packages/create-usai/dist/cli.js my-app (from this repo)
+pnpm dlx @sakaladev/create-usai my-app      # or: node packages/create-usai/dist/cli.js my-app (from this repo)
 cd my-app && pnpm install
 usai dev                         # from this repo: cargo run -p usai-cli -- dev --root my-app
 curl localhost:3000/hello/world
@@ -76,7 +76,7 @@ export const billing = defineModule({
 ## 4. HTTP
 
 ```ts
-import { defineApp, http, errors, auth } from "usai";
+import { defineApp, http, errors, auth } from "@sakaladev/usai";
 import { z } from "zod";
 
 const Params = z.object({ id: z.string().uuid() });
@@ -128,7 +128,7 @@ usai app reconcile -- --dry-run
 ## 7. PostgreSQL
 
 ```ts
-import { postgres, env, type PostgresHandle } from "usai";
+import { postgres, env, type PostgresHandle } from "@sakaladev/usai";
 const db = postgres("main", { pool: { max: 16 } });   // URL from DATABASE_URL
 
 export const listUsers = http.get("/users", { resources: [db] }, async (ctx) => {
@@ -218,7 +218,7 @@ Tests run the same application model as production:
 ```ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { testApp } from "usai/test";
+import { testApp } from "@sakaladev/usai/test";
 
 test("users", async () => {
   const app = await testApp({ root: "." });          // spawns the runtime for this project

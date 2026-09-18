@@ -1,6 +1,6 @@
 // HTTP fixture for the runtime's D2 acceptance tests. Every endpoint exists
 // to prove one contract; see crates/usai-runtime/tests/http.rs.
-import { defineApp, defineModule, http, auth, cache, errors, env, task } from "usai";
+import { defineApp, defineModule, http, auth, cache, errors, env, task } from "@sakaladev/usai";
 import { z } from "zod";
 
 const Params = z.object({ id: z.string().uuid() });
@@ -64,7 +64,7 @@ declare global {
 
 
 // ---- D4/D5: tasks, cron, commands -------------------------------------
-import { cron, command, dispatches } from "usai";
+import { cron, command, dispatches } from "@sakaladev/usai";
 
 const audit = cache.local("audit");
 type Audit = { increment(k: string): Promise<number>; get(k: string): Promise<number | null>; set(k: string, v: unknown): Promise<boolean> };
@@ -104,7 +104,7 @@ export const overlapping = cron("overlapping", { schedule: "* * * * * *", overla
 export const nightly = cron("nightly", { schedule: "0 3 * * *", timeout: "5m" }, async () => ({ ran: true }));
 
 // ---- D9: services ---------------------------------------------------------
-import { service } from "usai";
+import { service } from "@sakaladev/usai";
 
 export const ledgerSync = service("ledger-sync", { resources: [audit] }, async (ctx) => {
   // Mutable state that survives iterations because the service is alive.
@@ -137,7 +137,7 @@ export const crashy = service("crashy", { restart: { mode: "on-failure", backoff
 });
 
 // ---- D11: streams and sockets ---------------------------------------------
-import { socket } from "usai";
+import { socket } from "@sakaladev/usai";
 
 export const events = http.stream("/events", { query: z.object({ n: z.coerce.number().int().min(1).max(100).default(3) }) }, async (ctx, stream) => {
   await stream.start({ headers: { "x-stream": "yes" } });

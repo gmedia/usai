@@ -1,4 +1,4 @@
-import { defineModule, http, cron, command, errors, type PostgresHandle } from "usai";
+import { defineModule, http, cron, command, errors, type PostgresHandle } from "@sakaladev/usai";
 import { z } from "zod";
 import { db } from "../resources.ts";
 import { record } from "../activity/module.ts";

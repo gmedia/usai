@@ -11,7 +11,7 @@
     ],
     "baseUrl": ".",
     "paths": {
-      "usai/test": [
+      "@sakaladev/usai/test": [
         "../../packages/usai/src/test.ts"
       ]
     }

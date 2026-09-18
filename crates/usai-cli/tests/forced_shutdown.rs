@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 const STUCK_APP: &str = r#"
-import { defineApp, http, service } from "usai";
+import { defineApp, http, service } from "@sakaladev/usai";
 // A service that ignores its stop signal and keeps arming timers: the
 // drain can only end by its timeout, which is what the forced path is for.
 export const stuck = service("stuck", async (ctx) => { for (;;) { await ctx.sleep(60000); } });

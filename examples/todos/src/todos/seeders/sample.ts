@@ -1,4 +1,4 @@
-import { seeder, type PostgresHandle } from "usai";
+import { seeder, type PostgresHandle } from "@sakaladev/usai";
 import { db } from "../../resources.ts";
 
 // `usai db seed sample` — runs in its own finite world with the pool leased.

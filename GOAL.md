@@ -222,7 +222,7 @@ Usai should prefer one explicit application root.
 Example:
 
 ```ts
-import { defineApp } from "usai";
+import { defineApp } from "@sakaladev/usai";
 
 import { users } from "./users/module";
 import { billing } from "./billing/module";
@@ -390,7 +390,7 @@ The recommended application shape should be contract-aware.
 Example:
 
 ```ts
-import { http } from "usai";
+import { http } from "@sakaladev/usai";
 import { z } from "zod";
 
 const Params = z.object({
@@ -1082,7 +1082,7 @@ Usai should care about the resulting ApplicationDefinition, not arbitrary folder
 Example:
 
 ```ts
-import { defineConfig } from "usai/config";
+import { defineConfig } from "@sakaladev/usai/config";
 
 export default defineConfig({
   app: "./src/app.ts",
@@ -1359,7 +1359,7 @@ Testing should operate on the same application model as production.
 Conceptually:
 
 ```ts
-import { testApp } from "usai/test";
+import { testApp } from "@sakaladev/usai/test";
 
 const app = await testApp(MyApp);
 ```

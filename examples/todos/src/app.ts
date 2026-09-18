@@ -8,7 +8,7 @@
 //   curl 'localhost:3000/todos?done=false'
 //   usai app stats --root examples/todos
 //   usai test --root examples/todos
-import { defineApp, env } from "usai";
+import { defineApp, env } from "@sakaladev/usai";
 import { todos } from "./todos/module.ts";
 import { activity } from "./activity/module.ts";
 

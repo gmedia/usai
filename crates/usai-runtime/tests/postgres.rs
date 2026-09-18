@@ -83,7 +83,7 @@ async fn fixture_with(queue_consumers: bool) -> Option<Fixture> {
         return None;
     }
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pg-app");
-    if !root.join("node_modules/usai").exists() {
+    if !root.join("node_modules/@sakaladev/usai").exists() {
         return None;
     }
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -314,7 +314,7 @@ async fn unreachable_database_fails_activation_not_the_first_request() {
         return;
     }
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pg-app");
-    if !root.join("node_modules/usai").exists() {
+    if !root.join("node_modules/@sakaladev/usai").exists() {
         return;
     }
     let out_dir = std::env::temp_dir().join(format!("usai-pg-unreachable-{}", std::process::id()));
@@ -409,7 +409,7 @@ async fn tls_connections_verify_the_server_certificate() {
         return;
     }
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pg-app");
-    if !root.join("node_modules/usai").exists() {
+    if !root.join("node_modules/@sakaladev/usai").exists() {
         return;
     }
     let engine = usai_runtime::engine::from_env(64).unwrap();

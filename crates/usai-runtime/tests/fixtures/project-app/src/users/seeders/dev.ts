@@ -1,4 +1,4 @@
-import { seeder, type PostgresHandle } from "usai";
+import { seeder, type PostgresHandle } from "@sakaladev/usai";
 import { db } from "../../resources.ts";
 
 export default seeder({ resources: [db] }, async (ctx) => {

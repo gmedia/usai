@@ -1,4 +1,4 @@
-import { defineModule } from "usai";
+import { defineModule } from "@sakaladev/usai";
 import { db } from "../resources.ts";
 
 export const billing = defineModule({

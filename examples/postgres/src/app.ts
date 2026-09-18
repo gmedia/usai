@@ -8,7 +8,7 @@
 //
 // The pool lives for the runtime; each request leases one connection for
 // each operation and the runtime decides reuse from terminal proof.
-import { defineApp, http, command, postgres, errors, env, type PostgresHandle } from "usai";
+import { defineApp, http, command, postgres, errors, env, type PostgresHandle } from "@sakaladev/usai";
 import { z } from "zod";
 
 const db = postgres("main");

@@ -1,7 +1,7 @@
 // Workload matrix for execution-path attribution (tests/profile_matrix.rs).
 // One bundle, many workloads: the bundle is held constant so each row
 // isolates what the *handler* costs, not what the image contains.
-import { defineApp, http, task, errors } from "usai";
+import { defineApp, http, task, errors } from "@sakaladev/usai";
 import { z } from "zod";
 import { z as zm } from "zod/mini";
 
