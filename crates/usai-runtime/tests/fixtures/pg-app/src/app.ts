@@ -64,14 +64,15 @@ export const leak = http.get("/leak", { resources: [db] }, async (ctx) => {
 const seen = cache.local("seen");
 type Seen = { increment(k: string): Promise<number>; get(k: string): Promise<number | null> };
 
-export const orders = queue.consume("orders", { message: z.object({ orderId: z.string(), fail: z.number().int().optional() }), concurrency: 2, retry: { maxAttempts: 3, backoff: "fixed", baseMs: 100 }, resources: [seen, db] }, async (ctx) => {
+export const orders = queue.consume("orders", { message: z.object({ orderId: z.string(), fail: z.number().int().optional(), sleepMs: z.number().int().optional() }), concurrency: 2, retry: { maxAttempts: 3, backoff: "fixed", baseMs: 100 }, resources: [seen, db] }, async (ctx) => {
   globalThis.__mutable = ((globalThis.__mutable as number | undefined) ?? 0) + 1;
+  if (ctx.message.sleepMs) await ctx.sleep(ctx.message.sleepMs);
   const n = await (ctx.resources["seen"] as Seen).increment(`orders:${ctx.message.orderId}`);
   if (ctx.message.fail !== undefined && ctx.attempt <= ctx.message.fail) throw errors.internal(`attempt ${ctx.attempt} failed on purpose`);
   return { orderId: ctx.message.orderId, attempt: ctx.attempt, worldCounter: globalThis.__mutable, seen: n };
 });
 
-export const publish = http.post("/orders", { body: z.object({ orderId: z.string(), fail: z.number().int().optional() }) }, async (ctx) => ctx.queue.publish("orders", ctx.body));
+export const publish = http.post("/orders", { body: z.object({ orderId: z.string(), fail: z.number().int().optional(), sleepMs: z.number().int().optional() }) }, async (ctx) => ctx.queue.publish("orders", ctx.body));
 export const seenCount = http.get("/seen/:key", { resources: [seen] }, async (ctx) => ({ n: await (ctx.resources["seen"] as Seen).get(ctx.params["key"]!) }));
 
 declare global {

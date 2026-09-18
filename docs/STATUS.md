@@ -101,7 +101,7 @@ hello bundle (765 KB, zod evaluated per world) 6.52 ms/world
 ## Next
 
 1. **Soak** (≥ 1 h at c=16 on the VM) on the new reset path, watching RSS and the gauge baseline; then propose the Wasmtime region-budget change upstream. Remaining lever: the eval-based invoke/outcome/pending floor (0.24 ms of 1.05) — a core ABI change, after the soak.
-2. Acceptance audit done (`docs/ACCEPTANCE-AUDIT.md`); close its open items: PG slow-query timeout test, queue bounded-concurrency assertion, forced-shutdown automation.
+2. Acceptance audit done (`docs/ACCEPTANCE-AUDIT.md`); remaining ◐: crash/restart recovery is the orchestrator's, tutorial application, first tag.
 3. Per-world CPU accounting (threat model "Open").
 5. D14 alpha checklist still open: publish `usai` / `create-usai` to npm and a `usai` binary (today the CLI is `cargo run -p usai-cli`); artifact byte format + signing (ADR-0005 follow-up).
 

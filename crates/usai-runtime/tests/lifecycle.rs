@@ -489,8 +489,24 @@ async fn failed_activation_leaves_the_active_revision_untouched() {
 }
 
 #[tokio::test]
-async fn shutdown_cancels_live_work_and_returns_to_baseline() {
-    let rt = runtime().await;
+async fn shutdown_drains_then_cancels_live_work_and_returns_to_baseline() {
+    // Shutdown is graceful first: work that ends within the drain bound
+    // completes; work that does not is cancelled when the bound expires.
+    let engine = usai_runtime::engine::from_env(64).unwrap();
+    let rt = Runtime::with_env(
+        engine,
+        RuntimeConfig {
+            drain_timeout: Duration::from_millis(400),
+            ..config()
+        },
+        |_| None,
+    );
+    let rev = rt.install(definition("t")).await.unwrap();
+    rt.activate(rev.id).await.unwrap();
+    let quick = {
+        let rt = Arc::clone(&rt);
+        tokio::spawn(async move { rt.invoke("task:sleep", json!({ "ms": 100 })).await.unwrap() })
+    };
     let rt2 = Arc::clone(&rt);
     let running = tokio::spawn(async move {
         rt2.invoke("task:sleep", json!({ "ms": 10000 }))
@@ -498,7 +514,20 @@ async fn shutdown_cancels_live_work_and_returns_to_baseline() {
             .unwrap()
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
+    let started = std::time::Instant::now();
     rt.shutdown().await;
+    assert!(
+        started.elapsed() >= Duration::from_millis(350)
+            && started.elapsed() < Duration::from_secs(3),
+        "shutdown waits for the drain bound, then ends: {:?}",
+        started.elapsed()
+    );
+    let q = quick.await.unwrap();
+    assert!(
+        matches!(q.termination, Termination::Completed),
+        "{:?}",
+        q.termination
+    );
     let r = running.await.unwrap();
     assert!(
         matches!(r.termination, Termination::Cancelled { .. }),

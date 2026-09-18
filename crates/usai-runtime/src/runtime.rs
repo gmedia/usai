@@ -796,8 +796,12 @@ impl Runtime {
     }
 
     /// Stops admitting, cancels live worlds, drains, and shuts resources.
+    /// Graceful, bounded shutdown: stop admitting, ask services to stop and
+    /// let in-flight work finish (each up to `drain_timeout`), then cancel
+    /// whatever is still alive, then release resources. Every world's
+    /// cancel token is a child of the shutdown token, so the final cancel
+    /// reaches work that ignored the drain.
     pub async fn shutdown(&self) {
-        self.shutdown.cancel();
         let ids: Vec<RevisionId> = self
             .revisions
             .read()
@@ -806,8 +810,11 @@ impl Runtime {
             .copied()
             .collect();
         for id in ids {
-            let _ = self.drain(id).await;
+            if let Err(e) = self.drain(id).await {
+                tracing::warn!(revision = %id, error = %e, "drain did not finish; cancelling what is left");
+            }
         }
+        self.shutdown.cancel();
         self.resources.shutdown().await;
     }
 }

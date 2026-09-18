@@ -72,7 +72,7 @@ this file when an item moves.
 | reuse only after terminal knowledge | ✓ | `normal_completion_returns_the_connection`, `sql_error_is_terminal_and_the_connection_is_reused`, `ambiguous_abandonment_quarantines_the_connection` |
 | no connection-state leak across worlds | ✓ | `no_connection_state_leaks_across_worlds` |
 | cancellation covered | ✓ | `cooperative_cancellation_awaits_terminal_state_then_reuses` |
-| timeout | ◐ | deadline → cancel path is the HTTP deadline test + the PG cancel test; no dedicated PG-timeout test with a slow query (`/slow` exists in the fixture, unused) |
+| timeout | ✓ | `cooperative_cancellation_awaits_terminal_state_then_reuses` (`/slow`: 300 ms workload timeout over `pg_sleep(30)` → 504, cancel confirmed by 57014, connection reused) |
 | abandoned-world behaviour | ✓ | `ambiguous_abandonment_quarantines_the_connection`, `database_backend_loss_is_quarantined_and_recovered` |
 | recovery after abnormal cases | ✓ | `database_backend_loss_is_quarantined_and_recovered`, `pool_exhaustion_is_resource_aware_backpressure` |
 | unreachable database → activation fails | ✓ | `unreachable_database_fails_activation_not_the_first_request` |
@@ -110,7 +110,7 @@ this file when an item moves.
 | Acceptance | Status | Evidence |
 |---|---|---|
 | message contract validation (no world for invalid) | ✓ | `queue_messages_run_in_fresh_worlds_with_explicit_retry` |
-| bounded concurrency | ◐ | declared `concurrency` drives the consumer loops; not asserted under load in a test |
+| bounded concurrency | ✓ | `queue_concurrency_is_bounded` (6 × 300 ms messages at concurrency 2: ≥ 3 rounds, peak live worlds ≤ 2 + probe) |
 | per-message world; no state leak | ✓ | same test (three fresh worlds across retries) |
 | retry/error semantics explicit | ✓ | same test; ADR-0014 |
 | resource reuse follows ownership rules | ✓ | consumer worlds lease through the same `ResourceManager` (`pg_status` baseline assertions) |
@@ -139,8 +139,8 @@ this file when an item moves.
 | long-duration soak | ◐ | 1 h at c=16 on the research VM running at audit time (`docs/measurements/…` §8 when complete); RSS flat at 290 MB after 10 min |
 | sustained concurrency | ✓ | `usai bench` c=16/64 on the VM: 13.6k / 14.1k req/s, 0 errors |
 | overload/backpressure | ✓ | `budget_exhaustion_refuses_promptly_and_recovers`, `pool_exhaustion_is_resource_aware_backpressure`, `admission_is_refused_at_the_boundary_when_budget_is_exhausted` |
-| graceful shutdown | ✓ | `shutdown_cancels_live_work_and_returns_to_baseline`, drain tests |
-| forced shutdown | ◐ | second SIGINT forces exit (implemented in `serve_until_signal`); not automated |
+| graceful shutdown | ✓ | `shutdown_drains_then_cancels_live_work_and_returns_to_baseline` (found and fixed during this audit: shutdown used to cancel every world before draining) |
+| forced shutdown | ✓ | `crates/usai-cli/tests/forced_shutdown.rs` — a service that ignores stop keeps the drain open; a second SIGINT exits 130 and reports live worlds |
 | crash/restart recovery | ◐ | queue messages are PostgreSQL-backed (survive a process loss); dispatched in-memory tasks are counted as lost at shutdown (ADR-0010); process supervision is the orchestrator's (D15) |
 | bounded memory | ✓ | `a_world_exceeding_its_memory_limit_fails_cleanly`; pooling slots are fixed-size |
 | database loss/recovery | ✓ | `database_backend_loss_is_quarantined_and_recovered` |
@@ -178,6 +178,5 @@ this file when an item moves.
 
 1. Soak result to record (§8 of the measurements doc) — running.
 2. Per-world CPU accounting (threat model).
-3. D6 timeout test with a slow query; D10 bounded-concurrency assertion; forced-shutdown automation.
-4. First tagged release (`v0.0.1`) and npm token.
-5. A tutorial application beyond the examples.
+3. First tagged release (`v0.0.1`) and npm token.
+4. A tutorial application beyond the examples.

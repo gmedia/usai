@@ -341,6 +341,56 @@ async fn unreachable_database_fails_activation_not_the_first_request() {
     let _ = TerminalProof::Terminal;
 }
 
+/// D10: `concurrency` bounds how many message worlds run at once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn queue_concurrency_is_bounded() {
+    let Some(f) = fixture_with(true).await else {
+        return;
+    };
+    let rev = f.runtime.active().unwrap();
+    let (_, w) = rev
+        .definition
+        .workload("http:POST /orders")
+        .map(|(i, w)| (i, w.id.clone()))
+        .unwrap();
+    // Six messages of 300 ms each on a consumer declared with concurrency 2:
+    // at least three rounds, never more than two message worlds alive.
+    for i in 0..6 {
+        f.runtime
+            .invoke(&w, json!({ "kind": "http", "request": { "method": "POST", "path": "/orders", "url": "/orders", "params": {}, "query": {}, "headers": {}, "body": { "json": { "orderId": format!("slow{i}"), "sleepMs": 300 } } } }))
+            .await
+            .unwrap();
+    }
+    let started = std::time::Instant::now();
+    let mut peak = 0;
+    // Sample the live-world gauge until the last message is seen.
+    while wait_for(&f, "orders:slow5", 1, Duration::ZERO).await != json!(1)
+        && started.elapsed() < Duration::from_secs(10)
+    {
+        peak = peak.max(f.runtime.ledger().gauges.snapshot().live_worlds);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    for i in 0..6 {
+        assert_eq!(
+            wait_for(&f, &format!("orders:slow{i}"), 1, Duration::from_secs(5)).await,
+            json!(1)
+        );
+    }
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed >= Duration::from_millis(850),
+        "6 × 300 ms at concurrency 2 cannot finish in {elapsed:?}"
+    );
+    // The `/seen` probes are HTTP worlds too, so allow them on top of the
+    // two consumer worlds.
+    assert!(
+        peak <= 3,
+        "peak live worlds {peak} exceeds concurrency 2 (+1 probe)"
+    );
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    f.baseline();
+}
+
 /// TLS: `sslmode=require` connects only when the server certificate
 /// verifies against the configured roots; without them activation is
 /// refused (never an "encrypted but unverified" connection).
