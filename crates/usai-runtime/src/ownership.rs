@@ -70,6 +70,9 @@ pub struct Gauges {
     pub completions_dropped_late: AtomicU64,
     pub completions_rejected_stale: AtomicU64,
     pub detached_work_detected: AtomicU64,
+    /// Monotonic: thread CPU time spent inside guest entries, in
+    /// nanoseconds, summed over every world (per-world CPU accounting).
+    pub guest_cpu_ns: AtomicU64,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
@@ -82,6 +85,7 @@ pub struct GaugeSnapshot {
     pub completions_dropped_late: u64,
     pub completions_rejected_stale: u64,
     pub detached_work_detected: u64,
+    pub guest_cpu_ns: u64,
 }
 
 impl Gauges {
@@ -94,6 +98,7 @@ impl Gauges {
             completions_dropped_late: self.completions_dropped_late.load(Ordering::SeqCst),
             completions_rejected_stale: self.completions_rejected_stale.load(Ordering::SeqCst),
             detached_work_detected: self.detached_work_detected.load(Ordering::SeqCst),
+            guest_cpu_ns: self.guest_cpu_ns.load(Ordering::SeqCst),
         }
     }
 }

@@ -148,7 +148,7 @@ this file when an item moves.
 | artifact/version compatibility | ✓ | unsupported manifest version refused (same test); `MANIFEST_VERSION` |
 | revision activation/draining | ✓ | `revision_replacement_under_load_loses_no_request`, `revision_replacement_drains_the_old_revision`, `failed_activation_leaves_the_active_revision_untouched` |
 | resource limits | ✓ | memory limit, CPU slice (`runaway_synchronous_code_is_interrupted`), pool max, budgets |
-| security/threat model | ◐ | `docs/THREAT-MODEL.md`; per-world CPU accounting still open |
+| security/threat model | ✓ | `docs/THREAT-MODEL.md`; per-world guest CPU accounted (`WorkResult.cpu`, `usai_guest_cpu_seconds_total`); fairness policy listed as open |
 | upgrade/rollback | ✓ | `orchestrator_lifecycle_install_activate_drain_remove` (rollback = reinstall + activate) |
 
 ## D14 — Developer preview
@@ -177,6 +177,6 @@ this file when an item moves.
 ## Open items (in priority order)
 
 1. Soak result to record (§8 of the measurements doc) — running.
-2. Per-world CPU accounting (threat model).
-3. First tagged release (`v0.0.1`) and npm token.
-4. A tutorial application beyond the examples.
+2. First tagged release (`v0.0.1`) and npm token.
+3. A tutorial application beyond the examples.
+4. Per-workload CPU fairness on top of the accounting.

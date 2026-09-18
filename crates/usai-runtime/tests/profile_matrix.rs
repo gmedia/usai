@@ -114,6 +114,7 @@ async fn runtime_for(root: &str, engine: Arc<dyn usai_runtime::engine::Engine>) 
 struct Row {
     label: &'static str,
     total_ms: f64,
+    cpu_ms: f64,
     faults: f64,
     phases: BTreeMap<String, f64>,
 }
@@ -138,15 +139,18 @@ async fn measure(
         }
     }
     let mut phases: BTreeMap<String, f64> = BTreeMap::new();
+    let mut cpu = std::time::Duration::ZERO;
     let f0 = minflt();
     let t = Instant::now();
     for _ in 0..n {
         let r = runtime.invoke(workload, input.clone()).await.unwrap();
+        cpu += r.cpu;
         for (k, v) in r.profile {
             *phases.entry(k).or_default() += v;
         }
     }
     let total_ms = t.elapsed().as_secs_f64() * 1000.0 / n as f64;
+    let cpu_ms = cpu.as_secs_f64() * 1000.0 / n as f64;
     let faults = (minflt() - f0) as f64 / n as f64;
     for v in phases.values_mut() {
         *v /= n as f64;
@@ -154,6 +158,7 @@ async fn measure(
     Row {
         label,
         total_ms,
+        cpu_ms,
         faults,
         phases,
     }
@@ -167,8 +172,8 @@ fn print_table(engine: &str, rows: &[Row]) {
     let leaves: Vec<&String> = keys.iter().filter(|k| k.starts_with("engine.")).collect();
     println!("\n== {engine} ==  (ms per request)");
     print!(
-        "{:<12} {:>7} {:>7} {:>7} {:>7} {:>7}",
-        "workload", "total", "create", "run", "retire", "outside"
+        "{:<12} {:>7} {:>7} {:>7} {:>7} {:>7} {:>7}",
+        "workload", "total", "cpu", "create", "run", "retire", "outside"
     );
     for k in &leaves {
         print!(
@@ -194,8 +199,8 @@ fn print_table(engine: &str, rows: &[Row]) {
         // reset / runtime teardown) plus `Runtime::invoke` bookkeeping.
         let outside = r.total_ms - create - run - retire;
         print!(
-            "{:<12} {:>7.3} {:>7.3} {:>7.3} {:>7.3} {:>7.3}",
-            r.label, r.total_ms, create, run, retire, outside
+            "{:<12} {:>7.3} {:>7.3} {:>7.3} {:>7.3} {:>7.3} {:>7.3}",
+            r.label, r.total_ms, r.cpu_ms, create, run, retire, outside
         );
         for k in &leaves {
             print!(" {:>9.3}", r.phases.get(*k).copied().unwrap_or(0.0));
@@ -203,7 +208,7 @@ fn print_table(engine: &str, rows: &[Row]) {
         println!(" {:>7.3} {:>7.1}", unacct, r.faults);
     }
     println!(
-        "(outside = instance drop/slot reset + invoke bookkeeping; unacct = run outside timed guest calls; faults = minor page faults per request)"
+        "(cpu = thread CPU inside guest entries; outside = instance drop/slot reset + invoke bookkeeping; unacct = run outside timed guest calls; faults = minor page faults per request)"
     );
 }
 

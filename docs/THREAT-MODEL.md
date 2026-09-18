@@ -39,17 +39,17 @@
 
 ## What the runtime does not provide (v0)
 
-- **No TLS.** Run behind a TLS-terminating proxy or on a private network. PostgreSQL connections are `NoTls`.
+- **No HTTP TLS.** Run behind a TLS-terminating proxy or on a private network. PostgreSQL connections use TLS when the URL says `sslmode=require` (or `prefer`, the default, when the server offers it) and always verify the server certificate (Mozilla roots + `tls.caFile` / `PGSSLROOTCERT`).
 - **No authentication of `/_usai/*` surfaces.** Status, metrics, docs are served only when enabled (`--status`, `usai dev`); enable them only on trusted networks.
 - **No isolation between applications or tenants.** One runtime = one trust domain. Multi-application hosting needs a new ADR and threat model before untrusted co-tenancy.
-- **No CPU accounting beyond the synchronous slice.** A handler that awaits in a tight loop is bounded by its deadline, not by CPU share.
+- **CPU is accounted, not scheduled.** Every world's guest CPU time is measured (thread CPU inside guest entries: `WorkResult.cpu`, the world trace's `cpu_us`, `usai_guest_cpu_seconds_total`) and one synchronous run is bounded by the CPU slice; there is no per-workload CPU share or fairness policy yet — a handler that awaits in a tight loop is bounded by its deadline.
 - **No durable tasks.** A crash loses locally dispatched tasks (ADR-0010); the queue substrate is durable because PostgreSQL is.
 - **No rate limiting per client.** Budgets are per workload/resource, not per caller.
 - **No protection against a malicious build step.** `usai build` runs `node` and esbuild from the project's `node_modules`; the supply chain is the project's.
 
 ## Operator checklist
 
-1. Terminate TLS in front of Usai; put PostgreSQL on a private network.
+1. Terminate TLS in front of Usai; use `sslmode=require` to PostgreSQL (with the provider's root in `tls.caFile`) or keep it on a private network.
 2. Do not pass `--status` on public listeners; scrape metrics from a private interface.
 3. Set `DATABASE_URL` and other declared env in the deployment environment; activation fails loudly if they are missing or malformed.
 4. Size `RuntimeConfig.max_worlds` and pool sizes to the host; watch `usai_world_budget` and `usai_resource{metric="quarantined"}`.
@@ -58,5 +58,5 @@
 
 ## Open
 
-- Per-world CPU time accounting and fairness (D13 follow-up).
+- Per-workload CPU fairness / budgets on top of the accounting (D13 follow-up).
 - A hardened multi-tenant mode is a separate, evidence-backed decision (ADR-0008).

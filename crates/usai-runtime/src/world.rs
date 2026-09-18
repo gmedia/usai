@@ -91,6 +91,9 @@ pub struct WorkResult {
     /// Per-phase time accounting (`USAI_PROFILE=1`): driver phases plus
     /// the engine's own, in milliseconds.
     pub profile: Vec<(String, f64)>,
+    /// Thread CPU time spent inside guest entries (the world's own CPU;
+    /// host operations run elsewhere and are not included).
+    pub cpu: Duration,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -377,6 +380,10 @@ impl WorldDriver {
         } else {
             Vec::new()
         };
+        let cpu = Duration::from_nanos(self.watch.cpu_ns.load(Ordering::Relaxed));
+        self.gauges
+            .guest_cpu_ns
+            .fetch_add(cpu.as_nanos() as u64, Ordering::Relaxed);
         let mut result = WorkResult {
             world: self.id,
             workload: workload_id,
@@ -389,6 +396,7 @@ impl WorldDriver {
             logs,
             children,
             profile,
+            cpu,
         };
         let t_retire = Instant::now();
         self.retire("finished");
@@ -495,6 +503,7 @@ impl WorldDriver {
 struct Watchdog {
     slot: Arc<WatchSlot>,
     slice: Duration,
+    cpu_start_ns: u64,
 }
 
 /// One world's watch: the deadline the guest must return by (0 = disarmed)
@@ -502,6 +511,22 @@ struct Watchdog {
 struct WatchSlot {
     deadline_ns: std::sync::atomic::AtomicU64,
     flag: Arc<AtomicBool>,
+    /// CPU accounting rides on the same guard: thread CPU time at arm,
+    /// delta added at finish.
+    cpu_ns: std::sync::atomic::AtomicU64,
+}
+
+/// CPU time of the calling thread (CLOCK_THREAD_CPUTIME_ID); a vDSO read.
+fn thread_cpu_ns() -> u64 {
+    let mut ts = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: a valid pointer to a timespec; the clock id is a constant.
+    if unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut ts) } != 0 {
+        return 0;
+    }
+    ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64
 }
 
 const WATCHDOG_TICK: Duration = Duration::from_millis(5);
@@ -549,6 +574,7 @@ impl WatchSlot {
         let slot = Arc::new(Self {
             deadline_ns: std::sync::atomic::AtomicU64::new(0),
             flag,
+            cpu_ns: std::sync::atomic::AtomicU64::new(0),
         });
         let service = watchdog_service();
         service
@@ -568,11 +594,16 @@ impl Watchdog {
         Self {
             slot: Arc::clone(slot),
             slice,
+            cpu_start_ns: thread_cpu_ns(),
         }
     }
 
     fn finish<T>(self, result: Result<T, EngineError>) -> Result<T, EngineError> {
         self.slot.deadline_ns.store(0, Ordering::Release);
+        self.slot.cpu_ns.fetch_add(
+            thread_cpu_ns().saturating_sub(self.cpu_start_ns),
+            Ordering::Relaxed,
+        );
         if self.slot.flag.load(Ordering::SeqCst) {
             return Err(EngineError::Guest(format!(
                 "guest exceeded the synchronous CPU slice of {:?}",
@@ -585,6 +616,8 @@ impl Watchdog {
 
 impl Drop for Watchdog {
     fn drop(&mut self) {
+        // `finish` consumes the guard on the normal path; this is the
+        // unwinding path, where accounting is best effort.
         self.slot.deadline_ns.store(0, Ordering::Release);
     }
 }

@@ -99,6 +99,7 @@ pub fn trace_world(result: &WorkResult, revision: &str) {
         termination,
         outcome,
         duration_ms = result.duration.as_millis() as u64,
+        cpu_us = result.cpu.as_micros() as u64,
         completions_delivered = result.completions_delivered,
         completions_dropped = result.completions_dropped,
         children = ?children,
@@ -141,6 +142,13 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
         "Execution worlds created",
         "counter",
         &[(String::new(), g.worlds_created as f64)],
+    );
+    metric(
+        &mut out,
+        "usai_guest_cpu_seconds_total",
+        "Thread CPU time spent executing guest code, summed over worlds",
+        "counter",
+        &[(String::new(), g.guest_cpu_ns as f64 / 1e9)],
     );
     metric(
         &mut out,
