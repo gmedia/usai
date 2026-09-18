@@ -62,7 +62,7 @@
   .search { position: relative; margin: 0 0 16px; }
   .search input { width: 100%; padding: 9px 36px 9px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--bg); color: inherit; font: inherit; min-height: 40px; }
   .search kbd { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; background: var(--surface); }
-  .nav h2 { font-size: var(--text-xs); font-weight: 600; color: var(--muted); margin: 18px 0 6px; letter-spacing: 0.01em; }
+  .nav .group { font-size: var(--text-xs); font-weight: 600; color: var(--muted); margin: 18px 0 6px; letter-spacing: 0.01em; }
   .nav ul { list-style: none; margin: 0; padding: 0; }
   .nav li a { display: grid; grid-template-columns: 52px 1fr; gap: 8px; align-items: baseline; padding: 6px 8px; margin: 0 -8px; border-radius: var(--radius); text-decoration: none; min-height: 36px; }
   .nav li a:hover { background: var(--bg); }
@@ -280,8 +280,9 @@
   const navLinks = [];
   const groupOrder = [...groups.keys()].sort((a, b) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)));
   for (const key of groupOrder) {
-    nav.append(el("h2", {}, key || (groups.size > 1 ? "Application" : "Endpoints")));
-    const ul = el("ul");
+    const gid = `group-${slug(key || "app")}`;
+    nav.append(el("p", { class: "group", id: gid }, key || (groups.size > 1 ? "Application" : "Endpoints")));
+    const ul = el("ul", { "aria-labelledby": gid });
     for (const o of groups.get(key)) {
       const a = el("a", { href: `#${o.id}` }, el("span", { class: `m ${methodClass(o.method)}` }, o.method.toUpperCase()), el("span", { class: "path" }, o.path));
       a.dataset.search = `${o.method} ${o.path} ${o.op.operationId || ""} ${o.op.summary || ""}`.toLowerCase();
@@ -292,8 +293,8 @@
   }
   if (!ops.length) nav.append(el("p", { class: "empty" }, "No HTTP operations are declared. Add an http.* workload and this list fills itself."));
   if (workloads.length) {
-    nav.append(el("h2", {}, "Also in this application"));
-    const ul = el("ul", { class: "other" });
+    nav.append(el("p", { class: "group", id: "group-other" }, "Also in this application"));
+    const ul = el("ul", { class: "other", "aria-labelledby": "group-other" });
     for (const w of workloads) {
       const a = el("a", { href: `#wl-${slug(w.id)}` }, el("span", { class: "path" }, w.name, el("span", { class: "kind" }, w.kind)));
       a.dataset.search = `${w.kind} ${w.name}`.toLowerCase();
@@ -303,8 +304,8 @@
     nav.append(ul);
   }
   if (resources.length || envReqs.length) {
-    nav.append(el("h2", {}, "Runtime"));
-    nav.append(el("ul", { class: "other" }, el("li", {}, el("a", { href: "#resources" }, el("span", { class: "path" }, "Resources and environment")))));
+    nav.append(el("p", { class: "group", id: "group-runtime" }, "Runtime"));
+    nav.append(el("ul", { class: "other", "aria-labelledby": "group-runtime" }, el("li", {}, el("a", { href: "#resources" }, el("span", { class: "path" }, "Resources and environment")))));
   }
 
   // The sidebar is a collapsible sheet on narrow screens and always open
