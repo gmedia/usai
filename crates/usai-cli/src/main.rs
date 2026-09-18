@@ -40,6 +40,16 @@ enum Command {
         /// project has a tsconfig.json and typescript installed
         #[arg(long)]
         no_typecheck: bool,
+        /// Sign the artifact with this Ed25519 key file (`usai keygen`);
+        /// USAI_SIGNING_KEY is the equivalent environment variable
+        #[arg(long, env = "USAI_SIGNING_KEY")]
+        sign: Option<PathBuf>,
+    },
+    /// Generate an Ed25519 signing key for `build --sign`; prints the public key
+    Keygen {
+        /// Where to write the private key (hex seed); default usai-signing.key
+        #[arg(long, default_value = "usai-signing.key")]
+        out: PathBuf,
     },
     /// Serve a built artifact (builds first when none exists)
     Run {
@@ -60,6 +70,10 @@ enum Command {
         /// Print one JSON line with the bound addresses on stdout (for harnesses)
         #[arg(long)]
         announce: bool,
+        /// Refuse artifacts not signed by one of these public keys (hex, or a
+        /// file holding one per line); USAI_REQUIRE_SIGNATURE is the environment form
+        #[arg(long, env = "USAI_REQUIRE_SIGNATURE", value_delimiter = ',')]
+        require_signature: Vec<String>,
     },
     /// Build, serve, and rebuild on change as a new revision
     Dev {
@@ -257,7 +271,8 @@ async fn main() {
         load_dotenv(&root.join(".env"));
     }
     let result = match cli.command {
-        Command::Build { no_typecheck } => commands::build(&root, !no_typecheck).await,
+        Command::Build { no_typecheck, sign } => commands::build(&root, !no_typecheck, sign).await,
+        Command::Keygen { out } => commands::keygen(&out),
         Command::Run {
             host,
             port,
@@ -265,7 +280,20 @@ async fn main() {
             status,
             control,
             announce,
-        } => commands::run(&root, &host, port, artifact, status, control, announce).await,
+            require_signature,
+        } => {
+            commands::run(
+                &root,
+                &host,
+                port,
+                artifact,
+                status,
+                control,
+                announce,
+                require_signature,
+            )
+            .await
+        }
         Command::Dev { host, port } => commands::dev(&root, &host, port).await,
         Command::Inspect { json } => commands::inspect(&root, json).await,
         Command::Graph => commands::graph(&root).await,

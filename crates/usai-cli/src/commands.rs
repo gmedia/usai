@@ -49,7 +49,55 @@ pub async fn typecheck(root: &Path) -> Option<Result<(), String>> {
     }
 }
 
-pub async fn build(root: &Path, check_types: bool) -> Result<()> {
+pub fn keygen(out: &Path) -> Result<()> {
+    if out.exists() {
+        anyhow::bail!(
+            "{} exists; refusing to overwrite a signing key",
+            out.display()
+        );
+    }
+    let (key, public) = usai_runtime::signing::generate_key();
+    std::fs::write(out, format!("{}\n", hex::encode(key.to_bytes())))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(out, std::fs::Permissions::from_mode(0o600))?;
+    }
+    println!(
+        "private key: {} (keep it out of the repository)\npublic key:  {public}\n\n  usai build --sign {}\n  usai run --require-signature {public} --artifact .usai/build",
+        out.display(),
+        out.display()
+    );
+    Ok(())
+}
+
+/// Trusted signer keys from `--require-signature` values: hex keys, or
+/// files with one hex key per line.
+pub fn trusted_signers(values: &[String]) -> Result<Vec<ed25519_dalek::VerifyingKey>> {
+    let mut keys = Vec::new();
+    for value in values {
+        let path = Path::new(value);
+        let texts: Vec<String> = if path.exists() {
+            std::fs::read_to_string(path)?
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .map(str::to_owned)
+                .collect()
+        } else {
+            vec![value.clone()]
+        };
+        for text in texts {
+            keys.push(
+                usai_runtime::signing::parse_public_key(&text)
+                    .with_context(|| format!("--require-signature {value}"))?,
+            );
+        }
+    }
+    Ok(keys)
+}
+
+pub async fn build(root: &Path, check_types: bool, sign: Option<PathBuf>) -> Result<()> {
     let engine = engine();
     let config = load_config(engine.as_ref(), root).await?;
     let started = std::time::Instant::now();
@@ -71,6 +119,15 @@ pub async fn build(root: &Path, check_types: bool) -> Result<()> {
             "type check failed (the artifact was written, but do not ship it):\n{diagnostics}\n  hint: fix the errors, or pass --no-typecheck to build anyway"
         );
     }
+    let signed = match sign {
+        Some(key_path) => {
+            let key = usai_runtime::signing::load_signing_key(&key_path)?;
+            let dir = out.manifest_path.parent().expect("artifact dir");
+            let record = usai_runtime::signing::sign_artifact(dir, &key)?;
+            Some((record.files.len(), record.public_key))
+        }
+        None => None,
+    };
     let m = out.definition.manifest();
     println!(
         "built {} ({} workloads, {} resources) in {:?}\n  {}\n  {}",
@@ -89,6 +146,12 @@ pub async fn build(root: &Path, check_types: bool) -> Result<()> {
         println!(
             "  {}  (engine cache for this host; not part of the artifact's identity)",
             image.display()
+        );
+    }
+    if let Some((files, public)) = signed {
+        println!(
+            "  signed {files} files with key {}… (signature.json)",
+            &public[..16]
         );
     }
     Ok(())
@@ -126,6 +189,7 @@ async fn definition_for(
     Ok((definition, engine))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     root: &Path,
     host: &str,
@@ -134,9 +198,27 @@ pub async fn run(
     status: bool,
     control: Option<String>,
     announce: bool,
+    require_signature: Vec<String>,
 ) -> Result<()> {
+    let trusted = trusted_signers(&require_signature)?;
+    if !trusted.is_empty() {
+        let dir = match &artifact {
+            Some(dir) => dir.clone(),
+            None => anyhow::bail!(
+                "--require-signature needs --artifact <dir>: only a built, signed artifact can be verified"
+            ),
+        };
+        usai_runtime::signing::verify_artifact(&dir, &trusted)
+            .map_err(|e| anyhow::anyhow!("artifact refused: {e}"))?;
+    }
     let (definition, engine) = definition_for(root, artifact).await?;
-    let runtime = Runtime::new(engine, RuntimeConfig::default());
+    let runtime = Runtime::new(
+        engine,
+        RuntimeConfig {
+            trusted_signers: trusted,
+            ..RuntimeConfig::default()
+        },
+    );
     let revision = runtime.install(definition).await?;
     runtime.activate(revision.id).await.map_err(|e| match e {
         usai_runtime::RuntimeError::MissingEnv(name) => anyhow::anyhow!(

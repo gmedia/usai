@@ -24,5 +24,7 @@ tokio-util.workspace = true
 notify.workspace = true
 reqwest = { version = "0.12", default-features = false }
 libc = "0.2"
+hex.workspace = true
+ed25519-dalek.workspace = true
 
 [dev-dependencies]

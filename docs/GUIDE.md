@@ -290,6 +290,8 @@ reads `.env`), `--read-only --tmpfs /tmp` works; `docker stop` sends SIGTERM,
 which drains with the same bound as Ctrl-C. A compose file for app +
 PostgreSQL is the commented block in the scaffold's `compose.yaml`.
 
+Signed artifacts: `usai keygen` makes an Ed25519 key; `usai build --sign usai-signing.key` (or `USAI_SIGNING_KEY`) writes `signature.json` — the SHA-256 of every file in the artifact, the native `cache/image.cwasm` included, signed. A runtime started with `usai run --artifact … --require-signature <public key>` (or `USAI_REQUIRE_SIGNATURE`, a hex key or a file with one key per line) refuses, before listening, an unsigned artifact, one signed by an untrusted key, any changed file, and any file the signature does not cover; the control surface applies the same rule to installs. Keep the private key in CI's secret store and the public keys in the deployment's environment.
+
 `/_usai/docs` is the API reference, generated from the definition the runtime is executing (the revision identity is on the page). Beyond parameters, bodies and responses it shows what each request *does*: which slots are refused before a world exists, the world's lifetime and effective deadline, the resources it leases per operation, the tasks it hands off — and the tasks, crons, commands, queues and services that are not HTTP but run beside them. Every operation has a copyable curl and a "Try it" panel that sends a real request to this server and reports the runtime's own time (`x-usai-server-ms`). Declare `dispatches(endpoint, task)` and your `errors`/`response` statuses so the page can say so. `/_usai/openapi.json` carries the same facts as `x-usai-*` extensions for other tools.
 
 ## 15. Testing

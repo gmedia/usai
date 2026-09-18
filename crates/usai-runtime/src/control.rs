@@ -33,7 +33,7 @@ use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
-use crate::build::load_artifact;
+use crate::build::load_artifact_trusted;
 use crate::runtime::{RevisionId, RevisionState, Runtime, RuntimeError};
 
 #[derive(Clone, Debug)]
@@ -225,7 +225,11 @@ impl ControlHost {
                         return error(StatusCode::BAD_REQUEST, "invalid_request", e.to_string());
                     }
                 };
-                let definition = match load_artifact(std::path::Path::new(&install.artifact)).await
+                let definition = match load_artifact_trusted(
+                    std::path::Path::new(&install.artifact),
+                    &self.runtime.config().trusted_signers,
+                )
+                .await
                 {
                     Ok(d) => d,
                     Err(e) => {

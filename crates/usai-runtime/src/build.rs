@@ -83,6 +83,8 @@ pub enum BuildError {
          values belong to `env(...)` declarations in the application and to the runtime's environment (§13 of docs/GUIDE.md)."
     )]
     ConfigNotDeclarative { detail: String },
+    #[error("artifact refused: {0}")]
+    Signature(String),
 }
 
 #[derive(Deserialize)]
@@ -509,6 +511,19 @@ struct ImageMeta {
 /// Loads a previously built artifact directory. A precompiled image is
 /// attached when it was built from exactly this code and its digest holds
 /// (`USAI_PRECOMPILED=0` ignores it).
+/// `load_artifact`, refusing first when the runtime requires a signature
+/// and the artifact's does not verify against `trusted`.
+pub async fn load_artifact_trusted(
+    dir: &Path,
+    trusted: &[ed25519_dalek::VerifyingKey],
+) -> Result<Arc<ApplicationDefinition>, BuildError> {
+    if !trusted.is_empty() {
+        crate::signing::verify_artifact(dir, trusted)
+            .map_err(|e| BuildError::Signature(e.to_string()))?;
+    }
+    load_artifact(dir).await
+}
+
 pub async fn load_artifact(dir: &Path) -> Result<Arc<ApplicationDefinition>, BuildError> {
     let manifest: Manifest =
         serde_json::from_slice(&tokio::fs::read(dir.join("manifest.json")).await?)?;

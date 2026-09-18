@@ -48,6 +48,15 @@
 - **The artifact is trusted, including `cache/image.cwasm`.** The precompiled image is native code that `usai run` loads into the process when its digests match `image.json`; a party who can write the artifact directory can already replace `app.js` (which runs sandboxed with the application's full capabilities) and with `image.cwasm` could run native code. Deploy only artifacts you built; `USAI_PRECOMPILED=0` disables loading it; signing is the ADR-0005 follow-up.
 - **No protection against a malicious build step.** `usai build` runs `node` and esbuild from the project's `node_modules`; the supply chain is the project's.
 
+## Artifact integrity
+
+`cache/image.cwasm` is native code: whoever can write the artifact directory
+can run code in the runtime process. `usai build --sign` + `usai run
+--require-signature` (GUIDE §14) closes that: the runtime verifies an Ed25519
+signature over every file before loading anything, and the control surface
+verifies installs the same way. Without `--require-signature` the artifact
+directory is trusted like the binary itself — protect it the same way.
+
 ## Container envelope
 
 The runtime image (`sakaladev/usai:X.Y.Z`) runs as user `usai` (10001), ships

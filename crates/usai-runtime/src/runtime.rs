@@ -45,6 +45,10 @@ pub struct RuntimeConfig {
     pub cron_scheduler: bool,
     /// Whether this instance runs queue consumers.
     pub queue_consumers: bool,
+    /// When non-empty, every artifact this runtime loads (`--artifact`, a
+    /// control-surface install) must carry a valid signature by one of
+    /// these keys; otherwise it is refused before serving (`signing.rs`).
+    pub trusted_signers: Vec<ed25519_dalek::VerifyingKey>,
 }
 
 impl Default for RuntimeConfig {
@@ -59,6 +63,7 @@ impl Default for RuntimeConfig {
             task_queue_capacity: 10_000,
             cron_scheduler: true,
             queue_consumers: true,
+            trusted_signers: Vec::new(),
         }
     }
 }
