@@ -97,7 +97,7 @@ impl Supervisor {
                     let Some(runtime) = runtime.upgrade() else {
                         return;
                     };
-                    let admission = match runtime.admit_child(&revision, &id) {
+                    let admission = match runtime.admit_in_flight(&revision, &id) {
                         Ok(a) => a,
                         Err(e) => {
                             sup.set(index, ServiceState::Failed, None, Some(e.to_string()));

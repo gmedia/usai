@@ -87,15 +87,19 @@ impl OpHandler for InvokeHandler {
             .clone()
             .ok_or_else(|| OpOutcome::err("no_revision", 500, "world has no revision"))?;
         let id = task_id(&request.name);
-        let admission = runtime.admit_child(&revision, &id).map_err(|e| match e {
-            RuntimeError::UnknownWorkload(_) => OpOutcome::err(
-                "unknown_task",
-                500,
-                format!("no task named {}", request.name),
-            ),
-            RuntimeError::Admission(_) => OpOutcome::err("capacity_exhausted", 503, e.to_string()),
-            other => OpOutcome::err("task_admission_failed", 500, other.to_string()),
-        })?;
+        let admission = runtime
+            .admit_in_flight(&revision, &id)
+            .map_err(|e| match e {
+                RuntimeError::UnknownWorkload(_) => OpOutcome::err(
+                    "unknown_task",
+                    500,
+                    format!("no task named {}", request.name),
+                ),
+                RuntimeError::Admission(_) => {
+                    OpOutcome::err("capacity_exhausted", 503, e.to_string())
+                }
+                other => OpOutcome::err("task_admission_failed", 500, other.to_string()),
+            })?;
         let child_id = format!("{}#{}", id, ctx.op);
         ctx.children
             .lock()
@@ -212,7 +216,8 @@ impl TaskQueue {
                 let cancel = shutdown.child_token();
                 tokio::spawn(async move {
                     let _permit = permit;
-                    let admitted = runtime.admit_child(&dispatched.revision, &dispatched.workload);
+                    let admitted =
+                        runtime.admit_in_flight(&dispatched.revision, &dispatched.workload);
                     // The queue's hold on the revision ends here; the
                     // admission's own in-flight count takes over.
                     dispatched.revision.release_child();

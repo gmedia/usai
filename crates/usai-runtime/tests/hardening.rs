@@ -155,6 +155,8 @@ async fn revision_replacement_under_load_loses_no_request() {
         Arc::clone(&rt),
         HttpConfig {
             addr: ([127, 0, 0, 1], 0).into(),
+            // A failure during replacement must say why.
+            expose_diagnostics: true,
             ..HttpConfig::default()
         },
     );
@@ -259,6 +261,87 @@ async fn malformed_artifacts_are_refused_with_clear_errors() {
     // Missing files.
     std::fs::remove_file(&manifest_path).unwrap();
     assert!(load_artifact(&dir).await.is_err());
+}
+
+/// The build ships the engine's compiled image next to the artifact;
+/// installing loads it instead of compiling. Anything about it that does
+/// not match — digest, code, engine build — makes it ignored, never trusted.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn precompiled_image_is_loaded_when_it_matches_and_ignored_otherwise() {
+    let Some(root) = fixture_root("http-app") else {
+        return;
+    };
+    let engine = usai_runtime::engine::from_env(64).unwrap();
+    if usai_runtime::engine::Engine::name(engine.as_ref()) != "wasm" {
+        return;
+    }
+    let dir = out_dir("precompiled");
+    build(
+        engine.as_ref(),
+        &BuildOptions {
+            out_dir: dir.clone(),
+            ..BuildOptions::for_project(&root)
+        },
+    )
+    .await
+    .unwrap();
+    assert!(dir.join("image.cwasm").exists() && dir.join("image.json").exists());
+    let definition = load_artifact(&dir).await.unwrap();
+    let pre = definition.precompiled().expect("attached when it matches");
+    assert_eq!(pre.engine, "wasm");
+    let t = std::time::Instant::now();
+    let rt = Runtime::with_env(
+        Arc::clone(&engine),
+        RuntimeConfig {
+            cron_scheduler: false,
+            ..RuntimeConfig::default()
+        },
+        |_| None,
+    );
+    let rev = rt.install(Arc::clone(&definition)).await.unwrap();
+    let install_ms = t.elapsed().as_millis();
+    rt.activate(rev.id).await.unwrap();
+    let r = rt.invoke("http:GET /users/:id", json!({ "kind": "http", "env": {}, "request": { "method": "GET", "path": "/users/1", "url": "/users/1", "params": { "id": "1" }, "query": {}, "headers": {}, "body": null } })).await.unwrap();
+    assert!(
+        matches!(r.termination, Termination::Completed),
+        "{:?}",
+        r.termination
+    );
+    rt.shutdown().await;
+    eprintln!("install from precompiled image: {install_ms} ms");
+
+    // A corrupted image is ignored (digest), and the artifact still installs
+    // by compiling.
+    let image = dir.join("image.cwasm");
+    let mut bytes = std::fs::read(&image).unwrap();
+    let mid = bytes.len() / 2;
+    bytes[mid] ^= 0xff;
+    std::fs::write(&image, &bytes).unwrap();
+    let definition = load_artifact(&dir).await.unwrap();
+    assert!(
+        definition.precompiled().is_none(),
+        "a tampered image is never attached"
+    );
+    let rt = Runtime::with_env(
+        Arc::clone(&engine),
+        RuntimeConfig {
+            cron_scheduler: false,
+            ..RuntimeConfig::default()
+        },
+        |_| None,
+    );
+    let rev = rt.install(definition).await.unwrap();
+    rt.activate(rev.id).await.unwrap();
+    rt.shutdown().await;
+
+    // An image built from other code is ignored too.
+    bytes[mid] ^= 0xff;
+    std::fs::write(&image, &bytes).unwrap();
+    let meta_path = dir.join("image.json");
+    let mut meta: Value = serde_json::from_slice(&std::fs::read(&meta_path).unwrap()).unwrap();
+    meta["codeSha256"] = json!("0000");
+    std::fs::write(&meta_path, serde_json::to_vec(&meta).unwrap()).unwrap();
+    assert!(load_artifact(&dir).await.unwrap().precompiled().is_none());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

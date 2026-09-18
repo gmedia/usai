@@ -37,6 +37,13 @@ pub async fn build(root: &Path) -> Result<()> {
         out.manifest_path.display(),
         out.code_path.display()
     );
+    let image = out.manifest_path.with_file_name("image.cwasm");
+    if image.exists() {
+        println!(
+            "  {}  (precompiled for this host's engine; host cache, not identity)",
+            image.display()
+        );
+    }
     Ok(())
 }
 

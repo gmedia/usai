@@ -502,7 +502,7 @@ impl HttpHost {
         // 4. admit
         let admission = self
             .runtime
-            .admit(&compiled.revision, &workload.id)
+            .admit_in_flight(&compiled.revision, &workload.id)
             .map_err(|e| match e {
                 RuntimeError::Admission(_) => Reply::error(
                     StatusCode::SERVICE_UNAVAILABLE,
@@ -672,7 +672,7 @@ impl HttpHost {
             .expect("routed index exists");
         let admission = self
             .runtime
-            .admit(&compiled.revision, &workload_spec.id)
+            .admit_in_flight(&compiled.revision, &workload_spec.id)
             .map_err(|e| match e {
                 RuntimeError::Admission(_) => Reply::error(
                     StatusCode::SERVICE_UNAVAILABLE,

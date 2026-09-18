@@ -398,6 +398,28 @@ pub struct ApplicationDefinition {
     /// Workload id -> index into `manifest.workloads`. The index is the
     /// ordinal the guest SDK uses to locate the handler.
     index: BTreeMap<String, usize>,
+    /// An engine's serialized compiled form of `code`, produced by
+    /// `usai build` (`image.cwasm`). Not part of the identity: the same
+    /// application with or without it is the same application.
+    precompiled: Option<Precompiled>,
+}
+
+/// A precompiled form and what it was built with.
+#[derive(Clone)]
+pub struct Precompiled {
+    pub engine: String,
+    pub fingerprint: String,
+    pub bytes: Arc<[u8]>,
+}
+
+impl std::fmt::Debug for Precompiled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Precompiled")
+            .field("engine", &self.engine)
+            .field("fingerprint", &self.fingerprint)
+            .field("bytes", &self.bytes.len())
+            .finish()
+    }
 }
 
 impl ApplicationDefinition {
@@ -448,6 +470,7 @@ impl ApplicationDefinition {
             manifest,
             code,
             index,
+            precompiled: None,
         }))
     }
 
@@ -461,6 +484,20 @@ impl ApplicationDefinition {
 
     pub fn code(&self) -> &Code {
         &self.code
+    }
+
+    pub fn precompiled(&self) -> Option<&Precompiled> {
+        self.precompiled.as_ref()
+    }
+
+    /// Attaches a precompiled form (see `Precompiled`).
+    pub fn with_precompiled(self: Arc<Self>, precompiled: Precompiled) -> Arc<Self> {
+        Arc::new(Self {
+            manifest: self.manifest.clone(),
+            code: self.code.clone(),
+            index: self.index.clone(),
+            precompiled: Some(precompiled),
+        })
     }
 
     pub fn workloads(&self) -> &[WorkloadSpec] {

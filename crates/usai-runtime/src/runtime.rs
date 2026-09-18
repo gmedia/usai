@@ -564,10 +564,13 @@ impl Runtime {
         })
     }
 
-    /// Admission for child work (tasks, cron ticks) that belongs to a revision
-    /// which may already be draining: the revision still owns it and drain
-    /// waits for it. Runtime and application budgets still apply.
-    pub fn admit_child(
+    /// Admission for work a revision has already accepted — a request it
+    /// routed and validated, a child it spawned (tasks, cron ticks) — when
+    /// that revision may have started draining in the meantime: the
+    /// revision still owns the work and drain waits for it. Runtime and
+    /// application budgets still apply. New work arriving after a swap is
+    /// routed by the new revision and never reaches a draining one.
+    pub fn admit_in_flight(
         &self,
         revision: &Arc<Revision>,
         workload_id: &str,

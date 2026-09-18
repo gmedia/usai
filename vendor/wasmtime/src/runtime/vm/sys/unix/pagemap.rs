@@ -288,13 +288,15 @@ pub unsafe fn reset_with_pagemap(
         // backed by files. Such pages mean that they haven't changed from their
         // original contents, so they're inverted.
         .category_inverted(Categories::PFNZERO | Categories::FILE)
-        // Search for pages that are written and present as those are the dirty
-        // pages. Additionally search for the zero page/file page as those are
-        // inverted above meaning we're searching for pages that specifically
-        // don't have those flags.
-        .category_mask(
-            Categories::WRITTEN | Categories::PRESENT | Categories::PFNZERO | Categories::FILE,
-        )
+        // Search for pages that are written as those are the dirty pages —
+        // whether they are present or have been swapped out: a dirty page
+        // in swap is not PRESENT but still holds the previous instance's
+        // data, and requiring PRESENT would leave it in place for the next
+        // instance (observed under memory pressure as heap corruption in
+        // the guest). Additionally search for the zero page/file page as
+        // those are inverted above meaning we're searching for pages that
+        // specifically don't have those flags.
+        .category_mask(Categories::WRITTEN | Categories::PFNZERO | Categories::FILE)
         // Don't return any categories back. This helps group regions together
         // since the reported set of categories is always empty and we otherwise
         // aren't looking for anything in particular.

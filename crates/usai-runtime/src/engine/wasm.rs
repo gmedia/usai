@@ -38,6 +38,11 @@ pub const CORE_SHA256: &str = "c4e58003609cc13ebc23b7c987999d6a5d366be5b84afe7f6
 
 const MAX_PAYLOAD: usize = 8 * 1024 * 1024;
 
+/// The vendored Wasmtime (`vendor/wasmtime/Cargo.toml`); part of the
+/// precompiled image's fingerprint. Wasmtime verifies its own header on
+/// deserialize as well; this only makes the mismatch a clean skip.
+const WASMTIME_VERSION: &str = "48.0.2";
+
 /// The core to run: the vendored one, or `USAI_WASM_CORE=<path>` for
 /// controlled comparisons (e.g. the research `-Oz` core). Profiling only.
 fn core_bytes() -> Result<std::borrow::Cow<'static, [u8]>, EngineError> {
@@ -364,6 +369,8 @@ struct Image {
     pre: InstancePre<HostData>,
     exports: Vec<ModuleExport>,
     image_sha256: String,
+    /// The compiled module, kept so `precompile` can serialize it.
+    module: Module,
 }
 
 impl Compiled for Image {
@@ -636,7 +643,7 @@ impl Guest {
     {
         let f = self.func::<P, R>(store, name)?;
         f.call(store, params)
-            .map_err(|e| EngineError::Guest(format!("{name}: {e}")))
+            .map_err(|e| EngineError::Guest(format!("{name}: {e:#}")))
     }
 
     async fn alloc(
@@ -773,6 +780,32 @@ impl Guest {
     }
 }
 
+impl WasmEngine {
+    fn image_from_module(
+        &self,
+        module: Module,
+        image_sha256: String,
+    ) -> Result<Arc<dyn Compiled>, EngineError> {
+        let exports = EXPORT_NAMES
+            .iter()
+            .map(|name| {
+                module
+                    .get_export_index(name)
+                    .ok_or_else(|| EngineError::Compile(format!("image lacks export {name}")))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let pre = link(&self.runtime)?
+            .instantiate_pre(&module)
+            .map_err(|e| EngineError::Compile(e.to_string()))?;
+        Ok(Arc::new(Image {
+            pre,
+            exports,
+            image_sha256,
+            module,
+        }))
+    }
+}
+
 /// Renders a Rust string as a JavaScript string literal.
 fn js_string(text: &str) -> String {
     serde_json::to_string(text).unwrap_or_else(|_| "\"\"".into())
@@ -790,25 +823,57 @@ impl Engine for WasmEngine {
             use sha2::Digest as _;
             hex::encode(sha2::Sha256::digest(&image))
         };
+        let t = std::time::Instant::now();
         let module =
             Module::new(&self.runtime, &image).map_err(|e| EngineError::Compile(e.to_string()))?;
-        let exports = EXPORT_NAMES
-            .iter()
-            .map(|name| {
-                module
-                    .get_export_index(name)
-                    .ok_or_else(|| EngineError::Compile(format!("image lacks export {name}")))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let pre = link(&self.runtime)?
-            .instantiate_pre(&module)
-            .map_err(|e| EngineError::Compile(e.to_string()))?;
-        tracing::info!(image_sha256, bytes = image.len(), "application image built");
-        Ok(Arc::new(Image {
-            pre,
-            exports,
+        tracing::info!(
             image_sha256,
-        }))
+            bytes = image.len(),
+            compile_ms = t.elapsed().as_millis() as u64,
+            "application image built"
+        );
+        self.image_from_module(module, image_sha256)
+    }
+
+    fn fingerprint(&self) -> String {
+        // What a serialized module depends on: Wasmtime's build (it checks
+        // its own header too), the guest core, and the host target.
+        format!(
+            "wasmtime={};core={};target={}-{}",
+            WASMTIME_VERSION,
+            CORE_SHA256,
+            std::env::consts::ARCH,
+            std::env::consts::OS
+        )
+    }
+
+    fn precompile(&self, compiled: &Arc<dyn Compiled>) -> Option<Vec<u8>> {
+        let image = compiled.as_any().downcast_ref::<Image>()?;
+        image.module.serialize().ok()
+    }
+
+    async fn load_precompiled(
+        &self,
+        _code: &Code,
+        bytes: &[u8],
+    ) -> Result<Arc<dyn Compiled>, EngineError> {
+        let t = std::time::Instant::now();
+        // SAFETY: `bytes` is native code produced by `Module::serialize` on
+        // a compatible Wasmtime (its header is verified here); it comes from
+        // the artifact directory, which is the deployment's trust boundary
+        // (docs/THREAT-MODEL.md).
+        let module = unsafe { Module::deserialize(&self.runtime, bytes) }
+            .map_err(|e| EngineError::Compile(format!("precompiled image: {e}")))?;
+        let image_sha256 = {
+            use sha2::Digest as _;
+            hex::encode(sha2::Sha256::digest(bytes))
+        };
+        tracing::info!(
+            bytes = bytes.len(),
+            load_ms = t.elapsed().as_millis() as u64,
+            "precompiled application image loaded"
+        );
+        self.image_from_module(module, image_sha256)
     }
 
     async fn instantiate(
@@ -1099,5 +1164,109 @@ mod tests {
     fn the_vendored_core_matches_its_provenance() {
         use sha2::Digest as _;
         assert_eq!(hex::encode(sha2::Sha256::digest(CORE)), CORE_SHA256);
+    }
+
+    /// Freshness across slot reuse when the previous world's dirty pages were
+    /// paged out: the reset must not require a page to be resident to reset
+    /// it (`vendor/wasmtime-max-regions.patch`, second hunk). With one
+    /// pooling slot the second world reuses the first's memory.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_reused_slot_is_fresh_even_after_its_pages_were_paged_out() {
+        let engine = WasmEngine::new(WasmConfig {
+            capacity: 1,
+            pagemap_scan: std::env::var("USAI_TEST_PAGEMAP").as_deref() != Ok("0"),
+            ..WasmConfig::default()
+        })
+        .unwrap();
+        let code = Code::new("globalThis.__usai_app = { workloads: [] };");
+        let compiled = engine.compile_code(&code).await.unwrap();
+        let bindings: Arc<dyn HostBindings> = Arc::new(RefusingBindings);
+
+        // Reference contents from two pristine worlds; the bytes that differ
+        // between them are per-world by design (the Math.random seed) and
+        // are excluded from the comparison.
+        let snapshot = |world: &mut Box<dyn WorldInstance>| {
+            let w = world.as_any_mut().downcast_mut::<WasmWorld>().unwrap();
+            let len = w.guest.memory.data_size(&w.store);
+            w.guest.memory.data(&w.store)[..len].to_vec()
+        };
+        let mut world = engine
+            .instantiate(&compiled, Arc::clone(&bindings))
+            .await
+            .unwrap();
+        let pristine = snapshot(&mut world);
+        drop(world);
+        let mut world = engine
+            .instantiate(&compiled, Arc::clone(&bindings))
+            .await
+            .unwrap();
+        let other = snapshot(&mut world);
+        drop(world);
+        let image_len = pristine.len();
+        assert_eq!(other.len(), image_len);
+        let per_world: std::collections::HashSet<usize> = (0..image_len)
+            .filter(|i| pristine[*i] != other[*i])
+            .collect();
+        assert!(
+            per_world.len() < 64,
+            "unexpectedly many per-world bytes: {}",
+            per_world.len()
+        );
+
+        // World 1 dirties every page of the image and 64 grown pages, then
+        // asks the kernel to page them out (needs swap to actually happen;
+        // without it the test still checks the ordinary reset).
+        let mut world = engine
+            .instantiate(&compiled, Arc::clone(&bindings))
+            .await
+            .unwrap();
+        let w = world.as_any_mut().downcast_mut::<WasmWorld>().unwrap();
+        w.guest.memory.grow(&mut w.store, 64).unwrap();
+        let grown_len = w.guest.memory.data_size(&w.store);
+        {
+            let data = w.guest.memory.data_mut(&mut w.store);
+            for (i, b) in data.iter_mut().enumerate() {
+                *b = (i % 251) as u8 ^ 0x5a;
+            }
+        }
+        let base = w.guest.memory.data_ptr(&w.store);
+        // SAFETY: the range is this instance's linear memory, which stays
+        // mapped for the instance's lifetime; MADV_PAGEOUT only affects
+        // residency, never contents.
+        if std::env::var("USAI_TEST_PAGEOUT").as_deref() != Ok("0") {
+            let rc = unsafe { libc::madvise(base.cast(), grown_len, libc::MADV_PAGEOUT) };
+            assert_eq!(rc, 0, "madvise: {}", std::io::Error::last_os_error());
+        }
+        drop(world);
+
+        // World 2 must see the image, then zeros where world 1 grew.
+        let mut world = engine
+            .instantiate(&compiled, Arc::clone(&bindings))
+            .await
+            .unwrap();
+        let w = world.as_any_mut().downcast_mut::<WasmWorld>().unwrap();
+        assert_eq!(
+            w.guest.memory.data_size(&w.store),
+            image_len,
+            "size is the image's again"
+        );
+        let seen = &w.guest.memory.data(&w.store)[..image_len];
+        let first_diff =
+            (0..image_len).find(|i| seen[*i] != pristine[*i] && !per_world.contains(i));
+        assert_eq!(
+            first_diff,
+            None,
+            "image page {:?} carried the previous world's bytes",
+            first_diff.map(|i| i / 4096)
+        );
+        w.guest.memory.grow(&mut w.store, 64).unwrap();
+        let tail = &w.guest.memory.data(&w.store)[image_len..grown_len];
+        let dirty = tail.iter().position(|b| *b != 0);
+        assert_eq!(
+            dirty,
+            None,
+            "grown page {:?} carried the previous world's bytes",
+            dirty.map(|i| i / 4096)
+        );
     }
 }

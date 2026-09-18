@@ -287,3 +287,26 @@ RSS sampled every 30 s from `/proc/<pid>/status` (359 samples), threads
 steady at 37–38. The bench client keeps a fixed-size histogram, so the
 process's memory is the runtime's. No fault, no leak, no drift on the new
 slot-reset path over 49 M worlds.
+
+## 9. A freshness hole in the reset path, found by the hardening suite
+
+Under a fully loaded developer machine (swap 100 % used) the
+`revision_replacement_under_load_loses_no_request` test failed about one
+run in three with guest traps in `dlfree` and out-of-bounds accesses inside
+`JSON.parse` — a corrupted guest heap. Bisect: never with the pagemap scan
+off (memcpy reset), only with it on. Cause: Wasmtime's scan matched dirty
+pages only when `PRESENT`; a dirty page the kernel had swapped out
+(`WRITTEN | SWAPPED`) was neither reset nor decommitted, so the next world
+in that slot started with the previous world's heap bytes. The region-budget
+patch (§7) widened the window (upstream decommits everything after its
+32-region walk, which hid most of it), but the hole is upstream's.
+
+Fix: match `WRITTEN` without requiring residency (`vendor/README.md`, hunk
+2). Verified on the research VM with a 2 GB swapfile:
+`a_reused_slot_is_fresh_even_after_its_pages_were_paged_out` fails with the
+old mask and passes with the new one; the full workspace loop no longer
+fails on the swapping developer machine.
+
+Lesson for the thesis: "fresh world" is a property of the reset mechanism,
+and the reset mechanism has to be tested under the conditions production
+has — memory pressure included.

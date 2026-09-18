@@ -250,7 +250,7 @@ async fn run_message(
     cancel: CancellationToken,
 ) -> Result<(), String> {
     let admission = runtime
-        .admit_child(revision, workload_id)
+        .admit_in_flight(revision, workload_id)
         .map_err(|e| e.to_string())?;
     let input = super::input(
         revision,

@@ -102,7 +102,7 @@ hello bundle (765 KB, zod evaluated per world) 6.52 ms/world
 
 ## Next
 
-1. Propose the Wasmtime region-budget change upstream (soak done: 49 M worlds, 0 errors, no drift). Remaining lever: the eval-based invoke/outcome/pending floor (0.24 ms of 1.05) — a core ABI change.
+1. Propose both Wasmtime pagemap-reset hunks upstream (region budget; **paged-out dirty pages must be reset** — a freshness hole found here, `docs/measurements/…` §9). Remaining lever: the eval-based invoke/outcome/pending floor (0.24 ms of 1.05) — a core ABI change.
 2. Acceptance audit done (`docs/ACCEPTANCE-AUDIT.md`); remaining ◐: crash/restart recovery is the orchestrator's, tutorial application, first tag.
 3. Per-world CPU accounting (threat model "Open").
 5. D14 alpha checklist still open: publish `usai` / `create-usai` to npm and a `usai` binary (today the CLI is `cargo run -p usai-cli`); artifact byte format + signing (ADR-0005 follow-up).

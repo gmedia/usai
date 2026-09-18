@@ -299,6 +299,25 @@ pub async fn build(engine: &dyn Engine, options: &BuildOptions) -> Result<BuildO
     manifest_value["codeSha256"] = serde_json::Value::String(code.sha256.clone());
     let manifest: Manifest = serde_json::from_value(manifest_value)?;
     tokio::fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest)?).await?;
+    // The engine's compiled form next to the artifact, so installing it is
+    // a load rather than a compile (which takes every core for seconds).
+    let image_path = options.out_dir.join(IMAGE_FILE);
+    let meta_path = options.out_dir.join(IMAGE_META_FILE);
+    let _ = tokio::fs::remove_file(&image_path).await;
+    let _ = tokio::fs::remove_file(&meta_path).await;
+    if let Some(bytes) = engine.precompile(&compiled) {
+        let meta = ImageMeta {
+            engine: engine.name().to_owned(),
+            fingerprint: engine.fingerprint(),
+            code_sha256: code.sha256.clone(),
+            sha256: {
+                use sha2::Digest as _;
+                hex::encode(sha2::Sha256::digest(&bytes))
+            },
+        };
+        tokio::fs::write(&image_path, &bytes).await?;
+        tokio::fs::write(&meta_path, serde_json::to_vec_pretty(&meta)?).await?;
+    }
     let definition = ApplicationDefinition::new(manifest, code)?;
     Ok(BuildOutput {
         definition,
@@ -308,12 +327,58 @@ pub async fn build(engine: &dyn Engine, options: &BuildOptions) -> Result<BuildO
     })
 }
 
-/// Loads a previously built artifact directory.
+const IMAGE_FILE: &str = "image.cwasm";
+const IMAGE_META_FILE: &str = "image.json";
+
+/// What `image.cwasm` was built from and with. Any mismatch at load time
+/// means the file is ignored and the engine compiles from `app.js`.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImageMeta {
+    engine: String,
+    fingerprint: String,
+    code_sha256: String,
+    sha256: String,
+}
+
+/// Loads a previously built artifact directory. A precompiled image is
+/// attached when it was built from exactly this code and its digest holds
+/// (`USAI_PRECOMPILED=0` ignores it).
 pub async fn load_artifact(dir: &Path) -> Result<Arc<ApplicationDefinition>, BuildError> {
     let manifest: Manifest =
         serde_json::from_slice(&tokio::fs::read(dir.join("manifest.json")).await?)?;
     let code = Code::new(tokio::fs::read_to_string(dir.join("app.js")).await?);
-    Ok(ApplicationDefinition::new(manifest, code)?)
+    let definition = ApplicationDefinition::new(manifest, code)?;
+    if std::env::var("USAI_PRECOMPILED").as_deref() == Ok("0") {
+        return Ok(definition);
+    }
+    let Ok(meta) = tokio::fs::read(dir.join(IMAGE_META_FILE)).await else {
+        return Ok(definition);
+    };
+    let Ok(meta) = serde_json::from_slice::<ImageMeta>(&meta) else {
+        tracing::warn!("{IMAGE_META_FILE} is not readable; ignoring the precompiled image");
+        return Ok(definition);
+    };
+    if meta.code_sha256 != definition.code().sha256 {
+        tracing::warn!("{IMAGE_FILE} was built from other code; ignoring it");
+        return Ok(definition);
+    }
+    let Ok(bytes) = tokio::fs::read(dir.join(IMAGE_FILE)).await else {
+        return Ok(definition);
+    };
+    let digest = {
+        use sha2::Digest as _;
+        hex::encode(sha2::Sha256::digest(&bytes))
+    };
+    if digest != meta.sha256 {
+        tracing::warn!("{IMAGE_FILE} does not match {IMAGE_META_FILE}; ignoring it");
+        return Ok(definition);
+    }
+    Ok(definition.with_precompiled(crate::definition::Precompiled {
+        engine: meta.engine,
+        fingerprint: meta.fingerprint,
+        bytes: bytes.into(),
+    }))
 }
 
 /// Builds a definition whose only workload is `command:seed:<name>` running

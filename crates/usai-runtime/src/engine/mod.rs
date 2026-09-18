@@ -117,12 +117,47 @@ pub trait Compiled: Send + Sync + Any {
 #[async_trait]
 pub trait Engine: Send + Sync {
     fn name(&self) -> &'static str;
-    /// Definition-lifetime work: parse/compile once.
+    /// Definition-lifetime work: parse/compile once. A precompiled form
+    /// carried by the definition (`usai build` output) is used when this
+    /// engine produced it and it still matches; otherwise it compiles.
     async fn compile(
         &self,
         definition: &ApplicationDefinition,
     ) -> Result<Arc<dyn Compiled>, EngineError> {
+        if let Some(pre) = definition.precompiled() {
+            if pre.engine == self.name() && pre.fingerprint == self.fingerprint() {
+                match self.load_precompiled(definition.code(), &pre.bytes).await {
+                    Ok(compiled) => return Ok(compiled),
+                    Err(e) => tracing::warn!(error = %e, "precompiled image rejected; compiling"),
+                }
+            } else {
+                tracing::info!(
+                    engine = pre.engine,
+                    "precompiled image is for another engine or build; compiling"
+                );
+            }
+        }
         self.compile_code(definition.code()).await
+    }
+    /// Identifies what a precompiled form depends on (engine build, core,
+    /// target); a mismatch means the form is unusable here.
+    fn fingerprint(&self) -> String {
+        String::new()
+    }
+    /// The compiled form serialized for `usai build` to store next to the
+    /// artifact, when this engine supports it.
+    fn precompile(&self, _compiled: &Arc<dyn Compiled>) -> Option<Vec<u8>> {
+        None
+    }
+    /// Reconstructs a compiled form from `precompile` output.
+    async fn load_precompiled(
+        &self,
+        _code: &Code,
+        _bytes: &[u8],
+    ) -> Result<Arc<dyn Compiled>, EngineError> {
+        Err(EngineError::Compile(
+            "this engine has no precompiled form".into(),
+        ))
     }
     /// Same, from code alone (the build phase has no manifest yet).
     async fn compile_code(&self, code: &Code) -> Result<Arc<dyn Compiled>, EngineError>;
