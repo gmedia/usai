@@ -1,10 +1,13 @@
 name: release
 
-# Tag `vX.Y.Z` → binaries on the GitHub release + npm packages (when
-# NPM_TOKEN is configured). The tag must match the workspace version.
+# Tag `vX.Y.Z` → binaries on the GitHub release + npm packages. The tag must
+# match the SDK version. `workflow_dispatch` runs only the npm job, to publish
+# a package version that is not on the registry yet (e.g. a create-usai fix)
+# without cutting a runtime release.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -25,6 +28,7 @@ jobs:
           - os: macos-14
             target: aarch64-apple-darwin
     runs-on: ${{ matrix.os }}
+    if: startsWith(github.ref, 'refs/tags/')
     steps:
       - uses: actions/checkout@v4
       - name: Version matches the tag
@@ -76,7 +80,9 @@ jobs:
       - name: Version matches the tag
         run: |
           v=$(node -p "require('./packages/usai/package.json').version")
-          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "packages/usai is $v, tag is ${GITHUB_REF_NAME}"; exit 1; }
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "packages/usai is $v, tag is ${GITHUB_REF_NAME}"; exit 1; }
+          fi
           s=$(node -p "require('./packages/create-usai/package.json').sdkVersion")
           [ "$s" = "$v" ] || { echo "create-usai scaffolds @sakaladev/usai@$s but the SDK is $v; update sdkVersion"; exit 1; }
       - name: Publish
