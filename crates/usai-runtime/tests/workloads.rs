@@ -52,7 +52,7 @@ async fn runtime_with(cron_scheduler: bool) -> Option<Arc<Runtime>> {
             cron_scheduler,
             ..RuntimeConfig::default()
         },
-        |_| None,
+        |name| (name == "UPSTREAM_URL").then(|| "http://127.0.0.1:9/".to_owned()),
     );
     let rev = runtime.install(out.definition).await.unwrap();
     runtime.activate(rev.id).await.unwrap();

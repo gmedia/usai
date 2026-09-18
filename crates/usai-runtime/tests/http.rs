@@ -60,7 +60,11 @@ async fn start() -> Option<Server> {
             cron_scheduler: false,
             ..RuntimeConfig::default()
         },
-        |name| (name == "GREETING").then(|| "hi".to_owned()),
+        |name| match name {
+            "GREETING" => Some("hi".to_owned()),
+            "UPSTREAM_URL" => Some(upstream().to_owned()),
+            _ => None,
+        },
     );
     let rev = runtime.install(out.definition).await.unwrap();
     runtime.activate(rev.id).await.unwrap();
@@ -89,6 +93,90 @@ async fn start() -> Option<Server> {
         shutdown,
         client: reqwest::Client::new(),
     })
+}
+
+/// A minimal HTTP/1.1 upstream the fixture's `http.client` talks to: echoes
+/// method, path, headers and body as JSON; `/slow` never answers in time;
+/// `/bytes` returns a non-UTF-8 body. One per test process.
+fn upstream() -> &'static str {
+    static UPSTREAM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    UPSTREAM.get_or_init(|| {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                std::thread::spawn(move || serve_upstream(stream));
+            }
+        });
+        format!("http://{addr}/")
+    })
+}
+
+fn serve_upstream(mut stream: std::net::TcpStream) {
+    use std::io::{Read, Write};
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 4096];
+    let (head_end, head) = loop {
+        let n = match stream.read(&mut chunk) {
+            Ok(0) | Err(_) => return,
+            Ok(n) => n,
+        };
+        buf.extend_from_slice(&chunk[..n]);
+        if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+            break (pos + 4, String::from_utf8_lossy(&buf[..pos]).to_string());
+        }
+    };
+    let mut lines = head.lines();
+    let request_line = lines.next().unwrap_or_default().to_owned();
+    let mut parts = request_line.split_whitespace();
+    let method = parts.next().unwrap_or("").to_owned();
+    let path = parts.next().unwrap_or("").to_owned();
+    let mut headers = serde_json::Map::new();
+    let mut length = 0usize;
+    for line in lines {
+        if let Some((k, v)) = line.split_once(':') {
+            let k = k.trim().to_ascii_lowercase();
+            let v = v.trim().to_owned();
+            if k == "content-length" {
+                length = v.parse().unwrap_or(0);
+            }
+            headers.insert(k, Value::String(v));
+        }
+    }
+    while buf.len() < head_end + length {
+        let n = match stream.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => n,
+        };
+        buf.extend_from_slice(&chunk[..n]);
+    }
+    let body =
+        String::from_utf8_lossy(&buf[head_end..(head_end + length).min(buf.len())]).to_string();
+    let (status, content_type, payload): (u16, &str, Vec<u8>) = match path.as_str() {
+        "/slow" => {
+            std::thread::sleep(Duration::from_secs(3));
+            (200, "text/plain", b"late".to_vec())
+        }
+        "/bytes" => (
+            200,
+            "application/octet-stream",
+            vec![0xff, 0xfe, 0x00, 0x01],
+        ),
+        "/teapot" => (418, "text/plain", b"short and stout".to_vec()),
+        _ => (
+            200,
+            "application/json",
+            json!({ "method": method, "path": path, "headers": headers, "body": body })
+                .to_string()
+                .into_bytes(),
+        ),
+    };
+    let _ = write!(
+        stream,
+        "HTTP/1.1 {status} X\r\ncontent-type: {content_type}\r\nx-echo: yes\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+        payload.len()
+    );
+    let _ = stream.write_all(&payload);
 }
 
 impl Server {
@@ -454,6 +542,123 @@ async fn worlds_have_url_and_structured_clone() {
         "an invalid URL is refused, a valid one is not"
     );
     s.shutdown.cancel();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn outbound_http_is_a_declared_owned_resource() {
+    let Some(s) = start().await else { return };
+    // A request through the declared client: method, headers, body arrive;
+    // the response is readable as JSON.
+    let r = s
+        .client
+        .post(format!("{}/egress", s.base))
+        .json(&json!({ "path": "/orders/1?x=2", "method": "PUT", "json": { "n": 1 } }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    let body: Value = r.json().await.unwrap();
+    assert_eq!(body["status"], 200, "{body}");
+    assert_eq!(body["ok"], true);
+    assert_eq!(body["echo"], "yes");
+    assert_eq!(body["body"]["method"], "PUT");
+    assert_eq!(body["body"]["path"], "/orders/1?x=2");
+    assert_eq!(body["body"]["body"], "{\"n\":1}");
+    assert_eq!(body["body"]["headers"]["content-type"], "application/json");
+    assert!(
+        body["body"]["headers"]["user-agent"]
+            .as_str()
+            .unwrap()
+            .starts_with("usai/"),
+        "{body}"
+    );
+    // A non-2xx answer is data, not an exception.
+    let r = s
+        .client
+        .post(format!("{}/egress", s.base))
+        .json(&json!({ "path": "/teapot" }))
+        .send()
+        .await
+        .unwrap();
+    let body: Value = r.json().await.unwrap();
+    assert_eq!(body["status"], 418);
+    assert_eq!(body["ok"], false);
+    assert_eq!(body["body"], "short and stout");
+    // Binary bodies arrive as bytes.
+    let (status, body) = s.get("/egress/bytes").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["length"], 4);
+    assert_eq!(body["first"], 255);
+    // The declared baseUrl is the destination: another origin is refused
+    // inside the world, with a code the handler can act on.
+    let (_, body) = s.get("/egress/other").await;
+    assert_eq!(body["code"], "origin_refused");
+    // A world past its deadline drops its request: 504 to the caller, the
+    // operation counted as cancelled, nothing left in flight.
+    let (status, _) = s.get("/egress/slow").await;
+    assert_eq!(status, 504);
+    let resource = s
+        .runtime
+        .status()
+        .resources
+        .into_iter()
+        .find(|r| r.identity.kind == "http.client")
+        .expect("the client is a resource with a status");
+    assert_eq!(resource.detail["cancelled"], 1, "{resource:?}");
+    assert_eq!(resource.in_use, 0);
+    assert_eq!(resource.detail["baseUrl"], upstream());
+    // The global `fetch` exists only to say what to do instead.
+    let (_, body) = s.get("/nofetch").await;
+    assert_eq!(body["code"], "fetch_not_available");
+    assert!(
+        body["message"].as_str().unwrap().contains("httpClient"),
+        "{body}"
+    );
+    s.baseline().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn worlds_have_crypto_and_password_hashing() {
+    let Some(s) = start().await else { return };
+    let (status, body) = s.get("/crypto").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        body["sha256"],
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+    assert_eq!(body["hmac"], hmac_sha256(b"k", b"abc"));
+    assert_eq!(body["verified"], true);
+    let uuid = body["uuid"].as_str().unwrap();
+    assert_eq!(uuid.len(), 36);
+    assert_eq!(&uuid[14..15], "4", "version 4: {uuid}");
+    assert_ne!(body["uuid"], body["other"], "two draws differ");
+    // Entropy is per world: two worlds never draw the same bytes.
+    let (_, again) = s.get("/crypto").await;
+    assert_ne!(again["uuid"], body["uuid"]);
+    assert_ne!(again["random"], body["random"]);
+    let r = s
+        .client
+        .post(format!("{}/password", s.base))
+        .json(&json!({ "password": "correct horse battery staple" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    let body: Value = r.json().await.unwrap();
+    assert_eq!(body["prefix"], "$argon2id$");
+    assert_eq!(body["ok"], true);
+    assert_eq!(body["wrong"], false);
+    s.baseline().await;
+}
+
+fn hmac_sha256(key: &[u8], data: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut k = [0u8; 64];
+    k[..key.len()].copy_from_slice(key);
+    let ipad: Vec<u8> = k.iter().map(|b| b ^ 0x36).collect();
+    let opad: Vec<u8> = k.iter().map(|b| b ^ 0x5c).collect();
+    let inner = Sha256::digest([ipad.as_slice(), data].concat());
+    hex::encode(Sha256::digest([opad.as_slice(), inner.as_slice()].concat()))
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -9,20 +9,30 @@
 //!                                 the pool, never reused
 //! ```
 //!
+//! A transaction pins one connection for several statements. It is one
+//! owned operation from the world's point of view: `begin` leases the
+//! connection into a holder task, `query/one/execute` with the lease route to
+//! it, `commit`/`rollback` end it. The holder watches the world's
+//! cancellation: a world that dies (or ends) with the transaction open gets
+//! `ROLLBACK` issued on its behalf, and the connection returns to the pool
+//! only when that rollback reached a terminal state — otherwise quarantine,
+//! exactly as for a single statement.
+//!
 //! Backend identity and prepared statements belong to the physical
 //! connection (established once per connection), never to a world. Session
 //! state (`SET`, advisory locks, temp tables) is reset on every checkout by
 //! default so it cannot leak between worlds either.
 
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use deadpool_postgres::{Manager, ManagerConfig, Object, Pool, RecyclingMethod};
 use serde::Deserialize;
 use serde_json::{Value, json};
+use tokio::sync::{mpsc, oneshot};
 use tokio_postgres::types::{ToSql, Type};
 use tokio_postgres::{Row, Statement};
 use tokio_util::sync::CancellationToken;
@@ -140,8 +150,10 @@ impl ResourceProvider for PostgresProvider {
             identity,
             pool,
             max: max as u32,
-            counters: Counters::default(),
+            counters: Arc::new(Counters::default()),
             tls,
+            transactions: Arc::new(Mutex::new(HashMap::new())),
+            next_transaction: AtomicU64::new(1),
         }))
     }
 }
@@ -152,14 +164,34 @@ struct Counters {
     returned: AtomicU64,
     quarantined: AtomicU64,
     cancelled: AtomicU64,
+    transactions: AtomicU64,
+    /// Transactions the world left open; rolled back on its behalf.
+    rolled_back_for_world: AtomicU64,
 }
 
 pub struct Postgres {
     identity: ResourceIdentity,
     pool: Pool,
     max: u32,
-    counters: Counters,
+    counters: Arc<Counters>,
     tls: Tls,
+    /// Open transactions by lease id: the channel to the holder task that
+    /// owns the pinned connection.
+    transactions: Arc<Mutex<HashMap<u64, mpsc::Sender<TxCommand>>>>,
+    next_transaction: AtomicU64,
+}
+
+/// What a world may ask of its open transaction.
+enum TxCommand {
+    Sql {
+        method: String,
+        request: SqlRequest,
+        reply: oneshot::Sender<Result<Value, ResourceError>>,
+    },
+    End {
+        commit: bool,
+        reply: oneshot::Sender<Result<Value, ResourceError>>,
+    },
 }
 
 /// The connector every connection and every cancel request uses.
@@ -203,13 +235,13 @@ fn tls_connector(resource: &str, ca_file: Option<&str>) -> Result<Tls, ResourceE
 /// Owns one pooled connection for the duration of one operation. Dropped
 /// without terminal proof, it removes the connection from the pool: an
 /// abandoned operation never leaves a reusable-looking connection behind.
-struct Lease<'a> {
+struct Lease {
     object: Option<Object>,
     terminal: bool,
-    counters: &'a Counters,
+    counters: Arc<Counters>,
 }
 
-impl Lease<'_> {
+impl Lease {
     fn client(&self) -> &deadpool_postgres::ClientWrapper {
         self.object.as_ref().expect("lease holds its connection")
     }
@@ -221,7 +253,7 @@ impl Lease<'_> {
     }
 }
 
-impl Drop for Lease<'_> {
+impl Drop for Lease {
     fn drop(&mut self) {
         if self.terminal {
             self.counters.returned.fetch_add(1, Ordering::SeqCst);
@@ -242,6 +274,9 @@ struct SqlRequest {
     sql: String,
     #[serde(default)]
     params: Vec<Value>,
+    /// Set when the statement belongs to an open transaction.
+    #[serde(default)]
+    lease: Option<u64>,
 }
 
 enum Finished<T> {
@@ -521,6 +556,27 @@ impl ResourceManager for Postgres {
         call: ResourceCall,
         cancel: CancellationToken,
     ) -> Result<Value, ResourceError> {
+        match call.method.as_str() {
+            "begin" => return self.begin(cancel).await,
+            "commit" | "rollback" => {
+                let lease = call
+                    .args
+                    .get("lease")
+                    .and_then(Value::as_u64)
+                    .ok_or_else(|| ResourceError::Operation {
+                        code: "invalid_args".into(),
+                        message: format!("{} needs a lease", call.method),
+                        proof: TerminalProof::Terminal,
+                    })?;
+                return self
+                    .transaction_command(lease, |reply| TxCommand::End {
+                        commit: call.method == "commit",
+                        reply,
+                    })
+                    .await;
+            }
+            _ => {}
+        }
         let request: SqlRequest =
             serde_json::from_value(call.args).map_err(|e| ResourceError::Operation {
                 code: "invalid_args".into(),
@@ -528,6 +584,16 @@ impl ResourceManager for Postgres {
                 proof: TerminalProof::Terminal,
             })?;
         self.counters.operations.fetch_add(1, Ordering::SeqCst);
+        if let Some(lease) = request.lease {
+            let method = call.method.clone();
+            return self
+                .transaction_command(lease, move |reply| TxCommand::Sql {
+                    method,
+                    request,
+                    reply,
+                })
+                .await;
+        }
         let object = tokio::select! {
             biased;
             _ = cancel.cancelled() => return Err(ResourceError::Cancelled),
@@ -539,7 +605,7 @@ impl ResourceManager for Postgres {
         let mut lease = Lease {
             object: Some(object),
             terminal: false,
-            counters: &self.counters,
+            counters: Arc::clone(&self.counters),
         };
         let finished = {
             let client = lease.client();
@@ -624,6 +690,23 @@ impl ResourceManager for Postgres {
             "cancelled".into(),
             json!(self.counters.cancelled.load(Ordering::SeqCst)),
         );
+        detail.insert(
+            "transactions".into(),
+            json!(self.counters.transactions.load(Ordering::SeqCst)),
+        );
+        detail.insert(
+            "openTransactions".into(),
+            json!(
+                self.transactions
+                    .lock()
+                    .expect("transactions poisoned")
+                    .len()
+            ),
+        );
+        detail.insert(
+            "rolledBackForWorld".into(),
+            json!(self.counters.rolled_back_for_world.load(Ordering::SeqCst)),
+        );
         detail.insert("poolSize".into(), json!(status.size));
         detail.insert("available".into(), json!(status.available));
         detail.insert("waiting".into(), json!(status.waiting));
@@ -655,7 +738,156 @@ pub struct AppliedMigration {
     pub applied_at: String,
 }
 
+/// Runs one statement of an open transaction on its pinned connection.
+async fn transaction_statement(
+    client: &deadpool_postgres::ClientWrapper,
+    cancel: &CancellationToken,
+    counters: &Counters,
+    tls: &Tls,
+    method: &str,
+    request: &SqlRequest,
+) -> Finished<Result<Value, ResourceError>> {
+    let (statement, params) = match prepare_and_bind(client, request).await {
+        Ok(bound) => bound,
+        Err(e) => return Finished::Terminal(Err(e)),
+    };
+    let refs: Vec<&(dyn ToSql + Sync)> = params
+        .iter()
+        .map(|p| p.as_ref() as &(dyn ToSql + Sync))
+        .collect();
+    match method {
+        "query" => {
+            run_cancellable(client, cancel, counters, tls, async {
+                let rows = client.query(&statement, &refs).await?;
+                rows.iter()
+                    .map(row_to_json)
+                    .collect::<Result<Vec<_>, _>>()
+                    .map(Value::Array)
+            })
+            .await
+        }
+        "one" => {
+            run_cancellable(client, cancel, counters, tls, async {
+                let rows = client.query(&statement, &refs).await?;
+                Ok(rows
+                    .first()
+                    .map(row_to_json)
+                    .transpose()?
+                    .unwrap_or(Value::Null))
+            })
+            .await
+        }
+        "execute" => {
+            run_cancellable(client, cancel, counters, tls, async {
+                client.execute(&statement, &refs).await.map(|n| json!(n))
+            })
+            .await
+        }
+        other => Finished::Terminal(Err(ResourceError::UnknownMethod {
+            resource: "postgres".into(),
+            method: other.to_owned(),
+        })),
+    }
+}
+
+fn ambiguous_after_cancel() -> ResourceError {
+    ResourceError::Operation {
+        code: "cancel_unconfirmed".into(),
+        message: "the statement did not reach a terminal state after cancellation; connection quarantined".into(),
+        proof: TerminalProof::Ambiguous,
+    }
+}
+
 impl Postgres {
+    /// `BEGIN` on a leased connection, then hand the connection to a holder
+    /// task that serves the world's statements until `commit`/`rollback` —
+    /// or rolls back for the world when its cancellation fires first.
+    async fn begin(&self, cancel: CancellationToken) -> Result<Value, ResourceError> {
+        self.counters.operations.fetch_add(1, Ordering::SeqCst);
+        let object = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Err(ResourceError::Cancelled),
+            got = self.pool.get() => got.map_err(|e| match e {
+                deadpool_postgres::PoolError::Timeout(_) => ResourceError::Exhausted { resource: self.identity.name.clone() },
+                other => ResourceError::Operation { code: "pool_error".into(), message: other.to_string(), proof: TerminalProof::Terminal },
+            })?,
+        };
+        let mut lease = Lease {
+            object: Some(object),
+            terminal: false,
+            counters: Arc::clone(&self.counters),
+        };
+        let began = {
+            let client = lease.client();
+            run_cancellable(client, &cancel, &self.counters, &self.tls, async {
+                client.batch_execute("BEGIN").await
+            })
+            .await
+        };
+        match began {
+            Finished::Terminal(Ok(())) => {}
+            Finished::Terminal(Err(e)) => {
+                if !matches!(
+                    &e,
+                    ResourceError::Operation {
+                        proof: TerminalProof::Ambiguous,
+                        ..
+                    }
+                ) {
+                    lease.mark_terminal();
+                }
+                return Err(e);
+            }
+            Finished::Ambiguous => return Err(ambiguous_after_cancel()),
+        }
+        self.counters.transactions.fetch_add(1, Ordering::SeqCst);
+        let id = self.next_transaction.fetch_add(1, Ordering::SeqCst);
+        let (tx, rx) = mpsc::channel::<TxCommand>(1);
+        self.transactions
+            .lock()
+            .expect("transactions poisoned")
+            .insert(id, tx);
+        let transactions = Arc::clone(&self.transactions);
+        let counters = Arc::clone(&self.counters);
+        let tls = self.tls.clone();
+        tokio::spawn(async move {
+            hold_transaction(lease, rx, cancel, &counters, &tls).await;
+            transactions
+                .lock()
+                .expect("transactions poisoned")
+                .remove(&id);
+        });
+        Ok(json!({ "lease": id }))
+    }
+
+    async fn transaction_command(
+        &self,
+        lease: u64,
+        make: impl FnOnce(oneshot::Sender<Result<Value, ResourceError>>) -> TxCommand,
+    ) -> Result<Value, ResourceError> {
+        let sender = self
+            .transactions
+            .lock()
+            .expect("transactions poisoned")
+            .get(&lease)
+            .cloned();
+        let closed = || {
+            ResourceError::Operation {
+            code: "transaction_closed".into(),
+            message: "this transaction is no longer open (committed, rolled back, or ended with its world)".into(),
+            proof: TerminalProof::Terminal,
+        }
+        };
+        let Some(sender) = sender else {
+            return Err(closed());
+        };
+        let (reply_tx, reply_rx) = oneshot::channel();
+        if sender.send(make(reply_tx)).await.is_err() {
+            return Err(closed());
+        }
+        reply_rx.await.unwrap_or_else(|_| Err(closed()))
+    }
+
     async fn lease(&self, cancel: &CancellationToken) -> Result<Object, ResourceError> {
         tokio::select! {
             biased;
@@ -678,7 +910,7 @@ impl Postgres {
         let mut lease = Lease {
             object: Some(object),
             terminal: false,
-            counters: &self.counters,
+            counters: Arc::clone(&self.counters),
         };
         let script = format!(
             "BEGIN;\n{sql}\n;INSERT INTO usai_migrations (name, checksum) VALUES ({}, {});\nCOMMIT;",
@@ -723,7 +955,7 @@ impl Postgres {
         let mut lease = Lease {
             object: Some(object),
             terminal: false,
-            counters: &self.counters,
+            counters: Arc::clone(&self.counters),
         };
         let result = lease
             .client()
@@ -750,7 +982,7 @@ impl Postgres {
         let mut lease = Lease {
             object: Some(object),
             terminal: false,
-            counters: &self.counters,
+            counters: Arc::clone(&self.counters),
         };
         let result = lease
             .client()
@@ -779,6 +1011,111 @@ impl Postgres {
             lease.mark_terminal();
         }
         result
+    }
+}
+
+/// Owns a pinned connection for the life of one transaction. Exits on
+/// commit/rollback, on a lost connection, or on the world's cancellation —
+/// in that last case after rolling back for the world.
+async fn hold_transaction(
+    mut lease: Lease,
+    mut commands: mpsc::Receiver<TxCommand>,
+    cancel: CancellationToken,
+    counters: &Counters,
+    tls: &Tls,
+) {
+    loop {
+        let command = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => None,
+            command = commands.recv() => command,
+        };
+        match command {
+            None => {
+                // The world is gone (or dropped its handle) with the
+                // transaction open: roll back on its behalf. Only a
+                // rollback that reached the server proves the connection
+                // clean.
+                counters
+                    .rolled_back_for_world
+                    .fetch_add(1, Ordering::SeqCst);
+                let client = lease.client();
+                if let Ok(Ok(())) =
+                    tokio::time::timeout(CANCEL_TERMINAL_BOUND, client.batch_execute("ROLLBACK"))
+                        .await
+                {
+                    lease.mark_terminal();
+                }
+                return;
+            }
+            Some(TxCommand::Sql {
+                method,
+                request,
+                reply,
+            }) => {
+                let finished = transaction_statement(
+                    lease.client(),
+                    &cancel,
+                    counters,
+                    tls,
+                    &method,
+                    &request,
+                )
+                .await;
+                match finished {
+                    Finished::Terminal(result) => {
+                        let lost = matches!(
+                            &result,
+                            Err(ResourceError::Operation {
+                                proof: TerminalProof::Ambiguous,
+                                ..
+                            })
+                        );
+                        let _ = reply.send(result);
+                        if lost {
+                            return; // quarantined by the lease's drop
+                        }
+                    }
+                    Finished::Ambiguous => {
+                        let _ = reply.send(Err(ambiguous_after_cancel()));
+                        return;
+                    }
+                }
+            }
+            Some(TxCommand::End { commit, reply }) => {
+                let statement = if commit { "COMMIT" } else { "ROLLBACK" };
+                let client = lease.client();
+                let finished = run_cancellable(client, &cancel, counters, tls, async {
+                    client.batch_execute(statement).await
+                })
+                .await;
+                let result = match finished {
+                    Finished::Terminal(Ok(())) => {
+                        lease.mark_terminal();
+                        Ok(Value::Bool(true))
+                    }
+                    Finished::Terminal(Err(e)) => {
+                        // A failed COMMIT leaves the connection in a known
+                        // state (the transaction is aborted or gone); only a
+                        // lost connection is ambiguous.
+                        if !matches!(
+                            &e,
+                            ResourceError::Operation {
+                                proof: TerminalProof::Ambiguous,
+                                ..
+                            }
+                        ) {
+                            let _ = client.batch_execute("ROLLBACK").await;
+                            lease.mark_terminal();
+                        }
+                        Err(e)
+                    }
+                    Finished::Ambiguous => Err(ambiguous_after_cancel()),
+                };
+                let _ = reply.send(result);
+                return;
+            }
+        }
     }
 }
 

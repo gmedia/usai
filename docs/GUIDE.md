@@ -173,7 +173,8 @@ export const listUsers = http.get("/users", { response: { 200: z.array(User) }, 
 export default defineApp({ workloads: [listUsers], resources: [db], env: env({ DATABASE_URL: env.url() }) });
 ```
 
-- `sql.query(text, params)` → rows; `sql.one(...)` → row or null; `sql.execute(...)` → affected count. Parameters are typed from the prepared statement (`$1::int`, uuid, jsonb, timestamptz, arrays …).
+- `sql.query(text, params)` → rows; `sql.one(...)` → row or null; `sql.execute(...)` → affected count. Parameters are typed from the prepared statement (`$1::int`, uuid, jsonb, timestamptz, arrays …) and encoded by the runtime, so a string that is not a valid uuid/timestamp for its slot is an `invalid_param` error (500) from the handler's point of view — validate boundary input with the schema first (`z.string().uuid()`), and keep timestamps as the ISO-8601 strings the driver returns (a `::text` cast produces PostgreSQL's own format, which does not round-trip).
+- `sql.transaction(async (tx) => { … })` pins one connection for the callback: `tx.query/one/execute` run in one transaction, committed when the callback returns, rolled back when it throws (the error is rethrown). A handler that returns with the transaction still open is a lifecycle error — the runtime rolls back on its behalf and says so.
 - Each operation leases one pooled connection. A connection is reused only after a **terminal** outcome; cancellation waits for the server to confirm; anything ambiguous is quarantined and replaced. Session state is reset between worlds.
 - TLS: put `sslmode=require` in the URL (`prefer` is the default, `disable` turns it off). The server certificate is **always verified** — against Mozilla's roots plus the PEM bundle in `postgres("main", { tls: { caFile } })` or the `PGSSLROOTCERT` environment variable (private CAs, managed-database roots). There is no encrypted-but-unverified mode; a certificate that does not verify fails **activation**, not the first request.
 - Migrations: SQL files found by `usai.config.ts` includes and module globs, applied in file-name order by `usai db migrate`, recorded in `usai_migrations`, never run at startup. `usai db status` shows them.
@@ -218,19 +219,37 @@ export const ledgerSync = service("ledger-sync", { restart: { mode: "on-failure"
 
 A service world starts with the revision and stops when the revision drains: the signal fires, `ctx.sleep` returns, the loop exits. Finite worlds cannot see its state.
 
-## 11. What a world can use
+## 11. Outbound HTTP
 
-A world is a bare JavaScript engine with exactly these globals, no more: `console`, `setTimeout`/`clearTimeout`/`setInterval`/`clearInterval`, `queueMicrotask`, `atob`/`btoa`, `TextEncoder`/`TextDecoder`, `URL`/`URLSearchParams`, `structuredClone`, plus the SDK's `ctx`. Put `"types": ["@sakaladev/usai/globals"]` in `tsconfig.json` (the scaffold does) instead of the `DOM` lib or `@types/node`, so the compiler knows the same set.
+```ts
+import { httpClient, type HttpClientHandle } from "@sakaladev/usai";
+const payments = httpClient("payments", { baseUrlEnv: "PAYMENTS_URL", bearerTokenEnv: "PAYMENTS_TOKEN", timeoutMs: 5000, maxConcurrent: 16 });
+
+export const charge = http.post("/charge", { body: Charge, resources: [payments] }, async (ctx) => {
+  const api = ctx.resources["payments"] as HttpClientHandle;
+  const res = await api.fetch("/v1/charges", { method: "POST", json: ctx.body });
+  if (!res.ok) throw errors.badGateway(`payments answered ${res.status}`);
+  return res.json();
+});
+```
+
+There is no global `fetch` in a world (calling it rejects with `fetch_not_available` and this advice). Outbound HTTP is a **declared resource**: the runtime owns the client (pool, TLS roots, redirects, timeouts) and every `fetch` is an operation owned by the world — cancelled with it, bounded by its deadline. `baseUrl`/`baseUrlEnv` pins the destination (another origin is `origin_refused`); without it the client may call any http(s) URL. `maxConcurrent` refuses (503) instead of queueing. Responses: `status`, `ok`, `headers`, `text()`, `json()`, `bytes()`; a non-2xx status is data, not an exception. The destination shows in `usai graph`, `usai inspect` and `/_usai/docs`, and its counters in `/_usai/status`.
+
+## 12. What a world can use
+
+A world is a bare JavaScript engine with exactly these globals, no more: `console`, `setTimeout`/`clearTimeout`/`setInterval`/`clearInterval`, `queueMicrotask`, `atob`/`btoa`, `TextEncoder`/`TextDecoder`, `URL`/`URLSearchParams`, `structuredClone`, `crypto` (below), plus the SDK's `ctx`. Put `"types": ["@sakaladev/usai/globals"]` in `tsconfig.json` (the scaffold does) instead of the `DOM` lib or `@types/node`, so the compiler knows the same set.
+
+`crypto` is a WebCrypto subset with a clear lifetime story: `crypto.randomUUID()`, `crypto.getRandomValues(typedArray)` (32 bytes of host entropy per world, expanded with SHA-256 — never the image's state), `crypto.subtle.digest("SHA-256" | "SHA-384" | "SHA-512", data)`, and HMAC through `subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-256" }, …)` + `subtle.sign`/`subtle.verify` (constant-time compare). Password hashing is `password.hash(plain)` / `password.verify(plain, hash)` from the SDK — Argon2id run by the host off the world's thread; store the returned PHC string.
 
 Deliberately absent, and why:
 
-- **`fetch` / outbound HTTP** — an outbound call is an external operation that needs an owner (cancellation, deadline, terminal knowledge), so it will arrive as a host operation on `ctx`, not as a global. Until then, world code cannot make network calls.
-- **`crypto`** — randomness for secrets must come from the host; `Math.random` is seeded per world but is not a CSPRNG. Do not generate tokens in a world yet.
-- **`process`, `fs`, `require`** — there is no filesystem or process in a world; declare what you need as a resource.
+- **`fetch`** — outbound HTTP is the `httpClient` resource (§11); the global only explains that.
+- **`process`, `fs`, `require`** — there is no filesystem or process in a world; declare what you need as a resource, read configuration from `ctx.env`.
+- **`crypto.subtle` beyond digests and HMAC** (RSA, ECDSA, AES) — not yet; ask with the use case.
 
 Zod checks that need one of the absent globals fail inside the world for every input (that was the case for `z.string().url()` before `URL` was provided).
 
-## 12. Configuration and environment
+## 13. Configuration and environment
 
 ```ts
 export default defineApp({
@@ -245,7 +264,7 @@ Where values come from: the process environment. For local work, `usai dev`, `us
 
 Deployment settings (port, budgets, limits) are runtime flags and environment, not application code: `usai run --port 8080 --status`.
 
-## 13. Operate
+## 14. Operate
 
 ```bash
 usai build                     # .usai/build/{manifest.json, app.js} + cache/image.cwasm (engine cache for this host; install loads it in ms, drop it and install compiles)
@@ -267,7 +286,7 @@ PostgreSQL is the commented block in the scaffold's `compose.yaml`.
 
 `/_usai/docs` is the API reference, generated from the definition the runtime is executing (the revision identity is on the page). Beyond parameters, bodies and responses it shows what each request *does*: which slots are refused before a world exists, the world's lifetime and effective deadline, the resources it leases per operation, the tasks it hands off — and the tasks, crons, commands, queues and services that are not HTTP but run beside them. Every operation has a copyable curl and a "Try it" panel that sends a real request to this server and reports the runtime's own time (`x-usai-server-ms`). Declare `dispatches(endpoint, task)` and your `errors`/`response` statuses so the page can say so. `/_usai/openapi.json` carries the same facts as `x-usai-*` extensions for other tools.
 
-## 14. Testing
+## 15. Testing
 
 Tests run the same application model as production:
 
@@ -293,7 +312,7 @@ test("users", async () => {
 
 `testApp` needs the `usai` binary (`USAI_BIN` or on `PATH`) and the project's declared environment (pass `env: { DATABASE_URL }`). With `migrate: true` (or `migrate: { seed: true }`) it runs `usai db migrate` / `usai db seed` first — for a throwaway database. Lifecycle-specific tests are ordinary: mutate in one request, read in the next, and assert the mutation is gone.
 
-## 15. A realistic application: `examples/todos`
+## 16. A realistic application: `examples/todos`
 
 Everything above in one project — read it in this order.
 
@@ -327,6 +346,6 @@ usai app stats --root examples/todos
 usai test --root examples/todos
 ```
 
-## 16. Performance note (v0)
+## 17. Performance note (v0)
 
 Per-world cost on the Wasm substrate is flat with respect to application size: instantiating a world from the pre-initialized image costs ~0.02 ms whatever the bundle contains, and validators declared as contracts are prepared before the image is snapshotted, so a fresh world does not rebuild them. On the research VM a contract-validated hello request is ~1 ms p50 at c=1 and the runtime serves ~13k req/s at c=16 on 16 cores; the numbers and their attribution are in `docs/measurements/`. Handler code runs in an interpreter compiled by Cranelift: CPU-heavy loops are slower than on a JIT; keep hot loops small or move them to the database.

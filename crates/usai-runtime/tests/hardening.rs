@@ -59,7 +59,7 @@ async fn http_runtime() -> Option<(Arc<Runtime>, Arc<dyn usai_runtime::engine::E
             drain_timeout: Duration::from_secs(10),
             ..RuntimeConfig::default()
         },
-        |_| None,
+        |name| (name == "UPSTREAM_URL").then(|| "http://127.0.0.1:9/".to_owned()),
     );
     let rev = runtime.install(out.definition).await.unwrap();
     runtime.activate(rev.id).await.unwrap();
@@ -309,7 +309,7 @@ async fn precompiled_image_is_loaded_when_it_matches_and_ignored_otherwise() {
             cron_scheduler: false,
             ..RuntimeConfig::default()
         },
-        |_| None,
+        |name| (name == "UPSTREAM_URL").then(|| "http://127.0.0.1:9/".to_owned()),
     );
     let rev = rt.install(Arc::clone(&definition)).await.unwrap();
     let install_ms = t.elapsed().as_millis();
@@ -341,7 +341,7 @@ async fn precompiled_image_is_loaded_when_it_matches_and_ignored_otherwise() {
             cron_scheduler: false,
             ..RuntimeConfig::default()
         },
-        |_| None,
+        |name| (name == "UPSTREAM_URL").then(|| "http://127.0.0.1:9/".to_owned()),
     );
     let rev = rt.install(definition).await.unwrap();
     rt.activate(rev.id).await.unwrap();
@@ -380,7 +380,7 @@ async fn budget_exhaustion_refuses_promptly_and_recovers() {
             default_timeout: Duration::from_secs(10),
             ..RuntimeConfig::default()
         },
-        |_| None,
+        |name| (name == "UPSTREAM_URL").then(|| "http://127.0.0.1:9/".to_owned()),
     );
     let rev = rt.install(out.definition).await.unwrap();
     rt.activate(rev.id).await.unwrap();

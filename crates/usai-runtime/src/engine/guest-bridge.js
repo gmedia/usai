@@ -21,6 +21,9 @@
   // host installs `__usai_host_start` instead.
   const nativeOp = typeof globalThis.__usai_test_op === "function" ? globalThis.__usai_test_op : null;
   let nextNativeId = 1;
+  let nextHoldId = 0;
+  let entropySeed = null;
+  let entropyCounter = 0;
 
   function bridgeError(code, message) {
     const error = new Error(message);
@@ -117,6 +120,22 @@
       else entry.reject(errorFromPayload(payload));
       return true;
     },
+    // A synthetic pending entry for work the guest holds open across several
+    // operations (an open database transaction): it counts as live
+    // asynchronous work until released, so a finite world that ends without
+    // closing it is diagnosed like a live timer would be.
+    hold(kind) {
+      const id = -(++nextHoldId);
+      pending.set(id, { kind: String(kind), hold: true });
+      return { release() { pending.delete(id); } };
+    },
+    // Per-world entropy from the host (32 bytes, hex), installed with the
+    // invocation; `crypto` draws from it. Never reused across worlds: the
+    // image is a snapshot, so the seed must arrive after the world exists.
+    seed(hex) {
+      entropySeed = hex;
+      entropyCounter = 0;
+    },
     pendingCount() {
       return pending.size;
     },
@@ -144,7 +163,7 @@
       const entries = Array.from(pending.values());
       pending.clear();
       for (const entry of entries) {
-        entry.reject(bridgeError("cancelled", "work was cancelled: " + cancelled));
+        if (typeof entry.reject === "function") entry.reject(bridgeError("cancelled", "work was cancelled: " + cancelled));
       }
     },
     // Graceful stop (persistent workloads): the signal fires so loops can
@@ -289,14 +308,211 @@
     }
   };
 
+  // ---- crypto: a WebCrypto subset with a clear lifetime story ------------
+  // Randomness comes from host entropy installed per world (`__usai.seed`),
+  // expanded with SHA-256 in counter mode; digests and HMAC are pure. This is
+  // the whole surface: SHA-256/384/512 digests, HMAC sign/verify, random
+  // bytes and UUIDs. Password hashing is a host operation (`password` in the
+  // SDK) because it is deliberately expensive.
+  const K256 = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+  function sha256(bytes) {
+    const h = new Int32Array([0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19]);
+    const len = bytes.length, bitLen = len * 8;
+    const padded = new Uint8Array(((len + 9 + 63) >> 6) << 6);
+    padded.set(bytes); padded[len] = 0x80;
+    const dv = new DataView(padded.buffer);
+    dv.setUint32(padded.length - 4, bitLen >>> 0); dv.setUint32(padded.length - 8, Math.floor(bitLen / 0x100000000));
+    const w = new Int32Array(64);
+    for (let off = 0; off < padded.length; off += 64) {
+      for (let i = 0; i < 16; i++) w[i] = dv.getInt32(off + i * 4);
+      for (let i = 16; i < 64; i++) {
+        const a = w[i - 15], b = w[i - 2];
+        const s0 = ((a >>> 7) | (a << 25)) ^ ((a >>> 18) | (a << 14)) ^ (a >>> 3);
+        const s1 = ((b >>> 17) | (b << 15)) ^ ((b >>> 19) | (b << 13)) ^ (b >>> 10);
+        w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+      }
+      let [a, b, c, d, e, f, g, hh] = h;
+      for (let i = 0; i < 64; i++) {
+        const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+        const ch = (e & f) ^ (~e & g);
+        const t1 = (hh + S1 + ch + K256[i] + w[i]) | 0;
+        const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+        const maj = (a & b) ^ (a & c) ^ (b & c);
+        const t2 = (S0 + maj) | 0;
+        hh = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+      }
+      h[0] = (h[0] + a) | 0; h[1] = (h[1] + b) | 0; h[2] = (h[2] + c) | 0; h[3] = (h[3] + d) | 0;
+      h[4] = (h[4] + e) | 0; h[5] = (h[5] + f) | 0; h[6] = (h[6] + g) | 0; h[7] = (h[7] + hh) | 0;
+    }
+    const out = new Uint8Array(32);
+    const odv = new DataView(out.buffer);
+    for (let i = 0; i < 8; i++) odv.setInt32(i * 4, h[i]);
+    return out;
+  }
+  // SHA-512 core shared by SHA-384 (truncated, different IV); 64-bit words as pairs.
+  const K512 = ["428a2f98d728ae22","7137449123ef65cd","b5c0fbcfec4d3b2f","e9b5dba58189dbbc","3956c25bf348b538","59f111f1b605d019","923f82a4af194f9b","ab1c5ed5da6d8118","d807aa98a3030242","12835b0145706fbe","243185be4ee4b28c","550c7dc3d5ffb4e2","72be5d74f27b896f","80deb1fe3b1696b1","9bdc06a725c71235","c19bf174cf692694","e49b69c19ef14ad2","efbe4786384f25e3","0fc19dc68b8cd5b5","240ca1cc77ac9c65","2de92c6f592b0275","4a7484aa6ea6e483","5cb0a9dcbd41fbd4","76f988da831153b5","983e5152ee66dfab","a831c66d2db43210","b00327c898fb213f","bf597fc7beef0ee4","c6e00bf33da88fc2","d5a79147930aa725","06ca6351e003826f","142929670a0e6e70","27b70a8546d22ffc","2e1b21385c26c926","4d2c6dfc5ac42aed","53380d139d95b3df","650a73548baf63de","766a0abb3c77b2a8","81c2c92e47edaee6","92722c851482353b","a2bfe8a14cf10364","a81a664bbc423001","c24b8b70d0f89791","c76c51a30654be30","d192e819d6ef5218","d69906245565a910","f40e35855771202a","106aa07032bbd1b8","19a4c116b8d2d0c8","1e376c085141ab53","2748774cdf8eeb99","34b0bcb5e19b48a8","391c0cb3c5c95a63","4ed8aa4ae3418acb","5b9cca4f7763e373","682e6ff3d6b2b8a3","748f82ee5defb2fc","78a5636f43172f60","84c87814a1f0ab72","8cc702081a6439ec","90befffa23631e28","a4506cebde82bde9","bef9a3f7b2c67915","c67178f2e372532b","ca273eceea26619c","d186b8c721c0c207","eada7dd6cde0eb1e","f57d4f7fee6ed178","06f067aa72176fba","0a637dc5a2c898a6","113f9804bef90dae","1b710b35131c471b","28db77f523047d84","32caab7b40c72493","3c9ebe0a15c9bebc","431d67c49c100d4c","4cc5d4becb3e42b6","597f299cfc657e2a","5fcb6fab3ad6faec","6c44198c4a475817"];
+  const KH = new Int32Array(80), KL = new Int32Array(80);
+  for (let i = 0; i < 80; i++) { KH[i] = parseInt(K512[i].slice(0, 8), 16) | 0; KL[i] = parseInt(K512[i].slice(8), 16) | 0; }
+  function sha512core(bytes, iv, outWords) {
+    const H = new Int32Array(iv);
+    const len = bytes.length;
+    const padded = new Uint8Array(((len + 17 + 127) >> 7) << 7);
+    padded.set(bytes); padded[len] = 0x80;
+    const dv = new DataView(padded.buffer);
+    const bitLen = len * 8;
+    dv.setUint32(padded.length - 4, bitLen >>> 0); dv.setUint32(padded.length - 8, Math.floor(bitLen / 0x100000000));
+    const WH = new Int32Array(80), WL = new Int32Array(80);
+    for (let off = 0; off < padded.length; off += 128) {
+      for (let i = 0; i < 16; i++) { WH[i] = dv.getInt32(off + i * 8); WL[i] = dv.getInt32(off + i * 8 + 4); }
+      for (let i = 16; i < 80; i++) {
+        let xh = WH[i - 15], xl = WL[i - 15];
+        const s0h = ((xh >>> 1) | (xl << 31)) ^ ((xh >>> 8) | (xl << 24)) ^ (xh >>> 7);
+        const s0l = ((xl >>> 1) | (xh << 31)) ^ ((xl >>> 8) | (xh << 24)) ^ ((xl >>> 7) | (xh << 25));
+        xh = WH[i - 2]; xl = WL[i - 2];
+        const s1h = ((xh >>> 19) | (xl << 13)) ^ ((xl >>> 29) | (xh << 3)) ^ (xh >>> 6);
+        const s1l = ((xl >>> 19) | (xh << 13)) ^ ((xh >>> 29) | (xl << 3)) ^ ((xl >>> 6) | (xh << 26));
+        let lo = (WL[i - 16] >>> 0) + (s0l >>> 0) + (WL[i - 7] >>> 0) + (s1l >>> 0);
+        WH[i] = (WH[i - 16] + s0h + WH[i - 7] + s1h + Math.floor(lo / 0x100000000)) | 0;
+        WL[i] = lo | 0;
+      }
+      let ah = H[0], al = H[1], bh = H[2], bl = H[3], ch = H[4], cl = H[5], dh = H[6], dl = H[7];
+      let eh = H[8], el = H[9], fh = H[10], fl = H[11], gh = H[12], gl = H[13], hh = H[14], hl = H[15];
+      for (let i = 0; i < 80; i++) {
+        const S1h = ((eh >>> 14) | (el << 18)) ^ ((eh >>> 18) | (el << 14)) ^ ((el >>> 9) | (eh << 23));
+        const S1l = ((el >>> 14) | (eh << 18)) ^ ((el >>> 18) | (eh << 14)) ^ ((eh >>> 9) | (el << 23));
+        const chh = (eh & fh) ^ (~eh & gh), chl = (el & fl) ^ (~el & gl);
+        let lo = (hl >>> 0) + (S1l >>> 0) + (chl >>> 0) + (KL[i] >>> 0) + (WL[i] >>> 0);
+        const t1h = (hh + S1h + chh + KH[i] + WH[i] + Math.floor(lo / 0x100000000)) | 0, t1l = lo | 0;
+        const S0h = ((ah >>> 28) | (al << 4)) ^ ((al >>> 2) | (ah << 30)) ^ ((al >>> 7) | (ah << 25));
+        const S0l = ((al >>> 28) | (ah << 4)) ^ ((ah >>> 2) | (al << 30)) ^ ((ah >>> 7) | (al << 25));
+        const majh = (ah & bh) ^ (ah & ch) ^ (bh & ch), majl = (al & bl) ^ (al & cl) ^ (bl & cl);
+        lo = (S0l >>> 0) + (majl >>> 0);
+        const t2h = (S0h + majh + Math.floor(lo / 0x100000000)) | 0, t2l = lo | 0;
+        hh = gh; hl = gl; gh = fh; gl = fl; fh = eh; fl = el;
+        lo = (dl >>> 0) + (t1l >>> 0); eh = (dh + t1h + Math.floor(lo / 0x100000000)) | 0; el = lo | 0;
+        dh = ch; dl = cl; ch = bh; cl = bl; bh = ah; bl = al;
+        lo = (t1l >>> 0) + (t2l >>> 0); ah = (t1h + t2h + Math.floor(lo / 0x100000000)) | 0; al = lo | 0;
+      }
+      const add = (i, xh, xl) => { const lo = (H[i + 1] >>> 0) + (xl >>> 0); H[i] = (H[i] + xh + Math.floor(lo / 0x100000000)) | 0; H[i + 1] = lo | 0; };
+      add(0, ah, al); add(2, bh, bl); add(4, ch, cl); add(6, dh, dl); add(8, eh, el); add(10, fh, fl); add(12, gh, gl); add(14, hh, hl);
+    }
+    const out = new Uint8Array(outWords * 4);
+    const odv = new DataView(out.buffer);
+    for (let i = 0; i < outWords; i++) odv.setInt32(i * 4, H[i]);
+    return out;
+  }
+  const IV512 = [0x6a09e667,0xf3bcc908,0xbb67ae85,0x84caa73b,0x3c6ef372,0xfe94f82b,0xa54ff53a,0x5f1d36f1,0x510e527f,0xade682d1,0x9b05688c,0x2b3e6c1f,0x1f83d9ab,0xfb41bd6b,0x5be0cd19,0x137e2179];
+  const IV384 = [0xcbbb9d5d,0xc1059ed8,0x629a292a,0x367cd507,0x9159015a,0x3070dd17,0x152fecd8,0xf70e5939,0x67332667,0xffc00b31,0x8eb44a87,0x68581511,0xdb0c2e0d,0x64f98fa7,0x47b5481d,0xbefa4fa4];
+  const DIGESTS = {
+    "SHA-256": { fn: sha256, block: 64 },
+    "SHA-384": { fn: (b) => sha512core(b, IV384, 12), block: 128 },
+    "SHA-512": { fn: (b) => sha512core(b, IV512, 16), block: 128 },
+  };
+  function toBytes(data) {
+    if (data instanceof Uint8Array) return data;
+    if (data instanceof ArrayBuffer) return new Uint8Array(data);
+    if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    throw new TypeError("expected an ArrayBuffer or ArrayBufferView");
+  }
+  function digestName(algorithm) {
+    const name = typeof algorithm === "string" ? algorithm : algorithm && algorithm.name;
+    const key = String(name || "").toUpperCase();
+    if (!DIGESTS[key]) throw bridgeError("unsupported_algorithm", "crypto.subtle: unsupported digest " + JSON.stringify(name) + " (SHA-256, SHA-384, SHA-512)");
+    return key;
+  }
+  function hmac(hashName, key, data) {
+    const { fn, block } = DIGESTS[hashName];
+    let k = key.length > block ? fn(key) : key;
+    const ipad = new Uint8Array(block), opad = new Uint8Array(block);
+    for (let i = 0; i < block; i++) { const b = i < k.length ? k[i] : 0; ipad[i] = b ^ 0x36; opad[i] = b ^ 0x5c; }
+    const inner = new Uint8Array(block + data.length); inner.set(ipad); inner.set(data, block);
+    const ih = fn(inner);
+    const outer = new Uint8Array(block + ih.length); outer.set(opad); outer.set(ih, block);
+    return fn(outer);
+  }
+  function randomBytes(n) {
+    if (entropySeed === null) throw bridgeError("no_entropy", "crypto: this world received no entropy from the host");
+    const out = new Uint8Array(n);
+    const seed = new Uint8Array(entropySeed.length / 2);
+    for (let i = 0; i < seed.length; i++) seed[i] = parseInt(entropySeed.substr(i * 2, 2), 16);
+    const input = new Uint8Array(seed.length + 8);
+    input.set(seed);
+    let filled = 0;
+    while (filled < n) {
+      const c = ++entropyCounter;
+      input[seed.length] = c & 255; input[seed.length + 1] = (c >>> 8) & 255; input[seed.length + 2] = (c >>> 16) & 255; input[seed.length + 3] = (c >>> 24) & 255;
+      const block = sha256(input);
+      const take = Math.min(32, n - filled);
+      out.set(block.subarray(0, take), filled);
+      filled += take;
+    }
+    return out;
+  }
+  const HmacKey = class CryptoKey {
+    #raw; #hash;
+    constructor(raw, hash) { this.#raw = raw; this.#hash = hash; }
+    get type() { return "secret"; }
+    get algorithm() { return { name: "HMAC", hash: { name: this.#hash } }; }
+    get extractable() { return false; }
+    get usages() { return ["sign", "verify"]; }
+    _sign(data) { return hmac(this.#hash, this.#raw, data); }
+  };
+  const subtle = {
+    async digest(algorithm, data) {
+      return DIGESTS[digestName(algorithm)].fn(toBytes(data)).buffer;
+    },
+    async importKey(format, keyData, algorithm, _extractable, _usages) {
+      if (format !== "raw") throw bridgeError("unsupported_algorithm", "crypto.subtle.importKey: only raw keys are supported");
+      const name = algorithm && String(algorithm.name || "").toUpperCase();
+      if (name !== "HMAC") throw bridgeError("unsupported_algorithm", "crypto.subtle.importKey: only HMAC keys are supported");
+      return new HmacKey(toBytes(keyData).slice(), digestName(algorithm.hash || "SHA-256"));
+    },
+    async sign(algorithm, key, data) {
+      if (!(key instanceof HmacKey)) throw bridgeError("unsupported_algorithm", "crypto.subtle.sign: only HMAC is supported");
+      return key._sign(toBytes(data)).buffer;
+    },
+    async verify(algorithm, key, signature, data) {
+      if (!(key instanceof HmacKey)) throw bridgeError("unsupported_algorithm", "crypto.subtle.verify: only HMAC is supported");
+      const a = key._sign(toBytes(data)), b = toBytes(signature);
+      if (a.length !== b.length) return false;
+      let diff = 0;
+      for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+      return diff === 0;
+    },
+  };
+  const cryptoObject = {
+    getRandomValues(array) {
+      if (!ArrayBuffer.isView(array) || array instanceof Float32Array || array instanceof Float64Array || array instanceof DataView) throw new TypeError("getRandomValues: expected an integer typed array");
+      if (array.byteLength > 65536) throw bridgeError("quota_exceeded", "getRandomValues: at most 65536 bytes per call");
+      new Uint8Array(array.buffer, array.byteOffset, array.byteLength).set(randomBytes(array.byteLength));
+      return array;
+    },
+    randomUUID() {
+      const b = randomBytes(16);
+      b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+      const h = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+      return h.slice(0, 8) + "-" + h.slice(8, 12) + "-" + h.slice(12, 16) + "-" + h.slice(16, 20) + "-" + h.slice(20);
+    },
+    subtle,
+  };
+  Object.defineProperty(globalThis, "crypto", { value: Object.freeze(cryptoObject), writable: false, configurable: false });
+
+  // `fetch` is not a global here: outbound HTTP is an external operation that
+  // needs an owner and a declared destination. The name exists only to say
+  // so, instead of `ReferenceError: fetch is not defined`.
+  globalThis.fetch = function () {
+    return Promise.reject(bridgeError(
+      "fetch_not_available",
+      "fetch() is not available inside a world: outbound HTTP is a declared resource. Declare `const api = httpClient(\"api\", { baseUrl: \"https://…\" })`, add it to the workload's `resources: [api]`, and call `ctx.resources.api.fetch(path, init)`.",
+    ));
+  };
+
   // ---- Web platform globals a backend handler reasonably expects ----------
   // Kept small and dependency-free; this file is evaluated into the image.
   // `URL`/`URLSearchParams` cover the WHATWG behaviour validators and
   // handlers use (parse, components, query manipulation, serialization);
   // `structuredClone` deep-copies plain data, Dates, Maps, Sets, arrays and
-  // typed arrays. `fetch` and `crypto` are deliberately absent: outbound
-  // HTTP is an external operation that needs an owner (a host operation,
-  // not a global), and randomness for secrets must come from the host.
+  // typed arrays. `crypto` and the `fetch` refusal are defined above.
   const SPECIAL_PORTS = { "http:": "80", "https:": "443", "ws:": "80", "wss:": "443", "ftp:": "21", "file:": "" };
   const encodeQuery = (s) => encodeURIComponent(s).replace(/%20/g, "+").replace(/[!'()~]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase());
   const decodeQuery = (s) => { try { return decodeURIComponent(s.replace(/\+/g, " ")); } catch (_) { return s; } };

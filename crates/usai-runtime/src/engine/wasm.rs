@@ -840,11 +840,15 @@ impl Engine for WasmEngine {
 
     fn fingerprint(&self) -> String {
         // What a serialized module depends on: Wasmtime's build (it checks
-        // its own header too), the guest core, and the host target.
+        // its own header too), the guest core, the bridge evaluated into the
+        // image (a runtime that grew a bridge function must not load an
+        // image without it), and the host target.
+        use sha2::Digest;
         format!(
-            "wasmtime={};core={};target={}-{}",
+            "wasmtime={};core={};bridge={};target={}-{}",
             WASMTIME_VERSION,
             CORE_SHA256,
+            &hex::encode(sha2::Sha256::digest(GUEST_BRIDGE.as_bytes()))[..16],
             std::env::consts::ARCH,
             std::env::consts::OS
         )
@@ -1043,7 +1047,11 @@ impl WasmWorld {
 impl WorldInstance for WasmWorld {
     async fn invoke(&mut self, index: usize, input_json: &str) -> Result<(), EngineError> {
         let t = std::time::Instant::now();
-        let code = format!("__usai.invoke({index}, {});", js_string(input_json));
+        let code = format!(
+            "__usai.seed(\"{}\");__usai.invoke({index}, {});",
+            super::world_entropy(),
+            js_string(input_json)
+        );
         self.guest
             .eval(&mut self.store, &code, "usai:invoke")
             .await?;

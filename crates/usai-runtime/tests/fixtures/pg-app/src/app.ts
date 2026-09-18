@@ -60,6 +60,49 @@ export const leak = http.get("/leak", { resources: [db] }, async (ctx) => {
   return { before: before?.v ?? null };
 });
 
+// ---- transactions ----------------------------------------------------------
+export const txCommit = http.post("/tx/commit", { resources: [db] }, async (ctx) =>
+  d(ctx).transaction(async (tx) => {
+    await tx.execute(`insert into users (name, email) values ($1, $2)`, ["Citra", "citra@x.io"]);
+    // Visible inside the transaction, on the same connection.
+    const inside = await tx.one<{ n: number }>(`select count(*)::int as n from users where email = $1`, ["citra@x.io"]);
+    return { inside: inside?.n };
+  }),
+);
+
+export const txRollback = http.post("/tx/rollback", { resources: [db] }, async (ctx) => {
+  try {
+    await d(ctx).transaction(async (tx) => {
+      await tx.execute(`insert into users (name, email) values ($1, $2)`, ["Dewi", "dewi@x.io"]);
+      throw errors.conflict("changed my mind");
+    });
+    return { unexpected: true };
+  } catch (e) {
+    const n = await d(ctx).one<{ n: number }>(`select count(*)::int as n from users where email = $1`, ["dewi@x.io"]);
+    return { code: (e as { usai: { code: string } }).usai.code, after: n?.n };
+  }
+});
+
+export const txAbandon = http.post("/tx/abandon", { resources: [db] }, async (ctx) => {
+  // Starts a transaction and returns without ending it: a lifecycle error
+  // the runtime must diagnose, then roll back on the world's behalf.
+  const handle = d(ctx);
+  void handle.transaction(async (tx) => {
+    await tx.execute(`insert into users (name, email) values ($1, $2)`, ["Eka", "eka@x.io"]);
+    await new Promise(() => {});
+  });
+  await ctx.sleep(50);
+  return { started: true };
+});
+
+export const txClosed = http.post("/tx/closed", { resources: [db] }, async (ctx) => {
+  let leaked: import("@sakaladev/usai").SqlExecutor | null = null;
+  await d(ctx).transaction(async (tx) => { leaked = tx; });
+  try { await leaked!.query(`select 1`); return { unexpected: true }; } catch (e) { return { code: (e as { usai: { code: string } }).usai.code }; }
+});
+
+export const count = http.get("/count/:email", { resources: [db] }, async (ctx) => d(ctx).one(`select count(*)::int as n from users where email = $1`, [ctx.params["email"]!]));
+
 // ---- D10: queue -----------------------------------------------------------
 const seen = cache.local("seen");
 type Seen = { increment(k: string): Promise<number>; get(k: string): Promise<number | null> };
@@ -82,7 +125,7 @@ declare global {
 
 export default defineApp({
   name: "pg-fixture",
-  workloads: [setup, getUser, listUsers, slow, fail, tls, types, badParams, leak, orders, publish, seenCount],
+  workloads: [setup, getUser, listUsers, slow, fail, tls, types, badParams, leak, txCommit, txRollback, txAbandon, txClosed, count, orders, publish, seenCount],
   resources: [db, seen],
   env: env({ DATABASE_URL: env.url() }),
 });

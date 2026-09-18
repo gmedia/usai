@@ -466,6 +466,65 @@ async fn tls_connections_verify_the_server_certificate() {
     f.runtime.shutdown().await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn transactions_pin_one_connection_and_end_with_the_world() {
+    let Some(f) = fixture().await else { return };
+    // Commit: statements share a connection and the result is durable.
+    let (status, body) = f.http("POST", "/tx/commit", json!({})).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["inside"], 1);
+    let (_, after) = f
+        .http("GET", "/count/:email", json!({ "email": "citra@x.io" }))
+        .await;
+    assert_eq!(after["n"], 1);
+    // Rollback: the handler's throw undoes the insert, the error is the handler's.
+    let (status, body) = f.http("POST", "/tx/rollback", json!({})).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["code"], "conflict");
+    assert_eq!(body["after"], 0);
+    // A leaked executor after the transaction ended is refused, not silently
+    // run on some other connection.
+    let (_, body) = f.http("POST", "/tx/closed", json!({})).await;
+    assert_eq!(body["code"], "transaction_closed");
+    let before = f.pg_status();
+    // Abandonment: the world returns with the transaction open. That is a
+    // C3 violation on the world, and the runtime rolls back for it; the
+    // connection returns clean (no quarantine) because ROLLBACK is terminal.
+    let id = "http:POST /tx/abandon".to_owned();
+    let input = json!({ "kind": "http", "env": {}, "request": { "method": "POST", "path": "/tx/abandon", "url": "/tx/abandon", "params": {}, "query": {}, "headers": {}, "body": null } });
+    let r = f.runtime.invoke(&id, input).await.unwrap();
+    assert!(
+        r.violations
+            .iter()
+            .any(|v| format!("{v:?}").contains("postgres.transaction")),
+        "the open transaction must be diagnosed as live work: {:?}",
+        r.violations
+    );
+    let mut rolled_back = false;
+    for _ in 0..50 {
+        let s = f.pg_status();
+        if s.detail["rolledBackForWorld"].as_u64()
+            == Some(before.detail["rolledBackForWorld"].as_u64().unwrap_or(0) + 1)
+            && s.detail["openTransactions"].as_u64() == Some(0)
+        {
+            rolled_back = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(rolled_back, "{:?}", f.pg_status());
+    let (_, eka) = f
+        .http("GET", "/count/:email", json!({ "email": "eka@x.io" }))
+        .await;
+    assert_eq!(eka["n"], 0, "the abandoned insert must be rolled back");
+    assert_eq!(
+        f.pg_status().quarantined,
+        before.quarantined,
+        "a terminal ROLLBACK keeps the connection reusable"
+    );
+    f.baseline();
+}
+
 async fn wait_for(f: &Fixture, key: &str, expected: u64, timeout: Duration) -> Value {
     let started = std::time::Instant::now();
     loop {

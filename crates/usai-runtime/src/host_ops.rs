@@ -121,6 +121,7 @@ pub fn start_builtin(kind: &str, ctx: OpContext, payload: String) -> Result<OpFu
     match kind {
         "timer" => Ok(Box::pin(timer(ctx, payload))),
         "resource" => Ok(Box::pin(resource(ctx, payload))),
+        "crypto" => Ok(Box::pin(crypto(ctx, payload))),
         other => match ctx.extensions.handlers.get(other) {
             Some(handler) => Arc::clone(handler).start(ctx, payload),
             None => Err(OpOutcome::err(
@@ -175,6 +176,58 @@ async fn resource(ctx: OpContext, payload: String) -> OpOutcome {
     match manager.call(call, ctx.cancel.clone()).await {
         Ok(value) => OpOutcome::ok(&value),
         Err(error) => OpOutcome::from_resource_error(&error),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "op", rename_all = "kebab-case")]
+enum CryptoRequest {
+    /// Argon2id with the crate's defaults (19 MiB, 2 iterations, 1 lane):
+    /// deliberately expensive, so it runs on the blocking pool, never on a
+    /// world's thread.
+    PasswordHash {
+        password: String,
+    },
+    PasswordVerify {
+        password: String,
+        hash: String,
+    },
+}
+
+async fn crypto(ctx: OpContext, payload: String) -> OpOutcome {
+    let request: CryptoRequest = match serde_json::from_str(&payload) {
+        Ok(r) => r,
+        Err(e) => return OpOutcome::err("invalid_crypto_request", 500, e.to_string()),
+    };
+    let work = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
+        use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+        let argon = argon2::Argon2::default();
+        match request {
+            CryptoRequest::PasswordHash { password } => {
+                let mut salt = [0u8; 16];
+                getrandom::fill(&mut salt).map_err(|e| e.to_string())?;
+                let salt = SaltString::encode_b64(&salt).map_err(|e| e.to_string())?;
+                argon
+                    .hash_password(password.as_bytes(), &salt)
+                    .map(|h| json!(h.to_string()))
+                    .map_err(|e| e.to_string())
+            }
+            CryptoRequest::PasswordVerify { password, hash } => {
+                let parsed = PasswordHash::new(&hash)
+                    .map_err(|e| format!("not a PHC password hash: {e}"))?;
+                Ok(json!(
+                    argon.verify_password(password.as_bytes(), &parsed).is_ok()
+                ))
+            }
+        }
+    });
+    tokio::select! {
+        result = work => match result {
+            Ok(Ok(value)) => OpOutcome::ok(&value),
+            Ok(Err(message)) => OpOutcome::err("crypto_error", 500, message),
+            Err(e) => OpOutcome::err("crypto_error", 500, e.to_string()),
+        },
+        _ = ctx.cancel.cancelled() => OpOutcome::err("cancelled", 499, "cancelled with its world"),
     }
 }
 

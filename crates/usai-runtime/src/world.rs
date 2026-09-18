@@ -47,7 +47,11 @@ impl LifecycleViolation {
         // other pending kind (timers, owned invokes, resource calls) was cut
         // off with the world. Say which.
         let only_dispatch = summary.keys().all(|k| *k == "task.dispatch");
-        let outcome = if only_dispatch {
+        let open_transaction = summary.contains_key("postgres.transaction");
+        let outcome = if open_transaction {
+            "A database transaction was still open when the handler returned. The runtime rolled              it back on the world's behalf — nothing it wrote is durable. Await `db.transaction(...)`              so it commits before the response, or roll back explicitly by throwing inside it."
+                .to_owned()
+        } else if only_dispatch {
             "The hand-off itself already happened — the dispatched task runs in its own world — \
              but this world returned before the runtime acknowledged it. Add `await` in front of \
              `ctx.tasks.dispatch(...)` so the request only answers once the transfer is recorded."

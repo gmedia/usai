@@ -46,10 +46,11 @@ glob.workspace = true
 tokio-tungstenite.workspace = true
 futures-util.workspace = true
 libc = "0.2"
+reqwest.workspace = true
+argon2.workspace = true
 
 [dev-dependencies]
 wasmtime = { workspace = true }
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
 libc = "0.2"
 tracing-subscriber = { workspace = true }
 tokio-tungstenite = { workspace = true }

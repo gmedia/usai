@@ -3,7 +3,7 @@
 // operation; nothing escapes the world's ownership.
 
 import type { ResourceDeclaration, Workload } from "../declarations.ts";
-import type { CacheLocalHandle, PostgresHandle } from "../resources.ts";
+import type { CacheLocalHandle, FetchInit, FetchResponse, HttpClientHandle, PostgresHandle, SqlExecutor } from "../resources.ts";
 import { UsaiError } from "../errors.ts";
 
 /** What `ctx.log` and `console` offer inside a world. */
@@ -24,6 +24,7 @@ declare global {
     op(kind: string, payload: string): Promise<string>;
     onCancel(fn: (reason: string) => void): void;
     isCancelled(): boolean;
+    hold(kind: string): { release(): void };
   };
   var __usai_sdk: unknown;
   var __usai_app: unknown;
@@ -97,11 +98,77 @@ function cacheLocalHandle(name: string): CacheLocalHandle {
   };
 }
 
+function sqlExecutor(name: string, lease?: number): SqlExecutor {
+  const extra = lease === undefined ? {} : { lease };
+  return {
+    query: (sql, params = []) => resourceCall(name, "query", { sql, params, ...extra }) as Promise<never[]>,
+    one: (sql, params = []) => resourceCall(name, "one", { sql, params, ...extra }) as Promise<never>,
+    execute: (sql, params = []) => resourceCall(name, "execute", { sql, params, ...extra }) as Promise<number>,
+  };
+}
+
 function postgresHandle(name: string): PostgresHandle {
   return {
-    query: (sql, params = []) => resourceCall(name, "query", { sql, params }) as Promise<never[]>,
-    one: (sql, params = []) => resourceCall(name, "one", { sql, params }) as Promise<never>,
-    execute: (sql, params = []) => resourceCall(name, "execute", { sql, params }) as Promise<number>,
+    ...sqlExecutor(name),
+    async transaction(fn) {
+      const { lease } = (await resourceCall(name, "begin", {})) as { lease: number };
+      // The open transaction is live asynchronous work: a finite world that
+      // ends before commit/rollback is diagnosed, and the runtime rolls back.
+      const held = globalThis.__usai.hold("postgres.transaction");
+      try {
+        const result = await fn(sqlExecutor(name, lease));
+        await resourceCall(name, "commit", { lease });
+        return result;
+      } catch (error) {
+        await resourceCall(name, "rollback", { lease }).catch(() => undefined);
+        throw error;
+      } finally {
+        held.release();
+      }
+    },
+  };
+}
+
+interface RawFetchResponse {
+  status: number;
+  ok: boolean;
+  headers: Record<string, string>;
+  body: { text?: string; base64?: string };
+}
+
+function httpClientHandle(name: string): HttpClientHandle {
+  return {
+    async fetch(url: string, init: FetchInit = {}): Promise<FetchResponse> {
+      const headers = { ...(init.headers ?? {}) };
+      let body = init.body;
+      if (init.json !== undefined) {
+        body = JSON.stringify(init.json);
+        if (!Object.keys(headers).some((h) => h.toLowerCase() === "content-type")) headers["content-type"] = "application/json";
+      }
+      const args: Record<string, unknown> = { url, headers };
+      if (init.method !== undefined) args["method"] = init.method;
+      if (body !== undefined) args["body"] = body;
+      if (init.timeoutMs !== undefined) args["timeoutMs"] = init.timeoutMs;
+      const raw = (await resourceCall(name, "fetch", args)) as RawFetchResponse;
+      const text = () => raw.body.text ?? new TextDecoder().decode(bytes());
+      const bytes = () => {
+        if (raw.body.base64 !== undefined) {
+          const bin = atob(raw.body.base64);
+          const out = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+          return out;
+        }
+        return new TextEncoder().encode(raw.body.text ?? "");
+      };
+      return {
+        status: raw.status,
+        ok: raw.ok,
+        headers: raw.headers,
+        text,
+        json: <T,>() => JSON.parse(text()) as T,
+        bytes,
+      };
+    },
   };
 }
 
@@ -119,6 +186,7 @@ export function makeResources(declarations: readonly ResourceDeclaration[]): Rec
     out[declaration.name] =
       declaration.kind === "cache.local" ? cacheLocalHandle(declaration.name)
       : declaration.kind === "postgres" ? postgresHandle(declaration.name)
+      : declaration.kind === "http.client" ? httpClientHandle(declaration.name)
       : genericHandle(declaration);
   }
   // A resource the workload did not declare is a lifecycle mistake, not

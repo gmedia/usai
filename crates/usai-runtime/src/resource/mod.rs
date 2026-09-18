@@ -7,6 +7,7 @@
 //! an external operation with its own owner and terminal proof.
 
 pub mod cache_local;
+pub mod http_client;
 pub mod postgres;
 
 use std::collections::BTreeMap;
@@ -181,6 +182,7 @@ impl ResourceRegistry {
         let registry = Self::default();
         registry.register_provider(Arc::new(cache_local::CacheLocalProvider));
         registry.register_provider(Arc::new(postgres::PostgresProvider));
+        registry.register_provider(Arc::new(http_client::HttpClientProvider));
         registry
     }
 

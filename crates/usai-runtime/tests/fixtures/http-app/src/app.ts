@@ -194,6 +194,49 @@ export const inspectUrl = http.post("/url", { body: z.object({ url: z.string().u
   return { host: u.host, path: u.pathname, href: u.href, cloned: copy.when instanceof Date && copy.tags.has("a") };
 });
 
+// ---- P4: outbound HTTP, crypto, password ---------------------------------
+import { httpClient, password } from "@sakaladev/usai";
+const upstream = httpClient("upstream", { baseUrlEnv: "UPSTREAM_URL", timeoutMs: 2000, maxConcurrent: 2 });
+type Client = import("@sakaladev/usai").HttpClientHandle;
+const up = (ctx: { resources: Record<string, unknown> }) => ctx.resources["upstream"] as Client;
+
+export const egress = http.post("/egress", { body: z.object({ path: z.string(), method: z.string().optional(), json: z.unknown().optional() }), resources: [upstream] }, async (ctx) => {
+  const res = await up(ctx).fetch(ctx.body.path, { method: ctx.body.method ?? "GET", json: ctx.body.json });
+  return { status: res.status, ok: res.ok, echo: res.headers["x-echo"], body: res.status === 200 ? res.json() : res.text() };
+});
+export const egressOther = http.get("/egress/other", { resources: [upstream] }, async (ctx) => {
+  try { await up(ctx).fetch("https://example.com/"); return { unexpected: true }; } catch (e) { return { code: (e as { usai: { code: string } }).usai.code }; }
+});
+export const egressSlow = http.get("/egress/slow", { timeout: "300ms", resources: [upstream] }, async (ctx) => {
+  await up(ctx).fetch("/slow");
+  return { unreachable: true };
+});
+export const egressBytes = http.get("/egress/bytes", { resources: [upstream] }, async (ctx) => {
+  const res = await up(ctx).fetch("/bytes");
+  return { length: res.bytes().length, first: res.bytes()[0] };
+});
+export const noFetch = http.get("/nofetch", {}, async () => {
+  try { await fetch("https://example.com/"); return { unexpected: true }; } catch (e) { return { code: (e as { usai: { code: string } }).usai.code, message: (e as Error).message }; }
+});
+export const cryptoRoute = http.get("/crypto", {}, async () => {
+  const enc = new TextEncoder();
+  const hex = (b: ArrayBuffer) => Array.from(new Uint8Array(b), (x) => x.toString(16).padStart(2, "0")).join("");
+  const key = await crypto.subtle.importKey("raw", enc.encode("k"), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
+  const sig = await crypto.subtle.sign("HMAC", key, enc.encode("abc"));
+  return {
+    uuid: crypto.randomUUID(),
+    other: crypto.randomUUID(),
+    sha256: hex(await crypto.subtle.digest("SHA-256", enc.encode("abc"))),
+    hmac: hex(sig),
+    verified: await crypto.subtle.verify("HMAC", key, sig, enc.encode("abc")),
+    random: Array.from(crypto.getRandomValues(new Uint8Array(4))),
+  };
+});
+export const passwordRoute = http.post("/password", { body: z.object({ password: z.string() }) }, async (ctx) => {
+  const hash = await password.hash(ctx.body.password);
+  return { prefix: hash.slice(0, 10), ok: await password.verify(ctx.body.password, hash), wrong: await password.verify("nope", hash) };
+});
+
 export default defineApp({
   name: "http-fixture",
   modules: [defineModule({ name: "users", workloads: [getUser, createUser, noContent] })],
@@ -201,7 +244,8 @@ export default defineApp({
     counter, persistent, me, boom, badShape, detach, slow, echoQuery, webhook, sendReceipt,
     record, slowTask, failingTask, invokesSlow, order, auditRead, badDispatch, everySecond, overlapping, nightly, reconcile,
     ledgerSync, serviceLocalRead, events, endless, plainStream, chat, socketLocalRead, memoryHog, crashy, inspectUrl, busy, undeclared,
+    egress, egressOther, egressSlow, egressBytes, noFetch, cryptoRoute, passwordRoute,
   ],
-  resources: [hits, audit],
-  env: env({ GREETING: env.optional(env.string()) }),
+  resources: [hits, audit, upstream],
+  env: env({ GREETING: env.optional(env.string()), UPSTREAM_URL: env.url() }),
 });

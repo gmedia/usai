@@ -241,6 +241,15 @@ fn parse_bytes(v: &str) -> Option<usize> {
 }
 
 /// Whether phase accounting is enabled for this process.
+/// 32 bytes of host entropy, hex, for the world's `crypto`. Drawn per
+/// invocation: the image is a snapshot, so anything seeded before it would
+/// repeat in every world.
+pub(crate) fn world_entropy() -> String {
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).expect("operating system entropy");
+    hex::encode(bytes)
+}
+
 pub fn profiling() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var("USAI_PROFILE").as_deref() == Ok("1"))

@@ -50,3 +50,4 @@ Briefly, with the reason each was not chosen.
 | [0014](0014-no-implicit-retry.md) | No implicit retry; failure terminal by default | accepted (v0) | Q16 |
 | [0015](0015-execution-substrate-quickjs-native.md) | Bootstrap/reference substrate is native QuickJS-ng behind an engine boundary | accepted as scaffolding; production superseded by 0016 | — |
 | [0016](0016-wasm-substrate-preinitialized-image.md) | Production substrate: Wasmtime + pre-initialized QuickJS image, pooling + COW | accepted (v0), production evidence pending | ADR-0015 revisit |
+| [0017](0017-egress-crypto-transactions-as-capabilities.md) | Outbound HTTP is a declared resource; `crypto` subset with per-world entropy; a transaction is one owned operation | accepted (v0) | ADR-0013 follow-ups |

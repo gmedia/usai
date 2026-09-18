@@ -79,10 +79,87 @@ export function postgres(name: string, options: PostgresOptions = {}): PostgresD
 
 export type SqlParam = string | number | boolean | null | Record<string, unknown> | unknown[];
 
-/** The in-world handle for a `postgres` resource. Rows are plain objects
- * keyed by column name; values are JSON (uuid/timestamps as strings). */
-export interface PostgresHandle {
+/** The statements available on one connection. */
+export interface SqlExecutor {
   query<T = Record<string, unknown>>(sql: string, params?: SqlParam[]): Promise<T[]>;
   one<T = Record<string, unknown>>(sql: string, params?: SqlParam[]): Promise<T | null>;
   execute(sql: string, params?: SqlParam[]): Promise<number>;
+}
+
+/** The in-world handle for a `postgres` resource. Rows are plain objects
+ * keyed by column name; values are JSON (uuid/timestamps as strings). Each
+ * statement leases its own connection; `transaction` pins one for the
+ * callback and commits when it returns, rolls back when it throws. A world
+ * that ends with the transaction still open is a lifecycle error, and the
+ * runtime rolls back on its behalf. */
+export interface PostgresHandle extends SqlExecutor {
+  transaction<T>(fn: (tx: SqlExecutor) => Promise<T>): Promise<T>;
+}
+
+export interface HttpClientOptions {
+  /** Every request is relative to it; another origin is refused. Without
+   * it the client may call any http(s) URL. */
+  baseUrl?: string;
+  /** Environment variable holding the base URL (staging and production
+   * differ; the declaration does not). */
+  baseUrlEnv?: string;
+  /** Per-request timeout in milliseconds (default 10 000). */
+  timeoutMs?: number;
+  /** In-flight bound; the next request is refused with 503, not queued. */
+  maxConcurrent?: number;
+  /** Static headers on every request. */
+  headers?: Record<string, string>;
+  /** Environment variable whose value is sent as `Authorization: Bearer …`. */
+  bearerTokenEnv?: string;
+}
+
+/** Outbound HTTP, declared: the runtime owns the client (pool, TLS roots,
+ * timeouts), every request is an operation owned by the world, and the
+ * destination is visible in `usai graph` and the API docs. There is no
+ * global `fetch` inside a world. */
+export interface HttpClientDeclaration extends ResourceDeclaration {
+  readonly kind: "http.client";
+}
+
+export function httpClient(name: string, options: HttpClientOptions = {}): HttpClientDeclaration {
+  const config: Record<string, unknown> = {};
+  if (options.baseUrl !== undefined) config["baseUrl"] = options.baseUrl;
+  if (options.baseUrlEnv !== undefined) config["baseUrlEnv"] = options.baseUrlEnv;
+  if (options.timeoutMs !== undefined) config["timeoutMs"] = options.timeoutMs;
+  if (options.maxConcurrent !== undefined) config["maxConcurrent"] = options.maxConcurrent;
+  if (options.headers !== undefined) config["headers"] = options.headers;
+  if (options.bearerTokenEnv !== undefined) config["bearerTokenEnv"] = options.bearerTokenEnv;
+  return {
+    __usai: "resource",
+    name,
+    kind: "http.client",
+    config,
+    env: [options.baseUrlEnv, options.bearerTokenEnv].filter((v): v is string => v !== undefined),
+    methods: ["fetch"],
+  };
+}
+
+export interface FetchInit {
+  method?: string;
+  headers?: Record<string, string>;
+  /** A string body, or a JSON value (serialized, `content-type: application/json`). */
+  body?: string;
+  json?: unknown;
+  /** Lower than the resource's timeout only. */
+  timeoutMs?: number;
+}
+
+export interface FetchResponse {
+  readonly status: number;
+  readonly ok: boolean;
+  readonly headers: Record<string, string>;
+  text(): string;
+  json<T = unknown>(): T;
+  /** Raw bytes (text bodies are UTF-8 encoded). */
+  bytes(): Uint8Array;
+}
+
+/** The in-world handle for an `http.client` resource. */
+export interface HttpClientHandle {
+  fetch(url: string, init?: FetchInit): Promise<FetchResponse>;
 }

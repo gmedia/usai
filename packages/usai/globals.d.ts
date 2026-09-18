@@ -1,7 +1,8 @@
 // Ambient declarations for exactly what a Usai execution world provides —
 // nothing more. Reference it from tsconfig (`"types": ["@sakaladev/usai/globals"]`)
 // instead of the `DOM` lib or `@types/node`, which would advertise APIs
-// (fetch, fs, process, crypto, …) that do not exist inside a world.
+// (fetch, fs, process, …) that do not exist inside a world. Outbound HTTP
+// is the `httpClient` resource; `crypto` below is the subset a world has.
 
 declare function setTimeout(fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]): number;
 declare function clearTimeout(id: number | undefined): void;
@@ -11,6 +12,29 @@ declare function queueMicrotask(fn: () => void): void;
 declare function structuredClone<T>(value: T): T;
 declare function atob(data: string): string;
 declare function btoa(data: string): string;
+
+/** Present only to explain itself: rejects with `fetch_not_available`. Use an `httpClient` resource. */
+declare function fetch(input: unknown, init?: unknown): Promise<never>;
+
+type UsaiDigest = "SHA-256" | "SHA-384" | "SHA-512";
+interface UsaiCryptoKey {
+  readonly type: "secret";
+  readonly algorithm: { name: "HMAC"; hash: { name: UsaiDigest } };
+  readonly extractable: false;
+  readonly usages: ReadonlyArray<"sign" | "verify">;
+}
+/** The WebCrypto subset a world provides: SHA-2 digests, HMAC, random bytes
+ * and UUIDs (host entropy per world). Password hashing is `password` in the SDK. */
+declare const crypto: {
+  getRandomValues<T extends ArrayBufferView>(array: T): T;
+  randomUUID(): `${string}-${string}-${string}-${string}-${string}`;
+  readonly subtle: {
+    digest(algorithm: UsaiDigest | { name: UsaiDigest }, data: ArrayBuffer | ArrayBufferView): Promise<ArrayBuffer>;
+    importKey(format: "raw", keyData: ArrayBuffer | ArrayBufferView, algorithm: { name: "HMAC"; hash: UsaiDigest | { name: UsaiDigest } }, extractable: boolean, usages: ReadonlyArray<"sign" | "verify">): Promise<UsaiCryptoKey>;
+    sign(algorithm: "HMAC" | { name: "HMAC" }, key: UsaiCryptoKey, data: ArrayBuffer | ArrayBufferView): Promise<ArrayBuffer>;
+    verify(algorithm: "HMAC" | { name: "HMAC" }, key: UsaiCryptoKey, signature: ArrayBuffer | ArrayBufferView, data: ArrayBuffer | ArrayBufferView): Promise<boolean>;
+  };
+};
 
 declare class TextEncoder {
   readonly encoding: "utf-8";

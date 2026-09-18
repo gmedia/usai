@@ -69,7 +69,7 @@ async fn setup() -> Option<(
             drain_timeout: Duration::from_secs(5),
             ..RuntimeConfig::default()
         },
-        |_| None,
+        |name| (name == "UPSTREAM_URL").then(|| "http://127.0.0.1:9/".to_owned()),
     );
     let rev = runtime.install(first.definition).await.unwrap();
     runtime.activate(rev.id).await.unwrap();
@@ -268,7 +268,9 @@ fn non_loopback_bind_requires_a_token() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime.block_on(async {
         let engine = usai_runtime::engine::from_env(64).unwrap();
-        let rt = Runtime::with_env(engine, RuntimeConfig::default(), |_| None);
+        let rt = Runtime::with_env(engine, RuntimeConfig::default(), |name| {
+            (name == "UPSTREAM_URL").then(|| "http://127.0.0.1:9/".to_owned())
+        });
         let err = ControlHost::new(
             rt,
             ControlConfig {

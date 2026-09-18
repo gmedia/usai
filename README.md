@@ -148,7 +148,7 @@ cargo run -p usai-cli -- --root examples/hello inspect   # what the runtime unde
 ```
 
 A realistic application — modules, migrations, seeders, a dispatched task,
-a cron, a command, and tests — is `examples/todos`; `docs/GUIDE.md` §15
+a cron, a command, and tests — is `examples/todos`; `docs/GUIDE.md` §16
 walks through it.
 
 What exists today (each with acceptance tests): contract-aware HTTP with

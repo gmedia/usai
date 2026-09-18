@@ -288,10 +288,16 @@ impl WorldInstance for QuickJsWorld {
     async fn invoke(&mut self, index: usize, input_json: &str) -> Result<(), EngineError> {
         let t = std::time::Instant::now();
         let input = input_json.to_owned();
+        let entropy = super::world_entropy();
         let r = self
             .context
             .with(move |ctx| {
                 let b = bridge(&ctx)?;
+                let seed: Function = b
+                    .get("seed")
+                    .map_err(|e| EngineError::Guest(describe(&ctx, e)))?;
+                seed.call::<_, ()>((entropy,))
+                    .map_err(|e| EngineError::Guest(describe(&ctx, e)))?;
                 let invoke: Function = b
                     .get("invoke")
                     .map_err(|e| EngineError::Guest(describe(&ctx, e)))?;
