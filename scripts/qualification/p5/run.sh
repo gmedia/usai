@@ -57,8 +57,6 @@ up() {
 
 down() { docker compose down -v --remove-orphans; }
 
-# Runs the load generator for $1 seconds in the background; $2 = evidence prefix.
-load_start() { node "$here/loadgen.mjs" "$BASE" "$(cat "$TOKEN_FILE")" "${CLIENTS:-8}" "$1" "out/$2.load.jsonl" > /dev/null & echo $!; }
 
 wait_healthy() {
   local deadline=$((SECONDS + ${1:-120}))
@@ -72,7 +70,8 @@ scenario() {
   echo "== scenario $name ($dur s)"
   status > "out/$name.status.before.json"; metrics > "out/$name.metrics.before.txt"
   local start; start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  local pid; pid=$(load_start "$dur" "$name")
+  node "$here/loadgen.mjs" "$BASE" "$(cat "$TOKEN_FILE")" "${CLIENTS:-8}" "$dur" "out/$name.load.jsonl" > /dev/null &
+  local pid=$!
   sleep 8
   local t0=$SECONDS
   case "$name" in
