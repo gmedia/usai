@@ -19,10 +19,18 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && npm install -g pnpm@12.3.4 \
  && npm cache clean --force \
- && mkdir -p /app/node_modules && chown -R node:node /app
+ # pnpm 12 is a native binary its postinstall downloads without an integrity
+ # check; a truncated download segfaults. Fail the build, not the user.
+ && [ "$(pnpm --version)" = "12.3.4" ] \
+ && mkdir -p /app/node_modules /home/node/.local/share/pnpm \
+ && chown -R node:node /app /home/node \
+ && chmod -R a+rwX /app /home/node
 COPY --from=runtime /usr/local/bin/usai /usr/local/bin/usai
-# /app/node_modules exists and is owned by `node` so a named volume mounted
-# there (the scaffold's compose.yaml) inherits that ownership.
+# The scaffold's compose.yaml runs the container as the host user so the
+# files it writes into the bind mount (pnpm-lock.yaml, .usai/) are the
+# user's, not root's or uid 1000's. That uid is not `node`, so its home and
+# the directories the named volumes copy their mode from (/app/node_modules,
+# the pnpm store) are writable by anyone.
 USER node
 WORKDIR /app
 ENV HOME=/home/node

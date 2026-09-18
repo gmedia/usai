@@ -36,11 +36,16 @@ export function scaffold(options: ScaffoldOptions): string {
   // (kept equal to the published @sakaladev/usai by the release workflow),
   // never this scaffolder's own version — the two have separate cadences.
   const version = options.usaiVersion ?? (JSON.parse(readFileSync(resolve(here, "..", "package.json"), "utf8")) as { sdkVersion: string }).sdkVersion;
+  // compose.yaml runs the dev container as this user so the files it writes
+  // into the bind mount are theirs (Linux; Docker Desktop maps ownership
+  // itself). Windows has no uid; the image's default user then applies.
+  const uid = process.getuid?.() ?? 1000;
+  const gid = process.getgid?.() ?? 1000;
   walk(target, (file) => {
     const text = readFileSync(file, "utf8");
     // The image tag is the runtime version, which the release contract keeps
     // equal to the SDK version.
-    const replaced = text.replaceAll("__NAME__", name).replaceAll("__USAI_VERSION__", `^${version}`).replaceAll("__USAI_IMAGE_TAG__", version);
+    const replaced = text.replaceAll("__NAME__", name).replaceAll("__USAI_VERSION__", `^${version}`).replaceAll("__USAI_IMAGE_TAG__", version).replaceAll("__USAI_UID__", String(uid)).replaceAll("__USAI_GID__", String(gid));
     if (replaced !== text) writeFileSync(file, replaced);
   });
   // npm strips `.gitignore` from published packages, so the template ships

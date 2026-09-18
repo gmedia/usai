@@ -14,6 +14,7 @@ const stringSchema = {
   "~standard": {
     version: 1 as const,
     vendor: "test",
+    types: undefined as unknown as { input: string; output: string },
     validate: (v: unknown) => (typeof v === "string" ? { value: v } : { issues: [{ message: "expected string" }] }),
     jsonSchema: { input: () => ({ type: "string" }), output: () => ({ type: "string" }) },
   },

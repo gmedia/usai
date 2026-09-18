@@ -18,7 +18,9 @@ test("scaffolds the hello template with the project name substituted", () => {
   assert.ok(existsSync(join(target, ".gitignore")) && !existsSync(join(target, "_gitignore")));
   assert.ok(existsSync(join(target, "pnpm-workspace.yaml")));
   assert.ok(existsSync(join(target, ".dockerignore")) && existsSync(join(target, "compose.yaml")) && existsSync(join(target, "Dockerfile")));
-  assert.match(readFileSync(join(target, "compose.yaml"), "utf8"), /sakaladev\/usai:0\.0\.1-dev/);
+  const compose = readFileSync(join(target, "compose.yaml"), "utf8");
+  assert.match(compose, /sakaladev\/usai:0\.0\.1-dev/);
+  assert.match(compose, new RegExp(`user: "${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}"`));
   assert.match(readFileSync(join(target, "Dockerfile"), "utf8"), /FROM sakaladev\/usai:0\.0\.1\s*$/m);
   assert.throws(() => scaffold({ target: dir }), /not empty/);
 });
