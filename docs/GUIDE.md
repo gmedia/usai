@@ -11,7 +11,11 @@ GitHub release (`usai-vX.Y.Z-<target>.tar.gz` for Linux x86_64/aarch64 and
 macOS arm64, with a SHA-256 next to it) — or from `cargo build --release -p
 usai-cli` in this repository (Rust 1.98). Releases are cut by tagging
 `vX.Y.Z` (`.github/workflows/release.yml`); the same tag publishes the
-`usai` and `create-usai` packages to npm.
+`usai` and `create-usai` packages to npm through npm Trusted Publishing
+(OIDC; repository variable `NPM_TRUSTED_PUBLISHING=true`) — no long-lived
+token. A package's first version is published by hand with 2FA, because
+Trusted Publishing is configured on an existing package; versions already
+on the registry are skipped.
 
 ```bash
 pnpm dlx create-usai my-app      # or: node packages/create-usai/dist/cli.js my-app (from this repo)
