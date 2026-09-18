@@ -143,6 +143,9 @@ enum DbAction {
         /// Postgres resource to migrate (default: the first declared)
         #[arg(long)]
         resource: Option<String>,
+        /// Use a built artifact's migrations (production image, no source)
+        #[arg(long)]
+        artifact: Option<PathBuf>,
     },
     /// Show applied and pending migrations
     Status {
@@ -150,6 +153,9 @@ enum DbAction {
         resource: Option<String>,
         #[arg(long)]
         json: bool,
+        /// Use a built artifact's migrations (production image, no source)
+        #[arg(long)]
+        artifact: Option<PathBuf>,
     },
     /// Run seeders (all, or one by name)
     Seed { name: Option<String> },
@@ -272,11 +278,16 @@ async fn main() {
             action: TaskAction::Run { name, input },
         } => commands::task_run(&root, &name, &input).await,
         Command::Db {
-            action: DbAction::Migrate { resource },
-        } => commands::db_migrate(&root, resource.as_deref()).await,
+            action: DbAction::Migrate { resource, artifact },
+        } => commands::db_migrate(&root, resource.as_deref(), artifact).await,
         Command::Db {
-            action: DbAction::Status { resource, json },
-        } => commands::db_status(&root, resource.as_deref(), json).await,
+            action:
+                DbAction::Status {
+                    resource,
+                    json,
+                    artifact,
+                },
+        } => commands::db_status(&root, resource.as_deref(), json, artifact).await,
         Command::Db {
             action: DbAction::Seed { name },
         } => commands::db_seed(&root, name.as_deref()).await,

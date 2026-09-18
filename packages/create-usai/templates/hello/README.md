@@ -17,6 +17,7 @@ docker compose up            # runtime + toolchain in the image, your source mou
 
 # 3. ship it: one image with the runtime and the built artifact, nothing else
 docker build -t my-app . && docker run --rm -p 3000:3000 my-app
+#    migrations ride in the artifact: docker run --rm -e DATABASE_URL=… my-app db migrate --artifact /app/.usai/build
 ```
 
 - `test/hello.test.ts` — a test through the real runtime (`pnpm test` finds `src|test|tests/**/*.test.ts`).

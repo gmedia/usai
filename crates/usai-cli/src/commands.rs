@@ -691,50 +691,106 @@ async fn with_active_runtime<T>(
     result
 }
 
-pub async fn db_migrate(root: &Path, resource: Option<&str>) -> Result<()> {
+/// A runtime over an artifact's definition (no project, no source), for
+/// `db migrate --artifact` / `db status --artifact` inside a production image.
+async fn with_artifact_runtime<T>(
+    artifact: &Path,
+    f: impl AsyncFnOnce(&Runtime, Vec<db::MigrationFile>) -> Result<T>,
+) -> Result<T> {
+    let definition = load_artifact(artifact)
+        .await
+        .with_context(|| format!("artifact {}", artifact.display()))?;
+    let files = db::artifact_migrations(artifact)?;
+    let runtime = Runtime::new(
+        engine(),
+        RuntimeConfig {
+            cron_scheduler: false,
+            queue_consumers: false,
+            ..RuntimeConfig::default()
+        },
+    );
+    let revision = runtime.install(definition).await?;
+    runtime.activate(revision.id).await?;
+    let result = f(&runtime, files).await;
+    runtime.shutdown().await;
+    result
+}
+
+pub async fn db_migrate(
+    root: &Path,
+    resource: Option<&str>,
+    artifact: Option<PathBuf>,
+) -> Result<()> {
+    if let Some(dir) = artifact {
+        return with_artifact_runtime(&dir, async |runtime, files| {
+            let revision = runtime.active()?;
+            let manager = db::database(&revision, resource)?;
+            let applied = db::migrate(manager.as_ref(), &files, CancellationToken::new()).await?;
+            report_applied(&applied, files.len());
+            Ok(())
+        })
+        .await;
+    }
     with_active_runtime(root, async |runtime, config| {
         let revision = runtime.active()?;
         let globs = db::migration_globs(&revision.definition, &config.migrations.value);
         let files = db::discover_migrations(&config.root, &globs)?;
         let manager = db::database(&revision, resource)?;
         let applied = db::migrate(manager.as_ref(), &files, CancellationToken::new()).await?;
-        if applied.is_empty() {
-            println!(
-                "nothing to apply ({} migrations already applied)",
-                files.len()
-            );
-        } else {
-            for name in &applied {
-                println!("applied {name}");
-            }
-        }
+        report_applied(&applied, files.len());
         Ok(())
     })
     .await
 }
 
-pub async fn db_status(root: &Path, resource: Option<&str>, json: bool) -> Result<()> {
+fn report_applied(applied: &[String], total: usize) {
+    if applied.is_empty() {
+        println!("nothing to apply ({total} migrations already applied)");
+    } else {
+        for name in applied {
+            println!("applied {name}");
+        }
+    }
+}
+
+fn print_migration_status(status: Vec<db::MigrationStatus>, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(&status)?);
+        return Ok(());
+    }
+    println!("{:<40} {:<18} applied", "migration", "checksum");
+    for s in status {
+        let applied = s.applied_at.as_deref().unwrap_or("pending");
+        let missing = if s.path.is_none() {
+            "  (file missing)"
+        } else {
+            ""
+        };
+        println!("{:<40} {:<18} {applied}{missing}", s.name, s.checksum);
+    }
+    Ok(())
+}
+
+pub async fn db_status(
+    root: &Path,
+    resource: Option<&str>,
+    json: bool,
+    artifact: Option<PathBuf>,
+) -> Result<()> {
+    if let Some(dir) = artifact {
+        return with_artifact_runtime(&dir, async |runtime, files| {
+            let revision = runtime.active()?;
+            let manager = db::database(&revision, resource)?;
+            print_migration_status(db::status(manager.as_ref(), &files).await?, json)
+        })
+        .await;
+    }
     with_active_runtime(root, async |runtime, config| {
         let revision = runtime.active()?;
         let globs = db::migration_globs(&revision.definition, &config.migrations.value);
         let files = db::discover_migrations(&config.root, &globs)?;
         let manager = db::database(&revision, resource)?;
-        let status = db::status(manager.as_ref(), &files).await?;
-        if json {
-            println!("{}", serde_json::to_string_pretty(&status)?);
-            return Ok(());
-        }
-        println!("{:<40} {:<18} applied", "migration", "checksum");
-        for s in status {
-            let applied = s.applied_at.as_deref().unwrap_or("pending");
-            let missing = if s.path.is_none() {
-                "  (file missing)"
-            } else {
-                ""
-            };
-            println!("{:<40} {:<18} {applied}{missing}", s.name, s.checksum);
-        }
-        Ok(())
+        print_migration_status(db::status(manager.as_ref(), &files).await?, json)
     })
     .await
 }

@@ -105,16 +105,34 @@ pub fn migration_globs(
     definition: &ApplicationDefinition,
     config_globs: &[String],
 ) -> Vec<(String, String)> {
+    migration_globs_for(&definition.manifest().modules, config_globs)
+}
+
+pub fn migration_globs_for(
+    modules: &[crate::definition::ModuleSpec],
+    config_globs: &[String],
+) -> Vec<(String, String)> {
     let mut globs: Vec<(String, String)> = config_globs
         .iter()
         .map(|g| (g.clone(), "usai.config.ts".to_owned()))
         .collect();
-    for module in &definition.manifest().modules {
+    for module in modules {
         for g in &module.migrations {
             globs.push((g.clone(), format!("module {}", module.name)));
         }
     }
     globs
+}
+
+/// The migrations an artifact carries (`<artifact>/migrations/*.sql`).
+pub fn artifact_migrations(artifact: &Path) -> Result<Vec<MigrationFile>, DbError> {
+    discover_migrations(
+        artifact,
+        &[(
+            format!("{}/*.sql", crate::build::MIGRATIONS_DIR),
+            "artifact".to_owned(),
+        )],
+    )
 }
 
 pub fn seeder_globs(

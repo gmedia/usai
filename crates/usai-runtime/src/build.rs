@@ -26,6 +26,11 @@ pub struct BuildOptions {
     pub entry: PathBuf,
     /// Output directory for `app.js` and `manifest.json`.
     pub out_dir: PathBuf,
+    /// Root-relative migration globs from the project config (module globs
+    /// come from the definition). The matching files are copied into the
+    /// artifact so `usai db migrate --artifact <dir>` works where there is
+    /// no source tree (a production image).
+    pub migration_globs: Vec<String>,
 }
 
 impl BuildOptions {
@@ -35,6 +40,7 @@ impl BuildOptions {
             entry: root.join("src/app.ts"),
             out_dir: root.join(".usai/build"),
             root,
+            migration_globs: Vec::new(),
         }
     }
 }
@@ -337,6 +343,7 @@ impl BuildOptions {
             root: config.root.clone(),
             entry: config.app.value.clone(),
             out_dir: config.out_dir.value.clone(),
+            migration_globs: config.migrations.value.clone(),
         }
     }
 }
@@ -399,6 +406,22 @@ pub async fn build(engine: &dyn Engine, options: &BuildOptions) -> Result<BuildO
             bytes: bytes.into(),
         });
     }
+    // Migrations travel with the artifact (`migrations/<name>`), so a
+    // production image can apply them without the source tree.
+    let migrations_dir = options.out_dir.join(MIGRATIONS_DIR);
+    let _ = tokio::fs::remove_dir_all(&migrations_dir).await;
+    let globs = crate::db::migration_globs_for(&manifest.modules, &options.migration_globs);
+    if !globs.is_empty() {
+        let files = crate::db::discover_migrations(&options.root, &globs)
+            .map_err(|e| BuildError::Bundle(format!("migrations: {e}")))?;
+        if !files.is_empty() {
+            tokio::fs::create_dir_all(&migrations_dir).await?;
+            for file in &files {
+                tokio::fs::copy(&file.path, migrations_dir.join(&file.name)).await?;
+                inputs.push(file.path.clone());
+            }
+        }
+    }
     // The source files this artifact was built from, so tools that reuse the
     // artifact can tell when it is stale (`artifact_is_current`).
     let _ = tokio::fs::write(
@@ -432,6 +455,8 @@ pub async fn build(engine: &dyn Engine, options: &BuildOptions) -> Result<BuildO
 }
 
 const INPUTS_FILE: &str = "inputs.json";
+/// Where an artifact carries its migrations.
+pub const MIGRATIONS_DIR: &str = "migrations";
 
 /// `app.js.map` next to the bundle, when the bundler wrote one.
 async fn read_source_map(code_path: &Path) -> Option<Arc<crate::sourcemap::SourceMap>> {
@@ -560,6 +585,8 @@ pub async fn build_seeder(
         root: options.root.clone(),
         entry: entry_path,
         out_dir: entry_dir.join(name),
+        // A seeder's throwaway build does not carry migrations.
+        migration_globs: Vec::new(),
     };
     build(engine, &seed_options).await
 }

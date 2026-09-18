@@ -1,0 +1,9 @@
+:8080 {
+	reverse_proxy app:3000 {
+		# Usai answers 503 with Retry-After while draining; Caddy passes it through.
+		transport http {
+			dial_timeout 2s
+			response_header_timeout 30s
+		}
+	}
+}

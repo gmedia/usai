@@ -1,0 +1,30 @@
+# P5 operational qualification: a production-shaped deployment on one host.
+#   caddy (:8080) → app (usai run, --status on :3000, --control on :3900) → postgres
+# Built from a checkout: `scripts/qualification/p5/run.sh` builds the app
+# image with the dev image and drives the scenarios.
+services:
+  postgres:
+    image: postgres:18
+    environment: { POSTGRES_USER: app, POSTGRES_PASSWORD: app, POSTGRES_DB: invoicing }
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U app -d invoicing"], interval: 2s, timeout: 2s, retries: 30 }
+    volumes: [pgdata:/var/lib/postgresql]
+  app:
+    image: usai-p5-app:latest
+    environment:
+      DATABASE_URL: postgres://app:app@postgres:5432/invoicing
+      USAI_CONTROL_TOKEN: p5-control-token
+      RUST_LOG: info
+    command: ["run", "--artifact", "/app/.usai/build", "--host", "0.0.0.0", "--port", "3000", "--status", "--control", "0.0.0.0:3900"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    read_only: true
+    tmpfs: [/tmp]
+    mem_limit: 512m
+    ports: ["3900:3900"]     # control surface: on a trusted network only (here: localhost of the host)
+  caddy:
+    image: caddy:2
+    ports: ["8080:8080"]
+    volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro"]
+    depends_on: [app]
+volumes:
+  pgdata:
