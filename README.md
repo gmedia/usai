@@ -130,6 +130,8 @@ As a user (binary from the [releases](https://github.com/gmedia/usai/releases), 
 ```bash
 pnpm dlx @sakaladev/create-usai my-app && cd my-app && pnpm install
 usai dev                                                  # http://127.0.0.1:3000/hello/world
+docker compose up                                         # the same, with nothing installed (sakaladev/usai:<v>-dev)
+docker build -t my-app . && docker run -p 3000:3000 my-app   # runtime image + artifact, non-root, no toolchain
 ```
 
 From this repository:
@@ -254,7 +256,9 @@ the runtime itself is useful.
 
 ## Sakala ecosystem
 
-Usai is an independent project in the Sakala open-source ecosystem.
+Usai is an independent project in the Sakala open-source ecosystem, maintained
+by the Sakala maintainers (`GOVERNANCE.md`); the repository is hosted in the
+gmedia organization, which supports the project without steering it.
 
 Sakala may become a first-class deployment integration for Usai, but Usai must
 remain usable independently and must not require Sakala at runtime or during

@@ -44,6 +44,8 @@ USAI_PROFILE=1 cargo test --release -p usai-runtime --test profile_matrix -- --i
 scripts/p1-attribution.sh [research-Oz-core.wasm]                                     # ledger for -O3 / -Oz / native + perf-stat counters per request (Linux VM)
 USAI_ENGINE=quickjs cargo test -p usai-runtime --test lifecycle                        # run a suite on the reference engine
 crates/usai-runtime/guest/build.sh                                                     # rebuild the core (-O3); OPT=-Oz reproduces the research core
+docker build -f docker/runtime.Dockerfile -t sakaladev/usai:local . && docker build -f docker/dev.Dockerfile --build-arg USAI_RUNTIME_IMAGE=sakaladev/usai:local -t sakaladev/usai:local-dev .
+scripts/container-smoke.sh sakaladev/usai:local sakaladev/usai:local-dev            # scaffold → app image → read-only non-root → 200 → SIGTERM → compose path (what CI runs)
 ```
 
 Single tests:

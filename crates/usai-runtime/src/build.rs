@@ -333,6 +333,17 @@ pub async fn build(engine: &dyn Engine, options: &BuildOptions) -> Result<BuildO
     let compiled = engine.compile_code(&code).await?;
     let mut manifest_value = engine.describe(&compiled).await?;
     manifest_value["codeSha256"] = serde_json::Value::String(code.sha256.clone());
+    // Provenance for compatibility diagnostics: the SDK version comes from
+    // the bundle itself (`describe()` stamps it), the runtime's from here.
+    let sdk = manifest_value
+        .get("builtWith")
+        .and_then(|b| b.get("sdk"))
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    manifest_value["builtWith"] = serde_json::json!({
+        "sdk": sdk,
+        "runtime": crate::definition::RUNTIME_VERSION,
+    });
     let manifest: Manifest = serde_json::from_value(manifest_value)?;
     tokio::fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest)?).await?;
     // The engine's compiled form next to the artifact, so installing it is

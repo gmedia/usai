@@ -95,7 +95,7 @@ Profile before changing architecture for performance. The research lineage (EXP-
 
 ## 5. Milestones and scope
 
-Build in the order of `GOAL.md` §53 (D0 foundation → D1 lifecycle core → D2 HTTP → D3 dev loop → D4 tasks → D5 cron/commands → D6 PostgreSQL → D7 project model → D8 OpenAPI → D9 service → D10 queue → D11 socket/stream → D12 observability → D13 hardening → D14 alpha → D15 Sakala). Each milestone has acceptance criteria there. `docs/STATUS.md` says which one is current.
+After D0–D15, the phase in `docs/ROADMAP.md` decides what work is allowed — qualification (distribution, real application, operations, reliability, external users), not new capability. Build in the order of `GOAL.md` §53 (D0 foundation → D1 lifecycle core → D2 HTTP → D3 dev loop → D4 tasks → D5 cron/commands → D6 PostgreSQL → D7 project model → D8 OpenAPI → D9 service → D10 queue → D11 socket/stream → D12 observability → D13 hardening → D14 alpha → D15 Sakala). Each milestone has acceptance criteria there. `docs/STATUS.md` says which one is current.
 
 D1 (lifecycle core, testable without HTTP) is more important than routing. Do not start D2 before D1's acceptance holds.
 
@@ -171,6 +171,7 @@ crates/usai-runtime/          the runtime (lib); tests/lifecycle.rs is the D1 ac
 crates/usai-cli/              the `usai` binary
 packages/usai/                TypeScript SDK (developer surface; npm: @sakaladev/usai)
 packages/create-usai/         scaffolder (npm: @sakaladev/create-usai)
+docker/                       runtime and dev images (Docker Hub: sakaladev/usai)
 examples/                     runnable applications
 Makefile, .github/workflows/  `make check` is CI
 ```

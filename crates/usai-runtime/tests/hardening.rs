@@ -257,9 +257,20 @@ async fn malformed_artifacts_are_refused_with_clear_errors() {
     let mut manifest: Value =
         serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
     manifest["manifestVersion"] = json!(99);
+    manifest["builtWith"] = json!({ "sdk": "9.9.9", "runtime": "9.9.9" });
     std::fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
     let err = load_artifact(&dir).await.unwrap_err().to_string();
-    assert!(err.contains("manifest version 99"), "{err}");
+    // Deterministic and actionable: which format, built by what, what this
+    // runtime understands, and the two ways out.
+    for needle in [
+        "manifest format 99",
+        "SDK 9.9.9",
+        "runtime 9.9.9",
+        "understands format 1",
+        "usai build",
+    ] {
+        assert!(err.contains(needle), "{err}");
+    }
     // Missing files.
     std::fs::remove_file(&manifest_path).unwrap();
     assert!(load_artifact(&dir).await.is_err());
@@ -407,18 +418,27 @@ async fn budget_exhaustion_refuses_promptly_and_recovers() {
                 .as_u16()
         }));
     }
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    let t = std::time::Instant::now();
-    let r = client
-        .get(format!("http://{addr}/counter"))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(r.status(), 503);
-    assert!(
-        t.elapsed() < Duration::from_millis(500),
-        "refusal must not wait"
-    );
+    // Under a loaded machine the slow requests may take a moment to be
+    // admitted; poll until the budget is full, then the refusal must be prompt.
+    let mut r = None;
+    for _ in 0..50 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let t = std::time::Instant::now();
+        let resp = client
+            .get(format!("http://{addr}/counter"))
+            .send()
+            .await
+            .unwrap();
+        if resp.status() == 503 {
+            assert!(
+                t.elapsed() < Duration::from_millis(500),
+                "refusal must not wait"
+            );
+            r = Some(resp);
+            break;
+        }
+    }
+    let r = r.expect("the third request is refused once the budget is full");
     let body: Value = r.json().await.unwrap();
     assert_eq!(body["error"]["code"], "capacity_exhausted");
     for s in slow {

@@ -402,12 +402,15 @@ fn base_config() -> Config {
     }
     // Compiled artifacts are cached on disk keyed by their bytes and this
     // configuration: the core compiles once per machine, an image once per
-    // application revision.
-    match wasmtime::Cache::from_file(None) {
-        Ok(cache) => {
-            config.cache(Some(cache));
+    // application revision. `USAI_COMPILE_CACHE=0` turns it off (a read-only
+    // container serving a precompiled artifact has nothing to cache).
+    if std::env::var("USAI_COMPILE_CACHE").as_deref() != Ok("0") {
+        match wasmtime::Cache::from_file(None) {
+            Ok(cache) => {
+                config.cache(Some(cache));
+            }
+            Err(e) => tracing::warn!(error = %e, "wasmtime compilation cache unavailable"),
         }
-        Err(e) => tracing::warn!(error = %e, "wasmtime compilation cache unavailable"),
     }
     config.memory_init_cow(true);
     config.memory_may_move(true);

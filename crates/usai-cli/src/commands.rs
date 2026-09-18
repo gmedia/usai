@@ -58,21 +58,27 @@ async fn definition_for(
     Arc<dyn usai_runtime::engine::Engine>,
 )> {
     let engine = engine();
+    // An explicit --artifact is served as is — no project, no config, no
+    // toolchain needed (that is how a production image runs). The project's
+    // own build directory is reused only while it is newer than every source
+    // it was built from, so inspect/graph/openapi/run never describe stale
+    // code.
+    if let Some(dir) = artifact {
+        let definition = load_artifact(&dir)
+            .await
+            .with_context(|| format!("artifact {}", dir.display()))?;
+        return Ok((definition, engine));
+    }
     let config = load_config(engine.as_ref(), root).await?;
-    // An explicit --artifact is served as is; the project's own build
-    // directory is reused only while it is newer than every source it was
-    // built from, so inspect/graph/openapi/run never describe stale code.
-    let explicit = artifact.is_some();
-    let dir = artifact.unwrap_or_else(|| config.out_dir.value.clone());
-    let definition = if dir.join("manifest.json").exists()
-        && (explicit || usai_runtime::build::artifact_is_current(&dir))
-    {
-        load_artifact(&dir).await?
-    } else {
-        usai_runtime::build::build(engine.as_ref(), &BuildOptions::from_config(&config))
-            .await?
-            .definition
-    };
+    let dir = config.out_dir.value.clone();
+    let definition =
+        if dir.join("manifest.json").exists() && usai_runtime::build::artifact_is_current(&dir) {
+            load_artifact(&dir).await?
+        } else {
+            usai_runtime::build::build(engine.as_ref(), &BuildOptions::from_config(&config))
+                .await?
+                .definition
+        };
     Ok((definition, engine))
 }
 
@@ -205,13 +211,18 @@ async fn serve_until_signal(
         }
         handle
     };
+    // SIGINT (a terminal) and SIGTERM (an orchestrator, `docker stop`) both
+    // mean "drain, then leave"; a second one forces the exit.
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .context("cannot listen for SIGTERM")?;
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {}
+        _ = terminate.recv() => { eprintln!("SIGTERM received"); }
         _ = async { match &stop_requested { Some(t) => t.cancelled().await, None => std::future::pending().await } } => {
             eprintln!("stop requested through the control surface");
         }
     }
-    eprintln!("\nshutting down: draining in-flight work (ctrl-c again to force)");
+    eprintln!("\nshutting down: draining in-flight work (a second signal forces the exit)");
     shutdown.cancel();
     let drain = async {
         runtime.shutdown().await;
@@ -219,7 +230,7 @@ async fn serve_until_signal(
     };
     tokio::select! {
         _ = drain => eprintln!("drained; ownership returned to baseline"),
-        _ = tokio::signal::ctrl_c() => {
+        _ = async { tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = terminate.recv() => {} } } => {
             let g = runtime.ledger().gauges.snapshot();
             eprintln!("forced shutdown with {} live worlds and {} live operations", g.live_worlds, g.live_ops);
             std::process::exit(130);

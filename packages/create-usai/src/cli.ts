@@ -38,12 +38,16 @@ export function scaffold(options: ScaffoldOptions): string {
   const version = options.usaiVersion ?? (JSON.parse(readFileSync(resolve(here, "..", "package.json"), "utf8")) as { sdkVersion: string }).sdkVersion;
   walk(target, (file) => {
     const text = readFileSync(file, "utf8");
-    const replaced = text.replaceAll("__NAME__", name).replaceAll("__USAI_VERSION__", `^${version}`);
+    // The image tag is the runtime version, which the release contract keeps
+    // equal to the SDK version.
+    const replaced = text.replaceAll("__NAME__", name).replaceAll("__USAI_VERSION__", `^${version}`).replaceAll("__USAI_IMAGE_TAG__", version);
     if (replaced !== text) writeFileSync(file, replaced);
   });
   // npm strips `.gitignore` from published packages, so the template ships
   // it as `_gitignore`.
-  if (existsSync(join(target, "_gitignore"))) renameSync(join(target, "_gitignore"), join(target, ".gitignore"));
+  for (const [from, to] of [["_gitignore", ".gitignore"], ["_dockerignore", ".dockerignore"]] as const) {
+    if (existsSync(join(target, from))) renameSync(join(target, from), join(target, to));
+  }
   return target;
 }
 

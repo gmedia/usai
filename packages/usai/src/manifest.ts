@@ -6,6 +6,11 @@ import { type AppDeclaration, type Workload, flatten, parseDuration, workloadId 
 import { jsonSchemaOf } from "./schema.ts";
 
 export const MANIFEST_VERSION = 1 as const;
+/** The version of this SDK, stamped into manifests it describes (provenance
+ * for compatibility diagnostics; not part of the application's identity).
+ * Replaced at build time from package.json; the fallback is for source checkouts. */
+declare const __USAI_SDK_VERSION__: string | undefined;
+export const SDK_VERSION: string = typeof __USAI_SDK_VERSION__ === "string" ? __USAI_SDK_VERSION__ : "source";
 
 export interface ManifestContracts {
   params?: Record<string, unknown>;
@@ -41,6 +46,7 @@ export interface Manifest {
   auth: Array<{ name: string; scheme: string; header?: string }>;
   env: Array<{ name: string; kind: string; required: boolean; values: string[] }>;
   codeSha256: string;
+  builtWith?: { sdk?: string; runtime?: string };
 }
 
 function describeContracts(workload: Workload): ManifestContracts {
@@ -134,5 +140,6 @@ export function describe(app: AppDeclaration): Manifest {
     auth: [...authByName.values()],
     env,
     codeSha256: "",
+    builtWith: { sdk: SDK_VERSION },
   };
 }

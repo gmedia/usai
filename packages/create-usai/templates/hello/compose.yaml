@@ -1,0 +1,28 @@
+# Zero-install development: the runtime and the build toolchain live in the
+# image; your source is mounted. `docker compose up`, then edit files.
+#   docker compose run --rm --entrypoint usai app build   # produce .usai/build
+#   docker compose run --rm --entrypoint usai app test    # run the project's tests
+# Bind mounts on macOS/Windows can be slow to notice changes; the native
+# binary (https://github.com/gmedia/usai/releases) is the first-class path.
+services:
+  app:
+    image: sakaladev/usai:__USAI_IMAGE_TAG__-dev
+    # Installs dependencies into the named volume on first start, then serves.
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["[ -d node_modules/@sakaladev/usai ] || pnpm install; exec usai dev --host 0.0.0.0 --port 3000"]
+    ports:
+      - "3000:3000"
+    working_dir: /app
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+    # environment:
+    #   DATABASE_URL: postgres://app:app@postgres:5432/app
+    # depends_on: [postgres]
+  # postgres:
+  #   image: postgres:18
+  #   environment: { POSTGRES_USER: app, POSTGRES_PASSWORD: app, POSTGRES_DB: app }
+  #   ports: ["5432:5432"]
+
+volumes:
+  node_modules:

@@ -17,7 +17,7 @@ Developer preview           v0.0.1 TAGGED 2026-09-18 — binaries on the GitHub 
 Production ready            NO
 ```
 
-Current phase (after the 2026-09-18 review): **depth, not breadth.**
+Current phase (`docs/ROADMAP.md`): **P3.5 Distribution done → P4 Real application.** Depth, not breadth.
 
 ```text
 execution substrate recovery   ← ADR-0016 first pass done; measure on a real VM next
@@ -102,6 +102,8 @@ hello bundle (765 KB, zod evaluated per world) 6.52 ms/world
 ~90% of per-world cost is **application module evaluation per world** — exactly the "definition-level work rebuilt per world" the research removed with a pre-initialized image (Wizer) + copy-on-write memory (C13, EXP-011B/012B). The native QuickJS substrate (ADR-0015) has no snapshot mechanism, so this cost is structural to v0's engine choice, not to the lifecycle model. This is the concrete trigger ADR-0015 named for revisiting the substrate.
 
 - **API reference** (`/_usai/docs`, 2026-09-18): a dependency-free page (works offline, light/dark, keyboard, 320 px) that renders the OpenAPI document plus the Usai facts now carried as `x-usai-*` extensions — validated-before-world slots, lifetime and effective deadline, resources leased, tasks handed off, declared errors, and the non-HTTP workloads, resources and environment of the application. Schema tables instead of JSON dumps, per-status responses, copyable curl, Try-it with `x-usai-server-ms`. Served in dev and with `--status`.
+
+- **P3.5 Distribution & container UX** (2026-09-18): `docker/runtime.Dockerfile` (debian-slim + stripped `usai`, user 10001, `USAI_COMPILE_CACHE=0`, read-only ok, ~130 MB) and `docker/dev.Dockerfile` (runtime + Node 24 + pnpm + git); release publishes both for linux/amd64+arm64 to Docker Hub `sakaladev/usai` and GHCR from the same tag as binaries and npm; scaffold ships `compose.yaml` (dev path, installs on first start) and a two-stage `Dockerfile`; SIGTERM drains; `--artifact` needs no project/config; artifact records `builtWith {sdk, runtime}` and an unsupported format is refused before serving with an actionable message; `scripts/container-smoke.sh` runs in CI and after every release (scaffold → app image → read-only non-root → 200 → SIGTERM → compose path). Roadmap to production-ready in `docs/ROADMAP.md`; governance in `GOVERNANCE.md`.
 
 ## Dogfood (2026-09-18, fresh-eyes external-user run against v0.0.1)
 

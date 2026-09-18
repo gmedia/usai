@@ -56,3 +56,44 @@ jobs:
       - run: make fmt-check
       - run: make lint
       - run: make test
+
+  container:
+    # The two images build and the scaffold's Docker paths work — before a
+    # tag ever ships them. amd64 only here; the release builds both.
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.3.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build the runtime image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/runtime.Dockerfile
+          load: true
+          tags: sakaladev/usai:ci
+          build-args: USAI_VERSION=ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Build the dev image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/dev.Dockerfile
+          load: true
+          tags: sakaladev/usai:ci-dev
+          build-args: |
+            USAI_VERSION=ci
+            USAI_RUNTIME_IMAGE=sakaladev/usai:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - run: scripts/container-smoke.sh sakaladev/usai:ci sakaladev/usai:ci-dev

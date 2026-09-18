@@ -1,9 +1,11 @@
 name: release
 
-# Tag `vX.Y.Z` → binaries on the GitHub release + npm packages. The tag must
-# match the SDK version. `workflow_dispatch` runs only the npm job, to publish
-# a package version that is not on the registry yet (e.g. a create-usai fix)
-# without cutting a runtime release.
+# Tag `vX.Y.Z` → one release, three artefacts: binaries on the GitHub
+# release, npm packages, Docker images (sakaladev/usai:X.Y.Z and X.Y.Z-dev,
+# linux/amd64 + linux/arm64) — all at the same version. The tag must match
+# the SDK/runtime version. `workflow_dispatch` runs only the npm job, to
+# publish a package version that is not on the registry yet (e.g. a
+# create-usai fix) without cutting a runtime release.
 on:
   push:
     tags: ["v*"]
@@ -11,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -40,12 +43,12 @@ jobs:
           toolchain: 1.98.1
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release -p usai-cli --target ${{ matrix.target }}
+      - run: cargo build --profile dist -p usai-cli --target ${{ matrix.target }}
       - name: Package
         run: |
           name=usai-${GITHUB_REF_NAME}-${{ matrix.target }}
           mkdir -p dist/$name
-          cp target/${{ matrix.target }}/release/usai dist/$name/
+          cp target/${{ matrix.target }}/dist/usai dist/$name/
           cp LICENSE README.md dist/$name/
           tar -C dist -czf dist/$name.tar.gz $name
           (cd dist && shasum -a 256 $name.tar.gz > $name.tar.gz.sha256)
@@ -107,3 +110,93 @@ jobs:
       - name: Publish skipped
         if: env.NODE_AUTH_TOKEN == '' && vars.NPM_TRUSTED_PUBLISHING != 'true'
         run: echo "neither NPM_TOKEN (secret) nor NPM_TRUSTED_PUBLISHING=true (variable) is set; packages were built but not published"
+
+  docker:
+    # Both images, both architectures, pushed to Docker Hub (sakaladev/usai)
+    # when DOCKERHUB_USERNAME/DOCKERHUB_TOKEN exist and always to GHCR
+    # (ghcr.io/<owner>/usai). Tags: X.Y.Z, X.Y, X, latest; X.Y.Z-dev, latest-dev.
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+    outputs:
+      runtime_image: ${{ steps.names.outputs.runtime }}
+      dev_image: ${{ steps.names.outputs.dev }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version matches the tag
+        run: |
+          v=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)"/\1/')
+          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "Cargo.toml is $v, tag is ${GITHUB_REF_NAME}"; exit 1; }
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/login-action@v3
+        if: env.DOCKERHUB_USERNAME != ''
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Image names and tags
+        id: names
+        run: |
+          v=${GITHUB_REF_NAME#v}; major=${v%%.*}; minor=${v%.*}
+          ghcr="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/usai"
+          images="$ghcr"
+          [ -n "$DOCKERHUB_USERNAME" ] && images="sakaladev/usai,$ghcr" || echo "DOCKERHUB_USERNAME not set: pushing to GHCR only"
+          rt=""; dev=""
+          for i in ${images//,/ }; do
+            rt="$rt$i:$v,$i:$minor,$i:$major,$i:latest,"
+            dev="$dev$i:$v-dev,$i:latest-dev,"
+          done
+          echo "runtime_tags=${rt%,}" >> "$GITHUB_OUTPUT"
+          echo "dev_tags=${dev%,}" >> "$GITHUB_OUTPUT"
+          echo "runtime=$ghcr:$v" >> "$GITHUB_OUTPUT"
+          echo "dev=$ghcr:$v-dev" >> "$GITHUB_OUTPUT"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Build and push the runtime image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/runtime.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.names.outputs.runtime_tags }}
+          build-args: USAI_VERSION=${{ steps.names.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Build and push the dev image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/dev.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.names.outputs.dev_tags }}
+          build-args: |
+            USAI_VERSION=${{ steps.names.outputs.version }}
+            USAI_RUNTIME_IMAGE=${{ steps.names.outputs.runtime }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  container-smoke:
+    # The published images, used the way the scaffold tells a user to:
+    # scaffold → app image (dev stage builds, runtime stage serves) →
+    # read-only, non-root, no toolchain, 200, SIGTERM drains.
+    needs: docker
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Smoke
+        env:
+          RUNTIME_IMAGE: ${{ needs.docker.outputs.runtime_image }}
+          DEV_IMAGE: ${{ needs.docker.outputs.dev_image }}
+        run: scripts/container-smoke.sh "$RUNTIME_IMAGE" "$DEV_IMAGE"

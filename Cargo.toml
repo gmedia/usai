@@ -55,6 +55,14 @@ async-trait = "0.1"
 [profile.release]
 debug = 1
 
+# What ships: release without debug info and stripped (the release binary
+# with debuginfo is ~250 MB; stripped it is a few tens of MB). Engineering
+# profiling keeps using `release`.
+[profile.dist]
+inherits = "release"
+debug = false
+strip = "symbols"
+
 # Cranelift compiling an 800 KB core in an unoptimized build takes tens of
 # seconds; the compiler crates are not what we debug. Dependency debuginfo
 # is also what fills a CI runner's disk (wasmtime + cranelift alone are

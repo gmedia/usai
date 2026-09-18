@@ -110,6 +110,7 @@ fn definition(name: &str) -> Arc<ApplicationDefinition> {
     workloads[2].timeout_ms = None;
     let manifest = Manifest {
         manifest_version: MANIFEST_VERSION,
+        built_with: None,
         name: name.into(),
         modules: vec![],
         workloads,
@@ -461,6 +462,7 @@ async fn failed_activation_leaves_the_active_revision_untouched() {
     let code = Code::new(FIXTURE);
     let manifest = Manifest {
         manifest_version: MANIFEST_VERSION,
+        built_with: None,
         name: "needs-env".into(),
         modules: vec![],
         workloads: vec![task("task:count")],

@@ -352,7 +352,26 @@ pub struct Manifest {
     pub env: Vec<EnvRequirement>,
     /// SHA-256 of the application code the manifest describes.
     pub code_sha256: String,
+    /// What produced this artifact, for compatibility diagnostics (never
+    /// part of the identity: the same application built by another version
+    /// is the same application).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub built_with: Option<BuiltWith>,
 }
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BuiltWith {
+    /// `@sakaladev/usai` version that described the application.
+    #[serde(default)]
+    pub sdk: Option<String>,
+    /// `usai` runtime version that built the artifact.
+    #[serde(default)]
+    pub runtime: Option<String>,
+}
+
+/// This runtime's version, as shipped.
+pub const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The application's executable code in the build pipeline's portable form:
 /// one ES module whose default export is the application object.
@@ -372,8 +391,16 @@ impl Code {
 
 #[derive(Debug, thiserror::Error)]
 pub enum DefinitionError {
-    #[error("manifest version {found} is not supported (expected {MANIFEST_VERSION})")]
-    UnsupportedVersion { found: u32 },
+    #[error(
+        "this artifact uses manifest format {found} (built with SDK {sdk}, runtime {runtime}); \
+         runtime {RUNTIME_VERSION} understands format {MANIFEST_VERSION} only. \
+         Rebuild the artifact with this runtime (`usai build`) or run the runtime it was built with."
+    )]
+    UnsupportedVersion {
+        found: u32,
+        sdk: String,
+        runtime: String,
+    },
     #[error("manifest describes code {expected} but the loaded code hashes to {found}")]
     CodeMismatch { expected: String, found: String },
     #[error("duplicate workload id {0}")]
@@ -425,8 +452,14 @@ impl std::fmt::Debug for Precompiled {
 impl ApplicationDefinition {
     pub fn new(manifest: Manifest, code: Code) -> Result<Arc<Self>, DefinitionError> {
         if manifest.manifest_version != MANIFEST_VERSION {
+            let built = manifest.built_with.clone().unwrap_or(BuiltWith {
+                sdk: None,
+                runtime: None,
+            });
             return Err(DefinitionError::UnsupportedVersion {
                 found: manifest.manifest_version,
+                sdk: built.sdk.unwrap_or_else(|| "unknown".into()),
+                runtime: built.runtime.unwrap_or_else(|| "unknown".into()),
             });
         }
         if manifest.code_sha256 != code.sha256 {
@@ -526,7 +559,10 @@ impl ApplicationDefinition {
     /// hosts and engines (ADR-0005).
     pub fn identity(&self) -> String {
         let mut hasher = Sha256::new();
-        hasher.update(serde_json::to_vec(&self.manifest).expect("manifest serializes"));
+        // `built_with` is provenance, not identity.
+        let mut manifest = self.manifest.clone();
+        manifest.built_with = None;
+        hasher.update(serde_json::to_vec(&manifest).expect("manifest serializes"));
         hasher.update(self.code.sha256.as_bytes());
         hex::encode(hasher.finalize())[..16].to_owned()
     }
@@ -539,6 +575,7 @@ mod tests {
     fn manifest(code: &Code) -> Manifest {
         Manifest {
             manifest_version: MANIFEST_VERSION,
+            built_with: None,
             name: "t".into(),
             modules: vec![],
             workloads: vec![WorkloadSpec {

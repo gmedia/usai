@@ -48,6 +48,17 @@
 - **The artifact is trusted, including `cache/image.cwasm`.** The precompiled image is native code that `usai run` loads into the process when its digests match `image.json`; a party who can write the artifact directory can already replace `app.js` (which runs sandboxed with the application's full capabilities) and with `image.cwasm` could run native code. Deploy only artifacts you built; `USAI_PRECOMPILED=0` disables loading it; signing is the ADR-0005 follow-up.
 - **No protection against a malicious build step.** `usai build` runs `node` and esbuild from the project's `node_modules`; the supply chain is the project's.
 
+## Container envelope
+
+The runtime image (`sakaladev/usai:X.Y.Z`) runs as user `usai` (10001), ships
+no shell tooling beyond the base image, no Node or compiler, reads
+configuration from the environment only, and serves a precompiled artifact
+with `USAI_COMPILE_CACHE=0`, so `--read-only` (with a `tmpfs` at `/tmp`) is the
+recommended way to run it. `docker stop` (SIGTERM) drains like Ctrl-C. The
+`-dev` image is for building and developing and is not a production base.
+Status/control surfaces stay on trusted networks in a container exactly as
+on a host.
+
 ## Operator checklist
 
 1. Terminate TLS in front of Usai; use `sslmode=require` to PostgreSQL (with the provider's root in `tls.caFile`) or keep it on a private network.

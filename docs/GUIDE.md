@@ -6,16 +6,35 @@ This guide is enough to build a real application on the current runtime. The API
 
 ## 1. Install and run
 
-Prerequisites: Node ≥ 24 and pnpm (or npm). The `usai` binary comes from a
-GitHub release (`usai-vX.Y.Z-<target>.tar.gz` for Linux x86_64/aarch64 and
-macOS arm64, with a SHA-256 next to it) — or from `cargo build --release -p
-usai-cli` in this repository (Rust 1.98). Releases are cut by tagging
-`vX.Y.Z` (`.github/workflows/release.yml`); the same tag publishes the
-`usai` and `create-usai` packages to npm through npm Trusted Publishing
-(OIDC; repository variable `NPM_TRUSTED_PUBLISHING=true`) — no long-lived
-token. A package's first version is published by hand with 2FA, because
-Trusted Publishing is configured on an existing package; versions already
-on the registry are skipped.
+Three ways to run Usai; the native binary is the first-class one.
+
+```bash
+# 1. native binary — Node ≥ 24 + pnpm for the build, the `usai` binary from a
+#    GitHub release (Linux x86_64/aarch64, macOS arm64; SHA-256 next to it)
+pnpm dlx @sakaladev/create-usai my-app && cd my-app && pnpm install
+usai dev
+
+# 2. Docker, nothing installed locally: the scaffold's compose.yaml runs the
+#    `-dev` image with your source mounted (installs on first start, reloads on save)
+docker compose up
+
+# 3. ship it: the scaffold's Dockerfile builds in the `-dev` image and copies only
+#    the artifact into the runtime image — no Node, no source, non-root, read-only ok
+docker build -t my-app . && docker run --rm -p 3000:3000 my-app
+```
+
+Images: `sakaladev/usai:X.Y.Z` (runtime: the binary, CA roots, user `usai`
+10001, `ENTRYPOINT usai`, `CMD run --artifact /app/.usai/build --host 0.0.0.0
+--port 3000`) and `sakaladev/usai:X.Y.Z-dev` (runtime + Node 24, pnpm, git;
+`CMD dev --host 0.0.0.0`), both `linux/amd64` and `linux/arm64`, also on
+`ghcr.io/<owner>/usai`. Both images *are* the `usai` command (`docker run
+--rm sakaladev/usai:X.Y.Z --version`); use `--entrypoint sh` for a shell.
+Docker is zero-install, not zero-cost: bind mounts on macOS/Windows can be
+slow to notice changes. One tag `vX.Y.Z` publishes binaries, the npm packages
+(`@sakaladev/usai`, `@sakaladev/create-usai`, via Trusted Publishing) and the
+images at the same version — keep them equal; an artifact built by another
+format is refused before serving with a message that says which versions
+built it and what this runtime understands.
 
 ```bash
 pnpm dlx @sakaladev/create-usai my-app      # or: node packages/create-usai/dist/cli.js my-app (from this repo)
@@ -230,6 +249,12 @@ usai bench --path /users -c 16 -d 30   # engineering load test
 ```
 
 Ctrl-C drains in-flight work with a bound; a second Ctrl-C forces exit. Read `docs/THREAT-MODEL.md` before exposing anything.
+
+Deploying with Docker: build the scaffold's `Dockerfile`, run it with
+`DATABASE_URL` and the rest of the declared environment (`usai run` never
+reads `.env`), `--read-only --tmpfs /tmp` works; `docker stop` sends SIGTERM,
+which drains with the same bound as Ctrl-C. A compose file for app +
+PostgreSQL is the commented block in the scaffold's `compose.yaml`.
 
 `/_usai/docs` is the API reference, generated from the definition the runtime is executing (the revision identity is on the page). Beyond parameters, bodies and responses it shows what each request *does*: which slots are refused before a world exists, the world's lifetime and effective deadline, the resources it leases per operation, the tasks it hands off — and the tasks, crons, commands, queues and services that are not HTTP but run beside them. Every operation has a copyable curl and a "Try it" panel that sends a real request to this server and reports the runtime's own time (`x-usai-server-ms`). Declare `dispatches(endpoint, task)` and your `errors`/`response` statuses so the page can say so. `/_usai/openapi.json` carries the same facts as `x-usai-*` extensions for other tools.
 

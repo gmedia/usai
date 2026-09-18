@@ -167,6 +167,15 @@ this file when an item moves.
 | docs let a new developer build a real application | ✓ | `docs/GUIDE.md` §15 walks `examples/todos` (modules, migrations, seeders, typed env, HTTP CRUD, dispatched task, cron, command, tests); the example's test runs in CI |
 | published packages / binaries | ✓ | `v0.0.1` release with binaries for 3 targets; `@sakaladev/usai@0.0.1`, `@sakaladev/create-usai@0.0.5` on npm via Trusted Publishing; verified from a clean directory: `pnpm dlx @sakaladev/create-usai` → `pnpm install` → released `usai build` |
 
+## P3.5 — Distribution (roadmap phase, not a GOAL.md milestone)
+
+| Item | Status | Evidence |
+|---|---|---|
+| runtime image: non-root, no toolchain, read-only, SIGTERM drains | ✓ | `scripts/container-smoke.sh` (CI `container` job and release `container-smoke`) |
+| dev image + `docker compose up` path | ✓ | same script (compose path serves; installs on first start) |
+| multi-arch, one tag = binaries + npm + images | ✓ | `.github/workflows/release.yml` (`docker` job, linux/amd64+arm64, Docker Hub + GHCR) |
+| artifact ↔ runtime compatibility refused before serving | ✓ | `crates/usai-cli/tests/artifact_compat.rs`; `malformed_artifacts_are_refused_with_clear_errors` |
+
 ## D15 — Control surface
 
 | Item | Status | Evidence |
