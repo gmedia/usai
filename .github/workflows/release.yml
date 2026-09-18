@@ -77,8 +77,6 @@ jobs:
         run: |
           v=$(node -p "require('./packages/usai/package.json').version")
           [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "packages/usai is $v, tag is ${GITHUB_REF_NAME}"; exit 1; }
-          v=$(node -p "require('./packages/create-usai/package.json').version")
-          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "packages/create-usai is $v, tag is ${GITHUB_REF_NAME}"; exit 1; }
       - name: Publish
         if: env.NODE_AUTH_TOKEN != '' || vars.NPM_TRUSTED_PUBLISHING == 'true'
         env:
@@ -90,7 +88,8 @@ jobs:
             name=$(node -p "require('./$p/package.json').name")
             version=$(node -p "require('./$p/package.json').version")
             # The first version of a package is published by hand (Trusted
-            # Publishing can only be configured on an existing package).
+            # Publishing can only be configured on an existing package), and
+            # create-usai has its own version cadence.
             if npm view "$name@$version" version >/dev/null 2>&1; then
               echo "$name@$version is already on the registry; skipping"
               continue

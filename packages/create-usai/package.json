@@ -1,6 +1,6 @@
 {
   "name": "@sakaladev/create-usai",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Scaffold a new Usai application.",
   "license": "Apache-2.0",
   "repository": {
@@ -28,7 +28,7 @@
   },
   "type": "module",
   "bin": {
-    "create-usai": "./dist/cli.js"
+    "create-usai": "dist/cli.js"
   },
   "files": [
     "dist",
