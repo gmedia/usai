@@ -71,6 +71,8 @@ bookkeeping, 0.02 create.
 - **`usai/test` harness** (`GOAL.md` §36): `testApp({ root })` spawns `usai run --port 0 --control 127.0.0.1:0 --announce`, drives HTTP, and invokes tasks / cron ticks / commands deterministically through the control surface's `POST /invoke`. Tested against `examples/hello` with the repository binary.
 - `usai test` runs the project's `node --test` files with `USAI_BIN` set to the running binary and the `usai` export condition (workspace checkouts need no `dist/`). OpenAPI describes streams (`x-usai-stream`) and sockets (`x-usai-socket`, 101/426) explicitly. WebSocket idle timeout (`HttpConfig.socket_idle_timeout`, 300 s default, close 1008; tested). ADR-0015 records the measured per-world numbers and states that its revisit trigger has fired.
 - Measured bundle composition (release): SDK only 1.0 ms/world, `zod/mini` 1.3 ms/world, `zod` 6.6 ms/world (`tests/profile_bundles.rs`). `zod/mini` lacks Standard JSON Schema, so before-world validation and OpenAPI degrade with it; documented in the guide.
+- **PostgreSQL TLS** (rustls, `sslmode` from the URL, roots = Mozilla + `tls.caFile`/`PGSSLROOTCERT`, always verified; refused at activation otherwise). Tested against an embedded TLS server with a private CA.
+- **`usai dev` reload acceptance** (`crates/usai-cli/tests/dev_reload.rs`): edit → new revision, no failed request during the swap; a broken edit keeps the previous revision serving. Control surface: rollback = reinstall + activate (tested).
 - **P1/P2 substrate economics.** Per-phase ledger (`USAI_PROFILE=1`), workload matrix (`tests/profile_matrix.rs`, `scripts/p1-attribution.sh`), research-VM attribution; slot-reset root fix (vendored Wasmtime patch), callback-free validator preparation in the image (`runtime/prepare.ts`), zero-delay timer yield, lock-free watchdog. Hello on the VM: 1.52 ms p50, 9.8k req/s at c=16, 0 faults.
 - **P0 substrate (ADR-0016).** `engine/wasm.rs`: Wasmtime 48 + core built from pinned sources (`guest/build.sh`, `-O3`; `-Oz` reproduces the research core byte for byte) + Wizer image per definition + pooling/COW/pagemap_scan; guest ABI unchanged (bridge routes through the core's `__usai_test_op`); one artifact (IIFE bundle) serves both engines; compilation cache; epoch-based CPU slice. `wasm` is the default engine, `quickjs` selectable. All 71 acceptance tests pass on both. Profiling harness: `tests/profile_bundles.rs` (`--ignored`, release).
 - Design review closed 14 of 16 open questions as ADR-0001…0014; ADR-0015 records the engine decision.
@@ -101,7 +103,7 @@ hello bundle (765 KB, zod evaluated per world) 6.52 ms/world
 1. **Soak** (≥ 1 h at c=16 on the VM) on the new reset path, watching RSS and the gauge baseline; then propose the Wasmtime region-budget change upstream. Remaining lever: the eval-based invoke/outcome/pending floor (0.24 ms of 1.05) — a core ABI change, after the soak.
 2. Audit D0–D15 acceptance criteria item by item against `GOAL.md` §53; record gaps here.
 3. Per-world CPU accounting (threat model "Open").
-5. D14 alpha checklist still open: publish `usai` / `create-usai` to npm and a `usai` binary (today the CLI is `cargo run -p usai-cli`); artifact byte format + signing (ADR-0005 follow-up); PostgreSQL TLS.
+5. D14 alpha checklist still open: publish `usai` / `create-usai` to npm and a `usai` binary (today the CLI is `cargo run -p usai-cli`); artifact byte format + signing (ADR-0005 follow-up).
 
 ## Known gaps / debt
 
@@ -109,5 +111,5 @@ hello bundle (765 KB, zod evaluated per world) 6.52 ms/world
 - Boundary contracts are validated twice when a JSON Schema exists (host before the world, provider inside it to obtain parsed values). Acceptable for v0; `GOAL.md` §13 asks to collapse this later.
 - Auth resolvers run inside the world (after structural validation); `inspect` says so.
 - `create-usai` is a placeholder; `examples/hello` is the onboarding path for now.
-- Module-level `migrations:`/`seeders:` globs are root-relative, not module-relative (the bundle has no source locations); documented on `defineModule`. PostgreSQL is `NoTls` only in v0 (expected behind a private network or a TLS proxy); no transactions across operations yet.
+- Module-level `migrations:`/`seeders:` globs are root-relative, not module-relative (the bundle has no source locations); documented on `defineModule`. PostgreSQL: no transactions across operations yet.
 - HTTP/1.1 only; no TLS termination (expected behind a proxy in v0).

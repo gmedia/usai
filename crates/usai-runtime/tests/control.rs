@@ -212,6 +212,37 @@ async fn orchestrator_lifecycle_install_activate_drain_remove() {
     assert_eq!(r.status(), 200);
     assert_eq!(runtime.status().revisions.len(), 1);
 
+    // Rollback: the previous artifact is installed again (a retired revision
+    // is never re-activated; the artifact is the identity, ADR-0005) and
+    // activated, and the runtime serves it again.
+    let r = auth(client.post(format!("{base}/revisions")))
+        .json(&json!({ "artifact": _hello.to_string_lossy() }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 201);
+    let back: Value = r.json().await.unwrap();
+    assert_eq!(back["application"], "hello");
+    let back_id = back["id"].as_u64().unwrap();
+    let r = auth(client.post(format!("{base}/revisions/rev{back_id}/activate")))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200, "{}", r.text().await.unwrap());
+    let health: Value = auth(client.get(format!("{base}/health")))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(health["active"]["application"], "hello", "rolled back");
+    let r = auth(client.post(format!("{base}/revisions/rev{id}/drain")))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+
     // Status and stop.
     let status: Value = auth(client.get(format!("{base}/status")))
         .send()

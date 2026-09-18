@@ -141,6 +141,100 @@ fn start_embedded() -> Option<String> {
     Some(format!("postgres://usai@127.0.0.1:{port}/postgres"))
 }
 
+static TLS_SERVER: OnceLock<Option<(String, PathBuf)>> = OnceLock::new();
+static TLS_EMBEDDED: OnceLock<Embedded> = OnceLock::new();
+
+extern "C" fn stop_tls_embedded() {
+    if let Some(pg) = TLS_EMBEDDED.get() {
+        let _ = Command::new(pg.bin.join("pg_ctl"))
+            .args(["-D", pg.data.to_str().unwrap(), "-m", "fast", "-w", "stop"])
+            .output();
+        let _ = std::fs::remove_dir_all(&pg.data);
+    }
+}
+
+/// A second portable server with `ssl = on` behind a self-signed
+/// certificate for `localhost`; returns `(url, ca_file)` or `None` when the
+/// portable binaries or `openssl` are unavailable. Always embedded: the CI
+/// service container has no TLS.
+pub fn tls_database() -> Option<(String, PathBuf)> {
+    TLS_SERVER
+        .get_or_init(|| {
+            let bin = ensure_binaries()?.join("bin");
+            let data = std::env::temp_dir().join(format!("usai-pg-tls-{}", std::process::id()));
+            std::fs::create_dir_all(&data).ok()?;
+            // A private CA and a server certificate it signs: the shape of a
+            // real deployment (managed databases ship exactly this).
+            let ca_cert = data.join("ca.crt");
+            let ca_key = data.join("ca.key");
+            let cert = data.join("server.crt");
+            let key = data.join("server.key");
+            let csr = data.join("server.csr");
+            let ext = data.join("server.ext");
+            let run = |args: &[&str]| -> Option<bool> {
+                Some(Command::new("openssl").args(args).output().ok()?.status.success())
+            };
+            if !run(&["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2", "-subj", "/CN=usai-test-ca",
+                "-addext", "basicConstraints=critical,CA:TRUE", "-addext", "keyUsage=critical,keyCertSign,cRLSign",
+                "-keyout", ca_key.to_str()?, "-out", ca_cert.to_str()?])? {
+                return None;
+            }
+            if !run(&["req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=localhost",
+                "-keyout", key.to_str()?, "-out", csr.to_str()?])? {
+                return None;
+            }
+            std::fs::write(&ext, "subjectAltName=DNS:localhost,IP:127.0.0.1\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n").ok()?;
+            if !run(&["x509", "-req", "-days", "2", "-in", csr.to_str()?, "-CA", ca_cert.to_str()?, "-CAkey", ca_key.to_str()?,
+                "-CAcreateserial", "-extfile", ext.to_str()?, "-out", cert.to_str()?])? {
+                return None;
+            }
+            let ok = Command::new(bin.join("initdb"))
+                .args(["-D", data.join("db").to_str()?, "-U", "usai", "--auth=trust", "-E", "UTF8"])
+                .output()
+                .ok()?
+                .status
+                .success();
+            if !ok {
+                return None;
+            }
+            // The server refuses a key readable by others.
+            std::fs::set_permissions(&key, std::os::unix::fs::PermissionsExt::from_mode(0o600)).ok()?;
+            let port = free_port();
+            let socket_dir = data.to_str()?.to_owned();
+            let ok = Command::new(bin.join("pg_ctl"))
+                .args(["-D", data.join("db").to_str()?, "-w", "-l", data.join("pg.log").to_str()?, "-o"])
+                .arg(format!(
+                    "-p {port} -k {socket_dir} -c listen_addresses=127.0.0.1 -c ssl=on -c ssl_cert_file={} -c ssl_key_file={}",
+                    cert.display(),
+                    key.display()
+                ))
+                .arg("start")
+                .output()
+                .ok()?
+                .status
+                .success();
+            if !ok {
+                eprintln!("{}", std::fs::read_to_string(data.join("pg.log")).unwrap_or_default());
+                return None;
+            }
+            TLS_EMBEDDED
+                .set(Embedded {
+                    bin: bin.clone(),
+                    data: data.join("db"),
+                    port,
+                })
+                .ok()?;
+            unsafe {
+                libc::atexit(stop_tls_embedded);
+            }
+            Some((
+                format!("postgres://usai@localhost:{port}/postgres?sslmode=require"),
+                ca_cert,
+            ))
+        })
+        .clone()
+}
+
 /// A connection URL to a database the tests may freely mutate, or `None`
 /// to skip.
 pub fn database_url() -> Option<String> {

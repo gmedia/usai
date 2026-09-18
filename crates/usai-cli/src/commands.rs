@@ -598,7 +598,14 @@ pub async fn generate_openapi(root: &Path, out: Option<PathBuf>) -> Result<()> {
 /// Reports latency percentiles, throughput, RSS high-water, and whether
 /// ownership returned to baseline. Not canonical evidence (AGENTS.md §2).
 pub async fn bench(root: &Path, path: &str, concurrency: usize, duration: Duration) -> Result<()> {
-    let (definition, engine) = definition_for(root, None).await?;
+    // Always a fresh build: a measurement of a stale artifact (older SDK,
+    // older sources) is a footgun, and the build is cheap.
+    let engine = engine();
+    let config = load_config(engine.as_ref(), root).await?;
+    let definition =
+        usai_runtime::build::build(engine.as_ref(), &BuildOptions::from_config(&config))
+            .await?
+            .definition;
     let runtime = Runtime::new(
         engine,
         RuntimeConfig {
@@ -637,18 +644,28 @@ pub async fn bench(root: &Path, path: &str, concurrency: usize, duration: Durati
     let started = std::time::Instant::now();
     let deadline = started + duration;
     let mut workers = Vec::new();
+    // Fixed-size latency histogram (10 µs buckets to 1 s, then one overflow
+    // bucket) so a long soak measures the runtime's memory, not the client's.
+    const BUCKET_US: u64 = 10;
+    const BUCKETS: usize = 100_000;
+    // Sampled every 10 s: requests and p50 over that window, so a soak shows
+    // drift rather than only an end-of-run summary.
+    let progress = duration > Duration::from_secs(30);
     for _ in 0..concurrency {
         let client = client.clone();
         let url = url.clone();
         workers.push(tokio::spawn(async move {
-            let mut latencies = Vec::new();
+            let mut hist = vec![0u64; BUCKETS + 1];
+            let mut max_us = 0u64;
             let mut errors = 0u64;
             while std::time::Instant::now() < deadline {
                 let t = std::time::Instant::now();
                 match client.get(&url).send().await {
                     Ok(r) if r.status().is_success() => {
                         let _ = r.bytes().await;
-                        latencies.push(t.elapsed().as_micros() as u64);
+                        let us = t.elapsed().as_micros() as u64;
+                        max_us = max_us.max(us);
+                        hist[((us / BUCKET_US) as usize).min(BUCKETS)] += 1;
                     }
                     Ok(r) => {
                         if errors == 0 {
@@ -668,24 +685,69 @@ pub async fn bench(root: &Path, path: &str, concurrency: usize, duration: Durati
                     }
                 }
             }
-            (latencies, errors)
+            (hist, max_us, errors)
         }));
     }
-    let mut all = Vec::new();
+    let progress_runtime = Arc::clone(&runtime);
+    let progress_task = progress.then(|| {
+        tokio::spawn(async move {
+            let mut last = 0u64;
+            loop {
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                let g = progress_runtime.ledger().gauges.snapshot();
+                let rss = std::fs::read_to_string("/proc/self/status")
+                    .ok()
+                    .and_then(|s| {
+                        s.lines()
+                            .find(|l| l.starts_with("VmRSS:"))
+                            .map(|l| l.trim_start_matches("VmRSS:").trim().to_owned())
+                    })
+                    .unwrap_or_else(|| "n/a".into());
+                eprintln!(
+                    "[{:>5}s] worlds {} (+{}) live {} ops {} rss {}",
+                    started.elapsed().as_secs(),
+                    g.worlds_created,
+                    g.worlds_created - last,
+                    g.live_worlds,
+                    g.live_ops,
+                    rss
+                );
+                last = g.worlds_created;
+            }
+        })
+    });
+    let mut hist = vec![0u64; BUCKETS + 1];
+    let mut max_us = 0u64;
     let mut errors = 0;
     for w in workers {
-        let (l, e) = w.await?;
-        all.extend(l);
+        let (h, m, e) = w.await?;
+        for (a, b) in hist.iter_mut().zip(h) {
+            *a += b;
+        }
+        max_us = max_us.max(m);
         errors += e;
     }
+    if let Some(t) = progress_task {
+        t.abort();
+    }
     let elapsed = started.elapsed();
-    all.sort_unstable();
+    let total: u64 = hist.iter().sum();
     let pct = |p: f64| -> f64 {
-        if all.is_empty() {
+        if total == 0 {
             return 0.0;
         }
-        let rank = ((p / 100.0) * all.len() as f64).ceil().max(1.0) as usize;
-        all[rank.min(all.len()) - 1] as f64 / 1000.0
+        if p >= 100.0 {
+            return max_us as f64 / 1000.0;
+        }
+        let rank = ((p / 100.0) * total as f64).ceil().max(1.0) as u64;
+        let mut seen = 0u64;
+        for (i, n) in hist.iter().enumerate() {
+            seen += n;
+            if seen >= rank {
+                return ((i as u64 + 1) * BUCKET_US) as f64 / 1000.0;
+            }
+        }
+        max_us as f64 / 1000.0
     };
     shutdown.cancel();
     runtime.shutdown().await;
@@ -707,9 +769,9 @@ pub async fn bench(root: &Path, path: &str, concurrency: usize, duration: Durati
     );
     println!(
         "requests      {} ok, {} errors ({:.0} req/s)",
-        all.len(),
+        total,
         errors,
-        all.len() as f64 / elapsed.as_secs_f64()
+        total as f64 / elapsed.as_secs_f64()
     );
     println!(
         "latency ms    p50 {:.2}  p90 {:.2}  p99 {:.2}  max {:.2}",

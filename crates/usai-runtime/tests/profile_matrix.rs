@@ -218,6 +218,15 @@ async fn workload_matrix() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(300);
+    // USAI_PROFILE_TRACING=<filter> installs a subscriber writing to a sink,
+    // to price observability at a given level (D12: "detailed tracing can
+    // be disabled cheaply" is a claim to measure, not assert).
+    if let Ok(filter) = std::env::var("USAI_PROFILE_TRACING") {
+        tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_writer(std::io::sink)
+            .init();
+    }
     let engine = usai_runtime::engine::from_env(64).unwrap();
     let name = usai_runtime::engine::Engine::name(engine.as_ref()).to_string();
     let runtime = runtime_for("tests/fixtures/bench-app", engine).await;

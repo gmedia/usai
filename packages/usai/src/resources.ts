@@ -46,6 +46,11 @@ export interface PostgresOptions {
      * state. */
     recycling?: "clean" | "fast";
   };
+  /** TLS is chosen by the URL's `sslmode` (`disable` | `prefer` | `require`)
+   * and the server certificate is always verified — against Mozilla's roots
+   * plus this PEM bundle (private CAs, managed-database roots). When unset,
+   * the runtime also honours `PGSSLROOTCERT` in the environment. */
+  tls?: { caFile?: string };
 }
 
 /** A PostgreSQL pool owned by the runtime. Each operation leases one
@@ -61,6 +66,7 @@ export function postgres(name: string, options: PostgresOptions = {}): PostgresD
   if (options.pool?.max !== undefined) pool["max"] = options.pool.max;
   if (options.pool?.recycling !== undefined) pool["recycling"] = options.pool.recycling;
   if (Object.keys(pool).length > 0) config["pool"] = pool;
+  if (options.tls?.caFile !== undefined) config["tls"] = { caFile: options.tls.caFile };
   return {
     __usai: "resource",
     name,

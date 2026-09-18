@@ -37,6 +37,10 @@ export const fail = http.get("/fail", { resources: [db] }, async (ctx) => {
   }
 });
 
+export const tls = http.get("/tls", { resources: [db] }, async (ctx) =>
+  d(ctx).one<{ ssl: boolean }>(`select ssl from pg_stat_ssl where pid = pg_backend_pid()`),
+);
+
 export const types = task("types", { resources: [db] }, async (ctx) =>
   d(ctx).one(
     `select $1::int8 as big, $2::float8 as f, $3::bool as b, $4::uuid as u, $5::jsonb as j, $6::timestamptz as t, $7::text[] as arr, 12.50::numeric as n, null::text as nothing`,
@@ -77,7 +81,7 @@ declare global {
 
 export default defineApp({
   name: "pg-fixture",
-  workloads: [setup, getUser, listUsers, slow, fail, types, badParams, leak, orders, publish, seenCount],
+  workloads: [setup, getUser, listUsers, slow, fail, tls, types, badParams, leak, orders, publish, seenCount],
   resources: [db, seen],
   env: env({ DATABASE_URL: env.url() }),
 });

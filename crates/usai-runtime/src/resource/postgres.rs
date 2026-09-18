@@ -24,7 +24,7 @@ use deadpool_postgres::{Manager, ManagerConfig, Object, Pool, RecyclingMethod};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio_postgres::types::{ToSql, Type};
-use tokio_postgres::{NoTls, Row, Statement};
+use tokio_postgres::{Row, Statement};
 use tokio_util::sync::CancellationToken;
 
 use super::{
@@ -46,6 +46,22 @@ struct PostgresConfig {
     url_env: Option<String>,
     #[serde(default)]
     pool: PoolConfig,
+    #[serde(default)]
+    tls: TlsConfig,
+}
+
+/// TLS is selected by the URL's `sslmode` (`disable`, `prefer` — the
+/// default —, `require`); certificates are always verified against the
+/// trust roots (Mozilla's bundle plus `caFile`, PEM). There is no
+/// "encrypted but unverified" mode: libpq's `require` without a root is a
+/// footgun this runtime does not reproduce.
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct TlsConfig {
+    /// Path to a PEM bundle with additional trust roots (private CAs,
+    /// managed-database roots); `PGSSLROOTCERT` in the environment is the
+    /// fallback. Relative paths resolve against the CWD.
+    ca_file: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -79,6 +95,7 @@ impl ResourceProvider for PostgresProvider {
         let url_env = config.url_env.unwrap_or_else(|| "DATABASE_URL".into());
         // Read the env before the first await: the closure is not `Sync`.
         let resolved = env(&url_env);
+        let ca_file = config.tls.ca_file.clone().or_else(|| env("PGSSLROOTCERT"));
         let url = resolved.ok_or_else(|| {
             ResourceError::Startup(
                 spec.name.clone(),
@@ -105,7 +122,9 @@ impl ResourceProvider for PostgresProvider {
                 ));
             }
         };
-        let manager = Manager::from_config(pg_config, NoTls, ManagerConfig { recycling_method });
+        let tls = tls_connector(&spec.name, ca_file.as_deref())?;
+        let manager =
+            Manager::from_config(pg_config, tls.clone(), ManagerConfig { recycling_method });
         let max = config.pool.max.unwrap_or(16).max(1);
         let pool = Pool::builder(manager)
             .max_size(max)
@@ -122,6 +141,7 @@ impl ResourceProvider for PostgresProvider {
             pool,
             max: max as u32,
             counters: Counters::default(),
+            tls,
         }))
     }
 }
@@ -139,6 +159,45 @@ pub struct Postgres {
     pool: Pool,
     max: u32,
     counters: Counters,
+    tls: Tls,
+}
+
+/// The connector every connection and every cancel request uses.
+type Tls = tokio_postgres_rustls::MakeRustlsConnect;
+
+/// Mozilla's roots plus the resource's `tls.caFile`. Verification is
+/// always on; `sslmode` in the URL decides whether TLS is attempted.
+fn tls_connector(resource: &str, ca_file: Option<&str>) -> Result<Tls, ResourceError> {
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    if let Some(path) = ca_file {
+        let pem = std::fs::read(path).map_err(|e| {
+            ResourceError::Startup(resource.into(), format!("tls.caFile {path}: {e}"))
+        })?;
+        let mut added = 0;
+        for cert in rustls_pemfile::certs(&mut pem.as_slice()) {
+            let cert = cert.map_err(|e| {
+                ResourceError::Startup(resource.into(), format!("tls.caFile {path}: {e}"))
+            })?;
+            roots.add(cert).map_err(|e| {
+                ResourceError::Startup(resource.into(), format!("tls.caFile {path}: {e}"))
+            })?;
+            added += 1;
+        }
+        if added == 0 {
+            return Err(ResourceError::Startup(
+                resource.into(),
+                format!("tls.caFile {path}: no certificates found (PEM expected)"),
+            ));
+        }
+    }
+    let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
+    let config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|e| ResourceError::Startup(resource.into(), format!("tls: {e}")))?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    Ok(tokio_postgres_rustls::MakeRustlsConnect::new(config))
 }
 
 /// Owns one pooled connection for the duration of one operation. Dropped
@@ -248,6 +307,7 @@ async fn run_cancellable<T>(
     client: &deadpool_postgres::ClientWrapper,
     cancel: &CancellationToken,
     counters: &Counters,
+    tls: &Tls,
     query: impl Future<Output = Result<T, tokio_postgres::Error>>,
 ) -> Finished<Result<T, ResourceError>> {
     tokio::pin!(query);
@@ -259,7 +319,7 @@ async fn run_cancellable<T>(
             // CancelRequest is a request, not proof: the original operation
             // must still reach its terminal state on this connection.
             let cancel_token = client.cancel_token();
-            let _ = cancel_token.cancel_query(NoTls).await;
+            let _ = cancel_token.cancel_query(tls.clone()).await;
             match tokio::time::timeout(CANCEL_TERMINAL_BOUND, &mut query).await {
                 Ok(Err(e)) if e.as_db_error().is_some_and(|db| db.code().code() == "57014") => {
                     Finished::Terminal(Err(ResourceError::Cancelled))
@@ -496,7 +556,7 @@ impl ResourceManager for Postgres {
                 .collect();
             match call.method.as_str() {
                 "query" => {
-                    run_cancellable(client, &cancel, &self.counters, async {
+                    run_cancellable(client, &cancel, &self.counters, &self.tls, async {
                         let rows = client.query(&statement, &refs).await?;
                         rows.iter()
                             .map(row_to_json)
@@ -506,7 +566,7 @@ impl ResourceManager for Postgres {
                     .await
                 }
                 "one" => {
-                    run_cancellable(client, &cancel, &self.counters, async {
+                    run_cancellable(client, &cancel, &self.counters, &self.tls, async {
                         let rows = client.query(&statement, &refs).await?;
                         Ok(rows
                             .first()
@@ -517,7 +577,7 @@ impl ResourceManager for Postgres {
                     .await
                 }
                 "execute" => {
-                    run_cancellable(client, &cancel, &self.counters, async {
+                    run_cancellable(client, &cancel, &self.counters, &self.tls, async {
                         client.execute(&statement, &refs).await.map(|n| json!(n))
                     })
                     .await
@@ -627,7 +687,7 @@ impl Postgres {
         );
         let finished = {
             let client = lease.client();
-            run_cancellable(client, &cancel, &self.counters, async {
+            run_cancellable(client, &cancel, &self.counters, &self.tls, async {
                 match client.batch_execute(&script).await {
                     Ok(()) => Ok(()),
                     Err(e) => {

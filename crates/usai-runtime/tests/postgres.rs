@@ -341,6 +341,81 @@ async fn unreachable_database_fails_activation_not_the_first_request() {
     let _ = TerminalProof::Terminal;
 }
 
+/// TLS: `sslmode=require` connects only when the server certificate
+/// verifies against the configured roots; without them activation is
+/// refused (never an "encrypted but unverified" connection).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tls_connections_verify_the_server_certificate() {
+    let Some((url, ca)) = support::tls_database() else {
+        eprintln!("skipping: no TLS-capable PostgreSQL (portable binaries + openssl needed)");
+        return;
+    };
+    if std::process::Command::new("node")
+        .arg("--version")
+        .output()
+        .map(|o| !o.status.success())
+        .unwrap_or(true)
+    {
+        return;
+    }
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pg-app");
+    if !root.join("node_modules/usai").exists() {
+        return;
+    }
+    let engine = usai_runtime::engine::from_env(64).unwrap();
+    let out = build(
+        engine.as_ref(),
+        &BuildOptions {
+            out_dir: std::env::temp_dir().join(format!("usai-pg-tls-test-{}", std::process::id())),
+            ..BuildOptions::for_project(&root)
+        },
+    )
+    .await
+    .expect("fixture builds");
+
+    // Without the root: refused at activation with a TLS error, not served.
+    let bare = url.clone();
+    let runtime = Runtime::with_env(Arc::clone(&engine), RuntimeConfig::default(), move |name| {
+        (name == "DATABASE_URL").then(|| bare.clone())
+    });
+    let rev = runtime.install(Arc::clone(&out.definition)).await.unwrap();
+    let err = runtime.activate(rev.id).await.unwrap_err();
+    assert!(
+        matches!(&err, RuntimeError::Resource(ResourceError::Startup(_, detail)) if detail.contains("cannot connect")),
+        "{err}"
+    );
+    runtime.shutdown().await;
+
+    // With the root (PGSSLROOTCERT, libpq's name): the fixture works end to end.
+    let ca_path = ca.to_string_lossy().into_owned();
+    let runtime = Runtime::with_env(
+        engine,
+        RuntimeConfig {
+            cron_scheduler: false,
+            queue_consumers: false,
+            ..RuntimeConfig::default()
+        },
+        move |name| match name {
+            "DATABASE_URL" => Some(url.clone()),
+            "PGSSLROOTCERT" => Some(ca_path.clone()),
+            _ => None,
+        },
+    );
+    let rev = runtime.install(out.definition).await.unwrap();
+    runtime.activate(rev.id).await.unwrap();
+    let f = Fixture { runtime };
+    let r = f.runtime.run_command("setup", vec![]).await.unwrap();
+    assert!(matches!(r.outcome, Some(Ok(_))), "{:?}", r.outcome);
+    let (status, body) = f.http("GET", "/users/:id", json!({ "id": "1" })).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["name"], "Ayu");
+    // The wire really is TLS: the server says so for our backend.
+    let (status, body) = f.http("GET", "/tls", json!({})).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["ssl"], true, "{body}");
+    f.runtime.shutdown().await;
+}
+
 async fn wait_for(f: &Fixture, key: &str, expected: u64, timeout: Duration) -> Value {
     let started = std::time::Instant::now();
     loop {
