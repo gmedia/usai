@@ -54,7 +54,10 @@ pub fn free_port() -> u16 {
 
 pub fn get(port: u16, path: &str) -> Option<(u16, String)> {
     let mut s = TcpStream::connect(("127.0.0.1", port)).ok()?;
-    s.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+    // A rebuild compiles the new image with every core (Cranelift); on a
+    // two-core CI runner a request issued meanwhile can wait well over 5 s
+    // without failing. Slow is not failed.
+    s.set_read_timeout(Some(Duration::from_secs(60))).ok()?;
     write!(
         s,
         "GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"

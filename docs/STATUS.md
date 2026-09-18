@@ -108,6 +108,8 @@ hello bundle (765 KB, zod evaluated per world) 6.52 ms/world
 
 ## Known gaps / debt
 
+- Installing a revision compiles its image with Cranelift on every core (the Wizer output is a new module, so the compilation cache misses); on a two-core host that starves request serving for seconds. Candidate fix: ship the precompiled image (`.cwasm`, host- and Wasmtime-version-specific) next to the artifact so install is O(load), and/or bound the compiler's thread pool below the core count.
+
 - The Wasm substrate is the research representation (ADR-0016); its per-world cost is now attributed on the research VM but not yet reduced, and no soak has run. Do not cite EXP-012B numbers for this codebase. The native QuickJS engine stays as reference; do not use it for economics.
 - Boundary contracts are validated twice when a JSON Schema exists (host before the world, provider inside it to obtain parsed values). Acceptable for v0; `GOAL.md` §13 asks to collapse this later.
 - Auth resolvers run inside the world (after structural validation); `inspect` says so.
