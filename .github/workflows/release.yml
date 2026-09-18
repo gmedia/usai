@@ -112,10 +112,76 @@ jobs:
         run: echo "neither NPM_TOKEN (secret) nor NPM_TRUSTED_PUBLISHING=true (variable) is set; packages were built but not published"
 
   docker:
-    # Both images, both architectures, pushed to Docker Hub (sakaladev/usai)
-    # when DOCKERHUB_USERNAME/DOCKERHUB_TOKEN exist and always to GHCR
-    # (ghcr.io/<owner>/usai). Tags: X.Y.Z, X.Y, X, latest; X.Y.Z-dev, latest-dev.
+    # Both images, built natively per architecture (a Rust build under QEMU
+    # takes an hour) and pushed by digest; `docker-manifest` joins them.
     if: startsWith(github.ref, 'refs/tags/')
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux/amd64
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version matches the tag
+        run: |
+          v=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)"/\1/')
+          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "Cargo.toml is $v, tag is ${GITHUB_REF_NAME}"; exit 1; }
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Names
+        id: names
+        run: |
+          echo "ghcr=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/usai" >> "$GITHUB_OUTPUT"
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: Build and push the runtime image (by digest)
+        id: runtime
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/runtime.Dockerfile
+          platforms: ${{ matrix.platform }}
+          build-args: USAI_VERSION=${{ steps.names.outputs.version }}
+          outputs: type=image,name=${{ steps.names.outputs.ghcr }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=runtime-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=runtime-${{ matrix.arch }}
+      - name: Build and push the dev image (by digest)
+        id: dev
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/dev.Dockerfile
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            USAI_VERSION=${{ steps.names.outputs.version }}
+            USAI_RUNTIME_IMAGE=${{ steps.names.outputs.ghcr }}@${{ steps.runtime.outputs.digest }}
+          outputs: type=image,name=${{ steps.names.outputs.ghcr }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=dev-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=dev-${{ matrix.arch }}
+      - name: Record digests
+        run: |
+          mkdir -p digests
+          echo "${{ steps.runtime.outputs.digest }}" > digests/runtime-${{ matrix.arch }}
+          echo "${{ steps.dev.outputs.digest }}" > digests/dev-${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.arch }}
+          path: digests/
+          retention-days: 1
+
+  docker-manifest:
+    # One multi-arch tag set per image, on GHCR always and on Docker Hub
+    # (sakaladev/usai) when DOCKERHUB_USERNAME/DOCKERHUB_TOKEN exist.
+    # Tags: X.Y.Z, X.Y, X, latest; X.Y.Z-dev, latest-dev.
+    needs: docker
     runs-on: ubuntu-24.04
     env:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -123,12 +189,11 @@ jobs:
       runtime_image: ${{ steps.names.outputs.runtime }}
       dev_image: ${{ steps.names.outputs.dev }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Version matches the tag
-        run: |
-          v=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)"/\1/')
-          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "Cargo.toml is $v, tag is ${GITHUB_REF_NAME}"; exit 1; }
-      - uses: docker/setup-qemu-action@v3
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digests-*
+          path: digests
+          merge-multiple: true
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -146,50 +211,43 @@ jobs:
           v=${GITHUB_REF_NAME#v}; major=${v%%.*}; minor=${v%.*}
           ghcr="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/usai"
           images="$ghcr"
-          [ -n "$DOCKERHUB_USERNAME" ] && images="sakaladev/usai,$ghcr" || echo "DOCKERHUB_USERNAME not set: pushing to GHCR only"
+          [ -n "$DOCKERHUB_USERNAME" ] && images="sakaladev/usai $ghcr" || echo "DOCKERHUB_USERNAME not set: pushing to GHCR only"
           rt=""; dev=""
-          for i in ${images//,/ }; do
-            rt="$rt$i:$v,$i:$minor,$i:$major,$i:latest,"
-            dev="$dev$i:$v-dev,$i:latest-dev,"
+          for i in $images; do
+            rt="$rt -t $i:$v -t $i:$minor -t $i:$major -t $i:latest"
+            dev="$dev -t $i:$v-dev -t $i:latest-dev"
           done
-          echo "runtime_tags=${rt%,}" >> "$GITHUB_OUTPUT"
-          echo "dev_tags=${dev%,}" >> "$GITHUB_OUTPUT"
+          echo "ghcr=$ghcr" >> "$GITHUB_OUTPUT"
+          echo "runtime_tags=$rt" >> "$GITHUB_OUTPUT"
+          echo "dev_tags=$dev" >> "$GITHUB_OUTPUT"
           echo "runtime=$ghcr:$v" >> "$GITHUB_OUTPUT"
           echo "dev=$ghcr:$v-dev" >> "$GITHUB_OUTPUT"
-          echo "version=$v" >> "$GITHUB_OUTPUT"
-      - name: Build and push the runtime image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/runtime.Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.names.outputs.runtime_tags }}
-          build-args: USAI_VERSION=${{ steps.names.outputs.version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      - name: Build and push the dev image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/dev.Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.names.outputs.dev_tags }}
-          build-args: |
-            USAI_VERSION=${{ steps.names.outputs.version }}
-            USAI_RUNTIME_IMAGE=${{ steps.names.outputs.runtime }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Create the multi-arch manifests
+        run: |
+          ghcr=${{ steps.names.outputs.ghcr }}
+          docker buildx imagetools create ${{ steps.names.outputs.runtime_tags }} \
+            "$ghcr@$(cat digests/runtime-amd64)" "$ghcr@$(cat digests/runtime-arm64)"
+          docker buildx imagetools create ${{ steps.names.outputs.dev_tags }} \
+            "$ghcr@$(cat digests/dev-amd64)" "$ghcr@$(cat digests/dev-arm64)"
+          docker buildx imagetools inspect ${{ steps.names.outputs.runtime }}
+          docker buildx imagetools inspect ${{ steps.names.outputs.dev }}
 
   container-smoke:
     # The published images, used the way the scaffold tells a user to:
     # scaffold → app image (dev stage builds, runtime stage serves) →
     # read-only, non-root, no toolchain, 200, SIGTERM drains.
-    needs: docker
+    needs: docker-manifest
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.3.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -197,6 +255,6 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Smoke
         env:
-          RUNTIME_IMAGE: ${{ needs.docker.outputs.runtime_image }}
-          DEV_IMAGE: ${{ needs.docker.outputs.dev_image }}
+          RUNTIME_IMAGE: ${{ needs.docker-manifest.outputs.runtime_image }}
+          DEV_IMAGE: ${{ needs.docker-manifest.outputs.dev_image }}
         run: scripts/container-smoke.sh "$RUNTIME_IMAGE" "$DEV_IMAGE"
