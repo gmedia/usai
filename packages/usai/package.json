@@ -3,6 +3,29 @@
   "version": "0.0.1",
   "description": "Usai developer SDK: declare workloads and resources; the runtime gives each its natural lifetime.",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gmedia/usai.git",
+    "directory": "packages/usai"
+  },
+  "homepage": "https://github.com/gmedia/usai#readme",
+  "bugs": {
+    "url": "https://github.com/gmedia/usai/issues"
+  },
+  "keywords": [
+    "usai",
+    "runtime",
+    "lifecycle",
+    "wasm",
+    "postgres",
+    "typescript"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "exports": {
     ".": {

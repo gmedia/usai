@@ -54,6 +54,11 @@ jobs:
 
   npm:
     runs-on: ubuntu-24.04
+    # Publishes with npm Trusted Publishing (OIDC, no long-lived secret) when
+    # the packages are configured for it on npmjs.com, or with NPM_TOKEN.
+    permissions:
+      contents: read
+      id-token: write
     env:
       NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
@@ -72,9 +77,15 @@ jobs:
         run: |
           v=$(node -p "require('./packages/usai/package.json').version")
           [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "packages/usai is $v, tag is ${GITHUB_REF_NAME}"; exit 1; }
+          v=$(node -p "require('./packages/create-usai/package.json').version")
+          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "packages/create-usai is $v, tag is ${GITHUB_REF_NAME}"; exit 1; }
       - name: Publish
-        if: env.NODE_AUTH_TOKEN != ''
-        run: pnpm -r --filter usai --filter create-usai publish --access public --no-git-checks
+        if: env.NODE_AUTH_TOKEN != '' || vars.NPM_TRUSTED_PUBLISHING == 'true'
+        run: |
+          npm install -g npm@latest
+          for p in packages/usai packages/create-usai; do
+            (cd $p && npm publish --access public --provenance)
+          done
       - name: Publish skipped
-        if: env.NODE_AUTH_TOKEN == ''
-        run: echo "NPM_TOKEN is not configured; packages were built but not published"
+        if: env.NODE_AUTH_TOKEN == '' && vars.NPM_TRUSTED_PUBLISHING != 'true'
+        run: echo "neither NPM_TOKEN (secret) nor NPM_TRUSTED_PUBLISHING=true (variable) is set; packages were built but not published"
