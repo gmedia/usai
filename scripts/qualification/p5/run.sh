@@ -58,6 +58,15 @@ up() {
 down() { docker compose down -v --remove-orphans; }
 
 
+wait_exited() {
+  local deadline=$((SECONDS + $2))
+  while [ $SECONDS -lt $deadline ]; do
+    [ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null)" = "false" ] && return 0
+    sleep 0.2
+  done
+  return 1
+}
+
 wait_healthy() {
   local deadline=$((SECONDS + ${1:-120}))
   while [ $SECONDS -lt $deadline ]; do [ "$(health)" = "401" ] && return 0; sleep 0.5; done
@@ -79,8 +88,10 @@ scenario() {
     pg-kill)             docker compose kill -s SIGKILL postgres; sleep 10; docker compose start postgres ;;
     pg-restart)          docker compose restart postgres ;;
     network-partition)   docker network disconnect usai-p5_default usai-p5-postgres-1; sleep 10; docker network connect --alias postgres usai-p5_default usai-p5-postgres-1 ;;
-    app-sigterm)         docker compose kill -s SIGTERM app ;;   # restart: unless-stopped brings it back after the drain
-    app-sigkill)         docker compose kill -s SIGKILL app ;;
+    # An orchestrator signals, waits for the exit, and starts a replacement
+    # (Docker's restart policy ignores containers stopped by a signal you sent).
+    app-sigterm)         docker kill -s SIGTERM usai-p5-app-1 >/dev/null; wait_exited usai-p5-app-1 40; docker compose start app ;;
+    app-sigkill)         docker kill -s SIGKILL usai-p5-app-1 >/dev/null; wait_exited usai-p5-app-1 10; docker compose start app ;;
     app-restart)         docker compose restart app ;;
     bad-deploy)          # install an artifact whose manifest is broken through the control surface
                          docker compose exec -T app sh -c 'mkdir -p /tmp/bad && cp -r /app/.usai/build/. /tmp/bad/ && sed -i "s/\"manifestVersion\": 1/\"manifestVersion\": 99/" /tmp/bad/manifest.json'
