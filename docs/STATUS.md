@@ -28,18 +28,19 @@ traffic yet. The gates in `docs/ROADMAP.md`, with where each stands:
 | Correctness of the lifecycle model | ✓ automated | C1–C18 have acceptance tests; malformed artifacts, budget exhaustion, forced shutdown, revision replacement under load are tested; 1 h soak on a VM: 49 M requests, 0 errors, flat RSS |
 | Distribution (P3.5) | ✓ | native binary, `pnpm usai` wrapper, Docker runtime/dev images, compose path, artifact↔runtime compatibility refused before serving, smoke test in CI and after every release |
 | Real application built as a user (P4) | ✓ | `examples/invoicing` (tenants, sessions, transactional invoices, pagination, signed retried webhooks over outbound HTTP, cron, command, seeder, test through the real runtime) — GUIDE §17; primitives it forced: ADR-0017, enum params. A second outside-developer run (notes API) fed 14 fixes |
-| Operational qualification (P5) | ✗ | no runbooks (DB down/restart, bad deploy, rollback, disk full); HTTP/1.1 only, TLS termination is the proxy's; latency histogram / error-rate metrics not yet exposed |
-| Reliability qualification (P6) | ✗ | 1 h soak only; no 24 h / 72 h soaks, no revision-churn-under-traffic campaign, no DB-flap campaign |
-| External developer validation (P7) | ✗ | one fresh-eyes dogfood run (issues fixed in 0.0.2); no outside developers yet |
-| Frozen contracts, `SUPPORTED.md`, upgrade matrix (RC) | ✗ | contracts still move within 0.0.x; artifact format 1 |
-| Supply chain | ◐ | binaries have SHA-256, npm via Trusted Publishing, images by digest; **no artifact signing/attestation** (`cache/image.cwasm` is native code), no dependency scanning in CI |
-| Security qualification | ◐ | threat model written; worlds are semantic isolation, **not** a hostile multi-tenant sandbox (ADR-0008); no fuzzing of contracts/artifacts/control API |
-| Vendored Wasmtime patch | ◐ | `vendor/wasmtime` carries a pagemap-reset fix with documented provenance; not yet upstreamed, no rebase test |
+| Operational qualification (P5) | ✓ | production-shaped deployment (Caddy → runtime image → PostgreSQL) broken 13 ways under load; `docs/runbooks/` (8 pages: which metric, which log line, what workloads do, when it recovers); findings fixed (503 for unavailable dependencies, migrations in the artifact, bounded revisions, self-retiring revisions); evidence `docs/measurements/2026-09-18-p5-p6-qualification.md` |
+| Reliability qualification (P6) | ◐ | 1 000 revision replacements under load (2.04 M requests, 0 errors, flat RSS after the malloc-arena fix), DB flap ×10, restart loop ×10, overload (only 503 capacity), dead-letter — all passed; **24 h soak running** (started 2026-09-18 22:18 UTC), 72 h not yet |
+| External developer validation (P7) | ◐ | two fresh-eyes runs (0.0.1 → 0.0.2: 21 items; 0.0.4: 14 items, all fixed); the 0.0.5 round with three personas is next; no human outside developers yet |
+| Frozen contracts, `SUPPORTED.md`, upgrade matrix (RC) | ◐ | `SUPPORTED.md` written; runtime × artifact (N, N−1) matrix tested in CI against the last release; contracts still move within 0.0.x (they must, until P7 says the API is right) |
+| Supply chain | ✓ | artifact signing (`usai keygen` / `build --sign` / `run --require-signature`, native image covered, control installs verified); RustSec + npm audit in CI; binaries with SHA-256, npm via Trusted Publishing, images by digest |
+| Security qualification | ◐ | threat model, `SECURITY.md`; robustness tests (600 mutated artifacts, 600 garbage control/HTTP requests: no panic, no leaked work); worlds are semantic isolation, not a hostile sandbox (ADR-0008); no coverage-guided fuzzing yet |
+| Vendored Wasmtime patch | ◐ | provenance in `vendor/README.md`, PR text and upstream status in `docs/upstream/wasmtime-pagemap-reset.md` (upstream `main` unchanged as of 2026-09-18); the freshness tests are the rebase tests; the PR itself is a maintainer's public action |
 
-Next gate to open: **P5** — deploy for real (proxy → Usai → PostgreSQL),
-break it deliberately, and write the runbook each incident needs.
+Next gates: **P6** long soaks (24 h running, then 72 h) and **P7** outside
+developers building from the public docs alone; RC freezes contracts only
+after P7 says the API is right.
 
-Current phase (`docs/ROADMAP.md`): **P4 Real application done → P5 Operational qualification.** Depth, not breadth.
+Current phase (`docs/ROADMAP.md`): **P5 done, P6 soaking, P7 in progress.** Depth, not breadth.
 
 ```text
 execution substrate recovery   ← ADR-0016 first pass done; measure on a real VM next

@@ -28,6 +28,7 @@ Working agreement for agents and contributors: [`../AGENTS.md`](../AGENTS.md).
 docs/
   README.md                 this index
   STATUS.md                 living: current milestone
+  runbooks/                 incident pages from the P5 campaign
   ROADMAP.md                phases to production-ready (qualification, not capability)
   ACCEPTANCE-AUDIT.md       living: GOAL.md §53 items vs evidence
   measurements/             dated measurement reports (engineering evidence)
