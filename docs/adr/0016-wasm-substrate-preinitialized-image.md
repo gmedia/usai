@@ -40,7 +40,7 @@ world run             1.2 ms            4.8 ms
 
 \* the machine's speed varied 2× during the session; the ratio held.
 
-Attribution of the Wasm world run: a pure-JS CPU loop runs 2.3× slower than native (`-O3` core; it was 3.3× with the research's `-Oz` core), and each request incurs ~200 minor page faults regardless of keep-resident/pagemap settings — on WSL2 (Hyper-V) minor faults are expensive. The fault source (likely heap growth beyond the image) is the next item to measure **on a real Linux VM**, where the research's economics were established.
+Attribution of the Wasm world run (2026-09-18, research VM, `docs/measurements/2026-09-18-execution-path-attribution.md`): the hello-shaped world's 2.7 ms is zod's lazy schema initialization paid by every fresh world (1.64 ms), first-touch page faults from heap growth past the image that the slot reset decommits each world (~1.0 ms), the eval-based invoke/outcome/pending floor (0.25 ms), slot reset (0.19 ms) and create (0.02 ms). Per-world `madvise`/`mprotect` also caps multi-core scaling through TLB-shootdown IPIs (2.5k → 4.4k req/s at c=16 when decommit is avoided). The levers are ranked there; the ones that change what the image contains (validator warm-up, heap slack) are decisions, not defaults.
 
 ## Consequences
 

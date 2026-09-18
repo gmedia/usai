@@ -113,6 +113,19 @@ importers:
         specifier: ^5.9.0
         version: 5.9.3
 
+  crates/usai-runtime/tests/fixtures/bench-app:
+    dependencies:
+      usai:
+        specifier: workspace:*
+        version: link:../../../../../packages/usai
+      zod:
+        specifier: ^4.0.0
+        version: 4.6.5
+    devDependencies:
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+
   crates/usai-runtime/tests/fixtures/http-app:
     dependencies:
       usai:

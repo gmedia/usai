@@ -40,6 +40,8 @@ cargo run -p usai-cli -- --log-format json run --status ...       # JSON logs; /
 cargo run -p usai-cli -- --root <project> run --artifact .usai/build --control 127.0.0.1:3900   # orchestrator surface (USAI_CONTROL_TOKEN)
 cargo run --release -p usai-cli -- --root examples/hello bench --path /hello/x -c 16 -d 10   # engineering load test (release build!)
 cargo test --release -p usai-runtime --test profile_bundles -- --ignored --nocapture # per-world / per-request cost, both engines (USAI_ENGINE=wasm|quickjs)
+USAI_PROFILE=1 cargo test --release -p usai-runtime --test profile_matrix -- --ignored --nocapture  # workload matrix with the per-phase ledger (USAI_MATRIX_ROWS, USAI_WASM_CORE=<core.wasm>)
+scripts/p1-attribution.sh [research-Oz-core.wasm]                                     # ledger for -O3 / -Oz / native + perf-stat counters per request (Linux VM)
 USAI_ENGINE=quickjs cargo test -p usai-runtime --test lifecycle                        # run a suite on the reference engine
 crates/usai-runtime/guest/build.sh                                                     # rebuild the core (-O3); OPT=-Oz reproduces the research core
 ```

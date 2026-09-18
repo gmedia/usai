@@ -51,9 +51,12 @@ async-trait = "0.1"
 debug = 1
 
 # Cranelift compiling an 800 KB core in an unoptimized build takes tens of
-# seconds; the compiler crates are not what we debug.
+# seconds; the compiler crates are not what we debug. Dependency debuginfo
+# is also what fills a CI runner's disk (wasmtime + cranelift alone are
+# gigabytes of DWARF), so only the workspace crates keep theirs.
 [profile.dev.package."*"]
 opt-level = 1
+debug = false
 [profile.dev.package.cranelift-codegen]
 opt-level = 3
 [profile.dev.package.wasmparser]

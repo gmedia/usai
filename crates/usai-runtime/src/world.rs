@@ -88,6 +88,9 @@ pub struct WorkResult {
     pub logs: Vec<LogLine>,
     /// Child work this world started (owned invocations, transferred dispatches).
     pub children: Vec<ChildRecord>,
+    /// Per-phase time accounting (`USAI_PROFILE=1`): driver phases plus
+    /// the engine's own, in milliseconds.
+    pub profile: Vec<(String, f64)>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -196,6 +199,7 @@ pub struct WorldDriver {
     delivered: u32,
     dropped: u32,
     finished: bool,
+    instantiate: Duration,
 }
 
 impl WorldDriver {
@@ -249,6 +253,7 @@ impl WorldDriver {
             delivered: 0,
             dropped: 0,
             finished: false,
+            instantiate: t_inst.elapsed(),
         })
     }
 
@@ -350,7 +355,26 @@ impl WorldDriver {
         let logs = std::mem::take(&mut *self.shared.logs.lock().expect("logs poisoned"));
         let children =
             std::mem::take(&mut *self.shared.children.lock().expect("children poisoned"));
-        let result = WorkResult {
+        let profile = if crate::engine::profiling() {
+            let mut p: Vec<(String, f64)> = self
+                .instance
+                .phases()
+                .into_iter()
+                .map(|(k, d)| (format!("engine.{k}"), d.as_secs_f64() * 1000.0))
+                .collect();
+            p.push((
+                "driver.instantiate".into(),
+                self.instantiate.as_secs_f64() * 1000.0,
+            ));
+            p.push((
+                "driver.run".into(),
+                started.elapsed().as_secs_f64() * 1000.0,
+            ));
+            p
+        } else {
+            Vec::new()
+        };
+        let mut result = WorkResult {
             world: self.id,
             workload: workload_id,
             termination,
@@ -361,8 +385,16 @@ impl WorldDriver {
             completions_dropped: self.dropped,
             logs,
             children,
+            profile,
         };
+        let t_retire = Instant::now();
         self.retire("finished");
+        if crate::engine::profiling() {
+            result.profile.push((
+                "driver.retire".into(),
+                t_retire.elapsed().as_secs_f64() * 1000.0,
+            ));
+        }
         result
     }
 

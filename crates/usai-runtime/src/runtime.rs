@@ -742,9 +742,15 @@ impl Runtime {
         .await?;
         let create_ms = t_create.elapsed().as_secs_f64() * 1000.0;
         let t_run = std::time::Instant::now();
-        let result = driver.run(&input).await;
+        let mut result = driver.run(&input).await;
         let run_ms = t_run.elapsed().as_secs_f64() * 1000.0;
         tracing::debug!(create_ms, run_ms, "world phases");
+        if crate::engine::profiling() {
+            // `runtime.run` includes dropping the driver (instance release);
+            // `runtime.create` includes admission and the driver's setup.
+            result.profile.push(("runtime.create".into(), create_ms));
+            result.profile.push(("runtime.run".into(), run_ms));
+        }
         crate::observability::trace_world(&result, &revision.id.to_string());
         drop(in_flight);
         Ok(result)

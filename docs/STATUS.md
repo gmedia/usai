@@ -26,9 +26,20 @@ performance / soak / multi-core
 alpha
 ```
 
-## Measured — substrate (2026-09-18, release, WSL2; engineering numbers)
+## Measured — substrate (2026-09-18, release; engineering numbers)
 
-See ADR-0016 for the full table. Per-world instantiate: Wasm image 0.01–0.03 ms flat across bundle sizes vs native 1.1–7.2 ms. Hello request via `Runtime::invoke`: Wasm 5.3 ms (create+retire 0.55, world run 4.8) vs native 7.9–18 ms (create+retire dominates). Wasm world run is bounded by Cranelift interpreter speed (2.3× native with the `-O3` core) and ~200 minor page faults per request that WSL2 makes expensive; both need measuring on the research VM before any economic claim.
+Full ledger in `docs/measurements/2026-09-18-execution-path-attribution.md`
+(research VM, 16 × Xeon E5-2680 v4). Hello on the VM: Wasm p50 2.62 ms at
+c=1, 2.5k req/s at c=16 and **no gain at c=64**; native 11.5 ms / 1.1k req/s.
+The Wasm world's 2.7 ms is fully accounted for: zod's lazy schema
+initialization repeated in every fresh world (1.64 ms), first-touch page
+faults from heap growth past the image that Wasmtime's slot reset decommits
+every world (~1.0 ms; 240 faults × ~4.4 µs), the eval-based invoke/outcome/
+pending floor (0.25 ms), slot reset (0.19 ms), create (0.02 ms). The c=16
+ceiling is TLB-shootdown IPIs from per-world `madvise`/`mprotect` (19.6 % of
+cycles in `smp_call_function_many_cond`); avoiding decommit (`USAI_WASM_PAGEMAP_SCAN=0
+USAI_WASM_KEEP_RESIDENT=16777216`) gives 4.4k req/s (×1.9) and p50 2.19 ms
+with no code change. `-Oz` vs `-O3`: 10–40 % on CPU-bound rows only.
 
 ## Done
 
@@ -77,15 +88,15 @@ hello bundle (765 KB, zod evaluated per world) 6.52 ms/world
 
 ## Next
 
-1. **Measure the Wasm substrate on a real Linux VM** (the research VM if available) with the bundle matrix — engine floor / SDK only / zod-mini / zod / a representative CRUD app — and the metrics: world creation, request p50/p95/p99, CPU/request, throughput, RSS/PSS, idle memory, concurrency scaling. Attribute the ~200 minor faults per request (heap growth beyond the image?) and decide whether to pre-grow the image heap.
+1. **Decide the P2 levers from the attribution** (`docs/measurements/2026-09-18-execution-path-attribution.md` §5), in order: slot reset without decommit (host config now; Wasmtime `MAX_REGIONS` upstream/patch for the real fix), validator warm-up in the image (image content — needs a decision), timer-0 → yield, one eval for outcome+pending, watchdog handshake. No new features.
 2. Audit D0–D15 acceptance criteria item by item against `GOAL.md` §53; record gaps here.
 3. Long soak (≥ 1 h at c=16) watching RSS and gauge baseline; run with `usai bench --duration 3600`.
-3. Per-world CPU accounting (threat model "Open").
-4. D14 alpha checklist still open: publish `usai` / `create-usai` to npm and a `usai` binary (today the CLI is `cargo run -p usai-cli`); artifact byte format + signing (ADR-0005 follow-up); OpenAPI for stream/socket endpoints; PostgreSQL TLS.
+4. Per-world CPU accounting (threat model "Open").
+5. D14 alpha checklist still open: publish `usai` / `create-usai` to npm and a `usai` binary (today the CLI is `cargo run -p usai-cli`); artifact byte format + signing (ADR-0005 follow-up); PostgreSQL TLS.
 
 ## Known gaps / debt
 
-- The Wasm substrate is the research representation (ADR-0016) but its economics here are one machine's; do not cite EXP-012B numbers for this codebase until it is measured production-shaped. The native QuickJS engine stays as reference; do not use it for economics.
+- The Wasm substrate is the research representation (ADR-0016); its per-world cost is now attributed on the research VM but not yet reduced, and no soak has run. Do not cite EXP-012B numbers for this codebase. The native QuickJS engine stays as reference; do not use it for economics.
 - Boundary contracts are validated twice when a JSON Schema exists (host before the world, provider inside it to obtain parsed values). Acceptable for v0; `GOAL.md` §13 asks to collapse this later.
 - Auth resolvers run inside the world (after structural validation); `inspect` says so.
 - `create-usai` is a placeholder; `examples/hello` is the onboarding path for now.

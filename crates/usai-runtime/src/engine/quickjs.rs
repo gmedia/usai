@@ -222,6 +222,7 @@ impl Engine for QuickJsEngine {
             _runtime: runtime,
             context,
             interrupt,
+            phases: Vec::new(),
         }))
     }
 }
@@ -261,6 +262,19 @@ pub struct QuickJsWorld {
     _runtime: AsyncRuntime,
     context: AsyncContext,
     interrupt: Arc<AtomicBool>,
+    phases: Vec<(&'static str, std::time::Duration)>,
+}
+
+impl QuickJsWorld {
+    fn account(&mut self, name: &'static str, since: std::time::Instant) {
+        if super::profiling() {
+            let d = since.elapsed();
+            match self.phases.iter_mut().find(|(k, _)| *k == name) {
+                Some((_, total)) => *total += d,
+                None => self.phases.push((name, d)),
+            }
+        }
+    }
 }
 
 fn bridge<'js>(ctx: &Ctx<'js>) -> Result<Object<'js>, EngineError> {
@@ -272,8 +286,10 @@ fn bridge<'js>(ctx: &Ctx<'js>) -> Result<Object<'js>, EngineError> {
 #[async_trait]
 impl WorldInstance for QuickJsWorld {
     async fn invoke(&mut self, index: usize, input_json: &str) -> Result<(), EngineError> {
+        let t = std::time::Instant::now();
         let input = input_json.to_owned();
-        self.context
+        let r = self
+            .context
             .with(move |ctx| {
                 let b = bridge(&ctx)?;
                 let invoke: Function = b
@@ -285,12 +301,16 @@ impl WorldInstance for QuickJsWorld {
                 run_jobs(&ctx);
                 Ok(())
             })
-            .await
+            .await;
+        self.account("invoke", t);
+        r
     }
 
     async fn deliver(&mut self, op: u64, ok: bool, payload: &str) -> Result<bool, EngineError> {
+        let t = std::time::Instant::now();
         let payload = payload.to_owned();
-        self.context
+        let r = self
+            .context
             .with(move |ctx| {
                 let b = bridge(&ctx)?;
                 let complete: Function = b
@@ -302,7 +322,9 @@ impl WorldInstance for QuickJsWorld {
                 run_jobs(&ctx);
                 Ok(accepted)
             })
-            .await
+            .await;
+        self.account("deliver", t);
+        r
     }
 
     async fn cancel(&mut self, reason: &str) -> Result<(), EngineError> {
@@ -339,7 +361,9 @@ impl WorldInstance for QuickJsWorld {
     }
 
     async fn outcome(&mut self) -> Result<Option<Outcome>, EngineError> {
-        self.context
+        let t = std::time::Instant::now();
+        let r = self
+            .context
             .with(|ctx| {
                 let b = bridge(&ctx)?;
                 let outcome: Function = b
@@ -355,11 +379,15 @@ impl WorldInstance for QuickJsWorld {
                         .map_err(|e| EngineError::Guest(format!("outcome is not decodable: {e}"))),
                 }
             })
-            .await
+            .await;
+        self.account("outcome", t);
+        r
     }
 
     async fn pending(&mut self) -> Result<Pending, EngineError> {
-        self.context
+        let t = std::time::Instant::now();
+        let r = self
+            .context
             .with(|ctx| {
                 let b = bridge(&ctx)?;
                 let count: Function = b
@@ -379,7 +407,9 @@ impl WorldInstance for QuickJsWorld {
                     kinds,
                 })
             })
-            .await
+            .await;
+        self.account("pending", t);
+        r
     }
 
     fn interrupter(&self) -> Arc<AtomicBool> {
@@ -388,5 +418,9 @@ impl WorldInstance for QuickJsWorld {
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
+    }
+
+    fn phases(&self) -> Vec<(&'static str, std::time::Duration)> {
+        self.phases.clone()
     }
 }

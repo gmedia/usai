@@ -37,6 +37,20 @@ pub const CORE: &[u8] = include_bytes!("../../guest/quickjs-async.wasm");
 pub const CORE_SHA256: &str = "c4e58003609cc13ebc23b7c987999d6a5d366be5b84afe7f6f240aeb2a9dcf11";
 
 const MAX_PAYLOAD: usize = 8 * 1024 * 1024;
+
+/// The core to run: the vendored one, or `USAI_WASM_CORE=<path>` for
+/// controlled comparisons (e.g. the research `-Oz` core). Profiling only.
+fn core_bytes() -> Result<std::borrow::Cow<'static, [u8]>, EngineError> {
+    match std::env::var("USAI_WASM_CORE") {
+        Ok(path) => {
+            let bytes = std::fs::read(&path)
+                .map_err(|e| EngineError::Compile(format!("USAI_WASM_CORE {path}: {e}")))?;
+            tracing::warn!(path, bytes = bytes.len(), "using an alternative guest core");
+            Ok(std::borrow::Cow::Owned(bytes))
+        }
+        Err(_) => Ok(std::borrow::Cow::Borrowed(CORE)),
+    }
+}
 const EVAL_TYPE_GLOBAL: i32 = 0;
 /// One epoch tick; the deadline callback checks the watchdog flag each tick.
 const EPOCH_TICK: Duration = Duration::from_millis(10);
@@ -456,7 +470,8 @@ impl WasmEngine {
     async fn build_image(&self, code: &Code) -> Result<Vec<u8>, EngineError> {
         let compile = |e: wasmtime::Error| EngineError::Compile(e.to_string());
         let wizer = Wizer::new();
-        let (context, instrumented) = wizer.instrument(CORE).map_err(compile)?;
+        let core = core_bytes()?;
+        let (context, instrumented) = wizer.instrument(&core).map_err(compile)?;
         let module = Module::new(&self.builder, &instrumented).map_err(compile)?;
         let linker = link(&self.builder)?;
         let bindings: Arc<dyn HostBindings> = Arc::new(RefusingBindings);
@@ -817,7 +832,9 @@ impl Engine for WasmEngine {
             .and_then(|e| e.into_memory())
             .ok_or_else(|| EngineError::Instantiate("image has no memory".into()))?;
         store.data_mut().memory = Some(memory);
+        let t2 = std::time::Instant::now();
         let mut guest = Guest::from_exports(instance, memory, image.exports.clone());
+        let t3 = std::time::Instant::now();
         let mut seed = [0u8; 8];
         let _ = getrandom::fill(&mut seed);
         guest
@@ -831,13 +848,25 @@ impl Engine for WasmEngine {
         tracing::debug!(
             store_ms = (t1 - t0).as_secs_f64() * 1000.0,
             instantiate_and_seed_ms = t1.elapsed().as_secs_f64() * 1000.0,
+            memory_bytes = memory.data_size(&store),
             "wasm world instantiate"
         );
         let _ = &image.image_sha256;
+        let phases = if super::profiling() {
+            vec![
+                ("instantiate.store", t1 - t0),
+                ("instantiate.instance", t2 - t1),
+                ("instantiate.exports", t3 - t2),
+                ("instantiate.seed", t3.elapsed()),
+            ]
+        } else {
+            Vec::new()
+        };
         Ok(Box::new(WasmWorld {
             store,
             guest,
             interrupt,
+            phases,
         }))
     }
 
@@ -885,6 +914,19 @@ pub struct WasmWorld {
     store: Store<HostData>,
     guest: Guest,
     interrupt: Arc<AtomicBool>,
+    phases: Vec<(&'static str, Duration)>,
+}
+
+impl WasmWorld {
+    fn account(&mut self, name: &'static str, since: std::time::Instant) {
+        if super::profiling() {
+            let d = since.elapsed();
+            match self.phases.iter_mut().find(|(k, _)| *k == name) {
+                Some((_, total)) => *total += d,
+                None => self.phases.push((name, d)),
+            }
+        }
+    }
 }
 
 impl WasmWorld {
@@ -917,11 +959,15 @@ impl WasmWorld {
 #[async_trait]
 impl WorldInstance for WasmWorld {
     async fn invoke(&mut self, index: usize, input_json: &str) -> Result<(), EngineError> {
+        let t = std::time::Instant::now();
         let code = format!("__usai.invoke({index}, {});", js_string(input_json));
         self.guest
             .eval(&mut self.store, &code, "usai:invoke")
             .await?;
+        self.account("invoke.eval", t);
+        let t = std::time::Instant::now();
         self.guest.run_jobs(&mut self.store).await?;
+        self.account("invoke.jobs", t);
         self.drain_deferred().await
     }
 
@@ -930,11 +976,15 @@ impl WorldInstance for WasmWorld {
             return Ok(false);
         };
         self.forget(native);
+        let t = std::time::Instant::now();
         let status = self
             .guest
             .complete(&mut self.store, native, if ok { 0 } else { 1 }, payload)
             .await?;
+        self.account("deliver.complete", t);
+        let t = std::time::Instant::now();
         self.guest.run_jobs(&mut self.store).await?;
+        self.account("deliver.jobs", t);
         self.drain_deferred().await?;
         Ok(status == 0)
     }
@@ -984,10 +1034,12 @@ impl WorldInstance for WasmWorld {
     }
 
     async fn outcome(&mut self) -> Result<Option<Outcome>, EngineError> {
+        let t = std::time::Instant::now();
         let text = self
             .guest
             .eval(&mut self.store, "(__usai.outcome() ?? '')", "usai:outcome")
             .await?;
+        self.account("outcome.eval", t);
         if text.is_empty() {
             return Ok(None);
         }
@@ -997,6 +1049,7 @@ impl WorldInstance for WasmWorld {
     }
 
     async fn pending(&mut self) -> Result<Pending, EngineError> {
+        let t = std::time::Instant::now();
         let text = self
             .guest
             .eval(
@@ -1005,6 +1058,7 @@ impl WorldInstance for WasmWorld {
                 "usai:pending",
             )
             .await?;
+        self.account("pending.eval", t);
         serde_json::from_str::<Pending>(&text)
             .map_err(|e| EngineError::Guest(format!("pending is not decodable: {e}")))
     }
@@ -1015,6 +1069,10 @@ impl WorldInstance for WasmWorld {
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
+    }
+
+    fn phases(&self) -> Vec<(&'static str, Duration)> {
+        self.phases.clone()
     }
 }
 

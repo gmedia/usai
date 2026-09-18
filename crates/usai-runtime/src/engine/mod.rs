@@ -25,11 +25,13 @@ pub fn by_name(name: &str, capacity: u32) -> Result<Arc<dyn Engine>, EngineError
                 ..wasm::WasmConfig::default()
             };
             // Tuning knobs for profiling; not application configuration.
-            if let Some(bytes) = std::env::var("USAI_WASM_KEEP_RESIDENT")
-                .ok()
-                .and_then(|v| v.parse().ok())
-            {
-                config.linear_memory_keep_resident = bytes;
+            if let Ok(v) = std::env::var("USAI_WASM_KEEP_RESIDENT") {
+                match parse_bytes(&v) {
+                    Some(bytes) => config.linear_memory_keep_resident = bytes,
+                    None => {
+                        tracing::warn!(value = v, "USAI_WASM_KEEP_RESIDENT ignored: not a size")
+                    }
+                }
             }
             if std::env::var("USAI_WASM_PAGEMAP_SCAN").as_deref() == Ok("0") {
                 config.pagemap_scan = false;
@@ -180,4 +182,31 @@ pub trait WorldInstance: Send {
     /// by the driver's watchdog for runaway synchronous code.
     fn interrupter(&self) -> Arc<std::sync::atomic::AtomicBool>;
     fn as_any_mut(&mut self) -> &mut dyn Any;
+    /// Accumulated time per guest phase when profiling is on
+    /// (`USAI_PROFILE=1`); empty otherwise. Names are engine-specific.
+    fn phases(&self) -> Vec<(&'static str, std::time::Duration)> {
+        Vec::new()
+    }
+}
+
+/// `16777216`, `16MiB`, `64KiB`, `2MB` → bytes.
+fn parse_bytes(v: &str) -> Option<usize> {
+    let v = v.trim();
+    let split = v.find(|c: char| !c.is_ascii_digit()).unwrap_or(v.len());
+    let (num, unit) = v.split_at(split);
+    let n: usize = num.parse().ok()?;
+    let mult = match unit.trim().to_ascii_lowercase().as_str() {
+        "" | "b" => 1,
+        "k" | "kb" | "kib" => 1024,
+        "m" | "mb" | "mib" => 1024 * 1024,
+        "g" | "gb" | "gib" => 1024 * 1024 * 1024,
+        _ => return None,
+    };
+    Some(n * mult)
+}
+
+/// Whether phase accounting is enabled for this process.
+pub fn profiling() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("USAI_PROFILE").as_deref() == Ok("1"))
 }
