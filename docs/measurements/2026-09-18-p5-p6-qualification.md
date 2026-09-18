@@ -38,6 +38,31 @@ held revisions were unbounded → `max_revisions` (8) with 409
 `too_many_revisions`; control ids accepted bare or `rev`-prefixed;
 replaced revisions now retire themselves once settled.
 
-## P6 — reliability campaigns
+## P6 — reliability campaigns (`scripts/qualification/p6/run.sh`)
 
-(filled in from the campaign log; see the section below)
+| Campaign | Result |
+|---|---|
+| revision churn, **1 000 replacements** (install + activate through the control surface, previous retires itself) under 8-client load | 262 s for the replacements; over the whole 2 019 s window **2 039 500 requests, 0 errors, 0 × 503, 0 bad seconds**, p99 median 29 ms; RSS 143 MiB after, `compiledImagesLive` 2, one revision held |
+| PostgreSQL flap ×10 (kill −9, 2 s down, 8 s up) | 87 361 ok, **0 × 5xx**, 4 121 × 503 during the outages, 19 connections quarantined in total, pool back to 8 with 5 available |
+| runtime restart loop ×10 (SIGTERM → drain → replacement) | mean 1 s per cycle; 10 `drained; ownership returned to baseline` lines; the single replica's 502 window ≈ 1.7 s per cycle (8 645 over 10) |
+| overload: 200 clients against `--max-worlds 48` | **103 258 × 503 `capacity_exhausted`, 0 × 5xx**, admitted requests p99 median 140 ms (max 472 ms); `usai_http_rejections_total{reason="capacity"}` 103 899 |
+| idle 60 s → 32-client burst | first second p50 25 ms / p99 214 ms, second p50 18 ms; 0 errors |
+| dead letter: endpoint always 500 | 5 attempts (500 ms exponential: 0.5, 1, 2, 4 s), `retried` 4, `dead` 1, five `webhook_deliveries` rows, `usai_queue.state = dead` with the error |
+| 1 h soak | started 2026-09-19 (see the soak section when appended) |
+
+What the churn campaign found before it passed: RSS grew ~2 MB per
+replacement until the container's 512 MB limit killed the process after
+~270 replacements (`dmesg: Memory cgroup out of memory: Killed process …
+(usai)`). Not a leak — `compiledImagesLive` stayed at 2 — but glibc malloc
+arenas: one per worker thread, each retaining a freed module-sized chunk
+the other arenas cannot reuse. `M_ARENA_MAX=2` at startup bounds it (300
+local replacements: 290 MB → 110 MB plateau). Also found: Wasmtime prefers
+cold slots for a new module and keeps 100 warm unused ones
+(`max_unused_warm_slots`), so churn touched ever more keep-resident pages;
+set to 0, slots used = peak concurrency.
+
+## Not done here
+
+24 h and 72 h soaks (started on the VM, results appended when they end);
+WebSocket/stream churn (covered by the runtime's connection tests, not by
+this deployment, which has none); multi-instance deployments.
