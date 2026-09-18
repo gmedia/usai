@@ -49,6 +49,11 @@ pub struct RuntimeConfig {
     /// control-surface install) must carry a valid signature by one of
     /// these keys; otherwise it is refused before serving (`signing.rs`).
     pub trusted_signers: Vec<ed25519_dalek::VerifyingKey>,
+    /// Revisions the runtime holds at once (installed + active + draining).
+    /// Each holds a compiled image (tens of MB); an orchestrator that
+    /// installs without activating or removing runs into this bound
+    /// instead of into the memory limit.
+    pub max_revisions: usize,
 }
 
 impl Default for RuntimeConfig {
@@ -64,6 +69,7 @@ impl Default for RuntimeConfig {
             cron_scheduler: true,
             queue_consumers: true,
             trusted_signers: Vec::new(),
+            max_revisions: 8,
         }
     }
 }
@@ -210,6 +216,10 @@ pub enum RuntimeError {
     UnknownWorkload(String),
     #[error("missing required environment: {0}")]
     MissingEnv(String),
+    #[error(
+        "{held} revisions are held (installed, active or draining), the bound is {max}: remove revisions that will not be activated (DELETE /revisions/<id>) before installing another"
+    )]
+    TooManyRevisions { held: usize, max: usize },
     #[error("invalid environment: {0}")]
     InvalidEnv(String),
     #[error("revision {0} did not drain within {1:?}")]
@@ -365,6 +375,13 @@ impl Runtime {
         &self,
         definition: Arc<ApplicationDefinition>,
     ) -> Result<Arc<Revision>, RuntimeError> {
+        let held = self.revisions.read().expect("revisions poisoned").len();
+        if held >= self.config.max_revisions {
+            return Err(RuntimeError::TooManyRevisions {
+                held,
+                max: self.config.max_revisions,
+            });
+        }
         let compiled = self.engine.compile(&definition).await?;
         let id = RevisionId(self.next_revision.fetch_add(1, Ordering::SeqCst));
         let app_budget = Budget::new(

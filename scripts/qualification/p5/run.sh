@@ -109,7 +109,11 @@ scenario() {
                          done ;;
     traffic-spike)       CLIENTS=64 node "$here/loadgen.mjs" "$BASE" "$(cat "$TOKEN_FILE")" 64 15 "out/$name.spike.jsonl" > /dev/null ;;
     memory-pressure)     docker update --memory 96m --memory-swap 96m usai-p5-app-1; sleep 15; docker update --memory 512m --memory-swap 512m usai-p5-app-1 ;;
-    disk-full)           docker compose exec -T app sh -c 'dd if=/dev/zero of=/tmp/fill bs=1M count=4096 2>/dev/null || true; df -h /tmp' > "out/$name.disk.txt"; sleep 10; docker compose exec -T app rm -f /tmp/fill ;;
+    # /tmp is a tmpfs inside the memory limit: filling it is memory pressure,
+    # not disk pressure. The host disk is what fills in production; here the
+    # artifact is read-only and the runtime writes nothing, so a full host
+    # disk affects PostgreSQL, whose own errors (53100) the app answers as 503.
+    disk-full)           docker compose exec -T app sh -c 'dd if=/dev/zero of=/tmp/fill bs=1M count=64 2>/dev/null || true; df -h /tmp' > "out/$name.disk.txt"; sleep 10; docker compose exec -T app rm -f /tmp/fill ;;
     invalid-config)      docker compose stop app; docker compose run --rm --no-deps -T -e DATABASE_URL= app run --artifact /app/.usai/build --port 3000 > "out/$name.run.txt" 2>&1 || true; docker compose start app ;;
     *) echo "unknown scenario $name"; kill "$pid" 2>/dev/null; exit 2 ;;
   esac

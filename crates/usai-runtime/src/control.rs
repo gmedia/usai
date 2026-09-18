@@ -84,6 +84,9 @@ fn runtime_error(e: RuntimeError) -> ControlResponse {
         RuntimeError::NotActive(..) | RuntimeError::DrainTimeout(..) => {
             error(StatusCode::CONFLICT, "invalid_state", e.to_string())
         }
+        RuntimeError::TooManyRevisions { .. } => {
+            error(StatusCode::CONFLICT, "too_many_revisions", e.to_string())
+        }
         RuntimeError::MissingEnv(_)
         | RuntimeError::InvalidEnv(_)
         | RuntimeError::InvalidDefinition(_)
@@ -166,10 +169,13 @@ impl ControlHost {
         }
     }
 
+    /// `rev12` as the runtime prints it, or the bare `12` the JSON carries.
     fn revision_id(segment: &str) -> Option<RevisionId> {
         segment
             .strip_prefix("rev")
-            .and_then(|n| n.parse().ok())
+            .unwrap_or(segment)
+            .parse()
+            .ok()
             .map(RevisionId)
     }
 

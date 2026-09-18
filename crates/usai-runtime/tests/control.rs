@@ -103,6 +103,53 @@ async fn setup() -> Option<(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn held_revisions_are_bounded_and_ids_are_accepted_bare_or_prefixed() {
+    let Some((runtime, hello, _fixture_dir, base, shutdown, client)) = setup().await else {
+        return;
+    };
+    let auth = |r: reqwest::RequestBuilder| r.bearer_auth("s3cret");
+    let max = runtime.config().max_revisions;
+    // One is active already; installing up to the bound works, one more is refused.
+    let mut last = 0;
+    for i in 1..max {
+        let r = auth(client.post(format!("{base}/revisions")))
+            .json(&json!({ "artifact": hello.to_string_lossy() }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 201, "install {i}");
+        last = r.json::<Value>().await.unwrap()["id"].as_u64().unwrap();
+    }
+    let r = auth(client.post(format!("{base}/revisions")))
+        .json(&json!({ "artifact": hello.to_string_lossy() }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 409);
+    let body: Value = r.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "too_many_revisions");
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("DELETE /revisions")
+    );
+    // The JSON carries a bare id; both spellings address the revision.
+    let r = auth(client.delete(format!("{base}/revisions/{last}")))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200, "bare id");
+    let r = auth(client.delete(format!("{base}/revisions/rev{}", last - 1)))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200, "prefixed id");
+    shutdown.cancel();
+    runtime.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn orchestrator_lifecycle_install_activate_drain_remove() {
     let Some((runtime, _hello, fixture_dir, base, shutdown, client)) = setup().await else {
         return;

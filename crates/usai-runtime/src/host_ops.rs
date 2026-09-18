@@ -62,6 +62,8 @@ impl OpOutcome {
                         | "http_connect"
                         | "http_timeout"
                 ) || code.starts_with("sql_08")
+                    // Class 53: insufficient resources (disk full, too many connections).
+                    || code.starts_with("sql_53")
                     || matches!(code.as_str(), "sql_57p01" | "sql_57p02" | "sql_57p03") =>
             {
                 503
