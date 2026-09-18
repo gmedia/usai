@@ -12,7 +12,7 @@ Product breadth             ESTABLISHED — stop broadening; depth now
 Milestone acceptance        AUDITED — docs/ACCEPTANCE-AUDIT.md: all D0–D15 items ✓ or ◐, no ✗
 Production substrate        Wasm image + pooling/COW (ADR-0016); attributed and fixed on the research VM
                             (hello 1.01 ms p50, 13.6k req/s at c=16, 0 faults); 1 h soak: 49 M requests, 0 errors, RSS +0.9 %
-Developer preview           v0.0.3 (2026-09-18) — one tag publishes binaries (linux x86_64/aarch64, macOS arm64), npm
+Developer preview           v0.0.4 (2026-09-18) — one tag publishes binaries (linux x86_64/aarch64, macOS arm64), npm
                             (@sakaladev/usai, @sakaladev/create-usai) and Docker images (runtime + dev, amd64 + arm64)
 Production ready            NO — see "Production readiness" below
 ```
@@ -151,7 +151,7 @@ capabilities (design), latency histogram in metrics, an API reference page.
 1. Propose the Wasmtime pagemap-reset patch upstream (complete traversal from `walk_end`; **paged-out dirty pages must be reset** — a freshness hole found here, `docs/measurements/…` §9). Remaining lever: the eval-based invoke/outcome/pending floor (0.24 ms of 1.05) — a core ABI change.
 2. Acceptance audit done (`docs/ACCEPTANCE-AUDIT.md`); remaining ◐: crash/restart recovery is the orchestrator's, tutorial application, first tag.
 3. Per-world CPU accounting (threat model "Open").
-5. Released: `v0.0.1`–`v0.0.3` (2026-09-18) — `release.yml` publishes binaries, npm `@sakaladev/usai` + `@sakaladev/create-usai` (Trusted Publishing/OIDC; `workflow_dispatch` for scaffolder-only fixes) and Docker images (GHCR always; Docker Hub `sakaladev/usai` when the repository has `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN`). The unscoped `usai` name is refused by npm as too similar to existing packages. Open: artifact signing (ADR-0005 follow-up).
+5. Released: `v0.0.1`–`v0.0.4` (2026-09-18) — `release.yml` publishes binaries, npm `@sakaladev/usai` + `@sakaladev/create-usai` (Trusted Publishing/OIDC; `workflow_dispatch` for scaffolder-only fixes) and Docker images (Docker Hub `sakaladev/usai`, the canonical address, and GHCR `ghcr.io/gmedia/usai` as a public mirror). v0.0.4 verified from the registries: `docker pull` on amd64 and arm64, the container smoke against Docker Hub, and the pure-npm path (`pnpm dlx @sakaladev/create-usai` → `pnpm install` → `pnpm dev` fetching the release binary → `pnpm test`). The unscoped `usai` name is refused by npm as too similar to existing packages. Open: artifact signing (ADR-0005 follow-up).
 
 ## Known gaps / debt
 
