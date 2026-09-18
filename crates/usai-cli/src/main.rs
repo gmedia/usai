@@ -74,6 +74,10 @@ enum Command {
         /// file holding one per line); USAI_REQUIRE_SIGNATURE is the environment form
         #[arg(long, env = "USAI_REQUIRE_SIGNATURE", value_delimiter = ',')]
         require_signature: Vec<String>,
+        /// Execution worlds this instance holds at once (the admission bound;
+        /// each reserves memory up front). USAI_MAX_WORLDS is the environment form
+        #[arg(long, env = "USAI_MAX_WORLDS", default_value_t = 256)]
+        max_worlds: u32,
     },
     /// Build, serve, and rebuild on change as a new revision
     Dev {
@@ -281,6 +285,7 @@ async fn main() {
             control,
             announce,
             require_signature,
+            max_worlds,
         } => {
             commands::run(
                 &root,
@@ -291,6 +296,7 @@ async fn main() {
                 control,
                 announce,
                 require_signature,
+                max_worlds,
             )
             .await
         }

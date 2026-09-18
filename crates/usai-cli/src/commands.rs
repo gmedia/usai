@@ -12,7 +12,11 @@ use usai_runtime::*;
 use crate::display;
 
 fn engine() -> Arc<dyn usai_runtime::engine::Engine> {
-    match usai_runtime::engine::from_env(RuntimeConfig::default().max_worlds) {
+    engine_with(RuntimeConfig::default().max_worlds)
+}
+
+fn engine_with(capacity: u32) -> Arc<dyn usai_runtime::engine::Engine> {
+    match usai_runtime::engine::from_env(capacity) {
         Ok(engine) => engine,
         Err(e) => {
             eprintln!("error: {e}");
@@ -164,7 +168,18 @@ async fn definition_for(
     Arc<ApplicationDefinition>,
     Arc<dyn usai_runtime::engine::Engine>,
 )> {
-    let engine = engine();
+    definition_for_with(root, artifact, RuntimeConfig::default().max_worlds).await
+}
+
+async fn definition_for_with(
+    root: &Path,
+    artifact: Option<PathBuf>,
+    capacity: u32,
+) -> Result<(
+    Arc<ApplicationDefinition>,
+    Arc<dyn usai_runtime::engine::Engine>,
+)> {
+    let engine = engine_with(capacity);
     // An explicit --artifact is served as is — no project, no config, no
     // toolchain needed (that is how a production image runs). The project's
     // own build directory is reused only while it is newer than every source
@@ -199,6 +214,7 @@ pub async fn run(
     control: Option<String>,
     announce: bool,
     require_signature: Vec<String>,
+    max_worlds: u32,
 ) -> Result<()> {
     let trusted = trusted_signers(&require_signature)?;
     if !trusted.is_empty() {
@@ -211,11 +227,13 @@ pub async fn run(
         usai_runtime::signing::verify_artifact(&dir, &trusted)
             .map_err(|e| anyhow::anyhow!("artifact refused: {e}"))?;
     }
-    let (definition, engine) = definition_for(root, artifact).await?;
+    let (definition, engine) = definition_for_with(root, artifact, max_worlds.max(1)).await?;
     let runtime = Runtime::new(
         engine,
         RuntimeConfig {
             trusted_signers: trusted,
+            max_worlds: max_worlds.max(1),
+            default_app_concurrency: max_worlds.max(1),
             ..RuntimeConfig::default()
         },
     );
