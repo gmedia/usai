@@ -217,15 +217,21 @@ async fn orchestrator_lifecycle_install_activate_drain_remove() {
             )
         })
         .collect();
-    assert!(states.contains(&(1, "draining".into())), "{states:?}");
+    // The replaced revision is draining, or — with nothing in flight — has
+    // already retired itself.
+    assert!(
+        states.contains(&(1, "draining".into())) || !states.iter().any(|(i, _)| *i == 1),
+        "{states:?}"
+    );
     assert!(states.contains(&(id, "active".into())));
 
-    // Drain and remove the old one.
+    // An explicit drain is still fine: it waits for the same thing (or
+    // answers 404 when the revision already retired itself).
     let r = auth(client.post(format!("{base}/revisions/rev1/drain")))
         .send()
         .await
         .unwrap();
-    assert_eq!(r.status(), 200);
+    assert!(r.status() == 200 || r.status() == 404, "{}", r.status());
     let revisions: Value = auth(client.get(format!("{base}/revisions")))
         .send()
         .await
@@ -290,7 +296,11 @@ async fn orchestrator_lifecycle_install_activate_drain_remove() {
         .send()
         .await
         .unwrap();
-    assert_eq!(r.status(), 200);
+    assert!(
+        r.status() == 200 || r.status() == 404,
+        "retired itself or drains now: {}",
+        r.status()
+    );
 
     // Status and stop.
     let status: Value = auth(client.get(format!("{base}/status")))

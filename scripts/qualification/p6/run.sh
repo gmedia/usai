@@ -8,7 +8,8 @@
 #   scripts/qualification/p6/run.sh idle-burst       # 60 s idle then a burst: first-second latency and errors
 #   scripts/qualification/p6/run.sh dead-letter      # a webhook endpoint that always fails: 5 attempts then dead
 #   scripts/qualification/p6/run.sh soak <seconds>   # steady load; status sampled every 60 s (memory plateau, ownership)
-set -euo pipefail
+# Campaign steps tolerate failing curls (that is the point); only the setup is strict.
+set -uo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 p5="$here/../p5"
 cd "$p5"
@@ -31,23 +32,32 @@ summarize() {
     console.log(JSON.stringify({seconds:lines.length, ok:sum("ok"), s4xx:sum("s4xx"), s5xx:sum("s5xx"), s503:sum("s503"), errors:sum("errors"), badSeconds:bad, p99median:p99s[Math.floor(p99s.length/2)], p99max:p99s[p99s.length-1]}));
   ' "$1"
 }
-load() { node "$p5/loadgen.mjs" "$BASE" "$TOKEN" "${CLIENTS:-8}" "$1" "$2" > /dev/null & echo $!; }
+# One load generator at a time: a campaign that ends early must not leave
+# its load running into the next one.
+load() {
+  if [ -f "$here/out/load.pid" ]; then kill "$(cat "$here/out/load.pid")" 2>/dev/null || true; fi
+  node "$p5/loadgen.mjs" "$BASE" "$TOKEN" "${CLIENTS:-8}" "$1" "$2" > /dev/null &
+  echo $! > "$here/out/load.pid"; echo $!
+}
 
 churn() {
   local n="${1:-200}"; local out="$here/out/churn.load.jsonl"; rm -f "$out"
   local dur=$((n * 2 + 20)); local pid; pid=$(load "$dur" "$out")
   sleep 5
   local t0=$SECONDS; local failed=0
+  local installs_refused=0
   for i in $(seq 1 "$n"); do
-    r=$(curl -s -X POST "$CONTROL/revisions" "${AUTH[@]}" -H 'content-type: application/json' -d '{"artifact":"/app/.usai/build"}' | sed 's/.*"id":"\{0,1\}\([a-z0-9]*\)"\{0,1\}.*/\1/')
-    code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$CONTROL/revisions/$r/activate" "${AUTH[@]}")
-    [ "$code" = "200" ] || failed=$((failed + 1))
-    # Retire what drained, so the runtime does not hold hundreds of revisions.
-    for old in $(curl -s "$CONTROL/revisions" "${AUTH[@]}" | grep -o '"id":"\{0,1\}rev[0-9]*"\{0,1\},"[^}]*"state":"retired"' | sed 's/"id":"\{0,1\}\(rev[0-9]*\).*/\1/'); do
-      curl -s -o /dev/null -X DELETE "$CONTROL/revisions/$old" "${AUTH[@]}"
-    done
+    local body; body=$(curl -s -X POST "$CONTROL/revisions" "${AUTH[@]}" -H 'content-type: application/json' -d '{"artifact":"/app/.usai/build"}' || true)
+    local r; r=$(echo "$body" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+    if [ -z "$r" ]; then installs_refused=$((installs_refused + 1)); echo "install $i refused: $body" | cut -c1-200; sleep 0.5; continue; fi
+    local code; code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$CONTROL/revisions/$r/activate" "${AUTH[@]}" || echo 000)
+    [ "$code" = "200" ] || { failed=$((failed + 1)); echo "activate rev$r: $code"; }
+    # Drained revisions leave the runtime by themselves (drain removes them);
+    # the previous active one is draining now — wait for it so the bound of
+    # held revisions is never the limiting factor.
+    while curl -s "$CONTROL/revisions" "${AUTH[@]}" | grep -q '"state":"draining"'; do sleep 0.05; done
   done
-  echo "$n replacements in $((SECONDS - t0)) s, $failed activation failures"
+  echo "$n replacements in $((SECONDS - t0)) s, $failed activation failures, $installs_refused installs refused"
   wait "$pid" 2>/dev/null || true
   echo "load: $(summarize "$out")"; status > "$here/out/churn.status.json"
   echo "revisions now: $(status | grep -o '"state":"[a-z]*"' | sort | uniq -c | tr '\n' ' ')"

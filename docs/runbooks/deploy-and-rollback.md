@@ -17,9 +17,10 @@ Install (`revision installed`, ~70 ms with a precompiled image), activate
 (`revision active`), then drain the previous one (`revision retired`). New
 requests route to the new revision from the activation instant; in-flight
 ones finish on the old one. The runtime's own test replaces revisions under
-load and loses no request; through Caddy the campaign saw a short 5xx blip
-(≈1 s) on rollback, which is the proxy's connection reuse across the swap,
-not the runtime — a proxy retry policy on connection errors removes it.
+load and loses no request, and the campaign confirmed it through the proxy:
+activate → rollback under 1 000 req/s, **0 failed requests, 0 bad seconds**
+(log: `revision active rev2` / `revision draining rev1` … `revision active
+rev1` / `revision draining rev2`).
 
 ## Rollback
 

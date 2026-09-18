@@ -485,8 +485,52 @@ impl Runtime {
         {
             old.set_state(RevisionState::Draining);
             tracing::info!(revision = %previous, "revision draining");
+            // The replaced revision retires by itself once its in-flight
+            // work is done, so an orchestrator that only installs and
+            // activates never accumulates draining revisions. An explicit
+            // `drain` still works (it waits for the same thing), and a
+            // re-activation (rollback) cancels the retirement.
+            if let Some(runtime) = self.self_ref.upgrade() {
+                tokio::spawn(async move { runtime.retire_when_settled(previous).await });
+            }
         }
         Ok(revision)
+    }
+
+    /// Retires a draining revision when it settles — unless it was
+    /// activated again meanwhile.
+    async fn retire_when_settled(&self, id: RevisionId) {
+        let Ok(revision) = self.revision(id) else {
+            return;
+        };
+        let supervisor = revision.services.lock().expect("services poisoned").clone();
+        if let Some(supervisor) = supervisor {
+            supervisor.stop(self.config.drain_timeout).await;
+        }
+        let wait = async {
+            loop {
+                if revision.state() != RevisionState::Draining || revision.in_flight() == 0 {
+                    break;
+                }
+                let _ =
+                    tokio::time::timeout(Duration::from_millis(200), revision.settled.notified())
+                        .await;
+            }
+        };
+        let _ = tokio::time::timeout(self.config.drain_timeout, wait).await;
+        if revision.state() != RevisionState::Draining {
+            return; // rolled back to active, or already retired by `drain`
+        }
+        if revision.in_flight() != 0 {
+            tracing::warn!(revision = %id, "draining revision did not settle within the drain timeout; it stays draining");
+            return;
+        }
+        revision.set_state(RevisionState::Retired);
+        self.revisions
+            .write()
+            .expect("revisions poisoned")
+            .remove(&id);
+        tracing::info!(revision = %id, "revision retired");
     }
 
     /// Waits until a draining (or still-active, which it first marks
