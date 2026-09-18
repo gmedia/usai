@@ -12,7 +12,8 @@ Product breadth             ESTABLISHED — stop broadening; depth now
 Milestone acceptance        AUDITED — docs/ACCEPTANCE-AUDIT.md: all D0–D15 items ✓ or ◐, no ✗
 Production substrate        Wasm image + pooling/COW (ADR-0016); attributed and fixed on the research VM
                             (hello 1.01 ms p50, 13.6k req/s at c=16, 0 faults); 1 h soak: 49 M requests, 0 errors, RSS +0.9 %
-Developer preview           READY TO TAG — release workflow in place, PG TLS done; artifact byte format not final
+Developer preview           v0.0.1 TAGGED 2026-09-18 — binaries on the GitHub release (linux x86_64/aarch64, macOS arm64),
+                            @sakaladev/usai 0.0.1 + @sakaladev/create-usai 0.0.5 on npm (Trusted Publishing); pre-alpha, not production-ready
 Production ready            NO
 ```
 
@@ -105,7 +106,7 @@ hello bundle (765 KB, zod evaluated per world) 6.52 ms/world
 1. Propose the Wasmtime pagemap-reset patch upstream (complete traversal from `walk_end`; **paged-out dirty pages must be reset** — a freshness hole found here, `docs/measurements/…` §9). Remaining lever: the eval-based invoke/outcome/pending floor (0.24 ms of 1.05) — a core ABI change.
 2. Acceptance audit done (`docs/ACCEPTANCE-AUDIT.md`); remaining ◐: crash/restart recovery is the orchestrator's, tutorial application, first tag.
 3. Per-world CPU accounting (threat model "Open").
-5. D14 alpha checklist: npm packages are `@sakaladev/usai` and `@sakaladev/create-usai` (the unscoped `usai` name is refused by npm as too similar to existing packages); first publish is manual, then Trusted Publishing on tags; binaries from the release workflow; artifact byte format + signing (ADR-0005 follow-up).
+5. Released: `v0.0.1` (2026-09-18) — binaries from `release.yml`, npm `@sakaladev/usai` + `@sakaladev/create-usai` through Trusted Publishing (OIDC, `workflow_dispatch` for scaffolder-only fixes). The unscoped `usai` name is refused by npm as too similar to existing packages. Open: artifact signing (ADR-0005 follow-up).
 
 ## Known gaps / debt
 

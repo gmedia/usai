@@ -165,7 +165,7 @@ this file when an item moves.
 | lifecycle integration tests green | ✓ | 79 Rust acceptance tests + 7 TS, both engines |
 | observability sufficient to debug failures | ✓ | D12 |
 | docs let a new developer build a real application | ✓ | `docs/GUIDE.md` §14 walks `examples/todos` (modules, migrations, seeders, typed env, HTTP CRUD, dispatched task, cron, command, tests); the example's test runs in CI |
-| published packages / binaries | ◐ | release workflow in place (`.github/workflows/release.yml`); no tag cut yet, npm token not configured |
+| published packages / binaries | ✓ | `v0.0.1` release with binaries for 3 targets; `@sakaladev/usai@0.0.1`, `@sakaladev/create-usai@0.0.5` on npm via Trusted Publishing; verified from a clean directory: `pnpm dlx @sakaladev/create-usai` → `pnpm install` → released `usai build` |
 
 ## D15 — Control surface
 
