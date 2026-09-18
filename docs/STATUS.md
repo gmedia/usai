@@ -29,17 +29,26 @@ alpha
 ## Measured — substrate (2026-09-18, release; engineering numbers)
 
 Full ledger in `docs/measurements/2026-09-18-execution-path-attribution.md`
-(research VM, 16 × Xeon E5-2680 v4). Hello on the VM: Wasm p50 2.62 ms at
-c=1, 2.5k req/s at c=16 and **no gain at c=64**; native 11.5 ms / 1.1k req/s.
-The Wasm world's 2.7 ms is fully accounted for: zod's lazy schema
-initialization repeated in every fresh world (1.64 ms), first-touch page
-faults from heap growth past the image that Wasmtime's slot reset decommits
-every world (~1.0 ms; 240 faults × ~4.4 µs), the eval-based invoke/outcome/
-pending floor (0.25 ms), slot reset (0.19 ms), create (0.02 ms). The c=16
-ceiling is TLB-shootdown IPIs from per-world `madvise`/`mprotect` (19.6 % of
-cycles in `smp_call_function_many_cond`); avoiding decommit (`USAI_WASM_PAGEMAP_SCAN=0
-USAI_WASM_KEEP_RESIDENT=16777216`) gives 4.4k req/s (×1.9) and p50 2.19 ms
-with no code change. `-Oz` vs `-O3`: 10–40 % on CPU-bound rows only.
+(research VM, 16 × Xeon E5-2680 v4). After P1 attribution and P2 fixes:
+
+```text
+hello, usai bench, VM          P1 (aded35c)              P2 (ff2688f)
+c=1                            369 req/s, p50 2.62 ms     658 req/s, p50 1.52 ms
+c=16                           2 497 req/s, p50 6.24     9 763 req/s, p50 1.58
+c=64                           2 471 req/s, p50 25.6     9 788 req/s, p50 6.45
+minor faults / request         95–315                    0
+```
+
+What P1 found and P2 fixed: zod's lazy schema initialization was paid by
+every fresh world (1.64 ms → prepared before the snapshot, callback-free);
+Wasmtime's slot reset stopped its dirty-page scan at 32 regions and
+decommitted the rest, so every world refaulted its heap and the
+`madvise`/`mprotect` storm capped multi-core scaling with TLB-shootdown IPIs
+(vendored one-line patch, 0 faults, ×3.9 at c=16); zero-delay timers cost a
+1 ms timer-wheel tick (yield); the watchdog handshake cost 4 context switches
+per request (atomic slots + ticker). The world's remaining 1.05 ms on the VM
+is accounted: 0.46 validation + handler, 0.24 eval floor, 0.13 reset, 0.18
+bookkeeping, 0.02 create.
 
 ## Done
 
@@ -62,6 +71,7 @@ with no code change. `-Oz` vs `-O3`: 10–40 % on CPU-bound rows only.
 - **`usai/test` harness** (`GOAL.md` §36): `testApp({ root })` spawns `usai run --port 0 --control 127.0.0.1:0 --announce`, drives HTTP, and invokes tasks / cron ticks / commands deterministically through the control surface's `POST /invoke`. Tested against `examples/hello` with the repository binary.
 - `usai test` runs the project's `node --test` files with `USAI_BIN` set to the running binary and the `usai` export condition (workspace checkouts need no `dist/`). OpenAPI describes streams (`x-usai-stream`) and sockets (`x-usai-socket`, 101/426) explicitly. WebSocket idle timeout (`HttpConfig.socket_idle_timeout`, 300 s default, close 1008; tested). ADR-0015 records the measured per-world numbers and states that its revisit trigger has fired.
 - Measured bundle composition (release): SDK only 1.0 ms/world, `zod/mini` 1.3 ms/world, `zod` 6.6 ms/world (`tests/profile_bundles.rs`). `zod/mini` lacks Standard JSON Schema, so before-world validation and OpenAPI degrade with it; documented in the guide.
+- **P1/P2 substrate economics.** Per-phase ledger (`USAI_PROFILE=1`), workload matrix (`tests/profile_matrix.rs`, `scripts/p1-attribution.sh`), research-VM attribution; slot-reset root fix (vendored Wasmtime patch), callback-free validator preparation in the image (`runtime/prepare.ts`), zero-delay timer yield, lock-free watchdog. Hello on the VM: 1.52 ms p50, 9.8k req/s at c=16, 0 faults.
 - **P0 substrate (ADR-0016).** `engine/wasm.rs`: Wasmtime 48 + core built from pinned sources (`guest/build.sh`, `-O3`; `-Oz` reproduces the research core byte for byte) + Wizer image per definition + pooling/COW/pagemap_scan; guest ABI unchanged (bridge routes through the core's `__usai_test_op`); one artifact (IIFE bundle) serves both engines; compilation cache; epoch-based CPU slice. `wasm` is the default engine, `quickjs` selectable. All 71 acceptance tests pass on both. Profiling harness: `tests/profile_bundles.rs` (`--ignored`, release).
 - Design review closed 14 of 16 open questions as ADR-0001…0014; ADR-0015 records the engine decision.
 
@@ -88,10 +98,9 @@ hello bundle (765 KB, zod evaluated per world) 6.52 ms/world
 
 ## Next
 
-1. **Decide the P2 levers from the attribution** (`docs/measurements/2026-09-18-execution-path-attribution.md` §5), in order: slot reset without decommit (host config now; Wasmtime `MAX_REGIONS` upstream/patch for the real fix), validator warm-up in the image (image content — needs a decision), timer-0 → yield, one eval for outcome+pending, watchdog handshake. No new features.
+1. **Soak** (≥ 1 h at c=16 on the VM) on the new reset path, watching RSS and the gauge baseline; then propose the Wasmtime region-budget change upstream. Remaining lever: the eval-based invoke/outcome/pending floor (0.24 ms of 1.05) — a core ABI change, after the soak.
 2. Audit D0–D15 acceptance criteria item by item against `GOAL.md` §53; record gaps here.
-3. Long soak (≥ 1 h at c=16) watching RSS and gauge baseline; run with `usai bench --duration 3600`.
-4. Per-world CPU accounting (threat model "Open").
+3. Per-world CPU accounting (threat model "Open").
 5. D14 alpha checklist still open: publish `usai` / `create-usai` to npm and a `usai` binary (today the CLI is `cargo run -p usai-cli`); artifact byte format + signing (ADR-0005 follow-up); PostgreSQL TLS.
 
 ## Known gaps / debt

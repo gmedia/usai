@@ -196,3 +196,79 @@ faults), `zod` 2.10 (invoke.jobs 1.31), `zod x1` 1.99 vs `zod x10` 2.17;
 native `zod` 0.50. Earlier session numbers ("world run 4.8 ms") were taken
 while the machine ran 2.3× slower (native 18 ms vs 7.6 ms create) and are
 consistent with this ledger.
+
+## 7. After P2 (same VM, same harness, commit ff2688f)
+
+Levers applied: slot reset root fix (vendored Wasmtime patch, `MAX_REGIONS`
+32 → 1024, `vendor/README.md`), validator preparation before the snapshot
+(`packages/usai/src/runtime/prepare.ts`, callback-free), zero-delay timer →
+yield, lock-free watchdog. Heap slack (#3) and the ABI change (#5) were not
+needed.
+
+### Hello (`usai bench`, `examples/hello`, 5 s)
+
+```text
+engine    c    req/s   p50      p90     p99     before (P1)
+wasm      1      658   1.52 ms  1.54    1.59    369 req/s, 2.62 ms
+wasm     16    9 763   1.58     1.80    2.55    2 497 req/s, 6.24 ms
+wasm     64    9 788   6.45     8.70   10.82    2 471 req/s, 25.64 ms
+```
+
+c=16 throughput ×3.9; p50 at c=16 now equals p50 at c=1 — the cross-core
+interference is gone. c=64 is flat at c=16's rate because the in-process
+bench client shares the 16 cores; a separate load generator is needed to
+find the next ceiling (Q8 stays open on that point only).
+
+### Phase ledger (ms per request, n = 300)
+
+```text
+workload       total    run   invoke.eval invoke.jobs outcome pending  faults    before (total)
+empty          0.376  0.230     0.114      0.015      0.052   0.036      0        0.901
+constant       0.387  0.240     0.116      0.015      0.057   0.038      0        0.912
+loop 1e5      11.325 11.146    11.007      0.017      0.064   0.041      0       12.087
+objects 5k     6.631  6.324     6.189      0.016      0.062   0.039      0        9.271
+json 200k      1.934  1.628     1.503      0.016      0.056   0.038      0        3.105
+host x1        0.617  0.311     0.150      0.005      0.071   0.037      0        2.399
+host x8        1.061  0.750     0.154      0.005      0.195   0.039      0       10.692
+sdk-only       0.590  0.279     0.121      0.040      0.062   0.037      0        1.134
+zod/mini       0.653  0.337     0.123      0.092      0.064   0.037      0        1.522
+zod            1.052  0.713     0.128      0.457      0.067   0.039      0        2.717
+zod x1         1.507  1.148     1.018      0.016      0.058   0.038      0        2.883
+zod x10        1.779  1.420     1.283      0.017      0.062   0.041      0        3.209
+crud list      2.604  2.218     0.135      1.679      0.269   0.041      0        4.102
+crud create    2.470  2.096     0.134      1.816      0.079   0.040      0        4.232
+```
+
+`zod x1`/`zod x10` parse a schema that is *not* a declared contract (it is
+private to the handler), so it is not prepared — the row now serves as the
+control: a prepared contract (`zod`, two schemas) costs 0.46 ms of jobs
+against 1.0 ms for one unprepared first parse. What remains in the prepared
+path is the first *successful* parse (result shapes, inline caches), which
+cannot be warmed without running the validator for real.
+
+### Hardware counters per request
+
+```text
+workload   instructions   cycles   minflt  ctxsw     before
+empty         1 061 294  1 131 849   0.2    2.2    2.12 M / 2.80 M / 95 / 3.7
+zod           3 149 146  2 784 506   0.0    2.4    7.70 M / 8.15 M / 240 / 4.3
+crud list    11 849 248  7 093 552   0.1    2.9   15.23 M / 12.22 M / 302 / 4.4
+```
+
+The remaining ~2 context switches per request are the completion channel
+and the tokio hand-off, not the watchdog.
+
+### What the world's time is now (VM, `zod` row, 1.05 ms)
+
+```text
+ 0.46  prepared validation × 2 + handler (first successful parse path)
+ 0.13  invoke eval (compile the snippet + SDK dispatch)
+ 0.11  outcome + pending evals
+ 0.13  instance drop / slot reset (dirty pages only)
+ 0.02  create
+ 0.02  unaccounted
+ 0.18  outside (invoke bookkeeping, channel)
+```
+
+The eval floor (0.24 ms of 1.05) is now the largest fixed cost and the next
+candidate (#5), after a soak proves the new reset path stable.
