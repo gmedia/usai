@@ -71,7 +71,7 @@ bookkeeping, 0.02 create.
 - **`usai/test` harness** (`GOAL.md` §36): `testApp({ root })` spawns `usai run --port 0 --control 127.0.0.1:0 --announce`, drives HTTP, and invokes tasks / cron ticks / commands deterministically through the control surface's `POST /invoke`. Tested against `examples/hello` with the repository binary.
 - `usai test` runs the project's `node --test` files with `USAI_BIN` set to the running binary and the `usai` export condition (workspace checkouts need no `dist/`). OpenAPI describes streams (`x-usai-stream`) and sockets (`x-usai-socket`, 101/426) explicitly. WebSocket idle timeout (`HttpConfig.socket_idle_timeout`, 300 s default, close 1008; tested). ADR-0015 records the measured per-world numbers and states that its revisit trigger has fired.
 - Measured bundle composition (release): SDK only 1.0 ms/world, `zod/mini` 1.3 ms/world, `zod` 6.6 ms/world (`tests/profile_bundles.rs`). `zod/mini` lacks Standard JSON Schema, so before-world validation and OpenAPI degrade with it; documented in the guide.
-- **Precompiled image in the artifact** (`image.cwasm` + `image.json`, ADR-0005 addendum): install loads in ~15 ms instead of compiling for seconds on every core; ignored on any digest/engine/fingerprint mismatch; tested (match, corruption, other code).
+- **Precompiled image in the artifact** (`cache/image.cwasm` + `cache/image.json`, ADR-0005 addendum): install loads in ~15 ms instead of compiling for seconds on every core; ignored on any digest/engine/fingerprint mismatch; tested (match, corruption, other code).
 - **Tutorial application** `examples/todos` (modules, colocated migrations and seeders, typed env, HTTP CRUD with boundary contracts, dispatched task, cron, command; `usai/test` with `migrate: { seed: true }`); `docs/GUIDE.md` §14 walks it. Runs in CI against the service database.
 - **PostgreSQL TLS** (rustls, `sslmode` from the URL, roots = Mozilla + `tls.caFile`/`PGSSLROOTCERT`, always verified; refused at activation otherwise). Tested against an embedded TLS server with a private CA.
 - **`usai dev` reload acceptance** (`crates/usai-cli/tests/dev_reload.rs`): edit → new revision, no failed request during the swap; a broken edit keeps the previous revision serving. Control surface: rollback = reinstall + activate (tested).
@@ -102,7 +102,7 @@ hello bundle (765 KB, zod evaluated per world) 6.52 ms/world
 
 ## Next
 
-1. Propose both Wasmtime pagemap-reset hunks upstream (region budget; **paged-out dirty pages must be reset** — a freshness hole found here, `docs/measurements/…` §9). Remaining lever: the eval-based invoke/outcome/pending floor (0.24 ms of 1.05) — a core ABI change.
+1. Propose the Wasmtime pagemap-reset patch upstream (complete traversal from `walk_end`; **paged-out dirty pages must be reset** — a freshness hole found here, `docs/measurements/…` §9). Remaining lever: the eval-based invoke/outcome/pending floor (0.24 ms of 1.05) — a core ABI change.
 2. Acceptance audit done (`docs/ACCEPTANCE-AUDIT.md`); remaining ◐: crash/restart recovery is the orchestrator's, tutorial application, first tag.
 3. Per-world CPU accounting (threat model "Open").
 5. D14 alpha checklist still open: publish `usai` / `create-usai` to npm and a `usai` binary (today the CLI is `cargo run -p usai-cli`); artifact byte format + signing (ADR-0005 follow-up).

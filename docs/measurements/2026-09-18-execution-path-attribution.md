@@ -199,8 +199,8 @@ consistent with this ledger.
 
 ## 7. After P2 (same VM, same harness, commit ff2688f)
 
-Levers applied: slot reset root fix (vendored Wasmtime patch, `MAX_REGIONS`
-32 → 1024, `vendor/README.md`), validator preparation before the snapshot
+Levers applied: slot reset root fix (vendored Wasmtime patch: complete
+pagemap traversal, `vendor/README.md`), validator preparation before the snapshot
 (`packages/usai/src/runtime/prepare.ts`, callback-free), zero-delay timer →
 yield, lock-free watchdog. Heap slack (#3) and the ABI change (#5) were not
 needed.
@@ -297,7 +297,7 @@ run in three with guest traps in `dlfree` and out-of-bounds accesses inside
 off (memcpy reset), only with it on. Cause: Wasmtime's scan matched dirty
 pages only when `PRESENT`; a dirty page the kernel had swapped out
 (`WRITTEN | SWAPPED`) was neither reset nor decommitted, so the next world
-in that slot started with the previous world's heap bytes. The region-budget
+in that slot started with the previous world's heap bytes. The complete-traversal
 patch (§7) widened the window (upstream decommits everything after its
 32-region walk, which hid most of it), but the hole is upstream's.
 

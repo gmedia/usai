@@ -37,10 +37,13 @@ pub async fn build(root: &Path) -> Result<()> {
         out.manifest_path.display(),
         out.code_path.display()
     );
-    let image = out.manifest_path.with_file_name("image.cwasm");
+    let image = out
+        .manifest_path
+        .with_file_name("cache")
+        .join("image.cwasm");
     if image.exists() {
         println!(
-            "  {}  (precompiled for this host's engine; host cache, not identity)",
+            "  {}  (engine cache for this host; not part of the artifact's identity)",
             image.display()
         );
     }

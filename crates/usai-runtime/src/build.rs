@@ -306,6 +306,7 @@ pub async fn build(engine: &dyn Engine, options: &BuildOptions) -> Result<BuildO
     let _ = tokio::fs::remove_file(&image_path).await;
     let _ = tokio::fs::remove_file(&meta_path).await;
     if let Some(bytes) = engine.precompile(&compiled) {
+        tokio::fs::create_dir_all(image_path.parent().expect("cache dir")).await?;
         let meta = ImageMeta {
             engine: engine.name().to_owned(),
             fingerprint: engine.fingerprint(),
@@ -327,8 +328,11 @@ pub async fn build(engine: &dyn Engine, options: &BuildOptions) -> Result<BuildO
     })
 }
 
-const IMAGE_FILE: &str = "image.cwasm";
-const IMAGE_META_FILE: &str = "image.json";
+/// The engine cache lives apart from the logical artifact (`manifest.json`
+/// and `app.js`): a deployment may ship or drop the `cache/` directory
+/// without changing what the artifact is (ADR-0005).
+const IMAGE_FILE: &str = "cache/image.cwasm";
+const IMAGE_META_FILE: &str = "cache/image.json";
 
 /// What `image.cwasm` was built from and with. Any mismatch at load time
 /// means the file is ignored and the engine compiles from `app.js`.

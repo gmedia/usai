@@ -45,7 +45,7 @@
 - **CPU is accounted, not scheduled.** Every world's guest CPU time is measured (thread CPU inside guest entries: `WorkResult.cpu`, the world trace's `cpu_us`, `usai_guest_cpu_seconds_total`) and one synchronous run is bounded by the CPU slice; there is no per-workload CPU share or fairness policy yet — a handler that awaits in a tight loop is bounded by its deadline.
 - **No durable tasks.** A crash loses locally dispatched tasks (ADR-0010); the queue substrate is durable because PostgreSQL is.
 - **No rate limiting per client.** Budgets are per workload/resource, not per caller.
-- **The artifact is trusted, including `image.cwasm`.** The precompiled image is native code that `usai run` loads into the process when its digests match `image.json`; a party who can write the artifact directory can already replace `app.js` (which runs sandboxed with the application's full capabilities) and with `image.cwasm` could run native code. Deploy only artifacts you built; `USAI_PRECOMPILED=0` disables loading it; signing is the ADR-0005 follow-up.
+- **The artifact is trusted, including `cache/image.cwasm`.** The precompiled image is native code that `usai run` loads into the process when its digests match `image.json`; a party who can write the artifact directory can already replace `app.js` (which runs sandboxed with the application's full capabilities) and with `image.cwasm` could run native code. Deploy only artifacts you built; `USAI_PRECOMPILED=0` disables loading it; signing is the ADR-0005 follow-up.
 - **No protection against a malicious build step.** `usai build` runs `node` and esbuild from the project's `node_modules`; the supply chain is the project's.
 
 ## Operator checklist

@@ -1166,15 +1166,18 @@ mod tests {
         assert_eq!(hex::encode(sha2::Sha256::digest(CORE)), CORE_SHA256);
     }
 
-    /// Freshness across slot reuse when the previous world's dirty pages were
-    /// paged out: the reset must not require a page to be resident to reset
-    /// it (`vendor/wasmtime-max-regions.patch`, second hunk). With one
-    /// pooling slot the second world reuses the first's memory.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_reused_slot_is_fresh_even_after_its_pages_were_paged_out() {
+    /// Two worlds in one pooling slot: the second must see the image and
+    /// zeros where the first grew, whatever the first did to its memory.
+    /// `dirty` is applied to the first world's whole memory (image + 64
+    /// grown pages); `pageout` asks the kernel to page it out first.
+    async fn assert_slot_is_fresh_after(
+        dirty: impl Fn(&mut [u8]),
+        pageout: bool,
+        pagemap_scan: bool,
+    ) {
         let engine = WasmEngine::new(WasmConfig {
             capacity: 1,
-            pagemap_scan: std::env::var("USAI_TEST_PAGEMAP").as_deref() != Ok("0"),
+            pagemap_scan,
             ..WasmConfig::default()
         })
         .unwrap();
@@ -1213,9 +1216,9 @@ mod tests {
             per_world.len()
         );
 
-        // World 1 dirties every page of the image and 64 grown pages, then
-        // asks the kernel to page them out (needs swap to actually happen;
-        // without it the test still checks the ordinary reset).
+        // World 1 dirties memory (image and 64 grown pages), then maybe asks
+        // the kernel to page it out (needs swap to actually happen; without
+        // it the test still checks the ordinary reset).
         let mut world = engine
             .instantiate(&compiled, Arc::clone(&bindings))
             .await
@@ -1223,17 +1226,12 @@ mod tests {
         let w = world.as_any_mut().downcast_mut::<WasmWorld>().unwrap();
         w.guest.memory.grow(&mut w.store, 64).unwrap();
         let grown_len = w.guest.memory.data_size(&w.store);
-        {
-            let data = w.guest.memory.data_mut(&mut w.store);
-            for (i, b) in data.iter_mut().enumerate() {
-                *b = (i % 251) as u8 ^ 0x5a;
-            }
-        }
-        let base = w.guest.memory.data_ptr(&w.store);
-        // SAFETY: the range is this instance's linear memory, which stays
-        // mapped for the instance's lifetime; MADV_PAGEOUT only affects
-        // residency, never contents.
-        if std::env::var("USAI_TEST_PAGEOUT").as_deref() != Ok("0") {
+        dirty(w.guest.memory.data_mut(&mut w.store));
+        if pageout {
+            let base = w.guest.memory.data_ptr(&w.store);
+            // SAFETY: the range is this instance's linear memory, which stays
+            // mapped for the instance's lifetime; MADV_PAGEOUT only affects
+            // residency, never contents.
             let rc = unsafe { libc::madvise(base.cast(), grown_len, libc::MADV_PAGEOUT) };
             assert_eq!(rc, 0, "madvise: {}", std::io::Error::last_os_error());
         }
@@ -1268,5 +1266,42 @@ mod tests {
             "grown page {:?} carried the previous world's bytes",
             dirty.map(|i| i / 4096)
         );
+    }
+
+    fn scribble_everything(data: &mut [u8]) {
+        for (i, b) in data.iter_mut().enumerate() {
+            *b = (i % 251) as u8 ^ 0x5a;
+        }
+    }
+
+    /// One byte every other page: hundreds of disjoint dirty regions, far
+    /// more than the scan's per-call buffer, so the traversal must resume.
+    fn scribble_fragmented(data: &mut [u8]) {
+        for page in (0..data.len() / 4096).step_by(2) {
+            data[page * 4096 + 17] = 0xa5;
+        }
+    }
+
+    /// Freshness across slot reuse when the previous world's dirty pages were
+    /// paged out: the reset must not require a page to be resident to reset
+    /// it (`vendor/wasmtime-pagemap-reset.patch`).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_reused_slot_is_fresh_even_after_its_pages_were_paged_out() {
+        assert_slot_is_fresh_after(scribble_everything, true, true).await;
+    }
+
+    /// Fragmented dirty sets are reset completely: the scan resumes from
+    /// `walk_end` instead of stopping at a fixed region count.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_reused_slot_is_fresh_after_fragmented_writes() {
+        assert_slot_is_fresh_after(scribble_fragmented, false, true).await;
+        assert_slot_is_fresh_after(scribble_fragmented, true, true).await;
+    }
+
+    /// The memcpy reset path (no pagemap scan) keeps the same property.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_reused_slot_is_fresh_without_the_pagemap_scan() {
+        assert_slot_is_fresh_after(scribble_everything, true, false).await;
+        assert_slot_is_fresh_after(scribble_fragmented, false, false).await;
     }
 }

@@ -196,7 +196,7 @@ Deployment settings (port, budgets, limits) are runtime flags and environment, n
 ## 12. Operate
 
 ```bash
-usai build                     # .usai/build/{manifest.json, app.js, image.cwasm}  (the image: precompiled for this host; install loads it in ms)
+usai build                     # .usai/build/{manifest.json, app.js} + cache/image.cwasm (engine cache for this host; install loads it in ms, drop it and install compiles)
 usai run --artifact .usai/build --port 8080 --status
 curl :8080/_usai/status        # runtime truth: gauges, revisions, services, tasks, resources
 curl :8080/_usai/metrics       # Prometheus text

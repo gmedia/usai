@@ -285,7 +285,7 @@ async fn precompiled_image_is_loaded_when_it_matches_and_ignored_otherwise() {
     )
     .await
     .unwrap();
-    assert!(dir.join("image.cwasm").exists() && dir.join("image.json").exists());
+    assert!(dir.join("cache/image.cwasm").exists() && dir.join("cache/image.json").exists());
     let definition = load_artifact(&dir).await.unwrap();
     let pre = definition.precompiled().expect("attached when it matches");
     assert_eq!(pre.engine, "wasm");
@@ -312,7 +312,7 @@ async fn precompiled_image_is_loaded_when_it_matches_and_ignored_otherwise() {
 
     // A corrupted image is ignored (digest), and the artifact still installs
     // by compiling.
-    let image = dir.join("image.cwasm");
+    let image = dir.join("cache/image.cwasm");
     let mut bytes = std::fs::read(&image).unwrap();
     let mid = bytes.len() / 2;
     bytes[mid] ^= 0xff;
@@ -337,7 +337,7 @@ async fn precompiled_image_is_loaded_when_it_matches_and_ignored_otherwise() {
     // An image built from other code is ignored too.
     bytes[mid] ^= 0xff;
     std::fs::write(&image, &bytes).unwrap();
-    let meta_path = dir.join("image.json");
+    let meta_path = dir.join("cache/image.json");
     let mut meta: Value = serde_json::from_slice(&std::fs::read(&meta_path).unwrap()).unwrap();
     meta["codeSha256"] = json!("0000");
     std::fs::write(&meta_path, serde_json::to_vec(&meta).unwrap()).unwrap();
