@@ -943,6 +943,19 @@ async fn status_and_metrics_derive_from_runtime_truth() {
     );
     assert!(text.contains("usai_http_responses_total{class=\"2xx\"} 1"));
     assert!(text.contains("usai_resource{kind=\"cache.local\",name=\"hits\",metric=\"max\"}"));
+    // Round two: why requests were refused, and how long they took.
+    assert!(
+        text.contains("usai_http_rejections_total{reason=\"validation\"} 1"),
+        "{text}"
+    );
+    assert!(text.contains("usai_http_rejections_total{reason=\"capacity\"} 0"));
+    assert!(text.contains("# TYPE usai_http_request_seconds histogram"));
+    assert!(
+        text.contains("usai_http_request_seconds_bucket{le=\"+Inf\"} 2"),
+        "{text}"
+    );
+    assert!(text.contains("usai_http_request_seconds_count 2"));
+    assert_eq!(status["http"]["rejections"], json!([0, 1, 0, 0, 0, 0]));
     // Not served on a host without the flag.
     let (status_code, _) = s.get("/_usai/metrics").await;
     assert_eq!(status_code, 404);

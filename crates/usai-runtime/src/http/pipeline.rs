@@ -295,7 +295,12 @@ impl HttpHost {
         match self.pipeline(request).await {
             Ok(mut response) => {
                 if !internal {
-                    self.stats.record(response.status().as_u16(), false);
+                    self.stats.record_with(
+                        response.status().as_u16(),
+                        false,
+                        Some(started.elapsed()),
+                        None,
+                    );
                 }
                 if self.config.expose_diagnostics
                     && let Ok(value) = HeaderValue::from_str(&format!(
@@ -309,7 +314,17 @@ impl HttpHost {
             }
             Err(reply) => {
                 if !internal {
-                    self.stats.record(reply.status.as_u16(), reply.before_world);
+                    let reason = reply.before_world.then(|| {
+                        crate::observability::Rejection::from_code(
+                            reply.body["error"]["code"].as_str().unwrap_or(""),
+                        )
+                    });
+                    self.stats.record_with(
+                        reply.status.as_u16(),
+                        reply.before_world,
+                        Some(started.elapsed()),
+                        reason,
+                    );
                 }
                 json_response(reply.status, &reply.body)
             }

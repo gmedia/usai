@@ -234,6 +234,19 @@ pub struct RevisionStatus {
     pub state: RevisionState,
     pub in_flight: u64,
     pub services: Vec<services::ServiceStatus>,
+    /// Queue consumers of this revision: messages claimed, done, retried,
+    /// dead-lettered, refused by contract.
+    pub queue: QueueCounters,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueCounters {
+    pub claimed: u64,
+    pub done: u64,
+    pub retried: u64,
+    pub dead: u64,
+    pub invalid: u64,
 }
 
 pub struct Runtime {
@@ -789,6 +802,17 @@ impl Runtime {
                 state: r.state(),
                 in_flight: r.in_flight(),
                 services: r.services(),
+                queue: {
+                    use std::sync::atomic::Ordering;
+                    let q = &r.queue_stats;
+                    QueueCounters {
+                        claimed: q.claimed.load(Ordering::Relaxed),
+                        done: q.done.load(Ordering::Relaxed),
+                        retried: q.retried.load(Ordering::Relaxed),
+                        dead: q.dead.load(Ordering::Relaxed),
+                        invalid: q.invalid.load(Ordering::Relaxed),
+                    }
+                },
             })
             .collect();
         RuntimeStatus {
