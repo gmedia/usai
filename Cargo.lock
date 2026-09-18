@@ -3547,7 +3547,7 @@ dependencies = [
 
 [[package]]
 name = "usai-cli"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "anyhow",
  "clap",
@@ -3567,7 +3567,7 @@ dependencies = [
 
 [[package]]
 name = "usai-runtime"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "anyhow",
  "argon2",
