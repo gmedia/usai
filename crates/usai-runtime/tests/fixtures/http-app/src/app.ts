@@ -42,6 +42,12 @@ export const me = http.get("/me", { auth: authenticated }, async (ctx) => ctx.au
 export const boom = http.get("/boom", {}, async () => { throw new Error("kaboom with secret detail"); });
 export const badShape = http.get("/bad-shape", { response: User }, async () => ({ id: "nope" }) as never);
 export const detach = http.get("/detach", {}, async () => { setTimeout(() => {}, 5000); return { ok: true }; });
+// A write that was not awaited: the handler answers success over an
+// operation the runtime is about to cancel — that answer must not commit.
+export const detachWrite = http.post("/detach-write", { resources: [hits] }, async (ctx) => {
+  void (ctx.resources["hits"] as { increment(k: string): Promise<number> }).increment("detached");
+  return { ok: true };
+});
 export const slow = http.get("/slow", { timeout: "200ms" }, async (ctx) => { await ctx.sleep("10s"); return { ok: true }; });
 export const noContent = http.delete("/users/:id", {}, async () => http.noContent());
 // Using a resource without declaring it is named, not `undefined`.
@@ -241,7 +247,7 @@ export default defineApp({
   name: "http-fixture",
   modules: [defineModule({ name: "users", workloads: [getUser, createUser, noContent] })],
   workloads: [
-    counter, persistent, me, boom, badShape, detach, slow, echoQuery, webhook, sendReceipt,
+    counter, persistent, me, boom, badShape, detach, detachWrite, slow, echoQuery, webhook, sendReceipt,
     record, slowTask, failingTask, invokesSlow, order, auditRead, badDispatch, everySecond, overlapping, nightly, reconcile,
     ledgerSync, serviceLocalRead, events, endless, plainStream, chat, socketLocalRead, memoryHog, crashy, inspectUrl, busy, undeclared,
     egress, egressOther, egressSlow, egressBytes, noFetch, cryptoRoute, passwordRoute,

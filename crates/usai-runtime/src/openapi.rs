@@ -111,7 +111,9 @@ pub fn generate_with(definition: &ApplicationDefinition, config: &crate::Runtime
 
     for workload in definition.workloads() {
         let (method, path, raw, lifetime) = match &workload.trigger {
-            Trigger::Http { method, path, raw } => (method.clone(), path.clone(), *raw, "request"),
+            Trigger::Http {
+                method, path, raw, ..
+            } => (method.clone(), path.clone(), *raw, "request"),
             Trigger::Stream { method, path } => (method.clone(), path.clone(), false, "stream"),
             Trigger::Socket { path } => ("GET".to_owned(), path.clone(), true, "connection"),
             _ => continue,
@@ -208,14 +210,23 @@ pub fn generate_with(definition: &ApplicationDefinition, config: &crate::Runtime
 
         if *raw {
             operation["description"] = json!(
-                "Raw endpoint: the handler reads exact bytes and writes an arbitrary response. Request and response contracts are not described."
+                "Raw endpoint: the handler reads exact bytes and writes the response itself. The request body is not described; the statuses below are the ones the handler declares."
             );
             operation["x-usai-raw"] = json!(true);
             operation["requestBody"] = json!({ "content": { "*/*": {} } });
-            responses.insert(
-                "default".into(),
-                json!({ "description": "Opaque response" }),
-            );
+            let declared = match &workload.trigger {
+                Trigger::Http { responses, .. } => responses.clone(),
+                _ => Default::default(),
+            };
+            if declared.is_empty() {
+                responses.insert(
+                    "default".into(),
+                    json!({ "description": "Opaque response" }),
+                );
+            }
+            for (status, description) in declared {
+                responses.insert(status.to_string(), json!({ "description": description }));
+            }
         } else {
             let c = &workload.contracts;
             let mut params: Vec<Value> = Vec::new();
@@ -396,6 +407,7 @@ mod tests {
                 method: "GET".into(),
                 path: "/users/:id".into(),
                 raw: false,
+                responses: Default::default(),
             },
             contracts: Default::default(),
             errors: vec![],

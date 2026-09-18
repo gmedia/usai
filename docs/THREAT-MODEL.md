@@ -60,13 +60,15 @@ directory is trusted like the binary itself — protect it the same way.
 ## Container envelope
 
 The runtime image (`sakaladev/usai:X.Y.Z`) runs as user `usai` (10001), ships
-no shell tooling beyond the base image, no Node or compiler, reads
+no Node or compiler (it is Debian slim, so a shell and coreutils exist —
+not distroless), reads
 configuration from the environment only, and serves a precompiled artifact
 with `USAI_COMPILE_CACHE=0`, so `--read-only` (with a `tmpfs` at `/tmp`) is the
 recommended way to run it. `docker stop` (SIGTERM) drains like Ctrl-C. The
 `-dev` image is for building and developing and is not a production base.
 Status/control surfaces stay on trusted networks in a container exactly as
-on a host.
+on a host: prefer `--status-addr` on a private port over `--status` on the
+application listener, and never publish the control port.
 
 ## Operator checklist
 

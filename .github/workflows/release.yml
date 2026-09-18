@@ -58,6 +58,13 @@ jobs:
             dist/*.tar.gz
             dist/*.sha256
           generate_release_notes: true
+      # The same binary goes into the Docker image of this architecture.
+      - uses: actions/upload-artifact@v4
+        if: startsWith(matrix.target, 'x86_64-unknown-linux') || startsWith(matrix.target, 'aarch64-unknown-linux')
+        with:
+          name: binary-${{ matrix.target }}
+          path: target/${{ matrix.target }}/dist/usai
+          retention-days: 7
 
   npm:
     runs-on: ubuntu-24.04
@@ -112,21 +119,31 @@ jobs:
         run: echo "neither NPM_TOKEN (secret) nor NPM_TRUSTED_PUBLISHING=true (variable) is set; packages were built but not published"
 
   docker:
-    # Both images, built natively per architecture (a Rust build under QEMU
-    # takes an hour) and pushed by digest; `docker-manifest` joins them.
+    # Both images, one per architecture on a native runner, from the very
+    # binary the release tarball carries (the image's usai and the tarball's
+    # usai are identical bits; the .sha256 attests both). Pushed by digest;
+    # `docker-manifest` joins the architectures.
     if: startsWith(github.ref, 'refs/tags/')
+    needs: binaries
     strategy:
       matrix:
         include:
           - runner: ubuntu-24.04
             platform: linux/amd64
             arch: amd64
+            target: x86_64-unknown-linux-gnu
           - runner: ubuntu-24.04-arm
             platform: linux/arm64
             arch: arm64
+            target: aarch64-unknown-linux-gnu
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: binary-${{ matrix.target }}
+          path: prebuilt
+      - run: chmod +x prebuilt/usai && prebuilt/usai --version && sha256sum prebuilt/usai
       - name: Version matches the tag
         run: |
           v=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)"/\1/')

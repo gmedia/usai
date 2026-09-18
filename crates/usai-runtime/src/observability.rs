@@ -78,6 +78,9 @@ pub struct HttpStats {
     /// Sum of observed latencies, in microseconds.
     pub latency_sum_us: AtomicU64,
     pub rejections: [AtomicU64; 6],
+    /// Per-workload response classes (2xx, 3xx, 4xx, 5xx). Bounded by the
+    /// set of workloads the definitions name, never by request data.
+    pub by_workload: std::sync::RwLock<std::collections::BTreeMap<String, [AtomicU64; 4]>>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -95,11 +98,36 @@ pub struct HttpSnapshot {
     pub latency_sum_seconds: f64,
     /// Rejections by reason: route, validation, auth, capacity, draining, other.
     pub rejections: [u64; 6],
+    /// Per-workload response counts: workload id → [2xx, 3xx, 4xx, 5xx].
+    pub by_workload: std::collections::BTreeMap<String, [u64; 4]>,
 }
 
 impl HttpStats {
     pub fn record(&self, status: u16, before_world: bool) {
         self.record_with(status, before_world, None, None);
+    }
+
+    /// Counts a response under the workload that produced (or refused) it.
+    pub fn record_workload(&self, workload: &str, status: u16) {
+        let class = match status {
+            200..=299 => 0,
+            300..=399 => 1,
+            400..=499 => 2,
+            _ => 3,
+        };
+        if let Some(counters) = self
+            .by_workload
+            .read()
+            .expect("stats poisoned")
+            .get(workload)
+        {
+            counters[class].fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+        let mut map = self.by_workload.write().expect("stats poisoned");
+        map.entry(workload.to_owned())
+            .or_insert_with(|| std::array::from_fn(|_| AtomicU64::new(0)))[class]
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn record_with(
@@ -154,8 +182,77 @@ impl HttpStats {
             },
             latency_sum_seconds: self.latency_sum_us.load(Ordering::Relaxed) as f64 / 1e6,
             rejections: std::array::from_fn(|i| self.rejections[i].load(Ordering::Relaxed)),
+            by_workload: self
+                .by_workload
+                .read()
+                .expect("stats poisoned")
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        k.clone(),
+                        std::array::from_fn(|i| v[i].load(Ordering::Relaxed)),
+                    )
+                })
+                .collect(),
         }
     }
+}
+
+/// Process-level facts for the metrics endpoint: resident set, start time,
+/// build info. Linux-only where the kernel exposes them; absent elsewhere.
+/// (name, help, kind, samples)
+pub type MetricFamily = (&'static str, &'static str, &'static str, Vec<(String, f64)>);
+
+pub fn process_metrics() -> Vec<MetricFamily> {
+    let mut out = Vec::new();
+    out.push((
+        "usai_build_info",
+        "Usai runtime version (label), always 1",
+        "gauge",
+        vec![(
+            format!("version=\"{}\"", crate::definition::RUNTIME_VERSION),
+            1.0,
+        )],
+    ));
+    static STARTED: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+    let started = *STARTED.get_or_init(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0)
+    });
+    out.push((
+        "usai_process_start_time_seconds",
+        "Unix time the runtime started",
+        "gauge",
+        vec![(String::new(), started)],
+    ));
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(statm) = std::fs::read_to_string("/proc/self/statm")
+            && let Some(pages) = statm
+                .split_whitespace()
+                .nth(1)
+                .and_then(|p| p.parse::<f64>().ok())
+        {
+            let page = 4096.0;
+            out.push((
+                "usai_process_resident_memory_bytes",
+                "Resident set size",
+                "gauge",
+                vec![(String::new(), pages * page)],
+            ));
+        }
+        if let Ok(dir) = std::fs::read_dir("/proc/self/fd") {
+            out.push((
+                "usai_process_open_fds",
+                "Open file descriptors",
+                "gauge",
+                vec![(String::new(), dir.count() as f64)],
+            ));
+        }
+    }
+    out
 }
 
 /// The per-world trace record (`GOAL.md` §44). Emitted at `debug`; when
@@ -398,7 +495,34 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
         "gauge",
         &tasks,
     );
+    for (name, help, kind, samples) in process_metrics() {
+        metric(&mut out, name, help, kind, &samples);
+    }
     if let Some(h) = http {
+        let by_workload: Vec<(String, f64)> = h
+            .by_workload
+            .iter()
+            .flat_map(|(w, counts)| {
+                ["2xx", "3xx", "4xx", "5xx"]
+                    .iter()
+                    .zip(counts.iter())
+                    .map(move |(class, n)| {
+                        (
+                            format!("workload=\"{}\",class=\"{class}\"", label(w)),
+                            *n as f64,
+                        )
+                    })
+            })
+            .collect();
+        if !by_workload.is_empty() {
+            metric(
+                &mut out,
+                "usai_http_workload_responses_total",
+                "HTTP responses by workload and status class (refusals after routing included)",
+                "counter",
+                &by_workload,
+            );
+        }
         metric(
             &mut out,
             "usai_http_requests_total",

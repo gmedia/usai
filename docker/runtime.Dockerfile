@@ -9,10 +9,17 @@ WORKDIR /src
 COPY . .
 # The vendored Wasmtime (vendor/) and the guest core are part of the tree;
 # nothing is fetched from the research repository.
+# A release build uses the exact binary published on the GitHub release
+# (placed at prebuilt/usai by the workflow), so the image and the tarball
+# carry identical bits; a local build compiles from the tree.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
-    cargo build --profile dist -p usai-cli --locked \
- && install -m755 target/dist/usai /usr/local/bin/usai
+    if [ -x prebuilt/usai ]; then \
+      install -m755 prebuilt/usai /usr/local/bin/usai; \
+    else \
+      cargo build --profile dist -p usai-cli --locked \
+      && install -m755 target/dist/usai /usr/local/bin/usai; \
+    fi
 
 FROM debian:bookworm-slim
 ARG USAI_VERSION=dev

@@ -27,6 +27,11 @@ Where to look, always:
 - `GET /_usai/metrics`: the same as Prometheus text
   (`usai_http_request_seconds`, `usai_http_rejections_total{reason}`,
   `usai_resource{kind,name,metric}`, `usai_queue_messages_total`).
-- Logs: one line per event at `info`; every failed request that reached a
-  world logs `application error` with `code=` (and a source-mapped stack).
-  `RUST_LOG=debug` adds a `world trace` line per world.
+- Logs: one line per event at `info`; a request that reached a world and
+  failed with a **5xx** logs `application error` with `code=` (and a
+  source-mapped stack); 4xx answers (`not_found`, `conflict`, validation)
+  are the application's answers, counted but not logged. The application's
+  own `console.*`/`ctx.log.*` lines carry `target: "app"`. `RUST_LOG=debug`
+  adds a `world trace` line per world. `--log-format json` for shipping.
+- `GET /_usai/ready` / `GET /_usai/live` for orchestrators (readiness runs a
+  bounded probe on every bound resource).

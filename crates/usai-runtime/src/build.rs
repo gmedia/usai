@@ -388,6 +388,8 @@ pub async fn build(engine: &dyn Engine, options: &BuildOptions) -> Result<BuildO
     let meta_path = options.out_dir.join(IMAGE_META_FILE);
     let _ = tokio::fs::remove_file(&image_path).await;
     let _ = tokio::fs::remove_file(&meta_path).await;
+    // A signature from a previous build never describes this one.
+    let _ = tokio::fs::remove_file(options.out_dir.join(crate::signing::SIGNATURE_FILE)).await;
     let mut precompiled = None;
     if let Some(bytes) = engine.precompile(&compiled) {
         tokio::fs::create_dir_all(image_path.parent().expect("cache dir")).await?;

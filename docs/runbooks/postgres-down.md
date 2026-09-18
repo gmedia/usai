@@ -7,15 +7,20 @@
   resource keep answering 200. Refusals are fast: the campaign measured
   ~1 400 refusals/s at p99 < 15 ms — nothing queues behind the dead
   database.
-- Metrics: `usai_http_responses_total{class="5xx"}` rises;
+- Metrics: `usai_http_responses_total{class="5xx"}` and
+  `usai_http_workload_responses_total{workload,class="5xx"}` rise for the
+  workloads that lease the database (the others stay 2xx);
   `usai_resource{kind="postgres",name="main",metric="quarantined"}` rises by
-  the number of pooled connections that were open when the server died
-  (each dead connection is quarantined on its first failure, never reused);
-  `usai_http_request_seconds` p99 stays low.
-- Log: `application error … code="connection_closed"` (connections that were
-  open) then `code="pool_error" … cannot connect to <host:port> (from
-  DATABASE_URL) as user <user>: <reason>` for every attempt while the server
-  is down. Queue consumers log `claim failed; backing off`.
+  the number of pooled connections that were open when the server died —
+  it is a counter (quarantined ever), so alert on `increase()`, not on the
+  level; `usai_http_request_seconds` p99 stays low.
+- Log: `WARN connection quarantined: original query has no terminal outcome`
+  and `application error … code="connection_closed"` for the connections
+  that were open, then `code="pool_error" … cannot connect to <host:port> as
+  user <user>: <reason>` for every attempt while the server is down (the
+  same wording as the activation-time failure). Queue consumers log
+  `claim failed; backing off`. `GET /_usai/ready` answers 503 with
+  `resources: { main: "no connection: …" }` throughout.
 
 ## What the workloads do
 

@@ -107,11 +107,13 @@ impl CompiledRevision {
                     method,
                     path,
                     raw: true,
+                    ..
                 } => (method.as_str(), path.as_str(), RouteKind::Raw),
                 Trigger::Http {
                     method,
                     path,
                     raw: false,
+                    ..
                 } => (method.as_str(), path.as_str(), RouteKind::Contract),
                 Trigger::Stream { method, path } => {
                     (method.as_str(), path.as_str(), RouteKind::Stream)

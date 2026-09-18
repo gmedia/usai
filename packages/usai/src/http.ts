@@ -1,7 +1,7 @@
 // HTTP workload declarations (`GOAL.md` §10–§15, ADR-0003, ADR-0004).
 
 import type { AnySchema, Output } from "./schema.ts";
-import type { AuthDeclaration, HttpOptions, Method, Workload, WorkloadPolicies } from "./declarations.ts";
+import type { AuthDeclaration, DeclaredError, HttpOptions, Method, Workload, WorkloadPolicies } from "./declarations.ts";
 import type { BaseContext } from "./runtime/context.ts";
 
 /** Explicit response: status, headers, and a body the runtime encodes. */
@@ -98,6 +98,11 @@ export interface RawOptions extends WorkloadPolicies {
   method?: Method;
   auth?: AuthDeclaration;
   resources?: import("./declarations.ts").ResourceDeclaration[];
+  /** Errors the handler answers with (documented in the reference). */
+  errors?: DeclaredError[];
+  /** Statuses the handler writes, with a description each — the reference
+   * lists them instead of "opaque response". */
+  responses?: Record<number, string>;
 }
 
 type RawHandler = (ctx: RawContext) => RawResponse | HttpResponse | Promise<RawResponse | HttpResponse>;
@@ -117,9 +122,9 @@ function raw(path: string, a: RawOptions | RawHandler, b?: RawHandler): Workload
     __usai: "workload",
     kind: "http",
     name: `${m} ${path}`,
-    trigger: { method: m, path, raw: true },
+    trigger: { method: m, path, raw: true, ...(options.responses ? { responses: options.responses } : {}) },
     contracts: {},
-    errors: [],
+    errors: options.errors ?? [],
     ...(options.auth ? { auth: options.auth } : {}),
     resources: options.resources ?? [],
     dispatches: [],

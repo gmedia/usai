@@ -28,6 +28,12 @@ use crate::resource::BoundResources;
 pub struct LifecycleViolation {
     pub code: &'static str,
     pub message: String,
+    /// Whether the cut-off work included an external side effect whose
+    /// terminal state is now unknown (a resource operation, a queue
+    /// publish, an owned invoke, an open transaction) — as opposed to a
+    /// timer or a pure computation. A finite HTTP world must not answer
+    /// success over a cancelled write.
+    pub side_effects_lost: bool,
 }
 
 impl LifecycleViolation {
@@ -67,12 +73,19 @@ impl LifecycleViolation {
                  or await the work before returning."
             )
         };
+        let side_effects_lost = summary.keys().any(|k| {
+            matches!(
+                *k,
+                "resource" | "queue.publish" | "task.invoke" | "postgres.transaction"
+            )
+        });
         Self {
             code: "detached_work",
             message: format!(
                 "{kind} work `{}` ended with live asynchronous work ({live}).\n\n{outcome}",
                 workload.name
             ),
+            side_effects_lost,
         }
     }
 }
@@ -184,7 +197,15 @@ impl HostBindings for WorldShared {
                 message: message.to_owned(),
             });
         }
-        tracing::debug!(world = %self.id, level, "{message}");
+        // The application's own lines keep their level and carry a target
+        // of their own (`app`), so the default filter shows them at INFO in
+        // `dev` and `run` while the runtime's internals stay at their level.
+        match level {
+            "error" => tracing::error!(target: "app", world = %self.id, "{message}"),
+            "warn" => tracing::warn!(target: "app", world = %self.id, "{message}"),
+            "debug" => tracing::debug!(target: "app", world = %self.id, "{message}"),
+            _ => tracing::info!(target: "app", world = %self.id, "{message}"),
+        }
     }
 }
 

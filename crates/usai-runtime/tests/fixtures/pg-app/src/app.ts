@@ -48,6 +48,12 @@ export const types = task("types", { resources: [db] }, async (ctx) =>
   ),
 );
 
+// Types without a binary encoder take their text form: interval, inet,
+// and a value read back with ::text (PostgreSQL's own timestamp format).
+export const textTypes = task("text-types", { resources: [db] }, async (ctx) =>
+  d(ctx).one(`select ($1::interval)::text as i, ($2::inet)::text as ip, $3::timestamptz as t, ($4::numeric)::text as n`, ["30 days", "10.0.0.1", "2026-09-18 19:48:41.507406+07", "12.50"]),
+);
+
 export const badParams = task("bad-params", { resources: [db] }, async (ctx) => {
   try { await d(ctx).one(`select $1::int`, ["not a number"]); return "unexpected"; } catch (e) { return (e as { usai: { code: string } }).usai.code; }
 });
@@ -125,7 +131,7 @@ declare global {
 
 export default defineApp({
   name: "pg-fixture",
-  workloads: [setup, getUser, listUsers, slow, fail, tls, types, badParams, leak, txCommit, txRollback, txAbandon, txClosed, count, orders, publish, seenCount],
+  workloads: [setup, getUser, listUsers, slow, fail, tls, types, textTypes, badParams, leak, txCommit, txRollback, txAbandon, txClosed, count, orders, publish, seenCount],
   resources: [db, seen],
   env: env({ DATABASE_URL: env.url() }),
 });

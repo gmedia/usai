@@ -467,6 +467,24 @@ async fn tls_connections_verify_the_server_certificate() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn parameters_without_a_binary_encoder_take_their_text_form() {
+    let Some(f) = fixture().await else { return };
+    let r = f.runtime.run_task("text-types", json!(null)).await.unwrap();
+    let Some(Ok(value)) = r.outcome else {
+        panic!("{:?}", r.outcome)
+    };
+    let row = &value["value"];
+    assert_eq!(row["i"], "30 days", "{row}");
+    assert_eq!(row["ip"], "10.0.0.1/32");
+    assert_eq!(
+        row["t"], "2026-09-18T12:48:41.507406+00:00",
+        "PostgreSQL's own text output round-trips"
+    );
+    assert_eq!(row["n"], "12.50");
+    f.baseline();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn transactions_pin_one_connection_and_end_with_the_world() {
     let Some(f) = fixture().await else { return };
     // Commit: statements share a connection and the result is durable.

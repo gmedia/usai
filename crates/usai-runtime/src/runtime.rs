@@ -534,6 +534,27 @@ impl Runtime {
             .expect("revisions poisoned")
             .remove(&id);
         tracing::info!(revision = %id, "revision retired");
+        self.release_unbound_resources().await;
+    }
+
+    /// Resources bound by no held revision are shut down (a retired
+    /// revision's `cache.local`, a pool only it used), so status stops
+    /// listing them and their memory goes.
+    async fn release_unbound_resources(&self) {
+        let keep: Vec<crate::resource::ResourceIdentity> = self
+            .revisions
+            .read()
+            .expect("revisions poisoned")
+            .values()
+            .flat_map(|r| {
+                let bound = r.resources();
+                bound
+                    .names()
+                    .filter_map(|n| bound.get(n).map(|m| m.identity().clone()))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        self.resources.prune(&keep).await;
     }
 
     /// Waits until a draining (or still-active, which it first marks
@@ -575,6 +596,7 @@ impl Runtime {
             .expect("revisions poisoned")
             .remove(&id);
         tracing::info!(revision = %id, "revision retired");
+        self.release_unbound_resources().await;
         Ok(())
     }
 

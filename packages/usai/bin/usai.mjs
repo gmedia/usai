@@ -127,6 +127,17 @@ async function main() {
   // sent to this wrapper (docker stop, a supervisor) are forwarded once.
   process.on("SIGINT", () => {});
   for (const signal of ["SIGTERM", "SIGHUP"]) process.on(signal, () => child.kill(signal));
+  // `pnpm usai run &` then `kill $!` kills pnpm, not this wrapper: when the
+  // parent that started us is gone (ppid changes to init), drain the runtime
+  // and leave rather than survive as an orphan holding the port.
+  const parent = process.ppid;
+  const watch = setInterval(() => {
+    if (process.ppid !== parent) {
+      clearInterval(watch);
+      child.kill("SIGTERM");
+    }
+  }, 1000);
+  watch.unref();
   child.on("exit", (code, signal) => process.exit(code ?? (signal ? 128 + 1 : 1)));
   child.on("error", (error) => {
     process.stderr.write(`usai: ${error.message}\n`);

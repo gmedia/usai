@@ -432,12 +432,33 @@ async fn errors_are_contracts_and_unexpected_failures_are_sanitized() {
 async fn detached_work_is_reported_and_the_response_still_commits() {
     let Some(s) = start().await else { return };
     let (status, body) = s.get("/detach").await;
-    assert_eq!(status, 200);
+    assert_eq!(
+        status, 200,
+        "a pending timer is a diagnostic, not a lost side effect"
+    );
     assert_eq!(body["ok"], true);
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert_eq!(
         s.runtime.ledger().gauges.snapshot().detached_work_detected,
         1
+    );
+    // A write left in flight is different: the runtime cancelled it, so a
+    // 200 would report success over lost work. The request fails instead.
+    let r = s
+        .client
+        .post(format!("{}/detach-write", s.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 500);
+    let body: Value = r.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "detached_work");
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("cancelled"),
+        "{body}"
     );
     s.baseline().await;
     s.shutdown.cancel();
@@ -821,11 +842,12 @@ async fn openapi_is_generated_from_the_definition() {
         .await
         .unwrap();
     assert_eq!(served, doc);
-    // Without `Accept: text/html` (curl, a script) the docs route answers
-    // with the OpenAPI document itself, not the page's HTML shell.
+    // A client that asks for JSON gets the OpenAPI document from the docs
+    // URL; everyone else (browsers, curl) gets the page.
     let raw = s
         .client
         .get(format!("http://{addr}/_usai/docs"))
+        .header("accept", "application/json")
         .send()
         .await
         .unwrap();
@@ -838,7 +860,6 @@ async fn openapi_is_generated_from_the_definition() {
     let docs = s
         .client
         .get(format!("http://{addr}/_usai/docs"))
-        .header("accept", "text/html,application/xhtml+xml")
         .send()
         .await
         .unwrap();

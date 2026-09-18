@@ -1,0 +1,78 @@
+# A production-shaped deployment of a Usai application image (built from the
+# scaffold's Dockerfile): PostgreSQL, a one-shot migration, the runtime with
+# its private status listener, and a reverse proxy that terminates TLS and
+# never forwards /_usai/*. Adjust names, secrets and the proxy to taste.
+#
+#   docker compose -f compose.production.yaml build
+#   docker compose -f compose.production.yaml run --rm migrate
+#   docker compose -f compose.production.yaml up -d
+services:
+  postgres:
+    image: postgres:18
+    environment: { POSTGRES_USER: app, POSTGRES_PASSWORD: change-me, POSTGRES_DB: app }
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U app -d app"], interval: 2s, timeout: 2s, retries: 15 }
+    volumes: [pgdata:/var/lib/postgresql]
+    restart: unless-stopped
+
+  migrate:                      # docker compose run --rm migrate
+    build: .
+    image: my-app:local
+    command: ["db", "migrate", "--artifact", "/app/.usai/build"]
+    environment: { DATABASE_URL: "postgres://app:change-me@postgres:5432/app?sslmode=disable" }
+    depends_on: { postgres: { condition: service_healthy } }
+    read_only: true
+    tmpfs: [/tmp]
+    profiles: [ops]
+
+  app:
+    build: .
+    image: my-app:local
+    command:
+      - run
+      - --artifact
+      - /app/.usai/build
+      - --host
+      - 0.0.0.0
+      - --port
+      - "3000"
+      - --status-addr
+      - 0.0.0.0:9090          # reachable from the compose network only (not published)
+      - --max-worlds
+      - "48"                  # ≈ 48 × 8 MB keep-resident + images; fits the 512 MB limit below
+    environment:
+      DATABASE_URL: "postgres://app:change-me@postgres:5432/app?sslmode=disable"
+      # USAI_REQUIRE_SIGNATURE: <public key hex>   # refuse unsigned/tampered artifacts
+    depends_on: { postgres: { condition: service_healthy } }
+    read_only: true
+    tmpfs: [/tmp]
+    mem_limit: 512m
+    stop_grace_period: 35s    # drain bound (30 s) + margin
+    restart: unless-stopped
+    healthcheck: { test: ["CMD", "usai", "--version"], interval: 30s }   # liveness; readiness is GET :9090/_usai/ready from the proxy/orchestrator
+
+  caddy:
+    image: caddy:2
+    ports: ["80:80", "443:443"]
+    configs: [{ source: caddyfile, target: /etc/caddy/Caddyfile }]
+    volumes: [caddy_data:/data]
+    depends_on: [app]
+    restart: unless-stopped
+
+configs:
+  caddyfile:
+    content: |
+      example.com {
+        # The status listener is on :9090 inside the network; nothing under
+        # /_usai/ exists on :3000 without --status, and this denies it anyway.
+        @internal path /_usai/*
+        respond @internal 404
+        reverse_proxy app:3000 {
+          health_uri /_usai/ready
+          health_port 9090
+          health_interval 5s
+        }
+      }
+
+volumes:
+  pgdata:
+  caddy_data:

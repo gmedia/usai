@@ -41,7 +41,10 @@ pub fn banner(
     if !http.is_empty() {
         let _ = writeln!(out, "\nHTTP");
         for w in http {
-            if let Trigger::Http { method, path, raw } = &w.trigger {
+            if let Trigger::Http {
+                method, path, raw, ..
+            } = &w.trigger
+            {
                 let _ = writeln!(
                     out,
                     "  {method:<6} {path}{}",
@@ -149,7 +152,9 @@ pub fn inspect(definition: &ApplicationDefinition) -> String {
             last_kind = kind;
         }
         match &w.trigger {
-            Trigger::Http { method, path, raw } => {
+            Trigger::Http {
+                method, path, raw, ..
+            } => {
                 let _ = writeln!(
                     out,
                     "  {method} {path}{}",

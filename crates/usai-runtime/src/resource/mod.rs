@@ -153,6 +153,11 @@ pub trait ResourceManager: Send + Sync {
         cancel: CancellationToken,
     ) -> Result<serde_json::Value, ResourceError>;
     fn status(&self) -> ResourceStatus;
+    /// A bounded readiness probe (`/_usai/ready`): `Ok` when the resource
+    /// can serve an operation now. Default: ready.
+    async fn probe(&self) -> Result<(), String> {
+        Ok(())
+    }
     async fn shutdown(&self);
     fn as_any(&self) -> &dyn std::any::Any;
 }
@@ -222,6 +227,27 @@ impl ResourceRegistry {
             .expect("managers poisoned")
             .insert(identity, Arc::clone(&manager));
         Ok(manager)
+    }
+
+    /// Shuts down and forgets managers no live revision binds any more
+    /// (`keep` = the identities still bound). A manager lives as long as
+    /// some revision needs it (ADR-0011), not for the process lifetime.
+    pub async fn prune(&self, keep: &[ResourceIdentity]) {
+        let stale: Vec<Arc<dyn ResourceManager>> = {
+            let mut managers = self.managers.write().expect("managers poisoned");
+            let ids: Vec<ResourceIdentity> = managers
+                .keys()
+                .filter(|id| !keep.contains(id))
+                .cloned()
+                .collect();
+            ids.into_iter()
+                .filter_map(|id| managers.remove(&id))
+                .collect()
+        };
+        for manager in stale {
+            tracing::info!(resource = %manager.identity(), "resource released: no revision uses it");
+            manager.shutdown().await;
+        }
     }
 
     pub fn statuses(&self) -> Vec<ResourceStatus> {

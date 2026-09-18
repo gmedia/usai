@@ -31,6 +31,10 @@ async function sink() {
 test("invoicing: tenants, sessions, transactional invoices, pagination, signed retried webhooks, cron, command", { skip: url ? false : "set DATABASE_URL" }, async () => {
   const root = new URL("..", import.meta.url).pathname;
   const hooks = await sink();
+  // Unique per run: the test database may be shared with earlier runs.
+  const run = Date.now().toString(36);
+  const acme = `acme-${run}`;
+  const umbrella = `umbrella-${run}`;
   let app: Awaited<ReturnType<typeof testApp>>;
   try {
     app = await testApp({ root, env: { DATABASE_URL: url!, SESSION_TTL_HOURS: "1" }, migrate: { seed: true } });
@@ -40,12 +44,12 @@ test("invoicing: tenants, sessions, transactional invoices, pagination, signed r
   }
   try {
     // Sign up: tenant + owner in one transaction; a weak password is refused before any world exists.
-    const weak = await app.http.post("/signup", { body: { tenant: "acme", email: "ada@acme.test", password: "short" } });
+    const weak = await app.http.post("/signup", { body: { tenant: acme, email: "ada@acme.test", password: "short" } });
     assert.equal(weak.status, 400);
-    const signup = await app.http.post("/signup", { body: { tenant: "acme", email: "ada@acme.test", password: "correct horse battery staple" } });
+    const signup = await app.http.post("/signup", { body: { tenant: acme, email: "ada@acme.test", password: "correct horse battery staple" } });
     assert.equal(signup.status, 201, signup.text);
     const { token } = signup.body as { token: string };
-    const duplicate = await app.http.post("/signup", { body: { tenant: "acme", email: "bob@acme.test", password: "another long password" } });
+    const duplicate = await app.http.post("/signup", { body: { tenant: acme, email: "bob@acme.test", password: "another long password" } });
     assert.equal(duplicate.status, 409);
     const auth = { authorization: `Bearer ${token}` };
 
@@ -53,11 +57,11 @@ test("invoicing: tenants, sessions, transactional invoices, pagination, signed r
     assert.equal((await app.http.get("/me", { headers: { authorization: "Bearer nope" } })).status, 401, "unknown token");
     const me = await app.http.get("/me", { headers: auth });
     assert.equal(me.status, 200, me.text);
-    assert.equal((me.body as { tenant: string }).tenant, "acme");
+    assert.equal((me.body as { tenant: string }).tenant, acme);
 
-    const login = await app.http.post("/login", { body: { tenant: "acme", email: "ADA@acme.test", password: "correct horse battery staple" } });
+    const login = await app.http.post("/login", { body: { tenant: acme, email: "ADA@acme.test", password: "correct horse battery staple" } });
     assert.equal(login.status, 200, login.text);
-    const wrong = await app.http.post("/login", { body: { tenant: "acme", email: "ada@acme.test", password: "not the password, sorry" } });
+    const wrong = await app.http.post("/login", { body: { tenant: acme, email: "ada@acme.test", password: "not the password, sorry" } });
     assert.equal(wrong.status, 401);
 
     // Webhook endpoint for this tenant.
@@ -102,7 +106,7 @@ test("invoicing: tenants, sessions, transactional invoices, pagination, signed r
     const deleteIssued = await app.http.delete(`/invoices/${invoice.id}`, { headers: auth });
     assert.equal(deleteIssued.status, 409);
 
-    const other = await app.http.post("/signup", { body: { tenant: "umbrella", email: "eve@umbrella.test", password: "a completely different secret" } });
+    const other = await app.http.post("/signup", { body: { tenant: umbrella, email: "eve@umbrella.test", password: "a completely different secret" } });
     const otherAuth = { authorization: `Bearer ${(other.body as { token: string }).token}` };
     assert.equal((await app.http.get(`/invoices/${invoice.id}`, { headers: otherAuth })).status, 404, "tenants do not see each other");
     assert.equal(((await app.http.get("/invoices", { headers: otherAuth })).body as { items: unknown[] }).items.length, 0);
@@ -121,13 +125,13 @@ test("invoicing: tenants, sessions, transactional invoices, pagination, signed r
     // Cron: the due date is in the past → overdue, and another webhook.
     const overdue = await app.cron("mark-overdue").run<{ overdue: number }>();
     assert.equal(overdue.ok, true, JSON.stringify(overdue.error));
-    assert.equal(overdue.value.overdue, 2, "ours and the seeded demo tenant's invoice 3 (no webhook there: a no-op delivery)");
+    assert.ok(overdue.value.overdue >= 1, "ours (plus the seeded demo tenant's on a fresh database; no webhook there)");
     assert.ok(await waitFor(() => hooks.received.some((r) => r.event === "invoice.overdue"), 20_000), "overdue webhook");
 
     // Pay an overdue invoice; the command reports per tenant and status.
     const paid = await app.http.post(`/invoices/${invoice.id}/pay`, { headers: auth });
     assert.equal(paid.status, 200, paid.text);
-    const stats = await app.command("invoices:stats").run<{ rows: Array<{ tenant: string; status: string; count: number }> }>(["acme"]);
+    const stats = await app.command("invoices:stats").run<{ rows: Array<{ tenant: string; status: string; count: number }> }>([acme]);
     assert.equal(stats.ok, true, JSON.stringify(stats.error));
     assert.deepEqual(Object.fromEntries(stats.value.rows.map((r) => [r.status, r.count])), { draft: 4, paid: 1 });
 

@@ -3,11 +3,13 @@
 # artifact and nothing else — no Node, no source tree, non-root.
 FROM sakaladev/usai:__USAI_IMAGE_TAG__-dev AS build
 WORKDIR /app
-COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml* ./
+# --chown: the build stage runs as `node`; files pnpm rewrote on the host
+# (pnpm-workspace.yaml, mode 0600) must be readable here.
+COPY --chown=node:node package.json pnpm-lock.yaml* pnpm-workspace.yaml* ./
 # Frozen when a lockfile is committed (always, once the project is real).
 RUN --mount=type=cache,target=/home/node/.local/share/pnpm/store,uid=1000 \
     if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; else pnpm install; fi
-COPY . .
+COPY --chown=node:node . .
 RUN usai build
 
 FROM sakaladev/usai:__USAI_IMAGE_TAG__

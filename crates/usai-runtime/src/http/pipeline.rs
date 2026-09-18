@@ -69,6 +69,8 @@ struct Reply {
     body: Value,
     /// Decided before any world existed (routing, validation, admission).
     before_world: bool,
+    /// The workload this refusal belongs to, once routing named one.
+    workload: Option<String>,
 }
 
 impl Reply {
@@ -77,6 +79,7 @@ impl Reply {
             status,
             body: json!({ "error": { "code": code, "message": message.into() } }),
             before_world: true,
+            workload: None,
         }
     }
 
@@ -231,10 +234,24 @@ fn coerce_scalars(schema: &Value, value: &mut Value) {
     }
 }
 
+/// The validator's message, minus the parts a client cannot use: a format
+/// regex is the schema's business, "does not match the expected format" is
+/// the client's.
+fn readable_issue(error: &jsonschema::ValidationError<'_>) -> String {
+    let text = error.to_string();
+    if let Some(idx) = text.find(" does not match \"") {
+        let pattern = &text[idx + " does not match \"".len()..];
+        if pattern.len() > 24 {
+            return format!("{} does not match the expected format", &text[..idx]);
+        }
+    }
+    text
+}
+
 fn validate(slot: &str, validator: &jsonschema::Validator, value: &Value) -> Result<(), Reply> {
     let issues: Vec<Value> = validator
         .iter_errors(value)
-        .map(|e| json!({ "path": e.instance_path().to_string(), "message": e.to_string() }))
+        .map(|e| json!({ "path": e.instance_path().to_string(), "message": readable_issue(&e) }))
         .collect();
     if issues.is_empty() {
         Ok(())
@@ -335,42 +352,90 @@ impl HttpHost {
         &self.runtime
     }
 
-    async fn pipeline(&self, request: Request<Incoming>) -> Result<HttpResponse, Reply> {
-        let compiled = self.compiled()?;
-        let (parts, body) = request.into_parts();
-        let path = parts.uri.path().to_owned();
-
-        // 0. runtime-owned surfaces (never application work)
-        if self.config.serve_status && parts.method == Method::GET {
-            match path.as_str() {
+    /// The runtime-owned surfaces under `/_usai/`: status, metrics,
+    /// liveness, readiness (when `status` is on) and the API reference (when
+    /// `docs` is on). `None` for any other path. Served on the application
+    /// listener with `--status`, or on their own listener with
+    /// `--status-addr` (`serve_internal`), where they belong in production.
+    pub async fn internal(
+        &self,
+        path: &str,
+        headers: &http::HeaderMap,
+        status: bool,
+        docs: bool,
+    ) -> Option<HttpResponse> {
+        if status {
+            match path {
                 "/_usai/status" => {
                     let mut status =
                         serde_json::to_value(self.runtime.status()).unwrap_or(Value::Null);
                     status["http"] =
                         serde_json::to_value(self.stats.snapshot()).unwrap_or(Value::Null);
-                    return Ok(json_response(StatusCode::OK, &status));
+                    return Some(json_response(StatusCode::OK, &status));
                 }
                 "/_usai/metrics" => {
                     let text = crate::observability::render_prometheus(
                         &self.runtime.status(),
                         Some(&self.stats.snapshot()),
                     );
-                    return Ok(Response::builder()
-                        .status(StatusCode::OK)
-                        .header(
-                            header::CONTENT_TYPE,
-                            "text/plain; version=0.0.4; charset=utf-8",
-                        )
-                        .body(Full::new(Bytes::from(text)).boxed())
-                        .expect("static response"));
+                    return Some(
+                        Response::builder()
+                            .status(StatusCode::OK)
+                            .header(
+                                header::CONTENT_TYPE,
+                                "text/plain; version=0.0.4; charset=utf-8",
+                            )
+                            .body(Full::new(Bytes::from(text)).boxed())
+                            .expect("static response"),
+                    );
+                }
+                // Liveness: the process answers. Readiness: an active
+                // revision exists and every resource it bound answers a
+                // bounded probe (PostgreSQL: `SELECT 1` on a leased
+                // connection, 1 s). An orchestrator routes traffic on ready
+                // and restarts on live.
+                "/_usai/live" => {
+                    return Some(json_response(StatusCode::OK, &json!({ "live": true })));
+                }
+                "/_usai/ready" => {
+                    let Ok(revision) = self.runtime.active() else {
+                        return Some(json_response(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            &json!({ "ready": false, "reason": "no active revision" }),
+                        ));
+                    };
+                    let resources = revision.resources();
+                    let mut failed = serde_json::Map::new();
+                    for name in resources.names() {
+                        if let Some(manager) = resources.get(name)
+                            && let Err(reason) = tokio::time::timeout(
+                                std::time::Duration::from_secs(1),
+                                manager.probe(),
+                            )
+                            .await
+                            .unwrap_or_else(|_| Err("probe timed out after 1 s".into()))
+                        {
+                            failed.insert(name.to_owned(), Value::String(reason));
+                        }
+                    }
+                    let ready = failed.is_empty();
+                    return Some(json_response(
+                        if ready {
+                            StatusCode::OK
+                        } else {
+                            StatusCode::SERVICE_UNAVAILABLE
+                        },
+                        &json!({ "ready": ready, "revision": revision.id, "resources": failed }),
+                    ));
                 }
                 _ => {}
             }
         }
-        if self.config.serve_docs && parts.method == Method::GET {
-            match path.as_str() {
+        if docs {
+            let compiled = self.compiled().ok()?;
+            match path {
                 "/_usai/openapi.json" => {
-                    return Ok(json_response(
+                    return Some(json_response(
                         StatusCode::OK,
                         &crate::openapi::generate_with(
                             &compiled.revision.definition,
@@ -379,16 +444,17 @@ impl HttpHost {
                     ));
                 }
                 "/_usai/docs" | "/_usai/docs/" => {
-                    // A browser gets the page; anything that does not ask
-                    // for HTML (curl, a script) gets the document the page
-                    // itself renders, so `curl /_usai/docs` is not a shell.
-                    let wants_html = parts
-                        .headers
+                    // A "docs" URL answers HTML unless the client asks for
+                    // JSON explicitly; scripts that want the document use
+                    // /_usai/openapi.json (the page says so too).
+                    let wants_json = headers
                         .get(header::ACCEPT)
                         .and_then(|v| v.to_str().ok())
-                        .is_some_and(|a| a.contains("text/html"));
-                    if !wants_html {
-                        return Ok(json_response(
+                        .is_some_and(|a| {
+                            a.contains("application/json") && !a.contains("text/html")
+                        });
+                    if wants_json {
+                        return Some(json_response(
                             StatusCode::OK,
                             &crate::openapi::generate_with(
                                 &compiled.revision.definition,
@@ -396,17 +462,40 @@ impl HttpHost {
                             ),
                         ));
                     }
-                    return Ok(Response::builder()
-                        .status(StatusCode::OK)
-                        .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
-                        .body(
-                            Full::new(Bytes::from_static(crate::openapi::DOCS_HTML.as_bytes()))
-                                .boxed(),
-                        )
-                        .expect("static response"));
+                    return Some(
+                        Response::builder()
+                            .status(StatusCode::OK)
+                            .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+                            .body(
+                                Full::new(Bytes::from_static(crate::openapi::DOCS_HTML.as_bytes()))
+                                    .boxed(),
+                            )
+                            .expect("static response"),
+                    );
                 }
                 _ => {}
             }
+        }
+        None
+    }
+
+    async fn pipeline(&self, request: Request<Incoming>) -> Result<HttpResponse, Reply> {
+        let compiled = self.compiled()?;
+        let (parts, body) = request.into_parts();
+        let path = parts.uri.path().to_owned();
+
+        // 0. runtime-owned surfaces (never application work)
+        if parts.method == Method::GET
+            && let Some(response) = self
+                .internal(
+                    &path,
+                    &parts.headers,
+                    self.config.serve_status,
+                    self.config.serve_docs,
+                )
+                .await
+        {
+            return Ok(response);
         }
 
         // 1. route
@@ -442,142 +531,147 @@ impl HttpHost {
             .definition
             .workload_by_index(route.index)
             .expect("routed index exists");
+        // From here the workload is known: every outcome, refusal included,
+        // is counted under its id (`usai_http_responses_total{workload}`).
+        let workload_id = workload.id.clone();
+        let outcome: Result<HttpResponse, Reply> = async {
+            let mut query = query_to_json(parts.uri.query());
+            let mut headers = header_map_to_json(&parts.headers);
 
-        let mut query = query_to_json(parts.uri.query());
-        let mut headers = header_map_to_json(&parts.headers);
+            // Sockets: an HTTP upgrade, then one world for the connection.
+            if route.kind == RouteKind::Socket {
+                return self
+                    .upgrade_socket(
+                        parts,
+                        compiled.clone(),
+                        route.index,
+                        &workload.id,
+                        params,
+                        query,
+                        headers,
+                    )
+                    .await;
+            }
 
-        // Sockets: an HTTP upgrade, then one world for the connection.
-        if route.kind == RouteKind::Socket {
-            return self
-                .upgrade_socket(
-                    parts,
-                    compiled.clone(),
-                    route.index,
-                    &workload.id,
-                    params,
-                    query,
-                    headers,
-                )
-                .await;
-        }
+            // 2. decode
+            let content_type = parts
+                .headers
+                .get(header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            let raw_body = Limited::new(body, self.config.max_body_bytes)
+                .collect()
+                .await
+                .map_err(|_| {
+                    Reply::error(
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                        "payload_too_large",
+                        format!("body exceeds {} bytes", self.config.max_body_bytes),
+                    )
+                })?
+                .to_bytes();
+            let body_json: Value = if raw_body.is_empty() {
+                Value::Null
+            } else if route.raw() {
+                json!({ "base64": base64::engine::general_purpose::STANDARD.encode(&raw_body) })
+            } else if content_type.starts_with("application/json")
+                || content_type.ends_with("+json")
+            {
+                let parsed: Value = serde_json::from_slice(&raw_body).map_err(|e| {
+                    Reply::error(
+                        StatusCode::BAD_REQUEST,
+                        "invalid_json",
+                        format!("request body is not valid JSON: {e}"),
+                    )
+                })?;
+                json!({ "json": parsed })
+            } else if content_type.starts_with("text/")
+                || content_type.starts_with("application/x-www-form-urlencoded")
+            {
+                json!({ "text": String::from_utf8_lossy(&raw_body) })
+            } else {
+                json!({ "base64": base64::engine::general_purpose::STANDARD.encode(&raw_body) })
+            };
 
-        // 2. decode
-        let content_type = parts
-            .headers
-            .get(header::CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        let raw_body = Limited::new(body, self.config.max_body_bytes)
-            .collect()
-            .await
-            .map_err(|_| {
-                Reply::error(
-                    StatusCode::PAYLOAD_TOO_LARGE,
-                    "payload_too_large",
-                    format!("body exceeds {} bytes", self.config.max_body_bytes),
-                )
-            })?
-            .to_bytes();
-        let body_json: Value = if raw_body.is_empty() {
-            Value::Null
-        } else if route.raw() {
-            json!({ "base64": base64::engine::general_purpose::STANDARD.encode(&raw_body) })
-        } else if content_type.starts_with("application/json") || content_type.ends_with("+json") {
-            let parsed: Value = serde_json::from_slice(&raw_body).map_err(|e| {
-                Reply::error(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_json",
-                    format!("request body is not valid JSON: {e}"),
-                )
-            })?;
-            json!({ "json": parsed })
-        } else if content_type.starts_with("text/")
-            || content_type.starts_with("application/x-www-form-urlencoded")
-        {
-            json!({ "text": String::from_utf8_lossy(&raw_body) })
-        } else {
-            json!({ "base64": base64::engine::general_purpose::STANDARD.encode(&raw_body) })
-        };
-
-        // 3. boundary validation, before any world exists (C6)
-        let mut params = params;
-        if let Some(SlotValidators {
-            params: p,
-            query: q,
-            headers: h,
-            body: b,
-            schemas,
-        }) = compiled.validators.get(&route.index)
-        {
-            if let Some(v) = p {
-                if let Some(schema) = &schemas.params {
-                    coerce_scalars(schema, &mut params);
+            // 3. boundary validation, before any world exists (C6)
+            let mut params = params;
+            if let Some(SlotValidators {
+                params: p,
+                query: q,
+                headers: h,
+                body: b,
+                schemas,
+            }) = compiled.validators.get(&route.index)
+            {
+                if let Some(v) = p {
+                    if let Some(schema) = &schemas.params {
+                        coerce_scalars(schema, &mut params);
+                    }
+                    validate("params", v, &params)?;
                 }
-                validate("params", v, &params)?;
-            }
-            if let Some(v) = q {
-                if let Some(schema) = &schemas.query {
-                    coerce_scalars(schema, &mut query);
+                if let Some(v) = q {
+                    if let Some(schema) = &schemas.query {
+                        coerce_scalars(schema, &mut query);
+                    }
+                    validate("query", v, &query)?;
                 }
-                validate("query", v, &query)?;
-            }
-            if let Some(v) = h {
-                if let Some(schema) = &schemas.headers {
-                    coerce_scalars(schema, &mut headers);
+                if let Some(v) = h {
+                    if let Some(schema) = &schemas.headers {
+                        coerce_scalars(schema, &mut headers);
+                    }
+                    validate("headers", v, &headers)?;
                 }
-                validate("headers", v, &headers)?;
+                if let Some(v) = b {
+                    let candidate = body_json.get("json").cloned().unwrap_or(Value::Null);
+                    validate("body", v, &candidate)?;
+                }
             }
-            if let Some(v) = b {
-                let candidate = body_json.get("json").cloned().unwrap_or(Value::Null);
-                validate("body", v, &candidate)?;
+
+            // 4. admit
+            let admission = self
+                .runtime
+                .admit_in_flight(&compiled.revision, &workload.id)
+                .map_err(|e| match e {
+                    RuntimeError::Admission(_) => Reply::error(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "capacity_exhausted",
+                        e.to_string(),
+                    ),
+                    RuntimeError::NotActive(..) => Reply::error(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "revision_draining",
+                        e.to_string(),
+                    ),
+                    other => Reply::error(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "admission_failed",
+                        other.to_string(),
+                    ),
+                })?;
+
+            // 5. world
+            let env: BTreeMap<String, String> = (*compiled.revision.env()).clone();
+            let request = json!({
+                "method": parts.method.as_str(),
+                "path": path,
+                "url": parts.uri.to_string(),
+                "params": params,
+                "query": query,
+                "headers": headers,
+                "body": body_json,
+            });
+            if route.kind == RouteKind::Stream {
+                return self
+                    .run_stream(admission, &workload.id, compiled.clone(), request)
+                    .await;
             }
-        }
-
-        // 4. admit
-        let admission = self
-            .runtime
-            .admit_in_flight(&compiled.revision, &workload.id)
-            .map_err(|e| match e {
-                RuntimeError::Admission(_) => Reply::error(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "capacity_exhausted",
-                    e.to_string(),
-                ),
-                RuntimeError::NotActive(..) => Reply::error(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "revision_draining",
-                    e.to_string(),
-                ),
-                other => Reply::error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "admission_failed",
-                    other.to_string(),
-                ),
-            })?;
-
-        // 5. world
-        let env: BTreeMap<String, String> = (*compiled.revision.env()).clone();
-        let request = json!({
-            "method": parts.method.as_str(),
-            "path": path,
-            "url": parts.uri.to_string(),
-            "params": params,
-            "query": query,
-            "headers": headers,
-            "body": body_json,
-        });
-        if route.kind == RouteKind::Stream {
-            return self
-                .run_stream(admission, &workload.id, compiled.clone(), request)
-                .await;
-        }
-        let input = json!({ "kind": "http", "env": env, "request": request });
-        let cancel = CancellationToken::new();
-        // Dropping the request future (client gone) cancels the world.
-        let _guard = cancel.clone().drop_guard();
-        let t_execute = std::time::Instant::now();
-        let result = self
+            let input = json!({ "kind": "http", "env": env, "request": request });
+            let cancel = CancellationToken::new();
+            // Dropping the request future (client gone) cancels the world.
+            let _guard = cancel.clone().drop_guard();
+            let t_execute = std::time::Instant::now();
+            let result = self
             .runtime
             .execute(admission, input, cancel)
             .await
@@ -590,13 +684,28 @@ impl HttpHost {
                 )
             })?;
 
-        tracing::debug!(
-            execute_ms = t_execute.elapsed().as_secs_f64() * 1000.0,
-            world_ms = result.duration.as_secs_f64() * 1000.0,
-            "pipeline timing"
-        );
-        // 6. encode / commit
-        Ok(self.encode(&workload.id, result))
+            tracing::debug!(
+                execute_ms = t_execute.elapsed().as_secs_f64() * 1000.0,
+                world_ms = result.duration.as_secs_f64() * 1000.0,
+                "pipeline timing"
+            );
+            // 6. encode / commit
+            Ok(self.encode(&workload.id, result))
+        }
+        .await;
+        match outcome {
+            Ok(response) => {
+                self.stats
+                    .record_workload(&workload_id, response.status().as_u16());
+                Ok(response)
+            }
+            Err(mut reply) => {
+                self.stats
+                    .record_workload(&workload_id, reply.status.as_u16());
+                reply.workload = Some(workload_id);
+                Err(reply)
+            }
+        }
     }
 
     /// A stream world: the response commits at the first `stream.send`
@@ -823,6 +932,23 @@ impl HttpHost {
                 }
                 return json_response(StatusCode::INTERNAL_SERVER_ERROR, &body);
             }
+        }
+        // A handler that returned while a write (or another external side
+        // effect) was still in flight produced an answer the runtime cannot
+        // stand behind: the operation was cancelled with the world, so a
+        // 200 here would report success over lost work. Timers and other
+        // pure pending work still let the response commit (with the
+        // diagnostic in the log and, in dev, the header).
+        if let Some(violation) = result
+            .violations
+            .iter()
+            .find(|v| v.code == "detached_work" && v.side_effects_lost)
+        {
+            let mut body = json!({ "error": { "code": "detached_work", "message": "the handler returned before an operation it started had completed; that operation was cancelled and its result is unknown" } });
+            if self.config.expose_diagnostics {
+                body["error"]["detail"] = Value::String(violation.message.clone());
+            }
+            return json_response(StatusCode::INTERNAL_SERVER_ERROR, &body);
         }
         match result.outcome {
             Some(Ok(value)) => match serde_json::from_value::<GuestHttpOutput>(value) {

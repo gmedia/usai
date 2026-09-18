@@ -32,6 +32,10 @@ pub enum Trigger {
         path: String,
         #[serde(default)]
         raw: bool,
+        /// Raw endpoints only: the statuses the handler writes, with a
+        /// description each, so the reference can list them.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        responses: BTreeMap<u16, String>,
     },
     Task,
     Cron {
@@ -618,6 +622,7 @@ mod tests {
                     method: "GET".into(),
                     path: "/x".into(),
                     raw: false,
+                    responses: Default::default(),
                 },
                 contracts: Contracts::default(),
                 errors: vec![],

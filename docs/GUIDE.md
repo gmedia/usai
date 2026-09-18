@@ -83,7 +83,7 @@ The full API surface is the SDK's type declarations — `node_modules/@sakaladev
 ```text
 my-app/
 ├── src/app.ts          # the application root: defineApp({...})
-├── usai.config.ts      # maps structure (entry, migration/seeder globs); no semantics
+├── usai.config.ts      # defineConfig({ app: "./src/app.ts", database: { migrations: { include: ["./src/**/migrations/*.sql"] }, seeders: { include: ["./src/**/seeders/*.ts"] } } })
 ├── package.json
 └── tsconfig.json
 ```
@@ -136,6 +136,10 @@ export const createUser = http.post("/users", { body: NewUser, response: { 201: 
 - Raw endpoints: `http.raw("/webhook", async (ctx) => http.rawResponse(200, "ok"))` — exact bytes via `ctx.request.bytes()`, no contracts, documented as opaque.
 - Auth is a declared boundary: `const authed = auth.bearer({ resolve: async (ctx, token) => … })`, then `http.get("/me", { auth: authed }, async (ctx) => ctx.auth)`.
 
+An auth `resolve` runs **inside the request's world** with the workload's declared `resources` and `env` (`ctx.resources["main"]` works there — ADR-0004): a session lookup is one query, and `usai inspect` shows `auth: <name> (resolved in world)`.
+
+Raw endpoints (`http.raw`, exact bytes in — webhooks with signed bodies) can still declare `errors` and `responses: { 202: "accepted", 401: "bad signature" }` so the reference lists what the handler answers.
+
 ## 5. Tasks: owned or transferred
 
 ```ts
@@ -177,7 +181,9 @@ export const listUsers = http.get("/users", { response: { 200: z.array(User) }, 
 export default defineApp({ workloads: [listUsers], resources: [db], env: env({ DATABASE_URL: env.url() }) });
 ```
 
-- `sql.query(text, params)` → rows; `sql.one(...)` → row or null; `sql.execute(...)` → affected count. Parameters are typed from the prepared statement (`$1::int`, uuid, jsonb, timestamptz, arrays …) and encoded by the runtime, so a string that is not a valid uuid/timestamp for its slot is an `invalid_param` error (500) from the handler's point of view — validate boundary input with the schema first (`z.string().uuid()`), and keep timestamps as the ISO-8601 strings the driver returns (a `::text` cast produces PostgreSQL's own format, which does not round-trip).
+- **Row types.** Rows come back as `Record<string, unknown>`; a typed response contract makes the compiler ask for more. Say what a row is once, from the schema you already have: `type TaskRow = z.infer<typeof Task>; sql.one<TaskRow>(…)`. Column aliases (`total_cents::int as "totalCents"`) shape the row to the contract.
+- **Errors from SQL** arrive as `UsaiOperationError` with `err.usai.code` = `sql_<SQLSTATE>` (`sql_23505` for a unique violation, `sql_23503` foreign key, `sql_40001` serialization failure) and the server's message; connection loss is `connection_closed`, a full pool `resource_exhausted`. Catch by code: `if (isUsaiError(e) && e.usai.code === "sql_23505") throw errors.conflict("email taken")`.
+- `sql.query(text, params)` → rows; `sql.one(...)` → row or null; `sql.execute(...)` → affected count. Parameters are typed from the prepared statement (`$1::int`, uuid, jsonb, timestamptz, arrays, enums …) and encoded by the runtime; every other type (`interval`, `inet`, ranges, domains …) takes a string in its text form, parsed server-side like `'30 days'::interval`. A string that is not a valid uuid/timestamp for its slot is an `invalid_param` error (500) from the handler's point of view — validate boundary input with the schema first (`z.string().uuid()`). Timestamps accept ISO-8601 and PostgreSQL's own text output.
 - `sql.transaction(async (tx) => { … })` pins one connection for the callback: `tx.query/one/execute` run in one transaction, committed when the callback returns, rolled back when it throws (the error is rethrown). A handler that returns with the transaction still open is a lifecycle error — the runtime rolls back on its behalf and says so.
 - Each operation leases one pooled connection. A connection is reused only after a **terminal** outcome; cancellation waits for the server to confirm; anything ambiguous is quarantined and replaced. Session state is reset between worlds.
 - TLS: put `sslmode=require` in the URL (`prefer` is the default, `disable` turns it off). The server certificate is **always verified** — against Mozilla's roots plus the PEM bundle in `postgres("main", { tls: { caFile } })` or the `PGSSLROOTCERT` environment variable (private CAs, managed-database roots). There is no encrypted-but-unverified mode; a certificate that does not verify fails **activation**, not the first request.
@@ -284,11 +290,19 @@ usai bench --path /users -c 16 -d 30   # engineering load test
 
 Ctrl-C drains in-flight work with a bound; a second Ctrl-C forces exit. Read `docs/THREAT-MODEL.md` before exposing anything.
 
+Health: `GET /_usai/live` (the process answers) and `GET /_usai/ready` (an active revision exists and every bound resource answers a 1 s probe — PostgreSQL runs `SELECT 1` on a leased connection; 503 names the failing resource). Route traffic on ready, restart on live.
+
+Where the `/_usai/*` surfaces listen: `--status` puts status, metrics, live, ready and the docs on the **application** listener (development, trusted networks — a public proxy must then deny `/_usai/*`); `--status-addr 127.0.0.1:9090` (`USAI_STATUS_ADDR`) serves them on a **separate** listener instead, which is what production wants (scrape and probe a private port, expose nothing).
+
+Logs: `--log-format json` (global flag) writes one JSON object per line with `timestamp`, `level` and fields, on stderr; the application's `console.*`/`ctx.log.*` lines carry `target: "app"` and appear at INFO. Results of one-shot commands go to stdout.
+
 Deploying with Docker: build the scaffold's `Dockerfile`, run it with
 `DATABASE_URL` and the rest of the declared environment (`usai run` never
 reads `.env`), `--read-only --tmpfs /tmp` works; `docker stop` sends SIGTERM,
-which drains with the same bound as Ctrl-C. A compose file for app +
-PostgreSQL is the commented block in the scaffold's `compose.yaml`.
+which drains with the same bound as Ctrl-C. A production compose file (PostgreSQL, a one-shot
+`migrate` service, the app with `--status-addr`, a proxy) is
+`docs/deploy/compose.production.yaml`; the scaffold's `compose.yaml` is the
+development path.
 
 Signed artifacts: `usai keygen` makes an Ed25519 key; `usai build --sign usai-signing.key` (or `USAI_SIGNING_KEY`) writes `signature.json` — the SHA-256 of every file in the artifact, the native `cache/image.cwasm` included, signed. A runtime started with `usai run --artifact … --require-signature <public key>` (or `USAI_REQUIRE_SIGNATURE`, a hex key or a file with one key per line) refuses, before listening, an unsigned artifact, one signed by an untrusted key, any changed file, and any file the signature does not cover; the control surface applies the same rule to installs. Keep the private key in CI's secret store and the public keys in the deployment's environment.
 
@@ -319,6 +333,8 @@ test("users", async () => {
 ```
 
 `testApp` needs the `usai` binary (`USAI_BIN` or on `PATH`) and the project's declared environment (pass `env: { DATABASE_URL }`). With `migrate: true` (or `migrate: { seed: true }`) it runs `usai db migrate` / `usai db seed` first — for a throwaway database. Lifecycle-specific tests are ordinary: mutate in one request, read in the next, and assert the mutation is gone.
+
+`app.http.post(path, { body })` sends an object as JSON (`content-type: application/json`) and a string byte-for-byte (for signed webhook bodies: sign the string, send the string). Every call returns `{ status, headers, body, text }` — `body` is parsed JSON when the response is JSON.
 
 ## 16. A realistic application: `examples/todos`
 

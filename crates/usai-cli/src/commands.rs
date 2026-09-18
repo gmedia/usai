@@ -211,6 +211,7 @@ pub async fn run(
     port: u16,
     artifact: Option<PathBuf>,
     status: bool,
+    status_addr: Option<String>,
     control: Option<String>,
     announce: bool,
     require_signature: Vec<String>,
@@ -224,8 +225,14 @@ pub async fn run(
                 "--require-signature needs --artifact <dir>: only a built, signed artifact can be verified"
             ),
         };
-        usai_runtime::signing::verify_artifact(&dir, &trusted)
+        let record = usai_runtime::signing::verify_artifact(&dir, &trusted)
             .map_err(|e| anyhow::anyhow!("artifact refused: {e}"))?;
+        tracing::info!(
+            artifact = %dir.display(),
+            key = &record.public_key[..16],
+            files = record.files.len(),
+            "artifact signature verified"
+        );
     }
     let (definition, engine) = definition_for_with(root, artifact, max_worlds.max(1)).await?;
     let runtime = Runtime::new(
@@ -296,7 +303,17 @@ pub async fn run(
     } else {
         None
     };
-    serve_until_signal(runtime, host, port, false, status, stop_requested, on_ready).await
+    serve_until_signal(
+        runtime,
+        host,
+        port,
+        false,
+        status,
+        status_addr,
+        stop_requested,
+        on_ready,
+    )
+    .await
 }
 
 pub async fn graph(root: &Path) -> Result<()> {
@@ -305,12 +322,14 @@ pub async fn graph(root: &Path) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn serve_until_signal(
     runtime: Arc<Runtime>,
     host: &str,
     port: u16,
     expose_diagnostics: bool,
     serve_status: bool,
+    status_addr: Option<String>,
     stop_requested: Option<CancellationToken>,
     on_ready: Option<Box<dyn FnOnce(String) + Send>>,
 ) -> Result<()> {
@@ -329,8 +348,24 @@ async fn serve_until_signal(
             ..HttpConfig::default()
         },
     );
-    let quiet = on_ready.is_some();
+    // A harness (`--announce`) wants a silent exit; `dev` narrates like `run`.
+    let quiet = on_ready.is_some() && !expose_diagnostics;
     let shutdown = CancellationToken::new();
+    // The private surfaces on their own listener, when asked.
+    let http_for_internal = Arc::clone(&http);
+    if let Some(addr) = status_addr {
+        let addr: std::net::SocketAddr = addr.parse().context("invalid --status-addr")?;
+        let token = shutdown.clone();
+        tokio::spawn(async move {
+            if let Err(e) = usai_runtime::http::serve_internal(http_for_internal, addr, token, |bound| {
+                tracing::info!(%bound, "status listener: /_usai/status, /_usai/metrics, /_usai/live, /_usai/ready, /_usai/docs");
+            })
+            .await
+            {
+                tracing::error!(error = %e, "status listener failed");
+            }
+        });
+    }
     let server = {
         let shutdown = shutdown.clone();
         let (tx, rx) = tokio::sync::oneshot::channel();
@@ -396,16 +431,16 @@ async fn serve_until_signal(
     };
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {}
-        _ = terminate.recv() => { if !quiet { eprintln!("SIGTERM received"); } }
-        _ = parent_gone => { eprintln!("the process that started usai is gone"); }
+        _ = terminate.recv() => { if !quiet { tracing::info!("SIGTERM received"); } }
+        _ = parent_gone => { tracing::info!("the process that started usai is gone; shutting down"); }
         _ = async { match &stop_requested { Some(t) => t.cancelled().await, None => std::future::pending().await } } => {
-            if !quiet { eprintln!("stop requested through the control surface"); }
+            if !quiet { tracing::info!("stop requested through the control surface"); }
         }
     }
     // Under a harness or orchestrator (`--announce`) the shutdown narration
     // is noise in someone else's output; the exit code carries the result.
     if !quiet {
-        eprintln!("\nshutting down: draining in-flight work (a second signal forces the exit)");
+        tracing::info!("shutting down: draining in-flight work (a second signal forces the exit)");
     }
     shutdown.cancel();
     let drain = async {
@@ -413,10 +448,10 @@ async fn serve_until_signal(
         let _ = tokio::time::timeout(Duration::from_secs(35), server).await;
     };
     tokio::select! {
-        _ = drain => { if !quiet { eprintln!("drained; ownership returned to baseline"); } }
+        _ = drain => { if !quiet { tracing::info!("drained; ownership returned to baseline"); } }
         _ = async { tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = terminate.recv() => {} } } => {
             let g = runtime.ledger().gauges.snapshot();
-            eprintln!("forced shutdown with {} live worlds and {} live operations", g.live_worlds, g.live_ops);
+            tracing::warn!(live_worlds = g.live_worlds, live_ops = g.live_ops, "forced shutdown");
             std::process::exit(130);
         }
     }
@@ -637,7 +672,15 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
                                 if let Some(prev) = previous {
                                     let rt = Arc::clone(&rebuild_runtime);
                                     tokio::spawn(async move {
-                                        if let Err(e) = rt.drain(prev.id).await {
+                                        // The replaced revision retires itself once settled; an
+                                        // explicit drain only hurries it, so "unknown revision" here
+                                        // means it already left.
+                                        if let Err(e) = rt.drain(prev.id).await
+                                            && !matches!(
+                                                e,
+                                                usai_runtime::RuntimeError::UnknownRevision(_)
+                                            )
+                                        {
                                             eprintln!("drain of {} failed: {e}", prev.id);
                                         }
                                     });
@@ -664,6 +707,7 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
         port,
         true,
         true,
+        None,
         None,
         Some(Box::new(move |url| {
             let revision = banner_runtime.active().expect("active");

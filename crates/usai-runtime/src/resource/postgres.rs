@@ -145,6 +145,18 @@ impl ResourceProvider for PostgresProvider {
             .map_err(|e| ResourceError::Startup(spec.name.clone(), e.to_string()))?;
         // Fail activation, not the first request, when the database is
         // unreachable (`GOAL.md` §32).
+        let endpoint = pg_config
+            .get_hosts()
+            .iter()
+            .zip(pg_config.get_ports().iter().chain(std::iter::repeat(&5432)))
+            .map(|(h, p)| match h {
+                tokio_postgres::config::Host::Tcp(h) => format!("{h}:{p}"),
+                #[cfg(unix)]
+                tokio_postgres::config::Host::Unix(path) => path.display().to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let user = pg_config.get_user().unwrap_or("?").to_owned();
         let probe = pool.get().await.map_err(|e| {
             // Say where and why, without the pool library's framing.
             let hosts = pg_config
@@ -180,6 +192,8 @@ impl ResourceProvider for PostgresProvider {
         Ok(Arc::new(Postgres {
             identity,
             pool,
+            endpoint,
+            user,
             max: max as u32,
             counters: Arc::new(Counters::default()),
             tls,
@@ -203,6 +217,9 @@ struct Counters {
 pub struct Postgres {
     identity: ResourceIdentity,
     pool: Pool,
+    /// `host:port[, …]` and user, for messages (never the password).
+    endpoint: String,
+    user: String,
     max: u32,
     counters: Arc<Counters>,
     tls: Tls,
@@ -527,12 +544,51 @@ fn to_sql(
                     .collect())
             )
         }
-        _ => Err(param_error(
-            index,
-            ty,
-            "unsupported parameter type; cast it in SQL, e.g. $1::text",
-        )),
+        // Anything else (interval, inet, macaddr, money, ranges, domains,
+        // composite types …) travels in PostgreSQL's *text* format from a
+        // string, and the server parses it exactly as `'…'::type` would —
+        // what a `pg`/ActiveRecord user expects.
+        _ => match value {
+            Value::Null => Ok(Box::new(None::<TextParam>) as Box<dyn ToSql + Sync + Send>),
+            Value::String(text) => {
+                Ok(Box::new(Some(TextParam(text.clone()))) as Box<dyn ToSql + Sync + Send>)
+            }
+            other if !other.is_object() && !other.is_array() => {
+                Ok(Box::new(Some(TextParam(other.to_string()))) as Box<dyn ToSql + Sync + Send>)
+            }
+            _ => Err(param_error(
+                index,
+                ty,
+                "expected a string in the type's text form (or cast the parameter in SQL, e.g. $1::text)",
+            )),
+        },
     }
+}
+
+/// A value sent in text format for a type the runtime has no binary
+/// encoder for; PostgreSQL parses it server-side.
+#[derive(Debug)]
+struct TextParam(String);
+
+impl ToSql for TextParam {
+    fn to_sql(
+        &self,
+        _ty: &Type,
+        out: &mut bytes::BytesMut,
+    ) -> Result<tokio_postgres::types::IsNull, Box<dyn std::error::Error + Sync + Send>> {
+        out.extend_from_slice(self.0.as_bytes());
+        Ok(tokio_postgres::types::IsNull::No)
+    }
+
+    fn accepts(_ty: &Type) -> bool {
+        true
+    }
+
+    fn encode_format(&self, _ty: &Type) -> tokio_postgres::types::Format {
+        tokio_postgres::types::Format::Text
+    }
+
+    tokio_postgres::types::to_sql_checked!();
 }
 
 /// A PostgreSQL enum value, sent as its label in text format.
@@ -711,7 +767,7 @@ impl ResourceManager for Postgres {
             _ = cancel.cancelled() => return Err(ResourceError::Cancelled),
             got = self.pool.get() => got.map_err(|e| match e {
                 deadpool_postgres::PoolError::Timeout(_) => ResourceError::Exhausted { resource: self.identity.name.clone() },
-                other => ResourceError::Operation { code: "pool_error".into(), message: other.to_string(), proof: TerminalProof::Terminal },
+                other => ResourceError::Operation { code: "pool_error".into(), message: self.pool_error_text(&other), proof: TerminalProof::Terminal },
             })?,
         };
         let mut lease = Lease {
@@ -832,6 +888,28 @@ impl ResourceManager for Postgres {
         }
     }
 
+    /// `SELECT 1` on a leased connection: the pool can hand one out and the
+    /// server answers. Failures name the reason.
+    async fn probe(&self) -> Result<(), String> {
+        let object = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| format!("no connection: {e}"))?;
+        let mut lease = Lease {
+            object: Some(object),
+            terminal: false,
+            counters: Arc::clone(&self.counters),
+        };
+        match lease.client().simple_query("SELECT 1").await {
+            Ok(_) => {
+                lease.mark_terminal();
+                Ok(())
+            }
+            Err(e) => Err(sql_error(e).to_string()),
+        }
+    }
+
     async fn shutdown(&self) {
         self.pool.close();
     }
@@ -911,6 +989,25 @@ fn ambiguous_after_cancel() -> ResourceError {
 }
 
 impl Postgres {
+    /// A pool failure with the facts an operator needs — where and as whom —
+    /// instead of the pool library's framing.
+    fn pool_error_text(&self, error: &deadpool_postgres::PoolError) -> String {
+        let reason = match error {
+            deadpool_postgres::PoolError::Backend(err) => {
+                let mut text = err.to_string();
+                if let Some(source) = std::error::Error::source(err) {
+                    text = format!("{text}: {source}");
+                }
+                text
+            }
+            other => other.to_string(),
+        };
+        format!(
+            "cannot connect to {} as user {}: {reason}",
+            self.endpoint, self.user
+        )
+    }
+
     /// `BEGIN` on a leased connection, then hand the connection to a holder
     /// task that serves the world's statements until `commit`/`rollback` —
     /// or rolls back for the world when its cancellation fires first.
@@ -921,7 +1018,7 @@ impl Postgres {
             _ = cancel.cancelled() => return Err(ResourceError::Cancelled),
             got = self.pool.get() => got.map_err(|e| match e {
                 deadpool_postgres::PoolError::Timeout(_) => ResourceError::Exhausted { resource: self.identity.name.clone() },
-                other => ResourceError::Operation { code: "pool_error".into(), message: other.to_string(), proof: TerminalProof::Terminal },
+                other => ResourceError::Operation { code: "pool_error".into(), message: self.pool_error_text(&other), proof: TerminalProof::Terminal },
             })?,
         };
         let mut lease = Lease {
@@ -1004,7 +1101,7 @@ impl Postgres {
         tokio::select! {
             biased;
             _ = cancel.cancelled() => Err(ResourceError::Cancelled),
-            got = self.pool.get() => got.map_err(|e| ResourceError::Operation { code: "pool_error".into(), message: e.to_string(), proof: TerminalProof::Terminal }),
+            got = self.pool.get() => got.map_err(|e| ResourceError::Operation { code: "pool_error".into(), message: self.pool_error_text(&e), proof: TerminalProof::Terminal }),
         }
     }
 

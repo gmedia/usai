@@ -75,6 +75,26 @@ fn second_interrupt_forces_exit_and_reports_live_work() {
     };
     assert_eq!(status.code(), Some(130));
     let log = log.lock().unwrap();
-    assert!(log.contains("forced shutdown with 1 live worlds"), "{log}");
+    // Log lines carry ANSI colour in the capture; compare without it.
+    let plain: String = {
+        let mut out = String::new();
+        let mut chars = log.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '\x1b' {
+                for c in chars.by_ref() {
+                    if c == 'm' {
+                        break;
+                    }
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    };
+    assert!(
+        plain.contains("forced shutdown") && plain.contains("live_worlds=1"),
+        "{log}"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

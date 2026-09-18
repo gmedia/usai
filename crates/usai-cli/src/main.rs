@@ -60,9 +60,14 @@ enum Command {
         /// Artifact directory (defaults to the configured outDir)
         #[arg(long)]
         artifact: Option<PathBuf>,
-        /// Serve /_usai/status and /_usai/metrics
+        /// Serve /_usai/status, /_usai/metrics, /_usai/live, /_usai/ready and the API
+        /// docs on the application listener (development and trusted networks)
         #[arg(long)]
         status: bool,
+        /// Serve those surfaces on their own listener instead (a private
+        /// interface: 127.0.0.1:9090, a pod-local address); USAI_STATUS_ADDR is the environment form
+        #[arg(long, env = "USAI_STATUS_ADDR")]
+        status_addr: Option<String>,
         /// Bind the local control surface (install/activate/drain/stop), e.g. 127.0.0.1:3900.
         /// Token from USAI_CONTROL_TOKEN (required off loopback).
         #[arg(long)]
@@ -270,19 +275,41 @@ async fn async_main() {
         cli.command,
         Command::Run { .. } | Command::Dev { .. } | Command::Bench { .. }
     );
+    // `app` is the application's console/ctx.log; the compiler's internals
+    // (cranelift, wasmtime) stay off unless RUST_LOG names them — at debug
+    // they emit ~100 000 lines per image.
     let default_filter = if serves || cli.verbose {
-        "usai=info,usai_runtime=info"
+        "usai=info,usai_runtime=info,app=info"
     } else {
-        "usai=warn,usai_runtime=warn"
+        "usai=warn,usai_runtime=warn,app=info"
     };
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| default_filter.into()),
-        )
-        .with_target(false)
-        .compact()
-        .init();
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| default_filter.into())
+        .add_directive("cranelift_codegen=warn".parse().expect("directive"))
+        .add_directive("cranelift_frontend=warn".parse().expect("directive"))
+        .add_directive("wasmtime_cranelift=warn".parse().expect("directive"))
+        .add_directive("wasmtime=warn".parse().expect("directive"));
+    // Logs go to stderr, results (inspect, app, generate) to stdout, so a
+    // command's output can be piped while the runtime narrates.
+    match cli.log_format.as_str() {
+        "json" => tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_writer(std::io::stderr)
+            .with_target(false)
+            .json()
+            .flatten_event(true)
+            .init(),
+        "text" => tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_writer(std::io::stderr)
+            .with_target(false)
+            .compact()
+            .init(),
+        other => {
+            eprintln!("error: --log-format {other}: expected text or json");
+            std::process::exit(2);
+        }
+    }
     if let Some(engine) = &cli.engine {
         // SAFETY: no other thread exists yet; the runtime reads it later.
         unsafe { std::env::set_var("USAI_ENGINE", engine) };
@@ -306,6 +333,7 @@ async fn async_main() {
             port,
             artifact,
             status,
+            status_addr,
             control,
             announce,
             require_signature,
@@ -317,6 +345,7 @@ async fn async_main() {
                 port,
                 artifact,
                 status,
+                status_addr,
                 control,
                 announce,
                 require_signature,
