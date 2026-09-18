@@ -101,6 +101,8 @@ hello bundle (765 KB, zod evaluated per world) 6.52 ms/world
 
 ~90% of per-world cost is **application module evaluation per world** — exactly the "definition-level work rebuilt per world" the research removed with a pre-initialized image (Wizer) + copy-on-write memory (C13, EXP-011B/012B). The native QuickJS substrate (ADR-0015) has no snapshot mechanism, so this cost is structural to v0's engine choice, not to the lifecycle model. This is the concrete trigger ADR-0015 named for revisiting the substrate.
 
+- **API reference** (`/_usai/docs`, 2026-09-18): a dependency-free page (works offline, light/dark, keyboard, 320 px) that renders the OpenAPI document plus the Usai facts now carried as `x-usai-*` extensions — validated-before-world slots, lifetime and effective deadline, resources leased, tasks handed off, declared errors, and the non-HTTP workloads, resources and environment of the application. Schema tables instead of JSON dumps, per-status responses, copyable curl, Try-it with `x-usai-server-ms`. Served in dev and with `--status`.
+
 ## Dogfood (2026-09-18, fresh-eyes external-user run against v0.0.1)
 
 A reviewer with no prior knowledge installed from npm + the release, built a

@@ -1,4 +1,4 @@
-import { defineModule, http, cron, command, errors, type PostgresHandle } from "@sakaladev/usai";
+import { defineModule, http, cron, command, dispatches, errors, type PostgresHandle } from "@sakaladev/usai";
 import { z } from "zod";
 import { db } from "../resources.ts";
 import { record } from "../activity/module.ts";
@@ -23,27 +23,39 @@ export const get = http.get("/todos/:id", { params: Id, response: { 200: Todo },
   return row;
 });
 
-export const create = http.post("/todos", { body: NewTodo, response: { 201: Todo }, resources: [db] }, async (ctx) => {
-  const row = await sql(ctx).one<TodoRow>(`insert into todos (title) values ($1) returning ${columns}`, [ctx.body.title]);
-  // The request answers now; the activity row is written by a task in its
-  // own world. Nothing detached is left behind in this world.
-  await ctx.tasks.dispatch(record, { todoId: row!.id, event: "created" });
-  return http.created(row!);
-});
+// `dispatches(...)` records the hand-off for `usai graph` and the API docs.
+export const create = dispatches(
+  http.post("/todos", { body: NewTodo, response: { 201: Todo }, resources: [db] }, async (ctx) => {
+    const row = await sql(ctx).one<TodoRow>(`insert into todos (title) values ($1) returning ${columns}`, [ctx.body.title]);
+    // The request answers now; the activity row is written by a task in its
+    // own world. Nothing detached is left behind in this world.
+    await ctx.tasks.dispatch(record, { todoId: row!.id, event: "created" });
+    return http.created(row!);
+  }),
+  record,
+);
 
-export const complete = http.post("/todos/:id/complete", { params: Id, response: { 200: Todo }, resources: [db] }, async (ctx) => {
-  const row = await sql(ctx).one<TodoRow>(`update todos set done = true, completed_at = now() where id = $1 and done = false returning ${columns}`, [ctx.params.id]);
-  if (!row) throw errors.conflict(`todo ${ctx.params.id} is already done or does not exist`);
-  await ctx.tasks.dispatch(record, { todoId: row.id, event: "completed" });
-  return row;
-});
+// `dispatches(...)` records the hand-off for `usai graph` and the API docs.
+export const complete = dispatches(
+  http.post("/todos/:id/complete", { params: Id, response: { 200: Todo }, resources: [db] }, async (ctx) => {
+    const row = await sql(ctx).one<TodoRow>(`update todos set done = true, completed_at = now() where id = $1 and done = false returning ${columns}`, [ctx.params.id]);
+    if (!row) throw errors.conflict(`todo ${ctx.params.id} is already done or does not exist`);
+    await ctx.tasks.dispatch(record, { todoId: row.id, event: "completed" });
+    return row;
+  }),
+  record,
+);
 
-export const remove = http.delete("/todos/:id", { params: Id, resources: [db] }, async (ctx) => {
-  const n = await sql(ctx).execute(`delete from todos where id = $1`, [ctx.params.id]);
-  if (n === 0) throw errors.notFound(`todo ${ctx.params.id} does not exist`);
-  await ctx.tasks.dispatch(record, { todoId: ctx.params.id, event: "deleted" });
-  return http.noContent();
-});
+// `dispatches(...)` records the hand-off for `usai graph` and the API docs.
+export const remove = dispatches(
+  http.delete("/todos/:id", { params: Id, resources: [db] }, async (ctx) => {
+    const n = await sql(ctx).execute(`delete from todos where id = $1`, [ctx.params.id]);
+    if (n === 0) throw errors.notFound(`todo ${ctx.params.id} does not exist`);
+    await ctx.tasks.dispatch(record, { todoId: ctx.params.id, event: "deleted" });
+    return http.noContent();
+  }),
+  record,
+);
 
 // Runs in a fresh world on schedule; `usai cron run purge-completed` or the
 // test harness invokes it without waiting for the wall clock.

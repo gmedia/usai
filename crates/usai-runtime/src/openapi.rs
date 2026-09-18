@@ -99,6 +99,12 @@ fn to_openapi_path(path: &str) -> String {
 }
 
 pub fn generate(definition: &ApplicationDefinition) -> Value {
+    generate_with(definition, &crate::RuntimeConfig::default())
+}
+
+/// Same, with the runtime's effective defaults (the deadline a workload
+/// inherits when it declares none) so the document says what will happen.
+pub fn generate_with(definition: &ApplicationDefinition, config: &crate::RuntimeConfig) -> Value {
     let manifest = definition.manifest();
     let mut paths: Map<String, Value> = Map::new();
     let mut security_schemes: Map<String, Value> = Map::new();
@@ -130,6 +136,70 @@ pub fn generate(definition: &ApplicationDefinition) -> Value {
         }
         if let Some(module) = &workload.module {
             operation["tags"] = json!([module]);
+        }
+        // What this operation does to the system — the facts a consumer of
+        // a Usai application can rely on and that no hand-written document
+        // would keep current: the world's lifetime and deadline, which
+        // boundary slots are refused before a world exists, the resources
+        // leased per operation, the tasks handed off, the declared errors.
+        {
+            let c = &workload.contracts;
+            let mut validated = Map::new();
+            for (slot, present) in [
+                ("params", c.params.is_some()),
+                ("query", c.query.is_some()),
+                ("headers", c.headers.is_some()),
+                ("body", c.body.is_some()),
+            ] {
+                if present {
+                    validated.insert(slot.into(), json!("before-world"));
+                }
+            }
+            for slot in &c.in_world_only {
+                validated.insert(slot.clone(), json!("in-world"));
+            }
+            operation["x-usai-validated"] = Value::Object(validated);
+            operation["x-usai-resources"] = Value::Array(
+                workload
+                    .resources
+                    .iter()
+                    .map(|name| {
+                        let kind = definition
+                            .resources()
+                            .iter()
+                            .find(|r| &r.name == name)
+                            .map(|r| r.kind.as_str())
+                            .unwrap_or("unknown");
+                        json!({ "name": name, "kind": kind, "lease": "per operation" })
+                    })
+                    .collect(),
+            );
+            operation["x-usai-dispatches"] = json!(workload.dispatches);
+            operation["x-usai-errors"] = Value::Array(
+                workload
+                    .errors
+                    .iter()
+                    .map(|e| json!({ "code": e.code, "status": e.status }))
+                    .collect(),
+            );
+            match workload.timeout_ms {
+                Some(ms) => {
+                    operation["x-usai-timeout-ms"] = json!(ms);
+                    operation["x-usai-timeout-source"] = json!("declared");
+                }
+                None if lifetime == "request" => {
+                    operation["x-usai-timeout-ms"] =
+                        json!(config.default_timeout.as_millis() as u64);
+                    operation["x-usai-timeout-source"] = json!("default");
+                }
+                None => {}
+            }
+            if let Some(n) = workload.max_concurrency {
+                operation["x-usai-max-concurrency"] = json!(n);
+            }
+            if let Some(auth) = &workload.auth {
+                operation["x-usai-auth"] = json!(auth);
+            }
         }
         let mut responses: Map<String, Value> = Map::new();
 
@@ -233,6 +303,56 @@ pub fn generate(definition: &ApplicationDefinition) -> Value {
     if !security_schemes.is_empty() {
         components["securitySchemes"] = Value::Object(security_schemes);
     }
+    // The rest of the application: the work that is not an HTTP operation
+    // but that the document's reader will meet (a task an endpoint hands off
+    // to, the cron that purges, the queue a request publishes to) and the
+    // resources everything leases from.
+    let workloads: Vec<Value> = definition
+        .workloads()
+        .iter()
+        .filter(|w| !matches!(w.trigger, Trigger::Http { .. } | Trigger::Stream { .. } | Trigger::Socket { .. }))
+        .map(|w| {
+            let (kind, detail) = match &w.trigger {
+                Trigger::Task => ("task", json!({})),
+                Trigger::Cron { schedule, overlap, .. } => ("cron", json!({ "schedule": schedule, "overlap": format!("{overlap:?}").to_lowercase() })),
+                Trigger::Command => ("command", json!({})),
+                Trigger::Service { restart } => ("service", json!({ "restart": restart.mode })),
+                Trigger::Queue { topic, concurrency, .. } => ("queue", json!({ "topic": topic, "concurrency": concurrency })),
+                _ => ("workload", json!({})),
+            };
+            let mut entry = json!({
+                "id": w.id,
+                "name": w.name,
+                "kind": kind,
+                "module": w.module,
+                "lifetime": match w.lifetime() {
+                    crate::definition::LifetimeFamily::Finite => "finite",
+                    crate::definition::LifetimeFamily::ConnectionBound => "connection",
+                    crate::definition::LifetimeFamily::Persistent => "persistent",
+                },
+                "resources": w.resources,
+                "dispatches": w.dispatches,
+                "detail": detail,
+            });
+            if let Some(schema) = &w.contracts.input {
+                entry["input"] = clean(schema);
+            }
+            if let Some(schema) = &w.contracts.message {
+                entry["message"] = clean(schema);
+            }
+            entry
+        })
+        .collect();
+    let resources: Vec<Value> = definition
+        .resources()
+        .iter()
+        .map(|r| json!({ "name": r.name, "kind": r.kind, "module": r.module }))
+        .collect();
+    let env: Vec<Value> = manifest
+        .env
+        .iter()
+        .map(|e| serde_json::to_value(e).unwrap_or(Value::Null))
+        .collect();
     json!({
         "openapi": "3.1.0",
         "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
@@ -240,9 +360,13 @@ pub fn generate(definition: &ApplicationDefinition) -> Value {
             "title": manifest.name,
             "version": definition.identity(),
             "x-usai-identity": definition.identity(),
+            "x-usai-modules": manifest.modules.iter().map(|m| m.name.clone()).collect::<Vec<_>>(),
         },
         "paths": Value::Object(paths),
         "components": components,
+        "x-usai-workloads": workloads,
+        "x-usai-resources": resources,
+        "x-usai-env": env,
     })
 }
 

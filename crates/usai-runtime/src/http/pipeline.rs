@@ -357,7 +357,10 @@ impl HttpHost {
                 "/_usai/openapi.json" => {
                     return Ok(json_response(
                         StatusCode::OK,
-                        &crate::openapi::generate(&compiled.revision.definition),
+                        &crate::openapi::generate_with(
+                            &compiled.revision.definition,
+                            self.runtime.config(),
+                        ),
                     ));
                 }
                 "/_usai/docs" | "/_usai/docs/" => {

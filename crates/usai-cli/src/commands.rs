@@ -59,8 +59,14 @@ async fn definition_for(
 )> {
     let engine = engine();
     let config = load_config(engine.as_ref(), root).await?;
+    // An explicit --artifact is served as is; the project's own build
+    // directory is reused only while it is newer than every source it was
+    // built from, so inspect/graph/openapi/run never describe stale code.
+    let explicit = artifact.is_some();
     let dir = artifact.unwrap_or_else(|| config.out_dir.value.clone());
-    let definition = if dir.join("manifest.json").exists() {
+    let definition = if dir.join("manifest.json").exists()
+        && (explicit || usai_runtime::build::artifact_is_current(&dir))
+    {
         load_artifact(&dir).await?
     } else {
         usai_runtime::build::build(engine.as_ref(), &BuildOptions::from_config(&config))
@@ -161,7 +167,9 @@ async fn serve_until_signal(
         HttpConfig {
             addr,
             expose_diagnostics,
-            serve_docs: expose_diagnostics,
+            // The reference is a runtime-owned surface like status and
+            // metrics: on in dev, and wherever --status is asked for.
+            serve_docs: expose_diagnostics || serve_status,
             serve_status,
             ..HttpConfig::default()
         },

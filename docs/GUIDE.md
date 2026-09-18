@@ -221,7 +221,7 @@ Deployment settings (port, budgets, limits) are runtime flags and environment, n
 
 ```bash
 usai build                     # .usai/build/{manifest.json, app.js} + cache/image.cwasm (engine cache for this host; install loads it in ms, drop it and install compiles)
-usai run --artifact .usai/build --port 8080 --status    # /_usai/status + /_usai/metrics; /_usai/docs and openapi.json are dev-only
+usai run --artifact .usai/build --port 8080 --status    # /_usai/status + /_usai/metrics + /_usai/docs + /_usai/openapi.json (all on in `usai dev`)
 curl :8080/_usai/status        # runtime truth: gauges, revisions, services, tasks, resources
 curl :8080/_usai/metrics       # Prometheus text
 usai generate openapi --out openapi.json
@@ -230,6 +230,8 @@ usai bench --path /users -c 16 -d 30   # engineering load test
 ```
 
 Ctrl-C drains in-flight work with a bound; a second Ctrl-C forces exit. Read `docs/THREAT-MODEL.md` before exposing anything.
+
+`/_usai/docs` is the API reference, generated from the definition the runtime is executing (the revision identity is on the page). Beyond parameters, bodies and responses it shows what each request *does*: which slots are refused before a world exists, the world's lifetime and effective deadline, the resources it leases per operation, the tasks it hands off — and the tasks, crons, commands, queues and services that are not HTTP but run beside them. Every operation has a copyable curl and a "Try it" panel that sends a real request to this server and reports the runtime's own time (`x-usai-server-ms`). Declare `dispatches(endpoint, task)` and your `errors`/`response` statuses so the page can say so. `/_usai/openapi.json` carries the same facts as `x-usai-*` extensions for other tools.
 
 ## 14. Testing
 

@@ -487,7 +487,9 @@ async fn manifest_describes_the_application() {
 async fn openapi_is_generated_from_the_definition() {
     let Some(s) = start().await else { return };
     let rev = s.runtime.active().unwrap();
-    let doc = usai_runtime::openapi::generate(&rev.definition);
+    // The document carries the runtime's effective defaults (deadline), so
+    // the served one is generated with this runtime's configuration.
+    let doc = usai_runtime::openapi::generate_with(&rev.definition, s.runtime.config());
     assert_eq!(doc["openapi"], "3.1.0");
     assert_eq!(doc["info"]["title"], "http-fixture");
     assert_eq!(doc["info"]["version"], rev.definition.identity());
@@ -537,6 +539,29 @@ async fn openapi_is_generated_from_the_definition() {
         webhook["x-usai-raw"], true,
         "raw endpoints are opaque, not invented"
     );
+    // The facts a Usai consumer can rely on travel with the operation.
+    let order = &doc["paths"]["/orders"]["post"];
+    assert_eq!(order["x-usai-validated"]["body"], "before-world");
+    assert_eq!(order["x-usai-resources"][0]["name"], "audit");
+    assert_eq!(order["x-usai-dispatches"], json!(["task:record"]));
+    assert_eq!(order["x-usai-lifetime"], "request");
+    assert_eq!(order["x-usai-timeout-source"], "default");
+    assert!(order["x-usai-timeout-ms"].as_u64().unwrap() > 0);
+    assert!(
+        doc["x-usai-workloads"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["id"] == "task:record" && w["kind"] == "task"),
+        "non-HTTP workloads are part of the document"
+    );
+    assert!(
+        doc["x-usai-resources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["name"] == "audit")
+    );
     assert!(webhook.get("parameters").is_none());
     assert!(
         doc.to_string().find("$schema").is_none_or(|_| false)
@@ -581,6 +606,24 @@ async fn openapi_is_generated_from_the_definition() {
     assert_eq!(
         docs.headers().get("content-type").unwrap(),
         "text/html; charset=utf-8"
+    );
+    let html = docs.text().await.unwrap();
+    for needle in [
+        "openapi.json",
+        "x-usai-validated",
+        "x-usai-dispatches",
+        "Try it",
+        "prefers-color-scheme",
+        "prefers-reduced-motion",
+        "Skip to content",
+    ] {
+        assert!(html.contains(needle), "docs page lacks {needle}");
+    }
+    assert!(
+        !html.contains("<script src")
+            && !html.contains("<link rel=\"stylesheet\"")
+            && !html.contains("@import"),
+        "the docs page loads nothing from the network"
     );
     // Not served on a production host.
     let (status, _) = s.get("/_usai/openapi.json").await;

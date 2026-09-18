@@ -100,7 +100,7 @@ pub fn banner(
     }
     if let Some(url) = base_url {
         let _ = writeln!(out, "\nApp       {url}");
-        if docs {
+        if docs || status_surface {
             let _ = writeln!(out, "API Docs  {url}/_usai/docs");
             let _ = writeln!(out, "OpenAPI   {url}/_usai/openapi.json");
         }

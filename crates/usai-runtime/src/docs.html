@@ -3,45 +3,668 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>API docs</title>
+<title>API reference</title>
+<meta name="description" content="Generated from the application definition the runtime executes.">
 <style>
-  :root { --bg: #ffffff; --fg: #1a1a1a; --muted: #6b6b6b; --line: #e6e6e6; --accent: #0b5fff; --code: #f4f4f4; }
-  @media (prefers-color-scheme: dark) { :root { --bg: #111; --fg: #eee; --muted: #999; --line: #2a2a2a; --accent: #6ea8ff; --code: #1c1c1c; } }
-  body { margin: 0; padding: 24px 16px; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; max-width: 960px; margin-inline: auto; }
-  h1 { font-size: 22px; margin: 0 0 4px; } .muted { color: var(--muted); }
-  .op { border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; margin: 12px 0; }
-  .method { display: inline-block; min-width: 56px; font-weight: 700; color: var(--accent); }
-  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
-  pre { background: var(--code); padding: 10px; border-radius: 6px; overflow: auto; }
-  details > summary { cursor: pointer; color: var(--muted); }
-  .tag { font-size: 12px; color: var(--muted); margin-left: 8px; }
+  /* Served by the runtime itself, offline: no external fonts or scripts. */
+  :root {
+    color-scheme: light dark;
+    --bg: #f4f5f7; --surface: #ffffff; --ink: #1b1f27; --muted: #5f6773; --line: #e1e4ea; --line-strong: #c9cfd8;
+    --code-bg: #f0f2f5; --focus: #1b1f27;
+    --get: #2456c9; --post: #1e7b3a; --put: #9a5b00; --patch: #9a5b00; --delete: #b42323; --other: #5f6773;
+    --boundary: #5b3fbf; --world: #0e7c7b; --handoff: #b4530a; --lease: #3b4e9e;
+    --ok: #1e7b3a; --bad: #b42323;
+    --sidebar: 300px; --measure: 76ch; --radius: 6px;
+    --text-xs: 0.8125rem; --text-sm: 0.875rem; --text-base: 0.9375rem; --text-lg: 1.125rem; --text-xl: 1.375rem; --text-2xl: 1.75rem;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121417; --surface: #1a1d22; --ink: #e8eaee; --muted: #9aa3af; --line: #2a2f37; --line-strong: #3a414b;
+      --code-bg: #14171b; --focus: #e8eaee;
+      --get: #7ea2ff; --post: #6ccf8a; --put: #e2a95a; --patch: #e2a95a; --delete: #ff8a8a; --other: #9aa3af;
+      --boundary: #b7a4ff; --world: #5fd3cf; --handoff: #ffb073; --lease: #a3b3ff;
+      --ok: #6ccf8a; --bad: #ff8a8a;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html { scroll-padding-top: 16px; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: var(--text-base)/1.55 "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  }
+  code, pre, kbd, .mono { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 0.92em; }
+  a { color: inherit; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
+  .skip { position: absolute; left: -999px; top: 8px; background: var(--surface); padding: 8px 12px; border: 1px solid var(--line-strong); z-index: 10; }
+  .skip:focus { left: 8px; }
+  button { font: inherit; color: inherit; }
+
+  /* ---- layout ---------------------------------------------------------- */
+  .app { display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); min-height: 100vh; }
+  .side { border-right: 1px solid var(--line); background: var(--surface); position: sticky; top: 0; height: 100vh; overflow: auto; padding: 20px 16px 32px; }
+  .main { padding: 32px clamp(16px, 4vw, 56px) 96px; max-width: calc(var(--measure) + 240px); min-width: 0; }
+  .side { min-width: 0; }
+  @media (max-width: 880px) {
+    .app { grid-template-columns: 1fr; }
+    .side { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 12px 16px; }
+    .side > details > summary { cursor: pointer; font-weight: 600; padding: 8px 0; min-height: 44px; display: flex; align-items: center; }
+    .main { padding: 24px 16px 96px; }
+    table.props td.type, table.props td.name { white-space: normal; overflow-wrap: anywhere; }
+  }
+  @media (min-width: 881px) { .side > details > summary { display: none; } .side > details { display: contents; } }
+
+  /* ---- sidebar --------------------------------------------------------- */
+  .brand { display: flex; align-items: baseline; gap: 8px; margin: 0 0 4px; font-size: var(--text-lg); font-weight: 650; letter-spacing: -0.01em; }
+  .brand small { font-size: var(--text-xs); font-weight: 500; color: var(--muted); }
+  .identity { color: var(--muted); font-size: var(--text-xs); margin: 0 0 16px; }
+  .identity code { user-select: all; }
+  .search { position: relative; margin: 0 0 16px; }
+  .search input { width: 100%; padding: 9px 36px 9px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--bg); color: inherit; font: inherit; min-height: 40px; }
+  .search kbd { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; background: var(--surface); }
+  .nav h2 { font-size: var(--text-xs); font-weight: 600; color: var(--muted); margin: 18px 0 6px; letter-spacing: 0.01em; }
+  .nav ul { list-style: none; margin: 0; padding: 0; }
+  .nav li a { display: grid; grid-template-columns: 52px 1fr; gap: 8px; align-items: baseline; padding: 6px 8px; margin: 0 -8px; border-radius: var(--radius); text-decoration: none; min-height: 36px; }
+  .nav li a:hover { background: var(--bg); }
+  .nav li a[aria-current="true"] { background: var(--bg); box-shadow: inset 3px 0 0 var(--ink); }
+  .nav li a .path { font-family: ui-monospace, Menlo, monospace; font-size: var(--text-xs); overflow-wrap: anywhere; }
+  .nav .other li a { grid-template-columns: 1fr; }
+  .nav .other li a .path { font-family: inherit; }
+  .nav .kind { color: var(--muted); font-size: var(--text-xs); margin-left: 6px; }
+  .nav li.hidden { display: none; }
+  .nav .empty { color: var(--muted); font-size: var(--text-sm); padding: 6px 0; }
+
+  .m { font-family: ui-monospace, Menlo, monospace; font-size: 11px; font-weight: 700; letter-spacing: 0.02em; text-align: right; }
+  .m-get { color: var(--get); } .m-post { color: var(--post); } .m-put, .m-patch { color: var(--put); } .m-delete { color: var(--delete); } .m-other { color: var(--other); }
+
+  /* ---- header ----------------------------------------------------------- */
+  .head h1 { font-size: var(--text-2xl); letter-spacing: -0.02em; margin: 0 0 6px; font-weight: 650; }
+  .head p { margin: 0; color: var(--muted); max-width: var(--measure); }
+  .head .truth { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 14px; font-size: var(--text-sm); color: var(--muted); }
+  .head .truth b { color: var(--ink); font-weight: 600; }
+
+  /* ---- operation --------------------------------------------------------- */
+  .op { margin-top: 56px; padding-top: 32px; border-top: 1px solid var(--line); scroll-margin-top: 16px; }
+  .op:first-of-type { margin-top: 40px; }
+  .op h2 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 14px; margin: 0; font-size: var(--text-xl); font-weight: 600; letter-spacing: -0.01em; }
+  .op h2 .m { font-size: 13px; text-align: left; }
+  .op h2 code { font-size: 0.95em; font-weight: 600; overflow-wrap: anywhere; }
+  .op h2 a.anchor { color: var(--muted); text-decoration: none; font-weight: 400; font-size: var(--text-sm); }
+  .op h2 a.anchor:hover { color: var(--ink); }
+  .op .summary { margin: 6px 0 0; color: var(--muted); max-width: var(--measure); }
+  .op .summary .id { font-family: ui-monospace, Menlo, monospace; font-size: var(--text-xs); }
+  .op .desc { margin: 10px 0 0; max-width: var(--measure); }
+
+  /* The one bold element: what a request does, as connected steps. */
+  .life { margin: 20px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; align-items: stretch; gap: 0; border: 1px solid var(--line-strong); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
+  .life li { position: relative; flex: 1 1 160px; padding: 10px 14px 10px 18px; border-left: 1px solid var(--line); min-width: 0; }
+  .life li:first-child { border-left: 0; }
+  .life li::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--step); }
+  .life .step { display: block; font-size: var(--text-xs); color: var(--step); font-weight: 650; margin-bottom: 2px; }
+  .life .what { display: block; font-size: var(--text-sm); }
+  .life .what code { font-size: 0.9em; }
+  .life .quiet { color: var(--muted); }
+  .life .boundary { --step: var(--boundary); } .life .world { --step: var(--world); } .life .lease { --step: var(--lease); } .life .handoff { --step: var(--handoff); }
+  .life-note { margin: 8px 0 0; font-size: var(--text-xs); color: var(--muted); max-width: var(--measure); }
+
+  .op h3 { font-size: var(--text-sm); font-weight: 650; margin: 28px 0 8px; }
+  .op h3 .n { color: var(--muted); font-weight: 500; }
+  .slot { margin-top: 16px; }
+  .slot h4 { font-size: var(--text-sm); font-weight: 600; margin: 0 0 6px; display: flex; gap: 10px; align-items: baseline; }
+  .slot h4 .where { font-size: var(--text-xs); font-weight: 500; }
+  .where.b { color: var(--boundary); } .where.w { color: var(--world); }
+
+  table.props { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+  table.props th { text-align: left; font-weight: 600; color: var(--muted); font-size: var(--text-xs); padding: 4px 10px 6px 0; border-bottom: 1px solid var(--line); }
+  table.props td { padding: 7px 10px 7px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.props tr:last-child td { border-bottom: 0; }
+  table.props td.name { white-space: nowrap; }
+  table.props td.name code { font-weight: 600; }
+  table.props .req { color: var(--delete); font-size: 11px; margin-left: 4px; vertical-align: super; }
+  table.props td.type { color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: var(--text-xs); white-space: nowrap; }
+  table.props td.desc { color: var(--muted); }
+  table.props td.desc code { color: var(--ink); }
+  table.props .nested { margin: 8px 0 0 12px; padding-left: 12px; border-left: 2px solid var(--line); }
+  .schema-note { color: var(--muted); font-size: var(--text-sm); }
+
+  .responses { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; padding: 0; list-style: none; }
+  .responses button { border: 1px solid var(--line-strong); background: var(--surface); border-radius: 999px; padding: 4px 12px; cursor: pointer; font-size: var(--text-sm); font-variant-numeric: tabular-nums; min-height: 32px; }
+  .responses button[aria-selected="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .responses .st-2 { border-left: 3px solid var(--ok); } .responses .st-4 { border-left: 3px solid var(--put); } .responses .st-5 { border-left: 3px solid var(--bad); }
+  .resp-desc { color: var(--muted); font-size: var(--text-sm); margin: 0 0 10px; }
+
+  pre.code { margin: 0; padding: 12px 14px; background: var(--code-bg); border: 1px solid var(--line); border-radius: var(--radius); overflow: auto; font-size: var(--text-xs); line-height: 1.5; }
+  .codebar { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 0 0 6px; }
+  .codebar span { font-size: var(--text-xs); color: var(--muted); }
+  .btn { border: 1px solid var(--line-strong); background: var(--surface); border-radius: var(--radius); padding: 6px 12px; cursor: pointer; font-size: var(--text-sm); min-height: 32px; }
+  .btn:hover { background: var(--bg); }
+  .btn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .btn.primary:hover { opacity: 0.92; }
+
+  /* try it */
+  .try { margin-top: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+  .try summary { cursor: pointer; padding: 10px 14px; font-weight: 600; font-size: var(--text-sm); min-height: 44px; display: flex; align-items: center; justify-content: space-between; }
+  .try summary .hint { color: var(--muted); font-weight: 400; }
+  .try .body { padding: 4px 14px 14px; display: grid; gap: 12px; }
+  .try label { display: grid; gap: 4px; font-size: var(--text-xs); color: var(--muted); }
+  .try input, .try textarea { font: inherit; padding: 7px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--bg); color: inherit; width: 100%; min-height: 36px; }
+  .try textarea { font-family: ui-monospace, Menlo, monospace; font-size: var(--text-xs); min-height: 96px; resize: vertical; }
+  .try .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+  .try .actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .try .result { display: grid; gap: 6px; }
+  .try .status { font-size: var(--text-sm); display: flex; gap: 14px; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
+  .try .status .ok { color: var(--ok); font-weight: 600; } .try .status .bad { color: var(--bad); font-weight: 600; }
+  .try .status .ms { color: var(--muted); }
+
+  /* other workloads / resources */
+  .section { margin-top: 64px; padding-top: 32px; border-top: 1px solid var(--line); scroll-margin-top: 16px; }
+  .section h2 { font-size: var(--text-xl); margin: 0 0 4px; font-weight: 600; letter-spacing: -0.01em; }
+  .section > p { color: var(--muted); margin: 0 0 16px; max-width: var(--measure); }
+  .card { padding: 14px 0; border-top: 1px solid var(--line); scroll-margin-top: 16px; }
+  .card h3 { margin: 0; font-size: var(--text-base); font-weight: 600; display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+  .card h3 .kind { color: var(--muted); font-weight: 500; font-size: var(--text-xs); }
+  .card .meta { margin: 4px 0 0; color: var(--muted); font-size: var(--text-sm); display: flex; flex-wrap: wrap; gap: 4px 16px; }
+  .card .meta b { color: var(--ink); font-weight: 600; }
+  .card .life { margin-top: 10px; }
+  .card .slot { margin-top: 10px; }
+
+  .empty-state { color: var(--muted); }
+  .footer { margin-top: 64px; color: var(--muted); font-size: var(--text-xs); }
+  @media (max-width: 880px) {
+    .life li { flex: 1 1 100%; border-left: 0; border-top: 1px solid var(--line); }
+    .life li:first-child { border-top: 0; }
+  }
+  @media (prefers-reduced-motion: no-preference) { details .body { animation: open 120ms ease-out; } @keyframes open { from { opacity: 0; } to { opacity: 1; } } }
 </style>
 </head>
 <body>
-<h1 id="title">API</h1>
-<div class="muted" id="subtitle"></div>
-<div id="ops"></div>
+<a class="skip" href="#main">Skip to content</a>
+<div class="app">
+  <aside class="side" aria-label="Operations">
+    <details id="side-details">
+      <summary>Operations</summary>
+      <p class="brand"><span id="brand-title">API</span><small>reference</small></p>
+      <p class="identity">revision <code id="identity"></code></p>
+      <div class="search">
+        <label for="filter" style="position:absolute;left:-999px">Filter operations</label>
+        <input id="filter" type="search" placeholder="Filter by path, method or name" autocomplete="off">
+        <kbd aria-hidden="true">/</kbd>
+      </div>
+      <nav class="nav" id="nav" aria-label="Operations by module"></nav>
+    </details>
+  </aside>
+  <main class="main" id="main">
+    <header class="head">
+      <h1 id="title">API</h1>
+      <p id="subtitle">Generated from the application definition this runtime is executing — the same one <code>usai inspect</code> and the router read.</p>
+      <div class="truth" id="truth"></div>
+    </header>
+    <div id="ops"></div>
+    <section class="section" id="workloads" hidden>
+      <h2>Also in this application</h2>
+      <p>Work that is not an HTTP operation but that these endpoints hand off to or that runs beside them — each in a fresh world of its own kind.</p>
+      <div id="workload-list"></div>
+    </section>
+    <section class="section" id="resources" hidden>
+      <h2>Resources and environment</h2>
+      <p>Owned by the runtime for its whole lifetime; a world leases one connection per operation and gets it back only after a terminal outcome.</p>
+      <div id="resource-list"></div>
+    </section>
+    <p class="footer">Served by the Usai runtime at <code>/_usai/docs</code> from <code>/_usai/openapi.json</code>. Nothing on this page is written by hand; when the application changes, this page changes with its next revision.</p>
+  </main>
+</div>
+
 <script>
 (async () => {
-  const doc = await (await fetch("openapi.json")).json();
-  document.getElementById("title").textContent = doc.info.title;
-  document.getElementById("subtitle").textContent = "revision " + doc.info.version + " · generated from the ApplicationDefinition";
-  const ops = document.getElementById("ops");
-  for (const [path, methods] of Object.entries(doc.paths)) {
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const el = (tag, attrs = {}, ...children) => {
+    const node = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (v === undefined || v === null || v === false) continue;
+      if (k === "class") node.className = v;
+      else if (k === "html") node.innerHTML = v;
+      else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+      else node.setAttribute(k, v === true ? "" : String(v));
+    }
+    for (const c of children.flat()) if (c !== null && c !== undefined && c !== false) node.append(c instanceof Node ? c : document.createTextNode(String(c)));
+    return node;
+  };
+  const esc = (s) => String(s);
+  const methodClass = (m) => ["get", "post", "put", "patch", "delete"].includes(m) ? `m-${m}` : "m-other";
+  const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+  const humanMs = (ms) => ms >= 1000 ? `${ms / 1000} s` : `${ms} ms`;
+
+  let doc;
+  try {
+    doc = await (await fetch("openapi.json", { headers: { accept: "application/json" } })).json();
+  } catch (e) {
+    $("#ops").append(el("p", { class: "empty-state" }, "Could not load openapi.json from this server: ", String(e)));
+    return;
+  }
+  const info = doc.info || {};
+  const title = info.title || "API";
+  document.title = `${title} — API reference`;
+  $("#title").textContent = `${title}`;
+  $("#brand-title").textContent = title;
+  $("#identity").textContent = info["x-usai-identity"] || info.version || "";
+
+  // ---- collect operations ----------------------------------------------------
+  const ops = [];
+  for (const [path, methods] of Object.entries(doc.paths || {})) {
     for (const [method, op] of Object.entries(methods)) {
-      const el = document.createElement("div"); el.className = "op";
-      const tags = (op.tags || []).map(t => `<span class="tag">${t}</span>`).join("");
-      const raw = op["x-usai-raw"] ? `<span class="tag">raw · contracts not described</span>` : "";
-      const inWorld = op["x-usai-validated-in-world"] ? `<span class="tag">validated in world: ${op["x-usai-validated-in-world"].join(", ")}</span>` : "";
-      const sec = op.security ? `<span class="tag">auth: ${Object.keys(op.security[0]).join(", ")}</span>` : "";
-      let html = `<div><span class="method">${method.toUpperCase()}</span><code>${path}</code>${tags}${raw}${inWorld}${sec}</div>`;
-      if (op.description) html += `<div class="muted">${op.description}</div>`;
-      if (op.parameters?.length) html += `<details><summary>parameters</summary><pre>${JSON.stringify(op.parameters, null, 2)}</pre></details>`;
-      if (op.requestBody) html += `<details><summary>request body</summary><pre>${JSON.stringify(op.requestBody, null, 2)}</pre></details>`;
-      html += `<details><summary>responses: ${Object.keys(op.responses).join(", ")}</summary><pre>${JSON.stringify(op.responses, null, 2)}</pre></details>`;
-      el.innerHTML = html; ops.appendChild(el);
+      if (!op || typeof op !== "object") continue;
+      ops.push({ path, method, op, id: `op-${slug(method + " " + path)}`, module: (op.tags || [])[0] });
     }
   }
+  const workloads = doc["x-usai-workloads"] || [];
+  const resources = doc["x-usai-resources"] || [];
+  const envReqs = doc["x-usai-env"] || [];
+
+  const truth = $("#truth");
+  const counts = [];
+  counts.push(el("span", {}, el("b", {}, String(ops.length)), ` ${ops.length === 1 ? "operation" : "operations"}`));
+  if (workloads.length) counts.push(el("span", {}, el("b", {}, String(workloads.length)), ` other ${workloads.length === 1 ? "workload" : "workloads"}`));
+  if (resources.length) counts.push(el("span", {}, el("b", {}, String(resources.length)), ` ${resources.length === 1 ? "resource" : "resources"}`));
+  const modules = info["x-usai-modules"] || [];
+  if (modules.length) counts.push(el("span", {}, el("b", {}, String(modules.length)), ` ${modules.length === 1 ? "module" : "modules"}`));
+  truth.append(...counts);
+
+  // ---- sidebar ----------------------------------------------------------------
+  const nav = $("#nav");
+  const groups = new Map();
+  for (const o of ops) {
+    const key = o.module || "";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(o);
+  }
+  const navLinks = [];
+  const groupOrder = [...groups.keys()].sort((a, b) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)));
+  for (const key of groupOrder) {
+    nav.append(el("h2", {}, key || (groups.size > 1 ? "Application" : "Endpoints")));
+    const ul = el("ul");
+    for (const o of groups.get(key)) {
+      const a = el("a", { href: `#${o.id}` }, el("span", { class: `m ${methodClass(o.method)}` }, o.method.toUpperCase()), el("span", { class: "path" }, o.path));
+      a.dataset.search = `${o.method} ${o.path} ${o.op.operationId || ""} ${o.op.summary || ""}`.toLowerCase();
+      navLinks.push(a);
+      ul.append(el("li", {}, a));
+    }
+    nav.append(ul);
+  }
+  if (!ops.length) nav.append(el("p", { class: "empty" }, "No HTTP operations are declared. Add an http.* workload and this list fills itself."));
+  if (workloads.length) {
+    nav.append(el("h2", {}, "Also in this application"));
+    const ul = el("ul", { class: "other" });
+    for (const w of workloads) {
+      const a = el("a", { href: `#wl-${slug(w.id)}` }, el("span", { class: "path" }, w.name, el("span", { class: "kind" }, w.kind)));
+      a.dataset.search = `${w.kind} ${w.name}`.toLowerCase();
+      navLinks.push(a);
+      ul.append(el("li", {}, a));
+    }
+    nav.append(ul);
+  }
+  if (resources.length || envReqs.length) {
+    nav.append(el("h2", {}, "Runtime"));
+    nav.append(el("ul", { class: "other" }, el("li", {}, el("a", { href: "#resources" }, el("span", { class: "path" }, "Resources and environment")))));
+  }
+
+  // The sidebar is a collapsible sheet on narrow screens and always open
+  // on wide ones (where the summary is hidden).
+  const sideDetails = $("#side-details");
+  const wide = matchMedia("(min-width: 881px)");
+  const syncSide = () => { sideDetails.open = wide.matches; };
+  syncSide(); wide.addEventListener("change", syncSide);
+  for (const a of navLinks) a.addEventListener("click", () => { if (!wide.matches) sideDetails.open = false; });
+
+  const filter = $("#filter");
+  const applyFilter = () => {
+    const q = filter.value.trim().toLowerCase();
+    for (const a of navLinks) a.parentElement.classList.toggle("hidden", q !== "" && !a.dataset.search.includes(q));
+  };
+  filter.addEventListener("input", applyFilter);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "/" && !/input|textarea/i.test(document.activeElement?.tagName || "")) { e.preventDefault(); filter.focus(); filter.select(); }
+    if (e.key === "Escape" && document.activeElement === filter) { filter.value = ""; applyFilter(); filter.blur(); }
+  });
+
+  // ---- schema rendering -------------------------------------------------------
+  const components = (doc.components && doc.components.schemas) || {};
+  const deref = (schema) => {
+    if (schema && schema.$ref) {
+      const name = schema.$ref.split("/").pop();
+      return { ...(components[name] || {}), __name: name };
+    }
+    return schema || {};
+  };
+  const typeOf = (s) => {
+    s = deref(s);
+    if (s.enum) return `enum`;
+    if (s.const !== undefined) return `const ${JSON.stringify(s.const)}`;
+    if (Array.isArray(s.type)) return s.type.join(" | ");
+    if (s.anyOf || s.oneOf) return (s.anyOf || s.oneOf).map(typeOf).join(" | ");
+    if (s.type === "array") return `array of ${typeOf(s.items || {})}`;
+    if (s.type) return s.format ? `${s.type} (${s.format})` : s.type;
+    if (s.properties) return "object";
+    return "any";
+  };
+  const constraints = (s) => {
+    s = deref(s);
+    const out = [];
+    if (s.enum) out.push(`one of ${s.enum.map((v) => JSON.stringify(v)).join(", ")}`);
+    const SAFE = 9007199254740991;
+    if (s.minimum !== undefined && s.minimum !== -SAFE) out.push(`≥ ${s.minimum}`);
+    if (s.maximum !== undefined && s.maximum !== SAFE) out.push(`≤ ${s.maximum}`);
+    if (s.exclusiveMinimum !== undefined) out.push(`> ${s.exclusiveMinimum}`);
+    if (s.exclusiveMaximum !== undefined) out.push(`< ${s.exclusiveMaximum}`);
+    if (s.minLength !== undefined) out.push(`min length ${s.minLength}`);
+    if (s.maxLength !== undefined) out.push(`max length ${s.maxLength}`);
+    if (s.minItems !== undefined) out.push(`min items ${s.minItems}`);
+    if (s.maxItems !== undefined) out.push(`max items ${s.maxItems}`);
+    if (s.pattern) out.push(`matches /${s.pattern}/`);
+    if (s.default !== undefined) out.push(`default ${JSON.stringify(s.default)}`);
+    if (s.description) out.unshift(s.description);
+    return out;
+  };
+  const propsTable = (schema, depth = 0, opts = { markRequired: true }) => {
+    schema = deref(schema);
+    if (schema.type === "array" && schema.items) {
+      const inner = deref(schema.items);
+      if (inner.properties) return el("div", {}, el("p", { class: "schema-note" }, `Array of objects, each:`), propsTable(inner, depth, opts));
+      return el("p", { class: "schema-note" }, `Array of ${typeOf(inner)}${constraints(inner).length ? " — " + constraints(inner).join("; ") : ""}.`);
+    }
+    if (!schema.properties) {
+      const c = constraints(schema);
+      return el("p", { class: "schema-note" }, `${typeOf(schema)}${c.length ? " — " + c.join("; ") : ""}.`);
+    }
+    const required = new Set(schema.required || []);
+    const table = el("table", { class: "props" },
+      el("thead", {}, el("tr", {}, el("th", {}, "Field"), el("th", {}, "Type"), el("th", {}, "Notes"))));
+    const tbody = el("tbody");
+    for (const [name, sub] of Object.entries(schema.properties)) {
+      const s = deref(sub);
+      const nested = (s.properties || (s.type === "array" && deref(s.items || {}).properties)) && depth < 4;
+      const notes = constraints(s).filter((c) => !(s.enum && c.startsWith("one of")) || true);
+      tbody.append(el("tr", {},
+        el("td", { class: "name" }, el("code", {}, name), opts.markRequired && required.has(name) ? el("span", { class: "req", title: "required" }, "required") : null),
+        el("td", { class: "type" }, typeOf(s) + (!opts.markRequired && !required.has(name) ? "?" : "")),
+        el("td", { class: "desc" }, notes.join("; ") || (opts.markRequired && !required.has(name) ? "optional" : ""), nested ? el("div", { class: "nested" }, propsTable(s, depth + 1, opts)) : null)));
+    }
+    table.append(tbody);
+    if (schema.additionalProperties === false) table.append(el("caption", { style: "caption-side:bottom;text-align:left;color:var(--muted);font-size:var(--text-xs);padding-top:6px" }, "Unknown fields are rejected."));
+    return table;
+  };
+  const sample = (schema, depth = 0) => {
+    schema = deref(schema);
+    if (schema.default !== undefined) return schema.default;
+    if (schema.const !== undefined) return schema.const;
+    if (schema.enum) return schema.enum[0];
+    if (schema.anyOf || schema.oneOf) return sample((schema.anyOf || schema.oneOf)[0], depth + 1);
+    const t = Array.isArray(schema.type) ? schema.type.find((x) => x !== "null") : schema.type;
+    if (t === "object" || schema.properties) {
+      const out = {};
+      for (const [k, v] of Object.entries(schema.properties || {})) if (depth < 5) out[k] = sample(v, depth + 1);
+      return out;
+    }
+    if (t === "array") return schema.items && depth < 5 ? [sample(schema.items, depth + 1)] : [];
+    if (t === "integer") return schema.minimum !== undefined ? schema.minimum : 1;
+    if (t === "number") return schema.minimum !== undefined ? schema.minimum : 1.5;
+    if (t === "boolean") return true;
+    if (t === "string") {
+      if (schema.format === "uuid") return "6f1a2b3c-4d5e-4f60-8a71-92b3c4d5e6f7";
+      if (schema.format === "email") return "ayu@example.com";
+      if (schema.format === "date-time") return "2026-01-01T00:00:00Z";
+      if (schema.format === "uri" || schema.format === "url") return "https://example.com/";
+      return "string";
+    }
+    return null;
+  };
+
+  // ---- lifecycle strip ---------------------------------------------------------
+  const lifecycle = (op, kindLabel) => {
+    const list = el("ol", { class: "life", "aria-label": "What this request does" });
+    const validated = op["x-usai-validated"] || {};
+    const before = Object.entries(validated).filter(([, w]) => w === "before-world").map(([s]) => s);
+    const inWorld = Object.entries(validated).filter(([, w]) => w === "in-world").map(([s]) => s);
+    const auth = op["x-usai-auth"];
+    if (op["x-usai-raw"]) {
+      list.append(el("li", { class: "boundary" }, el("span", { class: "step" }, "boundary"), el("span", { class: "what" }, "raw: exact bytes, no contracts")));
+    } else {
+      list.append(el("li", { class: "boundary" }, el("span", { class: "step" }, "boundary"),
+        el("span", { class: "what" },
+          before.length ? [`refused before a world exists: `, ...before.flatMap((s, i) => [i ? ", " : "", el("code", {}, s)])] : el("span", { class: "quiet" }, "no contracts declared"),
+          auth ? [" · auth ", el("code", {}, auth)] : null)));
+    }
+    const lifetime = op["x-usai-lifetime"] || kindLabel || "request";
+    const timeout = op["x-usai-timeout-ms"];
+    const conc = op["x-usai-max-concurrency"];
+    list.append(el("li", { class: "world" }, el("span", { class: "step" }, "fresh world"),
+      el("span", { class: "what" }, `${lifetime} lifetime`, timeout ? [` · deadline ${humanMs(timeout)}`, op["x-usai-timeout-source"] === "default" ? el("span", { class: "quiet" }, " (runtime default)") : null] : "", conc ? ` · at most ${conc} at once` : "",
+        inWorld.length ? [" · validates in-world: ", ...inWorld.flatMap((s, i) => [i ? ", " : "", el("code", {}, s)])] : null)));
+    const res = op["x-usai-resources"] || [];
+    if (res.length) list.append(el("li", { class: "lease" }, el("span", { class: "step" }, "leases"),
+      el("span", { class: "what" }, ...res.flatMap((r, i) => [i ? ", " : "", el("code", {}, `${r.kind}/${r.name}`)]), el("span", { class: "quiet" }, " per operation"))));
+    const dispatches = op["x-usai-dispatches"] || [];
+    if (dispatches.length) list.append(el("li", { class: "handoff" }, el("span", { class: "step" }, "hands off"),
+      el("span", { class: "what" }, ...dispatches.flatMap((d, i) => {
+        const [kind, ...rest] = String(d).split(":");
+        const name = rest.length ? rest.join(":") : d;
+        return [i ? ", " : "", el("a", { href: `#wl-${slug(d)}` }, el("code", {}, name)), rest.length ? el("span", { class: "quiet" }, ` (${kind})`) : null];
+      }), el("span", { class: "quiet" }, " — in its own world, after this one answers"))));
+    return list;
+  };
+
+  // ---- operations --------------------------------------------------------------
+  const opsRoot = $("#ops");
+  const curlFor = (o) => {
+    const base = location.origin;
+    let path = o.path;
+    const params = o.op.parameters || [];
+    for (const p of params) if (p.in === "path") path = path.replace(`{${p.name}}`, encodeURIComponent(String(sample(p.schema || {}))));
+    const query = params.filter((p) => p.in === "query").map((p) => `${encodeURIComponent(p.name)}=${encodeURIComponent(String(sample(p.schema || {})))}`);
+    const url = `${base}${path}${query.length ? "?" + query.join("&") : ""}`;
+    const lines = [`curl -X ${o.method.toUpperCase()} '${url}'`];
+    for (const p of params.filter((p) => p.in === "header")) lines.push(`  -H '${p.name}: ${sample(p.schema || {})}'`);
+    if (o.op["x-usai-auth"]) lines.push(`  -H 'authorization: Bearer <token>'`);
+    const body = o.op.requestBody && o.op.requestBody.content && o.op.requestBody.content["application/json"];
+    if (body && body.schema) lines.push(`  -H 'content-type: application/json'`, `  -d '${JSON.stringify(sample(body.schema))}'`);
+    return lines.join(" \\\n");
+  };
+  const copyButton = (getText) => {
+    const b = el("button", { class: "btn", type: "button" }, "Copy");
+    b.addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(getText()); b.textContent = "Copied"; } catch { b.textContent = "Select and copy"; }
+      setTimeout(() => { b.textContent = "Copy"; }, 1500);
+    });
+    return b;
+  };
+
+  for (const o of ops) {
+    const op = o.op;
+    const section = el("section", { class: "op", id: o.id, "aria-labelledby": `${o.id}-h` });
+    section.append(el("h2", { id: `${o.id}-h` },
+      el("span", { class: `m ${methodClass(o.method)}` }, o.method.toUpperCase()),
+      el("code", {}, o.path),
+      el("a", { class: "anchor", href: `#${o.id}`, "aria-label": "Link to this operation" }, "#")));
+    const norm = (t) => String(t).trim().toLowerCase().replace(/:([a-z0-9_]+)/gi, "{$1}");
+    const repeatsHeading = !op.summary || norm(op.summary) === norm(`${o.method} ${o.path}`);
+    section.append(el("p", { class: "summary" }, repeatsHeading ? null : [op.summary, " · "], el("span", { class: "id" }, op.operationId || ""), o.module ? [" · module ", el("b", {}, o.module)] : null));
+    if (op.description) section.append(el("p", { class: "desc" }, op.description));
+    section.append(lifecycle(op));
+
+    // Request
+    const params = op.parameters || [];
+    const bodySchema = op.requestBody && op.requestBody.content && op.requestBody.content["application/json"] && op.requestBody.content["application/json"].schema;
+    const validated = op["x-usai-validated"] || {};
+    const where = (slot) => validated[slot] === "in-world" ? el("span", { class: "where w" }, "validated in the world") : validated[slot] === "before-world" ? el("span", { class: "where b" }, "validated before a world exists") : null;
+    const slots = [["path", "params", "Path parameters"], ["query", "query", "Query"], ["header", "headers", "Headers"]];
+    const hasRequest = params.length || bodySchema || op["x-usai-raw"];
+    if (hasRequest) {
+      section.append(el("h3", {}, "Request"));
+      for (const [loc, slot, label] of slots) {
+        const these = params.filter((p) => p.in === loc);
+        if (!these.length) continue;
+        const pseudo = { type: "object", properties: Object.fromEntries(these.map((p) => [p.name, p.schema || {}])), required: these.filter((p) => p.required).map((p) => p.name) };
+        section.append(el("div", { class: "slot" }, el("h4", {}, label, where(slot)), propsTable(pseudo)));
+      }
+      if (bodySchema) section.append(el("div", { class: "slot" }, el("h4", {}, "Body ", el("span", { class: "where", style: "color:var(--muted)" }, "application/json"), where("body")), propsTable(bodySchema)));
+      if (op["x-usai-raw"]) section.append(el("p", { class: "schema-note" }, "Raw endpoint: the handler reads the exact bytes; no request contract is declared."));
+    } else {
+      section.append(el("h3", {}, "Request"), el("p", { class: "schema-note" }, "No parameters or body."));
+    }
+
+    // Responses
+    const responses = Object.entries(op.responses || {});
+    section.append(el("h3", {}, "Responses ", el("span", { class: "n" }, `(${responses.length})`)));
+    const tabs = el("ul", { class: "responses", role: "tablist" });
+    const panels = el("div");
+    responses.forEach(([status, r], i) => {
+      const panelId = `${o.id}-r-${status}`;
+      const b = el("button", { type: "button", role: "tab", class: `st-${String(status)[0]}`, "aria-selected": i === 0 ? "true" : "false", "aria-controls": panelId }, status);
+      const schema = r.content && r.content["application/json"] && r.content["application/json"].schema;
+      const panel = el("div", { id: panelId, role: "tabpanel", hidden: i !== 0 },
+        el("p", { class: "resp-desc" }, r.description || ""),
+        schema ? (deref(schema).__name === "UsaiError" ? el("p", { class: "schema-note" }, "Error envelope: ", el("code", {}, `{ "error": { "code", "message", "details?" } }`), " — ", errorCodes(op, status)) : propsTable(schema, 0, { markRequired: false })) : el("p", { class: "schema-note" }, "No body contract declared; the handler's return value is encoded as JSON."));
+      b.addEventListener("click", () => {
+        for (const t of tabs.querySelectorAll("[role=tab]")) t.setAttribute("aria-selected", t === b ? "true" : "false");
+        for (const p of panels.children) p.hidden = p !== panel;
+      });
+      tabs.append(el("li", {}, b));
+      panels.append(panel);
+    });
+    section.append(tabs, panels);
+
+    // Example + try it
+    section.append(el("h3", {}, "Example"));
+    const curl = curlFor(o);
+    const pre = el("pre", { class: "code" }, el("code", {}, curl));
+    section.append(el("div", { class: "codebar" }, el("span", {}, "curl · values are samples from the contracts"), copyButton(() => pre.textContent)), pre);
+    section.append(tryIt(o, bodySchema));
+    opsRoot.append(section);
+  }
+  if (!ops.length) opsRoot.append(el("p", { class: "empty-state", style: "margin-top:40px" }, "This application declares no HTTP operations yet. Declare one with ", el("code", {}, "http.get(...)"), " and it appears here on the next revision."));
+
+  function errorCodes(op, status) {
+    const declared = (op["x-usai-errors"] || []).filter((e) => String(e.status) === String(status)).map((e) => e.code);
+    if (String(status) === "400") return "code validation_failed with details.slot and details.issues[].path (JSON pointer).";
+    if (String(status) === "401") return "code unauthorized from the auth boundary.";
+    if (String(status) === "500") return "code internal (message sanitized), or the runtime's own codes.";
+    if (declared.length) return `declared code${declared.length > 1 ? "s" : ""}: ${declared.join(", ")}.`;
+    return "";
+  }
+
+  function tryIt(o, bodySchema) {
+    const params = o.op.parameters || [];
+    const details = el("details", { class: "try" });
+    details.append(el("summary", {}, "Try it", el("span", { class: "hint" }, "sends a real request to this server")));
+    const body = el("div", { class: "body" });
+    const fields = el("div", { class: "fields" });
+    const inputs = [];
+    for (const p of params) {
+      const input = el("input", { type: "text", value: p.schema && (p.schema.default !== undefined) ? String(p.schema.default) : (p.in === "path" ? String(sample(p.schema || {})) : ""), "aria-label": `${p.in} ${p.name}` });
+      inputs.push({ p, input });
+      fields.append(el("label", {}, `${p.in} · ${p.name}${p.required ? " (required)" : ""}`, input));
+    }
+    if (o.op["x-usai-auth"]) {
+      const input = el("input", { type: "text", placeholder: "Bearer <token>", "aria-label": "authorization header" });
+      inputs.push({ p: { in: "header", name: "authorization" }, input });
+      fields.append(el("label", {}, "header · authorization", input));
+    }
+    if (fields.children.length) body.append(fields);
+    let bodyArea = null;
+    if (bodySchema) {
+      bodyArea = el("textarea", { "aria-label": "request body (JSON)" });
+      bodyArea.value = JSON.stringify(sample(bodySchema), null, 2);
+      body.append(el("label", {}, "body · application/json", bodyArea));
+    }
+    const send = el("button", { class: "btn primary", type: "button" }, "Send request");
+    const status = el("div", { class: "status" });
+    const out = el("pre", { class: "code", hidden: true });
+    body.append(el("div", { class: "actions" }, send, status), el("div", { class: "result" }, out));
+    send.addEventListener("click", async () => {
+      let path = o.path;
+      const query = [];
+      const headers = {};
+      for (const { p, input } of inputs) {
+        const v = input.value;
+        if (p.in === "path") path = path.replace(`{${p.name}}`, encodeURIComponent(v));
+        else if (p.in === "query" && v !== "") query.push(`${encodeURIComponent(p.name)}=${encodeURIComponent(v)}`);
+        else if (p.in === "header" && v !== "") headers[p.name] = v;
+      }
+      const init = { method: o.method.toUpperCase(), headers };
+      if (bodyArea) { headers["content-type"] = "application/json"; init.body = bodyArea.value; }
+      send.disabled = true; status.textContent = ""; out.hidden = true;
+      const t0 = performance.now();
+      try {
+        const res = await fetch(`${path}${query.length ? "?" + query.join("&") : ""}`, init);
+        const text = await res.text();
+        const ms = Math.round(performance.now() - t0);
+        const serverMs = res.headers.get("x-usai-server-ms");
+        status.append(el("span", { class: res.ok ? "ok" : "bad" }, `${res.status} ${res.statusText}`), el("span", { class: "ms" }, `${ms} ms round trip${serverMs ? ` · ${Number(serverMs).toFixed(2)} ms in the runtime` : ""}`));
+        let pretty = text;
+        try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch { /* not JSON */ }
+        out.textContent = pretty || "(empty body)"; out.hidden = false;
+      } catch (e) {
+        status.append(el("span", { class: "bad" }, "request failed"), el("span", { class: "ms" }, String(e)));
+      } finally { send.disabled = false; }
+    });
+    details.append(body);
+    return details;
+  }
+
+  // ---- other workloads -----------------------------------------------------------
+  if (workloads.length) {
+    const sec = $("#workloads"); sec.hidden = false;
+    const list = $("#workload-list");
+    const kindWord = { task: "task", cron: "cron", command: "command", service: "service", queue: "queue consumer" };
+    for (const w of workloads) {
+      const card = el("article", { class: "card", id: `wl-${slug(w.id)}` });
+      card.append(el("h3", {}, w.name, el("span", { class: "kind" }, kindWord[w.kind] || w.kind), w.module ? el("span", { class: "kind" }, `· module ${w.module}`) : null));
+      const meta = el("p", { class: "meta" });
+      const d = w.detail || {};
+      if (w.kind === "task") meta.append(el("span", {}, "Runs when an endpoint hands it off (", el("code", {}, "ctx.tasks.dispatch"), ") or awaits it (", el("code", {}, "ctx.tasks.invoke"), "); ", el("code", {}, `usai task run ${w.name}`), " runs it by hand."));
+      if (w.kind === "cron") meta.append(el("span", {}, "Schedule ", el("b", {}, d.schedule || "?"), d.overlap ? ` · overlapping ticks: ${d.overlap}` : "", " · ", el("code", {}, `usai cron run ${w.name}`), " runs one tick without the clock."));
+      if (w.kind === "command") meta.append(el("span", {}, "Runs on demand: ", el("code", {}, `usai app ${w.name} [args]`), "."));
+      if (w.kind === "service") meta.append(el("span", {}, "Persistent: starts with the revision, stops when it drains", d.restart ? ` · restart: ${d.restart}` : "", "."));
+      if (w.kind === "queue") meta.append(el("span", {}, "Consumes topic ", el("b", {}, d.topic || "?"), d.concurrency ? ` · up to ${d.concurrency} message${d.concurrency > 1 ? "s" : ""} at once` : "", "; one fresh world per message."));
+      card.append(meta);
+      card.append(lifecycle({ "x-usai-validated": w.input ? { input: "before-world" } : (w.message ? { message: "before-world" } : {}), "x-usai-resources": (w.resources || []).map((name) => ({ name, kind: (resources.find((r) => r.name === name) || {}).kind || "resource" })), "x-usai-dispatches": w.dispatches || [] }, w.lifetime === "persistent" ? "persistent" : w.lifetime === "connection" ? "connection" : w.kind));
+      if (w.input) card.append(el("div", { class: "slot" }, el("h4", {}, "Input", el("span", { class: "where b" }, "validated before a world exists")), propsTable(w.input)));
+      if (w.message) card.append(el("div", { class: "slot" }, el("h4", {}, "Message", el("span", { class: "where b" }, "validated before a world exists")), propsTable(w.message)));
+      list.append(card);
+    }
+  }
+
+  // ---- resources + env ----------------------------------------------------------------
+  if (resources.length || envReqs.length) {
+    const sec = $("#resources"); sec.hidden = false;
+    const list = $("#resource-list");
+    if (resources.length) {
+      const t = el("table", { class: "props" }, el("thead", {}, el("tr", {}, el("th", {}, "Resource"), el("th", {}, "Kind"), el("th", {}, "Ownership"))));
+      const tb = el("tbody");
+      for (const r of resources) tb.append(el("tr", {}, el("td", { class: "name" }, el("code", {}, r.name)), el("td", { class: "type" }, r.kind), el("td", { class: "desc" }, r.kind === "postgres" ? "Pool owned by the runtime; one connection leased per operation, reused only after terminal proof, quarantined otherwise." : r.kind === "cache.local" ? "Runtime-local, survives worlds, not shared across processes." : "Owned by the runtime for its lifetime.")));
+      t.append(tb); list.append(el("div", { class: "slot" }, el("h4", {}, "Resources"), t));
+    }
+    if (envReqs.length) {
+      const t = el("table", { class: "props" }, el("thead", {}, el("tr", {}, el("th", {}, "Variable"), el("th", {}, "Type"), el("th", {}, "Notes"))));
+      const tb = el("tbody");
+      for (const e of envReqs) tb.append(el("tr", {}, el("td", { class: "name" }, el("code", {}, e.name), e.required ? el("span", { class: "req" }, "required") : null), el("td", { class: "type" }, e.kind), el("td", { class: "desc" }, e.values && e.values.length ? `one of ${e.values.join(", ")}` : (e.required ? "checked at activation, not at the first request" : "optional"))));
+      t.append(tb); list.append(el("div", { class: "slot" }, el("h4", {}, "Environment"), t));
+    }
+  }
+
+  // ---- current section in the sidebar -------------------------------------------------
+  const targets = [...document.querySelectorAll(".op, .card, #resources")];
+  const byId = new Map(navLinks.map((a) => [a.getAttribute("href").slice(1), a]));
+  const setCurrent = (id) => { for (const [k, a] of byId) a.toggleAttribute("aria-current", k === id) || a.removeAttribute("aria-current"); const a = byId.get(id); if (a) a.setAttribute("aria-current", "true"); };
+  if ("IntersectionObserver" in window) {
+    const visible = new Map();
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) visible.set(e.target.id, e.isIntersecting ? e.boundingClientRect.top : Infinity);
+      const top = [...visible.entries()].filter(([, t]) => t !== Infinity).sort((a, b) => a[1] - b[1])[0];
+      if (top) setCurrent(top[0]);
+    }, { rootMargin: "-10% 0px -70% 0px" });
+    for (const t of targets) io.observe(t);
+  }
+  if (location.hash) { const t = document.getElementById(location.hash.slice(1)); if (t) t.scrollIntoView(); }
 })();
 </script>
 </body>

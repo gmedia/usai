@@ -355,12 +355,47 @@ pub async fn build(engine: &dyn Engine, options: &BuildOptions) -> Result<BuildO
         tokio::fs::write(&image_path, &bytes).await?;
         tokio::fs::write(&meta_path, serde_json::to_vec_pretty(&meta)?).await?;
     }
+    // The source files this artifact was built from, so tools that reuse the
+    // artifact can tell when it is stale (`artifact_is_current`).
+    let _ = tokio::fs::write(
+        options.out_dir.join(INPUTS_FILE),
+        serde_json::to_vec_pretty(
+            &inputs
+                .iter()
+                .map(|p| p.to_string_lossy())
+                .collect::<Vec<_>>(),
+        )?,
+    )
+    .await;
     let definition = ApplicationDefinition::new(manifest, code)?;
     Ok(BuildOutput {
         definition,
         manifest_path,
         code_path,
         inputs,
+    })
+}
+
+const INPUTS_FILE: &str = "inputs.json";
+
+/// Whether the artifact in `dir` is at least as new as every source file it
+/// was built from. `false` when the input list is missing (an artifact
+/// produced elsewhere), so callers rebuild rather than trust it.
+pub fn artifact_is_current(dir: &Path) -> bool {
+    let Ok(built) = std::fs::metadata(dir.join("manifest.json")).and_then(|m| m.modified()) else {
+        return false;
+    };
+    let Ok(inputs) = std::fs::read(dir.join(INPUTS_FILE)) else {
+        return false;
+    };
+    let Ok(inputs) = serde_json::from_slice::<Vec<String>>(&inputs) else {
+        return false;
+    };
+    inputs.iter().all(|input| {
+        std::fs::metadata(input)
+            .and_then(|m| m.modified())
+            .map(|changed| changed <= built)
+            .unwrap_or(false)
     })
 }
 
