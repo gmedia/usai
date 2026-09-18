@@ -55,6 +55,10 @@ pub enum BuildError {
         "could not resolve the `@sakaladev/usai` package from {root}: {detail}\n  hint: run `pnpm add @sakaladev/usai` (or npm install) in the project"
     )]
     SdkMissing { root: PathBuf, detail: String },
+    #[error(
+        "{root} is not a Usai project: no package.json or usai.config.ts here\n  hint: run this inside the project directory, or pass --root <dir>; `pnpm dlx @sakaladev/create-usai <dir>` creates one"
+    )]
+    NotAProject { root: PathBuf },
     #[error("bundling failed:\n{0}")]
     Bundle(String),
     #[error("io: {0}")]
@@ -214,6 +218,11 @@ const CONFIG_FILE: &str = "usai.config.ts";
 /// use TypeScript syntax but cannot perform I/O (contract C9).
 pub async fn load_config(engine: &dyn Engine, root: &Path) -> Result<ProjectConfig, BuildError> {
     let config_path = root.join(CONFIG_FILE);
+    if !config_path.exists() && !root.join("package.json").exists() {
+        return Err(BuildError::NotAProject {
+            root: root.to_path_buf(),
+        });
+    }
     let (raw, source): (RawConfig, &'static str) = if config_path.exists() {
         let outfile = root.join(".usai/config/usai.config.js");
         bundle(root, &config_path, &outfile).await?;
