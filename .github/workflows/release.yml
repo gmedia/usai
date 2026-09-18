@@ -81,10 +81,13 @@ jobs:
           [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "packages/create-usai is $v, tag is ${GITHUB_REF_NAME}"; exit 1; }
       - name: Publish
         if: env.NODE_AUTH_TOKEN != '' || vars.NPM_TRUSTED_PUBLISHING == 'true'
+        env:
+          # Provenance attestations need a public source repository.
+          PROVENANCE: ${{ github.event.repository.visibility == 'public' && '--provenance' || '' }}
         run: |
           npm install -g npm@latest
           for p in packages/usai packages/create-usai; do
-            (cd $p && npm publish --access public --provenance)
+            (cd $p && npm publish --access public $PROVENANCE)
           done
       - name: Publish skipped
         if: env.NODE_AUTH_TOKEN == '' && vars.NPM_TRUSTED_PUBLISHING != 'true'
