@@ -18,7 +18,15 @@ trap 'docker rm -f usai-smoke >/dev/null 2>&1 || true; (cd "$work/my-app" 2>/dev
 echo "== scaffold"
 (cd packages/create-usai && pnpm run build >/dev/null)
 node packages/create-usai/dist/cli.js "$work/my-app" >/dev/null
+# The SDK under test is this checkout, not whatever npm has (the tag that
+# publishes it may not exist yet): pack it and depend on the tarball.
+(cd packages/usai && pnpm run build >/dev/null && pnpm pack --out "$work/my-app/sakaladev-usai.tgz" >/dev/null)
 cd "$work/my-app"
+node -e '
+const fs = require("fs"); const p = JSON.parse(fs.readFileSync("package.json", "utf8"));
+p.dependencies["@sakaladev/usai"] = "file:./sakaladev-usai.tgz";
+fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n");'
+sed -i 's#^COPY package.json #COPY sakaladev-usai.tgz package.json #' Dockerfile
 # Point the template at the images under test.
 sed -i "s#^FROM sakaladev/usai:[^ ]*-dev AS build#FROM ${DEV_IMAGE} AS build#; s#^FROM sakaladev/usai:[^ ]*\$#FROM ${RUNTIME_IMAGE}#" Dockerfile
 sed -i "s#image: sakaladev/usai:.*-dev#image: ${DEV_IMAGE}#" compose.yaml
