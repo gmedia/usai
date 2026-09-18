@@ -1,0 +1,80 @@
+name: release
+
+# Tag `vX.Y.Z` → binaries on the GitHub release + npm packages (when
+# NPM_TOKEN is configured). The tag must match the workspace version.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  binaries:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-14
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version matches the tag
+        run: |
+          v=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)"/\1/')
+          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "Cargo.toml is $v, tag is ${GITHUB_REF_NAME}"; exit 1; }
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p usai-cli --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          name=usai-${GITHUB_REF_NAME}-${{ matrix.target }}
+          mkdir -p dist/$name
+          cp target/${{ matrix.target }}/release/usai dist/$name/
+          cp LICENSE README.md dist/$name/
+          tar -C dist -czf dist/$name.tar.gz $name
+          (cd dist && shasum -a 256 $name.tar.gz > $name.tar.gz.sha256)
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.sha256
+          generate_release_notes: true
+
+  npm:
+    runs-on: ubuntu-24.04
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.3.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r run build
+      - name: Version matches the tag
+        run: |
+          v=$(node -p "require('./packages/usai/package.json').version")
+          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "packages/usai is $v, tag is ${GITHUB_REF_NAME}"; exit 1; }
+      - name: Publish
+        if: env.NODE_AUTH_TOKEN != ''
+        run: pnpm -r --filter usai --filter create-usai publish --access public --no-git-checks
+      - name: Publish skipped
+        if: env.NODE_AUTH_TOKEN == ''
+        run: echo "NPM_TOKEN is not configured; packages were built but not published"

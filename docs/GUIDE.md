@@ -6,7 +6,12 @@ This guide is enough to build a real application on the current runtime. The API
 
 ## 1. Install and run
 
-Prerequisites: Node ≥ 24, pnpm (or npm), Rust 1.98 (until binaries are published).
+Prerequisites: Node ≥ 24 and pnpm (or npm). The `usai` binary comes from a
+GitHub release (`usai-vX.Y.Z-<target>.tar.gz` for Linux x86_64/aarch64 and
+macOS arm64, with a SHA-256 next to it) — or from `cargo build --release -p
+usai-cli` in this repository (Rust 1.98). Releases are cut by tagging
+`vX.Y.Z` (`.github/workflows/release.yml`); the same tag publishes the
+`usai` and `create-usai` packages to npm.
 
 ```bash
 pnpm dlx create-usai my-app      # or: node packages/create-usai/dist/cli.js my-app (from this repo)
