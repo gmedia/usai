@@ -103,6 +103,10 @@ export const billing = defineModule({
 
 `usai inspect` shows the application exactly as the runtime understood it. `usai config` shows every effective setting and where it came from.
 
+`usai.config.ts` is a **declaration**, evaluated in a capability-less world and cached by its source digest — not a Node script. `process.env`, `fs`, `require`, `import.meta` are not available in it (the error says so). Anything that differs per environment belongs to `env(...)` declarations in the application and to the runtime's environment, never to the config.
+
+Types: `usai build` runs the project's own `tsc -p tsconfig.json --noEmit` (when `tsconfig.json` and `typescript` are present) and refuses an artifact with type errors (`--no-typecheck` opts out); `usai dev` runs the same check in the background after every rebuild and prints the diagnostics while the new revision already serves. Errors in a world carry stacks mapped to your source (`src/notes/pg.ts:41:12`) through the bundle's source map.
+
 ## 4. HTTP
 
 ```ts
@@ -260,7 +264,9 @@ export default defineApp({
 
 Missing or malformed values fail **activation**, not the first request. Inside a world, `ctx.env.WORKERS` is a number (`ctx.env` is typed `Record<string, string | number | boolean | undefined>`; narrow per key, or `const e = ctx.env as EnvValues<typeof spec>`).
 
-Where values come from: the process environment. For local work, `usai dev`, `usai test`, `usai db …`, `usai app/cron/task …` also read `<root>/.env` (`KEY=VALUE`, `#` comments, quotes; never overriding what the shell set). `usai run` does **not** read `.env` — production configuration belongs to the deployment environment.
+Where values come from: the process environment. For local work, `usai dev`, `usai test`, `usai db …`, `usai app/cron/task …` also read `<root>/.env` (`KEY=VALUE`, `#` comments, quotes; never overriding what the shell set); `usai dev` re-reads it on every rebuild, so editing `.env` and saving takes effect without a restart. `usai run` does **not** read `.env` — production configuration belongs to the deployment environment (its error says so when a variable is missing).
+
+`cache.local` is local to **one runtime process**: `usai dev`'s server and a one-shot `usai app <cmd>` / `usai cron run` are different runtimes and do not see each other's cache. State that must be shared belongs in PostgreSQL.
 
 Deployment settings (port, budgets, limits) are runtime flags and environment, not application code: `usai run --port 8080 --status`.
 

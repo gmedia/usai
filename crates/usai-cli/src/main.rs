@@ -35,7 +35,12 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Build the application artifact (manifest + bundled code)
-    Build,
+    Build {
+        /// Skip the TypeScript check (`tsc --noEmit`) that runs when the
+        /// project has a tsconfig.json and typescript installed
+        #[arg(long)]
+        no_typecheck: bool,
+    },
     /// Serve a built artifact (builds first when none exists)
     Run {
         #[arg(long, default_value = "127.0.0.1")]
@@ -167,12 +172,12 @@ enum TaskAction {
 }
 
 /// `KEY=VALUE` lines (optional `export`, optional single/double quotes,
-/// `#` comments); returns how many variables were set.
-fn load_dotenv(path: &std::path::Path) -> usize {
+/// `#` comments), for the variables the shell did not already set.
+pub fn parse_dotenv(path: &std::path::Path) -> Vec<(String, String)> {
     let Ok(text) = std::fs::read_to_string(path) else {
-        return 0;
+        return Vec::new();
     };
-    let mut loaded = 0;
+    let mut out = Vec::new();
     for line in text.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
@@ -192,12 +197,20 @@ fn load_dotenv(path: &std::path::Path) -> usize {
             .and_then(|v| v.strip_suffix('"'))
             .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
             .unwrap_or(value);
+        out.push((key.to_owned(), value.to_owned()));
+    }
+    out
+}
+
+/// Sets the `.env` variables into the process environment; returns how many.
+fn load_dotenv(path: &std::path::Path) -> usize {
+    let vars = parse_dotenv(path);
+    for (key, value) in &vars {
         // SAFETY: called at startup before the command runs; nothing else
         // reads the environment concurrently yet.
         unsafe { std::env::set_var(key, value) };
-        loaded += 1;
     }
-    loaded
+    vars.len()
 }
 
 #[tokio::main]
@@ -232,15 +245,13 @@ async fn main() {
         .unwrap_or_else(|| std::env::current_dir().expect("cwd"));
     // Local development reads `<root>/.env` (never overriding what the shell
     // already set); `usai run` does not — production configuration comes
-    // from the deployment environment, on purpose.
-    if !matches!(cli.command, Command::Run { .. }) {
-        let loaded = load_dotenv(&root.join(".env"));
-        if loaded > 0 && matches!(cli.command, Command::Dev { .. }) {
-            eprintln!("loaded {loaded} variable(s) from .env");
-        }
+    // from the deployment environment, on purpose. `usai dev` reads it on
+    // every rebuild instead (see `commands::dev`), so it is not set here.
+    if !matches!(cli.command, Command::Run { .. } | Command::Dev { .. }) {
+        load_dotenv(&root.join(".env"));
     }
     let result = match cli.command {
-        Command::Build => commands::build(&root).await,
+        Command::Build { no_typecheck } => commands::build(&root, !no_typecheck).await,
         Command::Run {
             host,
             port,

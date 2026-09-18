@@ -119,7 +119,9 @@ async function main() {
     // Probed by another wrapper: not a native binary, so say nothing.
     process.exit(1);
   }
-  const child = spawn(bin, process.argv.slice(2), { stdio: "inherit" });
+  // The runtime watches this pid: if the wrapper is killed (an IDE task, a
+  // supervisor), the server drains and leaves instead of orphaning the port.
+  const child = spawn(bin, process.argv.slice(2), { stdio: "inherit", env: { ...process.env, USAI_PARENT_PID: String(process.pid) } });
   // Ctrl-C reaches the child through the process group already; forwarding
   // it too would be the "second signal" that forces the exit. SIGTERM/SIGHUP
   // sent to this wrapper (docker stop, a supervisor) are forwarded once.

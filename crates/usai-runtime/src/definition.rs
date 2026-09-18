@@ -429,6 +429,9 @@ pub struct ApplicationDefinition {
     /// `usai build` (`image.cwasm`). Not part of the identity: the same
     /// application with or without it is the same application.
     precompiled: Option<Precompiled>,
+    /// The bundle's source map (`app.js.map`), for readable stack frames.
+    /// Not part of the identity either.
+    source_map: Option<Arc<crate::sourcemap::SourceMap>>,
 }
 
 /// A precompiled form and what it was built with.
@@ -504,6 +507,7 @@ impl ApplicationDefinition {
             code,
             index,
             precompiled: None,
+            source_map: None,
         }))
     }
 
@@ -530,7 +534,32 @@ impl ApplicationDefinition {
             code: self.code.clone(),
             index: self.index.clone(),
             precompiled: Some(precompiled),
+            source_map: self.source_map.clone(),
         })
+    }
+
+    /// Attaches the bundle's source map.
+    pub fn with_source_map(self: Arc<Self>, map: Arc<crate::sourcemap::SourceMap>) -> Arc<Self> {
+        Arc::new(Self {
+            manifest: self.manifest.clone(),
+            code: self.code.clone(),
+            index: self.index.clone(),
+            precompiled: self.precompiled.clone(),
+            source_map: Some(map),
+        })
+    }
+
+    pub fn source_map(&self) -> Option<&Arc<crate::sourcemap::SourceMap>> {
+        self.source_map.as_ref()
+    }
+
+    /// A guest error with its stack frames mapped to source positions when a
+    /// map is attached; unchanged otherwise.
+    pub fn map_error(&self, mut error: crate::engine::GuestError) -> crate::engine::GuestError {
+        if let (Some(map), Some(stack)) = (&self.source_map, &error.stack) {
+            error.stack = Some(map.map_stack(stack));
+        }
+        error
     }
 
     pub fn workloads(&self) -> &[WorkloadSpec] {

@@ -237,7 +237,21 @@ impl TaskQueue {
                             }
                             (termination, outcome) => {
                                 queue.failed.fetch_add(1, Ordering::SeqCst);
-                                tracing::warn!(task = %id, world = %result.world, ?termination, error = ?outcome.as_ref().and_then(|o| o.as_ref().err().map(|e| e.message.clone())), "task failed");
+                                let termination = serde_json::to_value(termination)
+                                    .ok()
+                                    .and_then(|v| {
+                                        v.as_str().map(str::to_owned).or_else(|| {
+                                            v.get("detail")
+                                                .and_then(|d| d.as_str())
+                                                .map(str::to_owned)
+                                        })
+                                    })
+                                    .unwrap_or_else(|| "faulted".to_owned());
+                                let error = outcome
+                                    .as_ref()
+                                    .and_then(|o| o.as_ref().err().map(|e| e.message.clone()))
+                                    .unwrap_or_else(|| "no outcome".to_owned());
+                                tracing::warn!(task = %id, world = %result.world, %termination, %error, "task failed");
                             }
                         },
                         Err(e) => {

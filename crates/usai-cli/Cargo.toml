@@ -23,6 +23,6 @@ clap.workspace = true
 tokio-util.workspace = true
 notify.workspace = true
 reqwest = { version = "0.12", default-features = false }
+libc = "0.2"
 
 [dev-dependencies]
-libc = "0.2"

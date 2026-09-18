@@ -133,8 +133,11 @@ impl ResourceProvider for PostgresProvider {
             }
         };
         let tls = tls_connector(&spec.name, ca_file.as_deref())?;
-        let manager =
-            Manager::from_config(pg_config, tls.clone(), ManagerConfig { recycling_method });
+        let manager = Manager::from_config(
+            pg_config.clone(),
+            tls.clone(),
+            ManagerConfig { recycling_method },
+        );
         let max = config.pool.max.unwrap_or(16).max(1);
         let pool = Pool::builder(manager)
             .max_size(max)
@@ -143,7 +146,35 @@ impl ResourceProvider for PostgresProvider {
         // Fail activation, not the first request, when the database is
         // unreachable (`GOAL.md` §32).
         let probe = pool.get().await.map_err(|e| {
-            ResourceError::Startup(spec.name.clone(), format!("cannot connect: {e}"))
+            // Say where and why, without the pool library's framing.
+            let hosts = pg_config
+                .get_hosts()
+                .iter()
+                .zip(pg_config.get_ports().iter().chain(std::iter::repeat(&5432)))
+                .map(|(h, p)| match h {
+                    tokio_postgres::config::Host::Tcp(h) => format!("{h}:{p}"),
+                    #[cfg(unix)]
+                    tokio_postgres::config::Host::Unix(path) => path.display().to_string(),
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let reason = match &e {
+                deadpool_postgres::PoolError::Backend(err) => {
+                    let mut text = err.to_string();
+                    if let Some(source) = std::error::Error::source(err) {
+                        text = format!("{text}: {source}");
+                    }
+                    text
+                }
+                other => other.to_string(),
+            };
+            ResourceError::Startup(
+                spec.name.clone(),
+                format!(
+                    "cannot connect to {hosts} (from {url_env}) as user {}: {reason}",
+                    pg_config.get_user().unwrap_or("?")
+                ),
+            )
         })?;
         drop(probe);
         Ok(Arc::new(Postgres {
@@ -366,6 +397,36 @@ async fn run_cancellable<T>(
     }
 }
 
+/// ISO-8601 / RFC 3339, plus the forms PostgreSQL itself prints
+/// (`2026-09-18 19:48:41.507406+07`, `2026-09-18 19:48:41+00:00`), so a
+/// value read back with `::text` can be a parameter again.
+fn parse_timestamptz(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    let s = s.trim();
+    if let Ok(d) = chrono::DateTime::parse_from_rfc3339(s) {
+        return Some(d.with_timezone(&chrono::Utc));
+    }
+    let normalized = s.replacen(' ', "T", 1);
+    for candidate in [normalized.clone(), format!("{normalized}:00")] {
+        if let Ok(d) = chrono::DateTime::parse_from_rfc3339(&candidate) {
+            return Some(d.with_timezone(&chrono::Utc));
+        }
+        for fmt in [
+            "%Y-%m-%dT%H:%M:%S%.f%#z",
+            "%Y-%m-%dT%H:%M:%S%.f%:z",
+            "%Y-%m-%dT%H:%M:%S%#z",
+        ] {
+            if let Ok(d) = chrono::DateTime::parse_from_str(&candidate, fmt) {
+                return Some(d.with_timezone(&chrono::Utc));
+            }
+        }
+    }
+    // No zone at all: PostgreSQL would assume the session time zone; the
+    // runtime assumes UTC and says so in the docs.
+    chrono::NaiveDateTime::parse_from_str(&normalized, "%Y-%m-%dT%H:%M:%S%.f")
+        .ok()
+        .map(|n| n.and_utc())
+}
+
 fn param_error(index: usize, ty: &Type, detail: impl std::fmt::Display) -> ResourceError {
     ResourceError::Operation {
         code: "invalid_param".into(),
@@ -419,10 +480,7 @@ fn to_sql(
         Type::JSON | Type::JSONB => Ok(Box::new(value.clone())),
         Type::TIMESTAMPTZ => typed!(
             chrono::DateTime<chrono::Utc>,
-            value
-                .as_str()
-                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-                .map(|d| d.with_timezone(&chrono::Utc))
+            value.as_str().and_then(parse_timestamptz)
         ),
         Type::TIMESTAMP => typed!(
             chrono::NaiveDateTime,

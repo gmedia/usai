@@ -31,7 +31,10 @@ try {
     conditions: ["usai", "import", "default"],
     treeShaking: true,
     minify: false,
-    sourcemap: false,
+    // An external map next to the bundle: the runtime maps `usai:app:L:C`
+    // frames in error output to source positions. Sources are paths only.
+    sourcemap: "external",
+    sourcesContent: false,
     legalComments: "none",
     logLevel: "silent",
     metafile: true,

@@ -24,6 +24,7 @@ pub mod openapi;
 pub mod ownership;
 pub mod resource;
 pub mod runtime;
+pub mod sourcemap;
 pub mod workloads;
 pub mod world;
 

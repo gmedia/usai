@@ -69,6 +69,14 @@ pub enum BuildError {
     Manifest(#[from] serde_json::Error),
     #[error(transparent)]
     Definition(#[from] DefinitionError),
+    #[error(
+        "usai.config.ts could not be evaluated: {detail}\n  \
+         usai.config.ts is a declaration, evaluated in a capability-less world — not a Node script: \
+         `process.env`, `fs`, `require`, `import.meta` are not available there and the result is \
+         cached by its source digest. Keep it to structure (app entry, migrations, seeders); per-environment \
+         values belong to `env(...)` declarations in the application and to the runtime's environment (§13 of docs/GUIDE.md)."
+    )]
+    ConfigNotDeclarative { detail: String },
 }
 
 #[derive(Deserialize)]
@@ -243,8 +251,27 @@ pub async fn load_config(engine: &dyn Engine, root: &Path) -> Result<ProjectConf
                 v.get("config").cloned().unwrap_or(serde_json::Value::Null)
             }
             _ => {
-                let compiled = engine.compile_code(&code).await?;
-                let value = engine.export_default(&compiled).await?;
+                let not_declarative = |e: &EngineError| {
+                    let text = e.to_string();
+                    [
+                        "process is not defined",
+                        "require is not defined",
+                        "import.meta",
+                        "fs is not defined",
+                        "__dirname",
+                    ]
+                    .iter()
+                    .any(|needle| text.contains(needle))
+                    .then_some(BuildError::ConfigNotDeclarative { detail: text })
+                };
+                let compiled = match engine.compile_code(&code).await {
+                    Ok(c) => c,
+                    Err(e) => return Err(not_declarative(&e).unwrap_or(BuildError::Engine(e))),
+                };
+                let value = match engine.export_default(&compiled).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(not_declarative(&e).unwrap_or(BuildError::Engine(e))),
+                };
                 let _ = tokio::fs::write(
                     &cached,
                     serde_json::to_vec(
@@ -352,6 +379,7 @@ pub async fn build(engine: &dyn Engine, options: &BuildOptions) -> Result<BuildO
     let meta_path = options.out_dir.join(IMAGE_META_FILE);
     let _ = tokio::fs::remove_file(&image_path).await;
     let _ = tokio::fs::remove_file(&meta_path).await;
+    let mut precompiled = None;
     if let Some(bytes) = engine.precompile(&compiled) {
         tokio::fs::create_dir_all(image_path.parent().expect("cache dir")).await?;
         let meta = ImageMeta {
@@ -365,6 +393,11 @@ pub async fn build(engine: &dyn Engine, options: &BuildOptions) -> Result<BuildO
         };
         tokio::fs::write(&image_path, &bytes).await?;
         tokio::fs::write(&meta_path, serde_json::to_vec_pretty(&meta)?).await?;
+        precompiled = Some(crate::definition::Precompiled {
+            engine: meta.engine,
+            fingerprint: meta.fingerprint,
+            bytes: bytes.into(),
+        });
     }
     // The source files this artifact was built from, so tools that reuse the
     // artifact can tell when it is stale (`artifact_is_current`).
@@ -378,7 +411,18 @@ pub async fn build(engine: &dyn Engine, options: &BuildOptions) -> Result<BuildO
         )?,
     )
     .await;
+    // The definition the caller installs carries the compiled form too, so
+    // `usai dev` loads what the build just compiled instead of compiling a
+    // second time on every core.
     let definition = ApplicationDefinition::new(manifest, code)?;
+    let definition = match precompiled {
+        Some(pre) => definition.with_precompiled(pre),
+        None => definition,
+    };
+    let definition = match read_source_map(&code_path).await {
+        Some(map) => definition.with_source_map(map),
+        None => definition,
+    };
     Ok(BuildOutput {
         definition,
         manifest_path,
@@ -388,6 +432,16 @@ pub async fn build(engine: &dyn Engine, options: &BuildOptions) -> Result<BuildO
 }
 
 const INPUTS_FILE: &str = "inputs.json";
+
+/// `app.js.map` next to the bundle, when the bundler wrote one.
+async fn read_source_map(code_path: &Path) -> Option<Arc<crate::sourcemap::SourceMap>> {
+    let mut map_path = code_path.as_os_str().to_owned();
+    map_path.push(".map");
+    let text = tokio::fs::read_to_string(std::path::PathBuf::from(map_path))
+        .await
+        .ok()?;
+    crate::sourcemap::SourceMap::parse(&text)
+}
 
 /// Whether the artifact in `dir` is at least as new as every source file it
 /// was built from. `false` when the input list is missing (an artifact
@@ -435,6 +489,10 @@ pub async fn load_artifact(dir: &Path) -> Result<Arc<ApplicationDefinition>, Bui
         serde_json::from_slice(&tokio::fs::read(dir.join("manifest.json")).await?)?;
     let code = Code::new(tokio::fs::read_to_string(dir.join("app.js")).await?);
     let definition = ApplicationDefinition::new(manifest, code)?;
+    let definition = match read_source_map(&dir.join("app.js")).await {
+        Some(map) => definition.with_source_map(map),
+        None => definition,
+    };
     if std::env::var("USAI_PRECOMPILED").as_deref() == Ok("0") {
         return Ok(definition);
     }

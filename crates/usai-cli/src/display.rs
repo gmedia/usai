@@ -262,3 +262,27 @@ pub fn inspect(definition: &ApplicationDefinition) -> String {
     }
     out
 }
+
+/// What changed between two definitions, for the reload line: added and
+/// removed workloads by id (`http:GET /x`, `task:name`). Empty when only
+/// handler bodies changed.
+pub fn workload_diff(
+    previous: Option<&ApplicationDefinition>,
+    current: &ApplicationDefinition,
+) -> String {
+    let Some(previous) = previous else {
+        return String::new();
+    };
+    let before: std::collections::BTreeSet<&str> =
+        previous.workloads().iter().map(|w| w.id.as_str()).collect();
+    let after: std::collections::BTreeSet<&str> =
+        current.workloads().iter().map(|w| w.id.as_str()).collect();
+    let mut out = String::new();
+    for id in after.difference(&before) {
+        let _ = write!(out, "\n  + {id}");
+    }
+    for id in before.difference(&after) {
+        let _ = write!(out, "\n  - {id}");
+    }
+    out
+}

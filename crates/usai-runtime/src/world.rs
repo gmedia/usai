@@ -374,7 +374,7 @@ impl WorldDriver {
 
         let outcome = match self.instance.outcome().await {
             Ok(Some(Outcome::Ok { value, .. })) => Some(Ok(value)),
-            Ok(Some(Outcome::Err { error, .. })) => Some(Err(error)),
+            Ok(Some(Outcome::Err { error, .. })) => Some(Err(self.definition.map_error(error))),
             Ok(None) => None,
             Err(_) => None,
         };

@@ -130,6 +130,8 @@ hello bundle (765 KB, zod evaluated per world) 6.52 ms/world
 
 - **P4 primitives (ADR-0017)**: `httpClient(...)` resource (owned, bounded, origin-pinned outbound HTTP; no global `fetch`), `crypto` WebCrypto subset with per-world host entropy (`randomUUID`, `getRandomValues`, SHA-2 digests, HMAC), `password.hash/verify` (Argon2id host op), `db.transaction(fn)` as one owned operation (holder task, rollback for a world that ends with it open, teaching diagnostic). Acceptance tests in `tests/http.rs` and `tests/postgres.rs`. Precompiled-image fingerprint now covers the bridge.
 
+- **Second fresh-eyes run (v0.0.4, a subagent as an outside developer building a notes API)**: 2 blockers + 12 frictions, all closed: config evaluated in a world is now a teaching error (`ConfigNotDeclarative`); a killed wrapper no longer orphans the server (`USAI_PARENT_PID` watch) and a bind failure names the real cause; `.env` re-read on every rebuild; `usai run` says it does not read `.env`; PostgreSQL text timestamps round-trip; connection errors name host/user/reason; **source maps** (`app.js.map`, `usai:app:L:C` → `src/x.ts:L:C` in stacks); `usai build` type-checks (fatal, `--no-typecheck`) and `usai dev` type-checks in the background; reload prints the added/removed workloads; `curl /_usai/docs` gets the OpenAPI document; the test harness's runtime is quiet; task-failure logs are plain text; `cache.local` scope documented; `usai dev` installs the image it just compiled instead of compiling again.
+
 ## Dogfood (2026-09-18, fresh-eyes external-user run against v0.0.1)
 
 A reviewer with no prior knowledge installed from npm + the release, built a
@@ -157,7 +159,7 @@ capabilities (design), latency histogram in metrics, an API reference page.
 
 ## Known gaps / debt
 
-- `usai dev` still compiles each rebuilt image with Cranelift on every core (seconds; on a two-core host requests stall meanwhile). Production installs load the precompiled `image.cwasm` from the artifact instead (~15 ms).
+- `usai dev` compiles each rebuilt image once (the build's compiled form is installed directly); the compile itself still takes every core for seconds on a small host.
 
 - The Wasm substrate is the research representation (ADR-0016); its per-world cost is now attributed on the research VM but not yet reduced, and no soak has run. Do not cite EXP-012B numbers for this codebase. The native QuickJS engine stays as reference; do not use it for economics.
 - Boundary contracts are validated twice when a JSON Schema exists (host before the world, provider inside it to obtain parsed values). Acceptable for v0; `GOAL.md` §13 asks to collapse this later.

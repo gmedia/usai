@@ -364,6 +364,23 @@ impl HttpHost {
                     ));
                 }
                 "/_usai/docs" | "/_usai/docs/" => {
+                    // A browser gets the page; anything that does not ask
+                    // for HTML (curl, a script) gets the document the page
+                    // itself renders, so `curl /_usai/docs` is not a shell.
+                    let wants_html = parts
+                        .headers
+                        .get(header::ACCEPT)
+                        .and_then(|v| v.to_str().ok())
+                        .is_some_and(|a| a.contains("text/html"));
+                    if !wants_html {
+                        return Ok(json_response(
+                            StatusCode::OK,
+                            &crate::openapi::generate_with(
+                                &compiled.revision.definition,
+                                self.runtime.config(),
+                            ),
+                        ));
+                    }
                     return Ok(Response::builder()
                         .status(StatusCode::OK)
                         .header(header::CONTENT_TYPE, "text/html; charset=utf-8")

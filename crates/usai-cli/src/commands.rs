@@ -21,12 +21,56 @@ fn engine() -> Arc<dyn usai_runtime::engine::Engine> {
     }
 }
 
-pub async fn build(root: &Path) -> Result<()> {
+/// The project's own TypeScript check, when it has one: `tsc -p tsconfig.json
+/// --noEmit` with the typescript the project installed. esbuild strips types
+/// without checking them, so this is the only place a type error is caught
+/// before it ships. `None` when the project has no tsconfig or no typescript.
+pub async fn typecheck(root: &Path) -> Option<Result<(), String>> {
+    let tsconfig = root.join("tsconfig.json");
+    let tsc = root.join("node_modules/typescript/bin/tsc");
+    if !tsconfig.exists() || !tsc.exists() {
+        return None;
+    }
+    let output = tokio::process::Command::new("node")
+        .arg(&tsc)
+        .args(["-p", "tsconfig.json", "--noEmit", "--pretty", "false"])
+        .current_dir(root)
+        .output()
+        .await
+        .ok()?;
+    if output.status.success() {
+        Some(Ok(()))
+    } else {
+        let mut text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        if text.is_empty() {
+            text = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        }
+        Some(Err(text))
+    }
+}
+
+pub async fn build(root: &Path, check_types: bool) -> Result<()> {
     let engine = engine();
     let config = load_config(engine.as_ref(), root).await?;
     let started = std::time::Instant::now();
-    let out =
-        usai_runtime::build::build(engine.as_ref(), &BuildOptions::from_config(&config)).await?;
+    // The type check runs alongside the bundle; both are needed for a
+    // shippable artifact, so a type error fails the build (--no-typecheck
+    // opts out).
+    let types = async {
+        if check_types {
+            typecheck(root).await
+        } else {
+            None
+        }
+    };
+    let options = BuildOptions::from_config(&config);
+    let (out, types) = tokio::join!(usai_runtime::build::build(engine.as_ref(), &options), types);
+    let out = out?;
+    if let Some(Err(diagnostics)) = types {
+        anyhow::bail!(
+            "type check failed (the artifact was written, but do not ship it):\n{diagnostics}\n  hint: fix the errors, or pass --no-typecheck to build anyway"
+        );
+    }
     let m = out.definition.manifest();
     println!(
         "built {} ({} workloads, {} resources) in {:?}\n  {}\n  {}",
@@ -94,7 +138,12 @@ pub async fn run(
     let (definition, engine) = definition_for(root, artifact).await?;
     let runtime = Runtime::new(engine, RuntimeConfig::default());
     let revision = runtime.install(definition).await?;
-    runtime.activate(revision.id).await?;
+    runtime.activate(revision.id).await.map_err(|e| match e {
+        usai_runtime::RuntimeError::MissingEnv(name) => anyhow::anyhow!(
+            "missing required environment: {name}\n  `usai run` reads the process environment only — it does not load .env (that is a development convenience of `usai dev`). Export {name} (or pass it through your orchestrator / compose `environment:`) and start again."
+        ),
+        other => other.into(),
+    })?;
     let (control_tx, control_rx) = tokio::sync::oneshot::channel::<String>();
     let stop_requested = match control {
         Some(addr) => {
@@ -180,6 +229,7 @@ async fn serve_until_signal(
             ..HttpConfig::default()
         },
     );
+    let quiet = on_ready.is_some();
     let shutdown = CancellationToken::new();
     let server = {
         let shutdown = shutdown.clone();
@@ -190,7 +240,18 @@ async fn serve_until_signal(
             })
             .await
         });
-        let bound = rx.await.context("server did not bind")?;
+        let bound = match rx.await {
+            Ok(bound) => bound,
+            Err(_) => {
+                // The server task returned before announcing: its error is
+                // the real reason (an address already in use, most often).
+                return match handle.await {
+                    Ok(Err(e)) => Err(e).with_context(|| format!("cannot listen on {addr}")),
+                    Ok(Ok(())) => anyhow::bail!("server exited before binding {addr}"),
+                    Err(e) => Err(e).context("server task failed"),
+                };
+            }
+        };
         let url = format!("http://{bound}");
         match on_ready {
             Some(f) => f(url),
@@ -212,24 +273,47 @@ async fn serve_until_signal(
         handle
     };
     // SIGINT (a terminal) and SIGTERM (an orchestrator, `docker stop`) both
-    // mean "drain, then leave"; a second one forces the exit.
+    // mean "drain, then leave"; a second one forces the exit. A wrapper that
+    // started this process (`pnpm usai`, an IDE task) names itself in
+    // USAI_PARENT_PID: when it is gone, so is the reason to keep serving —
+    // otherwise a killed wrapper leaves a server holding the port.
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .context("cannot listen for SIGTERM")?;
+    let parent_gone = async {
+        match std::env::var("USAI_PARENT_PID")
+            .ok()
+            .and_then(|p| p.parse::<i32>().ok())
+        {
+            Some(pid) => loop {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                // Signal 0 checks existence without delivering anything.
+                if unsafe { libc::kill(pid, 0) } != 0 {
+                    break;
+                }
+            },
+            None => std::future::pending().await,
+        }
+    };
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {}
-        _ = terminate.recv() => { eprintln!("SIGTERM received"); }
+        _ = terminate.recv() => { if !quiet { eprintln!("SIGTERM received"); } }
+        _ = parent_gone => { eprintln!("the process that started usai is gone"); }
         _ = async { match &stop_requested { Some(t) => t.cancelled().await, None => std::future::pending().await } } => {
-            eprintln!("stop requested through the control surface");
+            if !quiet { eprintln!("stop requested through the control surface"); }
         }
     }
-    eprintln!("\nshutting down: draining in-flight work (a second signal forces the exit)");
+    // Under a harness or orchestrator (`--announce`) the shutdown narration
+    // is noise in someone else's output; the exit code carries the result.
+    if !quiet {
+        eprintln!("\nshutting down: draining in-flight work (a second signal forces the exit)");
+    }
     shutdown.cancel();
     let drain = async {
         runtime.shutdown().await;
         let _ = tokio::time::timeout(Duration::from_secs(35), server).await;
     };
     tokio::select! {
-        _ = drain => eprintln!("drained; ownership returned to baseline"),
+        _ = drain => { if !quiet { eprintln!("drained; ownership returned to baseline"); } }
         _ = async { tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = terminate.recv() => {} } } => {
             let g = runtime.ledger().gauges.snapshot();
             eprintln!("forced shutdown with {} live worlds and {} live operations", g.live_worlds, g.live_ops);
@@ -301,7 +385,28 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
     let config = load_config(engine.as_ref(), root).await?;
     let options = BuildOptions::from_config(&config);
     let first = usai_runtime::build::build(engine.as_ref(), &options).await?;
-    let runtime = Runtime::new(Arc::clone(&engine), RuntimeConfig::default());
+    // `.env` is read at start and again on every rebuild, never overriding
+    // what the shell set: editing it and saving a source file is enough.
+    let dotenv_path = root.join(".env");
+    let dotenv: Arc<std::sync::RwLock<std::collections::HashMap<String, String>>> = Arc::new(
+        std::sync::RwLock::new(crate::parse_dotenv(&dotenv_path).into_iter().collect()),
+    );
+    {
+        let n = dotenv.read().expect("dotenv poisoned").len();
+        if n > 0 {
+            eprintln!("loaded {n} variable(s) from .env");
+        }
+    }
+    let env_source = Arc::clone(&dotenv);
+    let runtime = Runtime::with_env(Arc::clone(&engine), RuntimeConfig::default(), move |name| {
+        std::env::var(name).ok().or_else(|| {
+            env_source
+                .read()
+                .expect("dotenv poisoned")
+                .get(name)
+                .cloned()
+        })
+    });
     let revision = runtime.install(first.definition).await?;
     runtime.activate(revision.id).await?;
 
@@ -338,6 +443,7 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
                 let paths = watcher_paths.lock().expect("watched poisoned");
                 event.paths.iter().any(|p| {
                     paths.iter().any(|w| w == p)
+                        || p.file_name().is_some_and(|f| f == ".env")
                         || p.extension()
                             .is_some_and(|e| e == "ts" || e == "js" || e == "json")
                 })
@@ -356,12 +462,24 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
     let rebuild_runtime = Arc::clone(&runtime);
     let rebuild_engine = Arc::clone(&engine);
     let rebuild_root = root.to_path_buf();
+    let rebuild_dotenv = Arc::clone(&dotenv);
     tokio::spawn(async move {
         while rx.recv().await.is_some() {
             // Coalesce bursts of filesystem events.
             tokio::time::sleep(Duration::from_millis(120)).await;
             while rx.try_recv().is_ok() {}
             let started = std::time::Instant::now();
+            {
+                let fresh: std::collections::HashMap<String, String> =
+                    crate::parse_dotenv(&rebuild_root.join(".env"))
+                        .into_iter()
+                        .collect();
+                let mut current = rebuild_dotenv.write().expect("dotenv poisoned");
+                if *current != fresh {
+                    eprintln!("\n.env changed: {} variable(s) now loaded", fresh.len());
+                    *current = fresh;
+                }
+            }
             let config = match load_config(rebuild_engine.as_ref(), &rebuild_root).await {
                 Ok(c) => c,
                 Err(e) => {
@@ -377,6 +495,16 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
             {
                 Ok(out) => {
                     *watched.lock().expect("watched poisoned") = out.inputs;
+                    // Types are checked in the background: the new revision
+                    // serves meanwhile, the diagnostics arrive when tsc is done.
+                    let check_root = rebuild_root.clone();
+                    tokio::spawn(async move {
+                        if let Some(Err(diagnostics)) = typecheck(&check_root).await {
+                            eprintln!(
+                                "\ntype errors (the revision serves anyway; `usai build` refuses them):\n{diagnostics}"
+                            );
+                        }
+                    });
                     let previous = rebuild_runtime.active().ok();
                     if previous
                         .as_ref()
@@ -397,10 +525,14 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
                         Ok(rev) => match rebuild_runtime.activate(rev.id).await {
                             Ok(rev) => {
                                 eprintln!(
-                                    "\nrevision {} active ({}) in {:?}",
+                                    "\nrevision {} active ({}) in {:?}{}",
                                     rev.id,
                                     rev.definition.identity(),
-                                    started.elapsed()
+                                    started.elapsed(),
+                                    display::workload_diff(
+                                        previous.as_ref().map(|p| p.definition.as_ref()),
+                                        &rev.definition
+                                    )
                                 );
                                 if let Some(prev) = previous {
                                     let rt = Arc::clone(&rebuild_runtime);

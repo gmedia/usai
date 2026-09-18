@@ -406,6 +406,25 @@ async fn errors_are_contracts_and_unexpected_failures_are_sanitized() {
     let (status, body) = s.get("/bad-shape").await;
     assert_eq!(status, 500, "{body}");
     assert_eq!(body["error"]["code"], "response_contract_violation");
+    // The stack the developer sees (dev responses, logs) points at the
+    // TypeScript source, not at a line in the 800 KB bundle.
+    let r = s
+        .runtime
+        .invoke(
+            "http:GET /boom",
+            json!({ "kind": "http", "env": {}, "request": { "method": "GET", "path": "/boom", "url": "/boom", "params": {}, "query": {}, "headers": {}, "body": null } }),
+        )
+        .await
+        .unwrap();
+    let Some(Err(error)) = r.outcome else {
+        panic!("boom must fail: {:?}", r.outcome)
+    };
+    let stack = error.stack.expect("a stack");
+    assert!(stack.contains("src/app.ts:42:"), "unmapped stack:\n{stack}");
+    assert!(
+        !stack.contains("usai:app:"),
+        "unmapped frame left:\n{stack}"
+    );
     s.shutdown.cancel();
 }
 
@@ -802,9 +821,21 @@ async fn openapi_is_generated_from_the_definition() {
         .await
         .unwrap();
     assert_eq!(served, doc);
+    // Without `Accept: text/html` (curl, a script) the docs route answers
+    // with the OpenAPI document itself, not the page's HTML shell.
+    let raw = s
+        .client
+        .get(format!("http://{addr}/_usai/docs"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(raw.headers().get("content-type").unwrap(), "application/json");
+    let as_json: Value = raw.json().await.unwrap();
+    assert_eq!(as_json, doc);
     let docs = s
         .client
         .get(format!("http://{addr}/_usai/docs"))
+        .header("accept", "text/html,application/xhtml+xml")
         .send()
         .await
         .unwrap();
