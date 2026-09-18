@@ -175,7 +175,7 @@ jobs:
         with:
           name: digests-${{ matrix.arch }}
           path: digests/
-          retention-days: 1
+          retention-days: 7
 
   docker-manifest:
     # One multi-arch tag set per image, on GHCR always and on Docker Hub
