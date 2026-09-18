@@ -33,6 +33,7 @@ export interface ManifestWorkload {
   auth?: string;
   resources: string[];
   dispatches: string[];
+  publishes: string[];
   maxConcurrency?: number;
   timeoutMs?: number;
 }
@@ -115,6 +116,7 @@ export function describe(app: AppDeclaration): Manifest {
       errors: workload.errors,
       resources: workload.resources.map((r) => r.name),
       dispatches: workload.dispatches.map((d) => workloadId(d)),
+      publishes: [...workload.publishes],
     };
     if (module !== undefined) entry.module = module;
     if (workload.auth) entry.auth = workload.auth.name;

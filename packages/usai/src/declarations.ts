@@ -71,6 +71,8 @@ export interface Workload {
   readonly auth?: AuthDeclaration;
   readonly resources: ResourceDeclaration[];
   readonly dispatches: Workload[];
+  /** Queue topics this workload publishes to (`publishes(...)`). */
+  readonly publishes: string[];
   readonly policies: WorkloadPolicies;
   readonly handler: (...args: never[]) => unknown;
 }

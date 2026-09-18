@@ -82,6 +82,7 @@ function declare<O extends HttpOptions>(method: Method, path: string, options: O
     ...(options.auth ? { auth: options.auth } : {}),
     resources: options.resources ?? [],
     dispatches: [],
+    publishes: [],
     policies,
     handler: handler as Workload["handler"],
   };
@@ -122,6 +123,7 @@ function raw(path: string, a: RawOptions | RawHandler, b?: RawHandler): Workload
     ...(options.auth ? { auth: options.auth } : {}),
     resources: options.resources ?? [],
     dispatches: [],
+    publishes: [],
     policies,
     handler,
   };

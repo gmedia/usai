@@ -1,0 +1,19 @@
+{
+  "name": "@usai-examples/invoicing",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "The P4 application: tenants, users and sessions, invoices with transactions and pagination, signed webhooks over outbound HTTP through a retrying queue, a cron, a command, migrations, seeders and tests.",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "node --conditions=usai --test test/**/*.test.ts"
+  },
+  "dependencies": {
+    "@sakaladev/usai": "workspace:*",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "@types/node": "^24.0.0"
+  }
+}

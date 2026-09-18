@@ -352,6 +352,12 @@ usai app stats --root examples/todos
 usai test --root examples/todos
 ```
 
-## 17. Performance note (v0)
+## 17. The P4 application: `examples/invoicing`
+
+The roadmap's "real application" gate: tenants, users and bearer sessions (`password.hash`, random tokens from `crypto`, only SHA-256 hashes stored), invoices with line items created in one `db.transaction`, keyset pagination, status transitions that answer 404/409 with the current state, tenant isolation, a daily cron, a command with arguments, a seeder, and **signed webhooks**: the `issue`/`pay`/`mark-overdue` workloads publish to a queue (`publishes(...)` records it for `usai graph`), the `webhook.deliver` consumer POSTs through an `httpClient` with an HMAC signature and retries five times with exponential backoff, recording every attempt. Its test spins a local sink that fails the first delivery, then checks the retry landed with a valid signature.
+
+What building it as a user found (and what changed): outbound HTTP, `crypto`, password hashing and transactions did not exist (ADR-0017); PostgreSQL enum parameters and columns were unsupported (now labels); a webhook consumer needs the *generic* client (tenant-chosen URLs), which is why `httpClient` without a `baseUrl` exists at all.
+
+## 18. Performance note (v0)
 
 Per-world cost on the Wasm substrate is flat with respect to application size: instantiating a world from the pre-initialized image costs ~0.02 ms whatever the bundle contains, and validators declared as contracts are prepared before the image is snapshotted, so a fresh world does not rebuild them. On the research VM a contract-validated hello request is ~1 ms p50 at c=1 and the runtime serves ~13k req/s at c=16 on 16 cores; the numbers and their attribution are in `docs/measurements/`. Handler code runs in an interpreter compiled by Cranelift: CPU-heavy loops are slower than on a JIT; keep hot loops small or move them to the database.

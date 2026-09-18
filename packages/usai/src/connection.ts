@@ -51,6 +51,7 @@ function stream(path: string, options: StreamOptions, handler: (ctx: StreamConte
     ...(options.auth ? { auth: options.auth } : {}),
     resources: options.resources ?? [],
     dispatches: [],
+    publishes: [],
     policies,
     handler: handler as Workload["handler"],
   };
@@ -107,6 +108,7 @@ export function socket<I extends AnySchema | undefined = undefined, O extends An
     ...(options.auth ? { auth: options.auth } : {}),
     resources: options.resources ?? [],
     dispatches: [],
+    publishes: [],
     policies,
     handler: handlers as unknown as Workload["handler"],
   };

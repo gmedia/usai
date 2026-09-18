@@ -829,7 +829,10 @@ async fn openapi_is_generated_from_the_definition() {
         .send()
         .await
         .unwrap();
-    assert_eq!(raw.headers().get("content-type").unwrap(), "application/json");
+    assert_eq!(
+        raw.headers().get("content-type").unwrap(),
+        "application/json"
+    );
     let as_json: Value = raw.json().await.unwrap();
     assert_eq!(as_json, doc);
     let docs = s

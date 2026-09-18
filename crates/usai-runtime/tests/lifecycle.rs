@@ -80,6 +80,7 @@ fn task(id: &str) -> WorkloadSpec {
         auth: None,
         resources: vec![],
         dispatches: vec![],
+        publishes: vec![],
         max_concurrency: None,
         timeout_ms: None,
     }

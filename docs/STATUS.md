@@ -27,7 +27,7 @@ traffic yet. The gates in `docs/ROADMAP.md`, with where each stands:
 |---|---|---|
 | Correctness of the lifecycle model | ✓ automated | C1–C18 have acceptance tests; malformed artifacts, budget exhaustion, forced shutdown, revision replacement under load are tested; 1 h soak on a VM: 49 M requests, 0 errors, flat RSS |
 | Distribution (P3.5) | ✓ | native binary, `pnpm usai` wrapper, Docker runtime/dev images, compose path, artifact↔runtime compatibility refused before serving, smoke test in CI and after every release |
-| Real application built as a user (P4) | ◐ | primitives landed (ADR-0017: `httpClient`, `crypto`, `password`, transactions); the realistic application built as a user is in progress |
+| Real application built as a user (P4) | ✓ | `examples/invoicing` (tenants, sessions, transactional invoices, pagination, signed retried webhooks over outbound HTTP, cron, command, seeder, test through the real runtime) — GUIDE §17; primitives it forced: ADR-0017, enum params. A second outside-developer run (notes API) fed 14 fixes |
 | Operational qualification (P5) | ✗ | no runbooks (DB down/restart, bad deploy, rollback, disk full); HTTP/1.1 only, TLS termination is the proxy's; latency histogram / error-rate metrics not yet exposed |
 | Reliability qualification (P6) | ✗ | 1 h soak only; no 24 h / 72 h soaks, no revision-churn-under-traffic campaign, no DB-flap campaign |
 | External developer validation (P7) | ✗ | one fresh-eyes dogfood run (issues fixed in 0.0.2); no outside developers yet |
@@ -36,11 +36,10 @@ traffic yet. The gates in `docs/ROADMAP.md`, with where each stands:
 | Security qualification | ◐ | threat model written; worlds are semantic isolation, **not** a hostile multi-tenant sandbox (ADR-0008); no fuzzing of contracts/artifacts/control API |
 | Vendored Wasmtime patch | ◐ | `vendor/wasmtime` carries a pagemap-reset fix with documented provenance; not yet upstreamed, no rebase test |
 
-Next gate to open: **P4** — build one realistic application without touching
-runtime internals; add `fetch`/`crypto` as ownership-aware host operations
-when it demands them.
+Next gate to open: **P5** — deploy for real (proxy → Usai → PostgreSQL),
+break it deliberately, and write the runbook each incident needs.
 
-Current phase (`docs/ROADMAP.md`): **P3.5 Distribution done → P4 Real application.** Depth, not breadth.
+Current phase (`docs/ROADMAP.md`): **P4 Real application done → P5 Operational qualification.** Depth, not breadth.
 
 ```text
 execution substrate recovery   ← ADR-0016 first pass done; measure on a real VM next
@@ -131,6 +130,8 @@ hello bundle (765 KB, zod evaluated per world) 6.52 ms/world
 - **P4 primitives (ADR-0017)**: `httpClient(...)` resource (owned, bounded, origin-pinned outbound HTTP; no global `fetch`), `crypto` WebCrypto subset with per-world host entropy (`randomUUID`, `getRandomValues`, SHA-2 digests, HMAC), `password.hash/verify` (Argon2id host op), `db.transaction(fn)` as one owned operation (holder task, rollback for a world that ends with it open, teaching diagnostic). Acceptance tests in `tests/http.rs` and `tests/postgres.rs`. Precompiled-image fingerprint now covers the bridge.
 
 - **Second fresh-eyes run (v0.0.4, a subagent as an outside developer building a notes API)**: 2 blockers + 12 frictions, all closed: config evaluated in a world is now a teaching error (`ConfigNotDeclarative`); a killed wrapper no longer orphans the server (`USAI_PARENT_PID` watch) and a bind failure names the real cause; `.env` re-read on every rebuild; `usai run` says it does not read `.env`; PostgreSQL text timestamps round-trip; connection errors name host/user/reason; **source maps** (`app.js.map`, `usai:app:L:C` → `src/x.ts:L:C` in stacks); `usai build` type-checks (fatal, `--no-typecheck`) and `usai dev` type-checks in the background; reload prints the added/removed workloads; `curl /_usai/docs` gets the OpenAPI document; the test harness's runtime is quiet; task-failure logs are plain text; `cache.local` scope documented; `usai dev` installs the image it just compiled instead of compiling again.
+
+- **P4 application** `examples/invoicing` (GUIDE §17): built as a user of the SDK; its test runs in CI against the service database. `publishes(...)` joins `dispatches(...)` for the graph/docs; PostgreSQL enums round-trip as labels.
 
 ## Dogfood (2026-09-18, fresh-eyes external-user run against v0.0.1)
 

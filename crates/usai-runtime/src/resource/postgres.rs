@@ -33,7 +33,7 @@ use deadpool_postgres::{Manager, ManagerConfig, Object, Pool, RecyclingMethod};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
-use tokio_postgres::types::{ToSql, Type};
+use tokio_postgres::types::{Kind, ToSql, Type};
 use tokio_postgres::{Row, Statement};
 use tokio_util::sync::CancellationToken;
 
@@ -513,11 +513,62 @@ fn to_sql(
                 .as_array()
                 .and_then(|a| a.iter().map(Value::as_i64).collect())
         ),
+        // User-defined enums travel as their label; arrays of them too
+        // (`status = any($1::invoice_status[])`).
+        _ if matches!(ty.kind(), Kind::Enum(_)) => {
+            typed!(EnumLabel, value.as_str().map(|s| EnumLabel(s.to_owned())))
+        }
+        _ if matches!(ty.kind(), Kind::Array(inner) if matches!(inner.kind(), Kind::Enum(_))) => {
+            typed!(
+                Vec<EnumLabel>,
+                value.as_array().and_then(|a| a
+                    .iter()
+                    .map(|v| v.as_str().map(|s| EnumLabel(s.to_owned())))
+                    .collect())
+            )
+        }
         _ => Err(param_error(
             index,
             ty,
             "unsupported parameter type; cast it in SQL, e.g. $1::text",
         )),
+    }
+}
+
+/// A PostgreSQL enum value, sent as its label in text format.
+#[derive(Debug)]
+struct EnumLabel(String);
+
+impl ToSql for EnumLabel {
+    fn to_sql(
+        &self,
+        _ty: &Type,
+        out: &mut bytes::BytesMut,
+    ) -> Result<tokio_postgres::types::IsNull, Box<dyn std::error::Error + Sync + Send>> {
+        out.extend_from_slice(self.0.as_bytes());
+        Ok(tokio_postgres::types::IsNull::No)
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(ty.kind(), Kind::Enum(_))
+    }
+
+    tokio_postgres::types::to_sql_checked!();
+}
+
+/// A PostgreSQL enum value read back as its label.
+struct EnumLabelOut(String);
+
+impl<'a> tokio_postgres::types::FromSql<'a> for EnumLabelOut {
+    fn from_sql(
+        _ty: &Type,
+        raw: &'a [u8],
+    ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        Ok(EnumLabelOut(std::str::from_utf8(raw)?.to_owned()))
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(ty.kind(), Kind::Enum(_))
     }
 }
 
@@ -561,6 +612,9 @@ fn column_to_json(row: &Row, index: usize, ty: &Type) -> Result<Value, tokio_pos
         Type::INT4_ARRAY => get!(Vec<i32>),
         Type::INT8_ARRAY => get!(Vec<i64>),
         Type::VOID => Ok(Value::Null),
+        _ if matches!(ty.kind(), Kind::Enum(_)) => row
+            .try_get::<_, Option<EnumLabelOut>>(index)
+            .map(|v| json!(v.map(|e| e.0))),
         _ => row.try_get::<_, Option<String>>(index).map(|v| json!(v)),
     }
 }

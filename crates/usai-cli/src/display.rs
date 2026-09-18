@@ -228,6 +228,12 @@ pub fn inspect(definition: &ApplicationDefinition) -> String {
                 let _ = writeln!(out, "      {d}");
             }
         }
+        if !w.publishes.is_empty() {
+            let _ = writeln!(out, "    publishes:");
+            for topic in &w.publishes {
+                let _ = writeln!(out, "      {topic}");
+            }
+        }
         if let Some(ms) = w.timeout_ms {
             let _ = writeln!(out, "    timeout: {ms}ms");
         }

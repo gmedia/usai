@@ -364,7 +364,25 @@ pub fn render_graph(definition: &crate::definition::ApplicationDefinition) -> St
                     .find(|x| &x.name == r)
                     .map(|x| x.kind.as_str())
                     .unwrap_or("resource");
-                format!("{kind}/{r} [lease]")
+                // A pool lends a connection; an HTTP client lends a bounded
+                // slot for one outbound request.
+                let edge = if kind == "http.client" {
+                    "egress"
+                } else {
+                    "lease"
+                };
+                format!("{kind}/{r} [{edge}]")
+            })
+            .collect();
+        let publishes: Vec<String> = w
+            .publishes
+            .iter()
+            .map(|topic| {
+                let target = definition
+                    .workload(&format!("queue:{topic}"))
+                    .map(|(_, t)| format!("{} [{}]", t.name, lifetime(&t.trigger)))
+                    .unwrap_or_else(|| format!("{topic} [message]"));
+                format!("publish → {target}")
             })
             .collect();
         let dispatches: Vec<String> = w
@@ -378,7 +396,11 @@ pub fn render_graph(definition: &crate::definition::ApplicationDefinition) -> St
                 format!("dispatch → {target}")
             })
             .collect();
-        let all: Vec<String> = edges.into_iter().chain(dispatches).collect();
+        let all: Vec<String> = edges
+            .into_iter()
+            .chain(dispatches)
+            .chain(publishes)
+            .collect();
         for (i, edge) in all.iter().enumerate() {
             let last = i + 1 == all.len();
             let _ = writeln!(out, "   {} {edge}", if last { "└──" } else { "├──" });

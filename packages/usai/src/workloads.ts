@@ -33,6 +33,7 @@ export function task<I extends AnySchema | undefined = undefined>(
     errors: options.errors ?? [],
     resources: options.resources ?? [],
     dispatches: [],
+    publishes: [],
     policies,
     handler: handler as Workload["handler"],
   };
@@ -61,6 +62,7 @@ export function cron(name: string, options: CronOptions, handler: (ctx: CronCont
     errors: [],
     resources: options.resources ?? [],
     dispatches: [],
+    publishes: [],
     policies,
     handler: handler as Workload["handler"],
   };
@@ -86,6 +88,7 @@ export function command(name: string, a: unknown, b?: unknown): Workload {
     errors: [],
     resources: options.resources ?? [],
     dispatches: [],
+    publishes: [],
     policies,
     handler,
   };
@@ -118,6 +121,7 @@ export function service(name: string, a: unknown, b?: unknown): Workload {
     errors: [],
     resources: options.resources ?? [],
     dispatches: [],
+    publishes: [],
     policies: {},
     handler,
   };
@@ -126,6 +130,13 @@ export function service(name: string, a: unknown, b?: unknown): Workload {
 /** Records that `from` dispatches `to`, for `usai graph`. Returns `from`. */
 export function dispatches(from: Workload, ...to: Workload[]): Workload {
   (from.dispatches as Workload[]).push(...to);
+  return from;
+}
+
+/** Records that `from` publishes to queue topics (names, or the consuming
+ * `queue.consume` workloads), for `usai graph` and the API docs. Returns `from`. */
+export function publishes(from: Workload, ...topics: Array<string | Workload>): Workload {
+  (from.publishes as string[]).push(...topics.map((t) => (typeof t === "string" ? t : t.name)));
   return from;
 }
 

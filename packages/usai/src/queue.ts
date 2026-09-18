@@ -59,6 +59,7 @@ function consume<M extends AnySchema | undefined = undefined>(
     errors: options.errors ?? [],
     resources,
     dispatches: [],
+    publishes: [],
     policies,
     handler: handler as Workload["handler"],
   };

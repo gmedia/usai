@@ -175,6 +175,9 @@ pub fn generate_with(definition: &ApplicationDefinition, config: &crate::Runtime
                     .collect(),
             );
             operation["x-usai-dispatches"] = json!(workload.dispatches);
+            if !workload.publishes.is_empty() {
+                operation["x-usai-publishes"] = json!(workload.publishes);
+            }
             operation["x-usai-errors"] = Value::Array(
                 workload
                     .errors
@@ -332,6 +335,7 @@ pub fn generate_with(definition: &ApplicationDefinition, config: &crate::Runtime
                 },
                 "resources": w.resources,
                 "dispatches": w.dispatches,
+                "publishes": w.publishes,
                 "detail": detail,
             });
             if let Some(schema) = &w.contracts.input {
@@ -398,6 +402,7 @@ mod tests {
             auth: None,
             resources: vec![],
             dispatches: vec![],
+            publishes: vec![],
             max_concurrency: None,
             timeout_ms: None,
         };

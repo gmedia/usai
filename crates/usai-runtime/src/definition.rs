@@ -248,6 +248,9 @@ pub struct WorkloadSpec {
     /// Task names this workload dispatches to. Informational for `graph`.
     #[serde(default)]
     pub dispatches: Vec<String>,
+    /// Queue topics this workload publishes to. Informational for `graph`.
+    #[serde(default)]
+    pub publishes: Vec<String>,
     /// Per-workload world budget (ADR-0012). `None` = inherit application budget.
     #[serde(default)]
     pub max_concurrency: Option<u32>,
@@ -621,6 +624,7 @@ mod tests {
                 auth: None,
                 resources: vec![],
                 dispatches: vec![],
+                publishes: vec![],
                 max_concurrency: None,
                 timeout_ms: None,
             }],

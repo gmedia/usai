@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": [
+      "node"
+    ],
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@sakaladev/usai/test": [
+        "../../packages/usai/src/test.ts"
+      ]
+    }
+  },
+  "include": [
+    "test"
+  ]
+}
