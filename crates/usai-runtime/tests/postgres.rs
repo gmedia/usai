@@ -164,8 +164,8 @@ async fn sql_error_is_terminal_and_the_connection_is_reused() {
 async fn cooperative_cancellation_awaits_terminal_state_then_reuses() {
     let Some(f) = fixture().await else { return };
     let started = std::time::Instant::now();
-    let (status, _) = f.http("GET", "/slow", json!({})).await;
-    assert_eq!(status, 504);
+    let (status, body) = f.http("GET", "/slow", json!({})).await;
+    assert_eq!(status, 504, "{body}");
     assert!(
         started.elapsed() < Duration::from_secs(5),
         "cancellation must not wait for pg_sleep"
