@@ -1199,19 +1199,26 @@ mod tests {
             .unwrap();
         let pristine = snapshot(&mut world);
         drop(world);
-        let mut world = engine
-            .instantiate(&compiled, Arc::clone(&bindings))
-            .await
-            .unwrap();
-        let other = snapshot(&mut world);
-        drop(world);
         let image_len = pristine.len();
-        assert_eq!(other.len(), image_len);
-        let per_world: std::collections::HashSet<usize> = (0..image_len)
-            .filter(|i| pristine[*i] != other[*i])
-            .collect();
+        // Four more pristine worlds: a seed byte that coincides by chance in
+        // one pair differs in another, and the whole 64-byte window around
+        // any differing byte is excluded so neighbouring state words are too.
+        let mut per_world = std::collections::HashSet::new();
+        for _ in 0..4 {
+            let mut world = engine
+                .instantiate(&compiled, Arc::clone(&bindings))
+                .await
+                .unwrap();
+            let other = snapshot(&mut world);
+            drop(world);
+            assert_eq!(other.len(), image_len);
+            for i in (0..image_len).filter(|i| pristine[*i] != other[*i]) {
+                let window = i / 64 * 64;
+                per_world.extend(window..(window + 64).min(image_len));
+            }
+        }
         assert!(
-            per_world.len() < 64,
+            per_world.len() < 1024,
             "unexpectedly many per-world bytes: {}",
             per_world.len()
         );
