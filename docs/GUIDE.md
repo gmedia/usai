@@ -9,10 +9,13 @@ This guide is enough to build a real application on the current runtime. The API
 Three ways to run Usai; the native binary is the first-class one.
 
 ```bash
-# 1. native binary — Node ≥ 24 + pnpm for the build, the `usai` binary from a
-#    GitHub release (Linux x86_64/aarch64, macOS arm64; SHA-256 next to it)
+# 1. native — Node ≥ 24 + pnpm. `pnpm dev` (= `pnpm usai dev`) runs the `usai`
+#    binary at the project's SDK version: a `usai` on PATH at that version, else
+#    the GitHub release asset (Linux x86_64/aarch64, macOS arm64), fetched once
+#    into ~/.cache/usai/<version> and SHA-256 verified. Or install the binary
+#    yourself from the releases page and call `usai` directly.
 pnpm dlx @sakaladev/create-usai my-app && cd my-app && pnpm install
-usai dev
+pnpm dev
 
 # 2. Docker, nothing installed locally: the scaffold's compose.yaml runs the
 #    `-dev` image with your source mounted (installs on first start, reloads on save)
@@ -22,6 +25,12 @@ docker compose up
 #    the artifact into the runtime image — no Node, no source, non-root, read-only ok
 docker build -t my-app . && docker run --rm -p 3000:3000 my-app
 ```
+
+The npm wrapper honours `USAI_BINARY` (use exactly this binary), `USAI_CACHE_DIR`
+/ `XDG_CACHE_HOME` (where fetched binaries live) and `USAI_RELEASE_BASE` (a
+mirror of the release assets, for air-gapped or proxied networks). Other
+platforms: build with `cargo build --release -p usai-cli` and set `USAI_BINARY`,
+or use Docker.
 
 Images: `sakaladev/usai:X.Y.Z` (runtime: the binary, CA roots, user `usai`
 10001, `ENTRYPOINT usai`, `CMD run --artifact /app/.usai/build --host 0.0.0.0

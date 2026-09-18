@@ -66,7 +66,7 @@ function main(argv: string[]): void {
   }
   try {
     const target = scaffold(templateFlag ? { target: dir, template: templateFlag } : { target: dir });
-    console.log(`created ${target}\n\n  cd ${dir}\n  pnpm install\n  usai dev\n`);
+    console.log(`created ${target}\n\n  cd ${dir}\n  pnpm install\n  pnpm dev\n`);
   } catch (error) {
     console.error(`error: ${(error as Error).message}`);
     process.exit(1);

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "usai dev",
     "build": "usai build",
+    "test": "usai test",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

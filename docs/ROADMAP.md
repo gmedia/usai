@@ -32,7 +32,7 @@ feature parity with anything.
 ```text
 1. native binary        usai dev               (first-class; releases page)
 2. Docker               docker compose up      (zero-install, not zero-cost: bind mounts on macOS/Windows)
-3. npm-assisted binary  pnpm usai dev          (later: the package fetches the platform binary)
+3. npm-assisted binary  pnpm usai dev          (the SDK's `usai` bin fetches the release binary at its version, once)
 ```
 
 Three artefacts from one tag `vX.Y.Z`: GitHub release binaries, npm

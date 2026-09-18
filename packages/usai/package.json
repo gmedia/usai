@@ -27,6 +27,9 @@
     "access": "public"
   },
   "type": "module",
+  "bin": {
+    "usai": "bin/usai.mjs"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -50,6 +53,7 @@
     }
   },
   "files": [
+    "bin",
     "build",
     "dist",
     "globals.d.ts",
