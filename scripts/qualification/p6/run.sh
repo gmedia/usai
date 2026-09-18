@@ -37,12 +37,12 @@ summarize() {
 load() {
   if [ -f "$here/out/load.pid" ]; then kill "$(cat "$here/out/load.pid")" 2>/dev/null || true; fi
   node "$p5/loadgen.mjs" "$BASE" "$TOKEN" "${CLIENTS:-8}" "$1" "$2" > /dev/null &
-  echo $! > "$here/out/load.pid"; echo $!
+  LOAD_PID=$!; echo $LOAD_PID > "$here/out/load.pid"
 }
 
 churn() {
   local n="${1:-200}"; local out="$here/out/churn.load.jsonl"; rm -f "$out"
-  local dur=$((n * 2 + 20)); local pid; pid=$(load "$dur" "$out")
+  local dur=$((n * 2 + 20)); load "$dur" "$out"; local pid=$LOAD_PID
   sleep 5
   local t0=$SECONDS; local failed=0
   local installs_refused=0
@@ -60,12 +60,13 @@ churn() {
   echo "$n replacements in $((SECONDS - t0)) s, $failed activation failures, $installs_refused installs refused"
   wait "$pid" 2>/dev/null || true
   echo "load: $(summarize "$out")"; status > "$here/out/churn.status.json"
+  echo "rss now: $(rss_mb) MiB; images live: $(status | grep -o '"compiledImagesLive":[0-9]*')"
   echo "revisions now: $(status | grep -o '"state":"[a-z]*"' | sort | uniq -c | tr '\n' ' ')"
 }
 
 db_flap() {
   local n="${1:-10}"; local out="$here/out/db-flap.load.jsonl"; rm -f "$out"
-  local pid; pid=$(load $((n * 12 + 10)) "$out"); sleep 5
+  load $((n * 12 + 10)) "$out"; local pid=$LOAD_PID; sleep 5
   for i in $(seq 1 "$n"); do docker kill -s SIGKILL usai-p5-postgres-1 >/dev/null; sleep 2; docker start usai-p5-postgres-1 >/dev/null; sleep 8; done
   wait_healthy 60 || echo "NOT HEALTHY after flaps"
   wait "$pid" 2>/dev/null || true
@@ -75,7 +76,7 @@ db_flap() {
 
 restart_loop() {
   local n="${1:-10}"; local out="$here/out/restart-loop.load.jsonl"; rm -f "$out"
-  local pid; pid=$(load $((n * 8 + 10)) "$out"); sleep 5
+  load $((n * 8 + 10)) "$out"; local pid=$LOAD_PID; sleep 5
   local total=0
   for i in $(seq 1 "$n"); do
     local t=$SECONDS
@@ -129,7 +130,7 @@ dead_letter() {
 soak() {
   local s="${1:-3600}"; local out="$here/out/soak.load.jsonl"; local samples="$here/out/soak.samples.jsonl"; rm -f "$out" "$samples"
   echo "soak start $(date -u +%FT%TZ) for $s s"
-  local pid; pid=$(load "$s" "$out")
+  load "$s" "$out"; local pid=$LOAD_PID
   local t0=$SECONDS
   while kill -0 "$pid" 2>/dev/null; do
     sleep 60

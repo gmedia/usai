@@ -571,6 +571,7 @@ mod tests {
     fn prometheus_text_is_well_formed() {
         let status = RuntimeStatus {
             engine: "quickjs",
+            compiled_images_live: 1,
             gauges: crate::ownership::GaugeSnapshot {
                 worlds_created: 3,
                 live_worlds: 1,

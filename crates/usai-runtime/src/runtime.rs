@@ -232,6 +232,9 @@ pub enum RuntimeError {
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeStatus {
     pub engine: &'static str,
+    /// Compiled application images alive (one per held revision, plus
+    /// whatever a build or a world still references). Wasm engine only.
+    pub compiled_images_live: u64,
     pub gauges: GaugeSnapshot,
     pub tasks: serde_json::Value,
     pub revisions: Vec<RevisionStatus>,
@@ -883,6 +886,8 @@ impl Runtime {
             .collect();
         RuntimeStatus {
             engine: self.engine.name(),
+            compiled_images_live: crate::engine::wasm::IMAGES_LIVE
+                .load(std::sync::atomic::Ordering::Relaxed),
             gauges: self.ledger.gauges.snapshot(),
             tasks: self.tasks.status(),
             revisions,

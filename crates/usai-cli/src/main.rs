@@ -237,8 +237,32 @@ fn load_dotenv(path: &std::path::Path) -> usize {
     vars.len()
 }
 
-#[tokio::main]
-async fn main() {
+/// glibc grows one malloc arena per thread that allocates concurrently; a
+/// 10 MB module deserialized on worker thread N leaves a 10 MB free chunk
+/// in arena N that arena M cannot reuse. With 16 workers and revision churn
+/// that is 16 × (image + bookkeeping) of retained-but-free memory — the P6
+/// campaign hit a 512 MB limit after ~270 replacements. Two arenas bound it.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn bound_malloc_arenas() {
+    // SAFETY: called before any thread is spawned; plain libc setting.
+    unsafe {
+        libc::mallopt(libc::M_ARENA_MAX, 2);
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+fn bound_malloc_arenas() {}
+
+fn main() {
+    bound_malloc_arenas();
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime")
+        .block_on(async_main());
+}
+
+async fn async_main() {
     let cli = Cli::parse();
     // Servers narrate (revisions, images, listeners); one-shot commands print
     // their result and stay quiet unless asked.

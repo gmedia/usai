@@ -379,6 +379,18 @@ impl Compiled for Image {
     }
 }
 
+/// Compiled images alive right now: each holds a deserialized module and
+/// its memory image. A retired revision must bring this down again — the
+/// revision-churn campaign watches it.
+pub static IMAGES_LIVE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+impl Drop for Image {
+    fn drop(&mut self) {
+        IMAGES_LIVE.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        tracing::debug!(image_sha256 = %self.image_sha256, "application image dropped");
+    }
+}
+
 pub struct WasmEngine {
     config: WasmConfig,
     runtime: WtEngine,
@@ -435,6 +447,14 @@ impl WasmEngine {
         pooling.max_memory_size(config.max_memory_bytes);
         pooling.linear_memory_keep_resident(config.linear_memory_keep_resident);
         pooling.table_keep_resident(config.table_keep_resident);
+        // Every world resets its slot fully anyway, so slot↔module affinity
+        // buys nothing here — but Wasmtime's default keeps up to 100 unused
+        // warm slots and prefers *cold* slots for a new module, so revision
+        // churn touched ever more slots and their keep-resident pages until
+        // the container's memory limit (P6 campaign: OOM after ~270
+        // replacements at 512 MB). With 0 the slots ever used equal the peak
+        // concurrency: RSS ≈ live worlds × keep_resident, whatever the churn.
+        pooling.max_unused_warm_slots(0);
         let pagemap = PoolingAllocationConfig::is_pagemap_scan_available();
         if config.pagemap_scan && pagemap {
             pooling.pagemap_scan(Enabled::Yes);
@@ -800,6 +820,7 @@ impl WasmEngine {
         let pre = link(&self.runtime)?
             .instantiate_pre(&module)
             .map_err(|e| EngineError::Compile(e.to_string()))?;
+        IMAGES_LIVE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Ok(Arc::new(Image {
             pre,
             exports,
