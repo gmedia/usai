@@ -294,25 +294,12 @@ async fn workload_matrix_postgres() {
     print_table(&format!("{name} postgres n={n}"), &[row]);
 }
 
-/// The whole request: the same rows through the HTTP host (in-process
-/// listener, one keep-alive connection, c=1), attributed with the
-/// `x-usai-profile` header — host phases (route, decode, validate, admit,
-/// execute, encode), the runtime/driver/engine phases and the guest's own
-/// ledger (dispatch, validation, handler, response). This is the invoice the
-/// P8 parity study reads; `USAI_MATRIX_ROWS` selects rows.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore]
-async fn http_invoice() {
-    assert!(usai_runtime::engine::profiling(), "set USAI_PROFILE=1");
-    let n: usize = std::env::var("USAI_MATRIX_N")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(300);
-    let engine = usai_runtime::engine::from_env(64).unwrap();
-    let name = usai_runtime::engine::Engine::name(engine.as_ref()).to_string();
-    let runtime = runtime_for("tests/fixtures/bench-app", engine).await;
+/// Serves a runtime on an in-process listener; returns its address.
+async fn listen(
+    runtime: &Arc<Runtime>,
+) -> (std::net::SocketAddr, tokio_util::sync::CancellationToken) {
     let host = usai_runtime::http::HttpHost::new(
-        Arc::clone(&runtime),
+        Arc::clone(runtime),
         usai_runtime::http::HttpConfig {
             addr: ([127, 0, 0, 1], 0).into(),
             expose_diagnostics: false,
@@ -329,94 +316,157 @@ async fn http_invoice() {
         .await
         .unwrap();
     });
-    let addr = rx.await.unwrap();
+    (rx.await.unwrap(), shutdown)
+}
+
+/// One row of the HTTP invoice: n keep-alive requests, the
+/// `x-usai-profile` header summed and averaged, printed as the invoice.
+async fn invoice_row(client: &reqwest::Client, label: &str, url: &str, n: usize) {
+    for _ in 0..20 {
+        let r = client.get(url).send().await.unwrap();
+        let status = r.status();
+        let body = r.text().await.unwrap_or_default();
+        assert_eq!(status, 200, "{label}: {body}");
+    }
+    let mut phases: BTreeMap<String, f64> = BTreeMap::new();
+    let t = Instant::now();
+    for _ in 0..n {
+        let r = client.get(url).send().await.unwrap();
+        let header = r
+            .headers()
+            .get("x-usai-profile")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_owned();
+        let _ = r.bytes().await;
+        for item in header.split(',') {
+            if let Some((k, v)) = item.split_once('=') {
+                *phases.entry(k.to_owned()).or_default() += v.parse::<f64>().unwrap_or(0.0);
+            }
+        }
+    }
+    let total = t.elapsed().as_secs_f64() * 1000.0 / n as f64;
+    for v in phases.values_mut() {
+        *v /= n as f64;
+    }
+    let get = |k: &str| phases.get(k).copied().unwrap_or(0.0);
+    let host_sum: f64 = ["route", "decode", "validate", "admit", "encode"]
+        .iter()
+        .map(|k| get(&format!("http.{k}")))
+        .sum();
+    let execute = get("http.execute");
+    let create = get("runtime.create");
+    let run = get("driver.run");
+    let retire = get("driver.retire");
+    let guest: Vec<(&String, &f64)> = phases
+        .iter()
+        .filter(|(k, _)| k.starts_with("guest."))
+        .collect();
+    let guest_sum: f64 = guest.iter().map(|(_, v)| **v).sum();
+    println!(
+        "\n{label}: end-to-end {total:.3} ms (client round trip, same process; server side = {:.3})",
+        host_sum + execute
+    );
+    println!(
+        "  host    route {:.3}  decode {:.3}  validate {:.3}  admit {:.3}  encode {:.3}   = {:.3}",
+        get("http.route"),
+        get("http.decode"),
+        get("http.validate"),
+        get("http.admit"),
+        get("http.encode"),
+        host_sum
+    );
+    println!(
+        "  execute {execute:.3}  = create {create:.3} + run {run:.3} + retire {retire:.3} + release {:.3}",
+        execute - create - run - retire
+    );
+    print!("  engine ");
+    for (k, v) in phases.iter().filter(|(k, _)| k.starts_with("engine.")) {
+        print!(" {}={v:.3}", k.trim_start_matches("engine."));
+    }
+    println!();
+    print!("  guest  ");
+    for (k, v) in &guest {
+        print!(" {}={v:.3}", k.trim_start_matches("guest."));
+    }
+    println!("   = {guest_sum:.3}  (inside invoke.jobs/deliver.jobs)");
+    println!(
+        "  client+network (in-process reqwest) = {:.3}",
+        total - host_sum - execute
+    );
+}
+
+/// The whole request: the bench rows and, with a database, the pg
+/// fixture's `/users/:id`, through the HTTP host (in-process listener, one
+/// keep-alive connection, c=1), attributed with the `x-usai-profile` header
+/// — host phases (route, decode, validate, admit, execute, encode), the
+/// runtime/driver/engine phases and the guest's own ledger (dispatch,
+/// validation, handler, response). This is the invoice the P8 parity study
+/// reads; `USAI_MATRIX_ROWS` selects rows.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore]
+async fn http_invoice() {
+    assert!(usai_runtime::engine::profiling(), "set USAI_PROFILE=1");
+    let n: usize = std::env::var("USAI_MATRIX_N")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(300);
+    let engine = usai_runtime::engine::from_env(64).unwrap();
+    let name = usai_runtime::engine::Engine::name(engine.as_ref()).to_string();
+    let only: Option<Vec<String>> = std::env::var("USAI_MATRIX_ROWS")
+        .ok()
+        .map(|v| v.split(',').map(|s| s.trim().to_string()).collect());
+    let wanted = |label: &str| only.as_ref().is_none_or(|o| o.iter().any(|x| x == label));
     let client = reqwest::Client::builder()
         .pool_max_idle_per_host(1)
         .build()
         .unwrap();
-    let only: Option<Vec<String>> = std::env::var("USAI_MATRIX_ROWS")
-        .ok()
-        .map(|v| v.split(',').map(|s| s.trim().to_string()).collect());
-    let routes: Vec<(&str, &str)> = vec![
+    println!("\n== {name} http invoice n={n} (ms per request, c=1, in-process listener) ==");
+
+    let runtime = runtime_for("tests/fixtures/bench-app", Arc::clone(&engine)).await;
+    let (addr, shutdown) = listen(&runtime).await;
+    for (label, path) in [
         ("sdk-only", "/sdk/x"),
         ("zod/mini", "/mini/x"),
         ("zod", "/zod/x"),
-    ];
-    println!("\n== {name} http invoice n={n} (ms per request, c=1, in-process listener) ==");
-    for (label, path) in routes {
-        if only.as_ref().is_some_and(|o| !o.iter().any(|x| x == label)) {
-            continue;
+    ] {
+        if wanted(label) {
+            invoice_row(&client, label, &format!("http://{addr}{path}"), n).await;
         }
-        let url = format!("http://{addr}{path}");
-        for _ in 0..20 {
-            let r = client.get(&url).send().await.unwrap();
-            let status = r.status();
-            let body = r.text().await.unwrap_or_default();
-            assert_eq!(status, 200, "{label}: {body}");
-        }
-        let mut phases: BTreeMap<String, f64> = BTreeMap::new();
-        let t = Instant::now();
-        for _ in 0..n {
-            let r = client.get(&url).send().await.unwrap();
-            let header = r
-                .headers()
-                .get("x-usai-profile")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("")
-                .to_owned();
-            let _ = r.bytes().await;
-            for item in header.split(',') {
-                if let Some((k, v)) = item.split_once('=') {
-                    *phases.entry(k.to_owned()).or_default() += v.parse::<f64>().unwrap_or(0.0);
-                }
-            }
-        }
-        let total = t.elapsed().as_secs_f64() * 1000.0 / n as f64;
-        for v in phases.values_mut() {
-            *v /= n as f64;
-        }
-        let get = |k: &str| phases.get(k).copied().unwrap_or(0.0);
-        let host_sum: f64 = ["route", "decode", "validate", "admit", "encode"]
-            .iter()
-            .map(|k| get(&format!("http.{k}")))
-            .sum();
-        let execute = get("http.execute");
-        let create = get("runtime.create");
-        let run = get("driver.run");
-        let retire = get("driver.retire");
-        let guest: Vec<(&String, &f64)> = phases
-            .iter()
-            .filter(|(k, _)| k.starts_with("guest."))
-            .collect();
-        let guest_sum: f64 = guest.iter().map(|(_, v)| **v).sum();
-        println!("\n{label}: end-to-end {total:.3} ms (client round trip, same process)");
-        println!(
-            "  host    route {:.3}  decode {:.3}  validate {:.3}  admit {:.3}  encode {:.3}   = {:.3}",
-            get("http.route"),
-            get("http.decode"),
-            get("http.validate"),
-            get("http.admit"),
-            get("http.encode"),
-            host_sum
-        );
-        println!(
-            "  execute {execute:.3}  = create {create:.3} + run {run:.3} + retire {retire:.3} + release {:.3}",
-            execute - create - run - retire
-        );
-        print!("  engine ");
-        for (k, v) in phases.iter().filter(|(k, _)| k.starts_with("engine.")) {
-            print!(" {}={v:.3}", k.trim_start_matches("engine."));
-        }
-        println!();
-        print!("  guest  ");
-        for (k, v) in &guest {
-            print!(" {}={v:.3}", k.trim_start_matches("guest."));
-        }
-        println!("   = {guest_sum:.3}");
-        println!(
-            "  unaccounted: run − engine − guest-ledger-overlap is not additive (guest phases lie inside invoke.jobs); client+network = {:.3}",
-            total - host_sum - execute
-        );
     }
     shutdown.cancel();
+
+    if wanted("crud + pg")
+        && let Some(server) = support::database_url()
+    {
+        let url = support::fresh_database(&server).await;
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pg-app");
+        let out = build(
+            engine.as_ref(),
+            &BuildOptions {
+                out_dir: std::env::temp_dir().join(format!("usai-invoice-pg-{name}")),
+                ..BuildOptions::for_project(&root)
+            },
+        )
+        .await
+        .unwrap();
+        let runtime = Runtime::with_env(
+            engine,
+            RuntimeConfig {
+                cron_scheduler: false,
+                queue_consumers: false,
+                ..RuntimeConfig::default()
+            },
+            move |name| (name == "DATABASE_URL").then(|| url.clone()),
+        );
+        let rev = runtime.install(out.definition).await.unwrap();
+        runtime.activate(rev.id).await.unwrap();
+        let setup = runtime.run_command("setup", vec![]).await.unwrap();
+        assert!(matches!(setup.outcome, Some(Ok(_))), "{:?}", setup.outcome);
+        let (addr, shutdown) = listen(&runtime).await;
+        invoice_row(&client, "crud + pg", &format!("http://{addr}/users/1"), n).await;
+        shutdown.cancel();
+    } else if wanted("crud + pg") {
+        println!("\n(crud + pg: no database; set USAI_TEST_DATABASE_URL)");
+    }
 }
