@@ -196,6 +196,51 @@ test("invoicing: tenants, sessions, transactional invoices, pagination, signed r
     );
     const deleteIssued = await app.http.delete(`/invoices/${invoice.id}`, { headers: auth });
     assert.equal(deleteIssued.status, 409);
+    // Void is a state (draft/issued/overdue → void), reachable through the API;
+    // an impossible calendar date is refused at the boundary, not by PostgreSQL.
+    const toVoid = await app.http.post("/invoices", {
+      headers: auth,
+      body: {
+        customer: "Void Co",
+        currency: "USD",
+        dueDate: "2026-12-01",
+        items: [{ description: "x", quantity: 1, unitCents: 1 }],
+      },
+    });
+    assert.equal(toVoid.status, 201, toVoid.text);
+    const voided = await app.http.post(`/invoices/${(toVoid.body as { id: string }).id}/void`, {
+      headers: auth,
+    });
+    assert.equal(voided.status, 200, voided.text);
+    assert.equal((voided.body as { status: string }).status, "void");
+    const badDate = await app.http.post("/invoices", {
+      headers: auth,
+      body: {
+        customer: "Void Co",
+        currency: "USD",
+        dueDate: "2026-02-30",
+        items: [{ description: "x", quantity: 1, unitCents: 1 }],
+      },
+    });
+    assert.equal(badDate.status, 400, badDate.text);
+    // The largest schema-valid invoice fits: totals are bigint end to end.
+    const big = await app.http.post("/invoices", {
+      headers: auth,
+      body: {
+        customer: "Big Co",
+        currency: "USD",
+        dueDate: "2026-12-01",
+        items: Array.from({ length: 100 }, () => ({
+          description: "max",
+          quantity: 10_000,
+          unitCents: 100_000_000,
+        })),
+      },
+    });
+    assert.equal(big.status, 201, big.text);
+    assert.equal((big.body as { totalCents: number }).totalCents, 100 * 10_000 * 100_000_000);
+    const whoami = await app.http.get("/me", { headers: auth });
+    assert.equal((whoami.body as { tenantName: string }).tenantName, acme);
 
     const other = await app.http.post("/signup", {
       body: {
@@ -286,8 +331,9 @@ test("invoicing: tenants, sessions, transactional invoices, pagination, signed r
       .run<{ rows: Array<{ tenant: string; status: string; count: number }> }>([acme]);
     assert.equal(stats.ok, true, JSON.stringify(stats.error));
     assert.deepEqual(Object.fromEntries(stats.value.rows.map((r) => [r.status, r.count])), {
-      draft: 4,
+      draft: 5,
       paid: 1,
+      void: 1,
     });
 
     // Seeded demo tenant can log in.

@@ -24,7 +24,9 @@ const Item = z.object({
 const NewInvoice = z.object({
   customer: z.string().min(1).max(200),
   currency: z.enum(["USD", "EUR", "IDR"]),
-  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "YYYY-MM-DD"),
+  // A real calendar date, checked at the boundary: "2026-02-30" is a 400
+  // here, not a PostgreSQL error in the handler.
+  dueDate: z.string().date(),
   items: z.array(Item).min(1).max(100),
 });
 const Status = z.enum(["draft", "issued", "paid", "overdue", "void"]);
@@ -50,7 +52,9 @@ const ListQuery = z.object({
 const Id = z.object({ id: z.string().uuid() });
 type InvoiceRow = z.infer<typeof Invoice>;
 
-const columns = `id, number, customer, currency, status, total_cents::int as "totalCents", due_date::text as "dueDate", issued_at as "issuedAt", paid_at as "paidAt", created_at as "createdAt"`;
+// total_cents is bigint (100 items × 10 000 × 1e8 cents does not fit an int4);
+// the runtime hands an int8 to the handler as a JSON number.
+const columns = `id, number, customer, currency, status, total_cents as "totalCents", due_date::text as "dueDate", issued_at as "issuedAt", paid_at as "paidAt", created_at as "createdAt"`;
 
 /** The events tenants can subscribe to; delivered by the webhooks module. */
 export type InvoiceEvent = "invoice.issued" | "invoice.paid" | "invoice.overdue";
@@ -240,10 +244,29 @@ export const pay = publishes(
   "webhook.deliver",
 );
 
+export const voidInvoice = http.post(
+  "/invoices/:id/void",
+  {
+    summary: "Void an invoice",
+    description: "Draft, issued or overdue → void. A paid invoice cannot be voided.",
+    auth: session,
+    params: Id,
+    response: { 200: Invoice },
+    errors: [
+      { code: "not_found", status: 404 },
+      { code: "conflict", status: 409 },
+    ],
+    resources: [db],
+  },
+  async (ctx) => transition(ctx, ["draft", "issued", "overdue"], "void", "voided_at"),
+);
+
 export const remove = http.delete(
   "/invoices/:id",
   {
-    summary: "Void a draft",
+    summary: "Delete a draft",
+    description:
+      "Only drafts can be deleted; void an issued invoice instead (POST /invoices/{id}/void).",
     auth: session,
     params: Id,
     response: { 204: z.null() },
@@ -264,7 +287,9 @@ export const remove = http.delete(
         ctx.params.id,
       ]);
       if (!exists) throw errors.notFound(`invoice ${ctx.params.id} does not exist`);
-      throw errors.conflict("only drafts can be deleted; void it instead");
+      throw errors.conflict(
+        "only drafts can be deleted; void it instead (POST /invoices/{id}/void)",
+      );
     }
     return http.noContent();
   },
@@ -296,7 +321,7 @@ export const stats = command("invoices:stats", { resources: [db] }, async (ctx) 
     count: number;
     totalCents: number;
   }>(
-    `select t.slug as tenant, i.status::text as status, count(*)::int as count, coalesce(sum(i.total_cents), 0)::int as "totalCents"
+    `select t.slug as tenant, i.status::text as status, count(*)::int as count, coalesce(sum(i.total_cents), 0)::bigint as "totalCents"
        from invoices i join tenants t on t.id = i.tenant_id
       where ($1::text is null or t.slug = $1)
       group by t.slug, i.status order by t.slug, i.status`,
@@ -307,7 +332,7 @@ export const stats = command("invoices:stats", { resources: [db] }, async (ctx) 
 
 export const invoices = defineModule({
   name: "invoices",
-  workloads: [create, get, list, issue, pay, remove, live, feed, markOverdue, stats],
+  workloads: [create, get, list, issue, pay, voidInvoice, remove, live, feed, markOverdue, stats],
   resources: [db],
   migrations: "./src/invoices/migrations/*.sql",
   seeders: "./src/invoices/seeders/*.ts",

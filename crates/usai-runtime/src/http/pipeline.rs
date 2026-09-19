@@ -71,6 +71,8 @@ struct Reply {
     before_world: bool,
     /// The workload this refusal belongs to, once routing named one.
     workload: Option<String>,
+    /// Extra response headers (`Allow` on a 405).
+    headers: Vec<(&'static str, String)>,
 }
 
 impl Reply {
@@ -80,7 +82,13 @@ impl Reply {
             body: json!({ "error": { "code": code, "message": message.into() } }),
             before_world: true,
             workload: None,
+            headers: Vec::new(),
         }
+    }
+
+    fn with_header(mut self, name: &'static str, value: String) -> Self {
+        self.headers.push((name, value));
+        self
     }
 
     /// A failure after admission: a world existed or was being created.
@@ -387,7 +395,13 @@ impl HttpHost {
                         reason,
                     );
                 }
-                json_response(reply.status, &reply.body)
+                let mut response = json_response(reply.status, &reply.body);
+                for (name, value) in &reply.headers {
+                    if let Ok(v) = HeaderValue::from_str(value) {
+                        response.headers_mut().insert(*name, v);
+                    }
+                }
+                response
             }
         }
     }
@@ -580,11 +594,18 @@ impl HttpHost {
                     || (parts.method == Method::HEAD && r.method == "GET")
             })
             .ok_or_else(|| {
+                // RFC 9110 §15.5.6: a 405 names what is allowed.
+                let mut allowed: Vec<&str> =
+                    matched.value.iter().map(|r| r.method.as_str()).collect();
+                if allowed.contains(&"GET") {
+                    allowed.push("HEAD");
+                }
                 Reply::error(
                     StatusCode::METHOD_NOT_ALLOWED,
                     "method_not_allowed",
                     format!("{} is not allowed on {path}", parts.method),
                 )
+                .with_header("allow", allowed.join(", "))
             })?;
         let params: Value = matched
             .params
@@ -653,6 +674,22 @@ impl HttpHost {
                     )
                 })?;
                 json!({ "json": parsed })
+            } else if compiled
+                .validators
+                .get(&route.index)
+                .is_some_and(|v| v.body.is_some())
+            {
+                // A body arrived for a JSON contract without a JSON media
+                // type: say so, instead of validating `null`.
+                return Err(Reply::error(
+                    StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                    "unsupported_media_type",
+                    if content_type.is_empty() {
+                        "the body has no content-type; this route expects application/json".to_owned()
+                    } else {
+                        format!("{content_type} is not accepted here; this route expects application/json")
+                    },
+                ));
             } else if content_type.starts_with("text/")
                 || content_type.starts_with("application/x-www-form-urlencoded")
             {
@@ -842,6 +879,11 @@ impl HttpHost {
                         }
                     }
                     builder = builder.header("x-usai-lifetime", "stream");
+                    // An event stream is never cacheable; proxies that buffer
+                    // whole responses need telling as well.
+                    builder = builder
+                        .header(header::CACHE_CONTROL, "no-cache")
+                        .header("x-accel-buffering", "no");
                     self.stats.streams.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     let body = WorldBody { receiver: body_rx, _guard: cancel.drop_guard() };
                     // The world keeps running; its result is observed by the task.
@@ -938,12 +980,84 @@ impl HttpHost {
             })?;
         let (inbound_tx, inbound_rx) = tokio::sync::mpsc::channel::<Inbound>(64);
         let (outbound_tx, outbound_rx) = tokio::sync::mpsc::channel(64);
-        let link = SocketLink::new(inbound_rx, outbound_tx);
+        let (link, accepted) = SocketLink::new(inbound_rx, outbound_tx);
         let stop = compiled.revision.connections_stop();
         let pump_stop = stop.clone();
         let cancel = CancellationToken::new();
         let pump_cancel = cancel.clone();
         let idle_timeout = self.config.socket_idle_timeout;
+        let runtime = Arc::clone(&self.runtime);
+        let request = json!({
+            "method": "GET",
+            "path": parts.uri.path(),
+            "url": parts.uri.to_string(),
+            "params": params,
+            "query": query,
+            "headers": headers,
+        });
+        let input = json!({ "kind": "socket", "request": request });
+        let workload = workload.to_owned();
+        let world_workload = workload.clone();
+        // The world starts first. The 101 is answered only when the handler
+        // accepts the connection (its auth resolver passed — `socket.accept`,
+        // or the first recv/send of an older bundle); a handler that fails
+        // before that answers as any HTTP request would (401, 500), so the
+        // client sees a status, not a bare close frame, and the counters
+        // count what happened.
+        let mut world = tokio::spawn(async move {
+            runtime
+                .execute_opts(
+                    admission,
+                    input,
+                    ExecuteOptions {
+                        cancel,
+                        stop: Some(stop),
+                        attachment: Some(link),
+                    },
+                )
+                .await
+        });
+        let handshake_bound = tokio::time::sleep(self.runtime.config().default_timeout);
+        tokio::pin!(handshake_bound);
+        let protocol = tokio::select! {
+            accepted = accepted => match accepted {
+                Ok(protocol) => protocol,
+                // The link was dropped without accepting: the world ended;
+                // fall through to its outcome below.
+                Err(_) => {
+                    return match world.await {
+                        Ok(Ok(result)) => Ok(self.encode(&world_workload, result)),
+                        Ok(Err(e)) => Err(Reply::error(StatusCode::INTERNAL_SERVER_ERROR, "socket_world_failed", e.to_string())),
+                        Err(e) => Err(Reply::error(StatusCode::INTERNAL_SERVER_ERROR, "socket_world_failed", e.to_string())),
+                    };
+                }
+            },
+            result = &mut world => {
+                return match result {
+                    Ok(Ok(result)) => Ok(self.encode(&world_workload, result)),
+                    Ok(Err(e)) => Err(Reply::error(StatusCode::INTERNAL_SERVER_ERROR, "socket_world_failed", e.to_string())),
+                    Err(e) => Err(Reply::error(StatusCode::INTERNAL_SERVER_ERROR, "socket_world_failed", e.to_string())),
+                };
+            }
+            _ = &mut handshake_bound => {
+                pump_cancel.cancel();
+                return Err(Reply::error(StatusCode::GATEWAY_TIMEOUT, "deadline_exceeded", "the socket handler did not accept the connection within the deadline"));
+            }
+        };
+        tokio::spawn(async move {
+            match world.await {
+                Ok(Ok(result)) => {
+                    for v in &result.violations {
+                        tracing::warn!(world = %result.world, workload, code = v.code, "{}", v.message);
+                    }
+                    if let Some(Err(e)) = &result.outcome {
+                        tracing::error!(world = %result.world, workload, name = %e.name, message = %e.message, "socket handler failed");
+                    }
+                }
+                Ok(Err(e)) => tracing::error!(workload, error = %e, "socket world failed"),
+                Err(e) => tracing::error!(workload, error = %e, "socket world panicked"),
+            }
+        });
         tokio::spawn(async move {
             match on_upgrade.await {
                 Ok(upgraded) => {
@@ -956,46 +1070,15 @@ impl HttpHost {
                 }
             }
         });
-        let runtime = Arc::clone(&self.runtime);
-        let request = json!({
-            "method": "GET",
-            "path": parts.uri.path(),
-            "url": parts.uri.to_string(),
-            "params": params,
-            "query": query,
-            "headers": headers,
-        });
-        let input = json!({ "kind": "socket", "request": request });
-        let workload = workload.to_owned();
-        tokio::spawn(async move {
-            match runtime
-                .execute_opts(
-                    admission,
-                    input,
-                    ExecuteOptions {
-                        cancel,
-                        stop: Some(stop),
-                        attachment: Some(link),
-                    },
-                )
-                .await
-            {
-                Ok(result) => {
-                    for v in &result.violations {
-                        tracing::warn!(world = %result.world, workload, code = v.code, "{}", v.message);
-                    }
-                    if let Some(Err(e)) = &result.outcome {
-                        tracing::error!(world = %result.world, workload, name = %e.name, message = %e.message, "socket handler failed");
-                    }
-                }
-                Err(e) => tracing::error!(workload, error = %e, "socket world failed"),
-            }
-        });
-        Ok(Response::builder()
+        let mut response = Response::builder()
             .status(StatusCode::SWITCHING_PROTOCOLS)
             .header(header::CONNECTION, "upgrade")
             .header(header::UPGRADE, "websocket")
-            .header("sec-websocket-accept", accept)
+            .header("sec-websocket-accept", accept);
+        if let Some(protocol) = protocol {
+            response = response.header("sec-websocket-protocol", protocol);
+        }
+        Ok(response
             .body(http_body_util::Empty::new().boxed())
             .expect("upgrade response"))
     }
@@ -1134,6 +1217,20 @@ pub(crate) fn render_output(output: GuestHttpOutput, lifecycle: Option<String>) 
 impl HttpHost {
     /// Known application errors map to their declared status; anything else
     /// is sanitized (C11).
+    /// The 500 codes the runtime itself produces and documents; any other
+    /// code on a 500 is an operation's internal failure and is reported to
+    /// the client as `internal`.
+    const RUNTIME_500_CODES: [&'static str; 8] = [
+        "internal",
+        "detached_work",
+        "response_contract_violation",
+        "resource_not_declared",
+        "unknown_task",
+        "unknown_operation",
+        "invalid_handler_output",
+        "runtime_fault",
+    ];
+
     fn application_error(
         &self,
         workload: &str,
@@ -1146,7 +1243,20 @@ impl HttpHost {
                 .and_then(Value::as_u64)
                 .and_then(|s| StatusCode::from_u16(s as u16).ok())
                 .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-            let code = usai.get("code").and_then(Value::as_str).unwrap_or("error");
+            let raw_code = usai.get("code").and_then(Value::as_str).unwrap_or("error");
+            // A 500 whose code is not one of the runtime's own is an
+            // operation's failure surfacing through the handler (`sql_22003`,
+            // `invalid_param`, …): the SQLSTATE and the parameter position
+            // belong in the log, not in the client's hands. Declared
+            // application errors are 4xx by contract and pass untouched.
+            let code = if status == StatusCode::INTERNAL_SERVER_ERROR
+                && !Self::RUNTIME_500_CODES.contains(&raw_code)
+                && !self.config.expose_diagnostics
+            {
+                "internal"
+            } else {
+                raw_code
+            };
             let mut body = json!({ "error": { "code": code, "message": error.message } });
             if status.is_client_error()
                 && let Some(details) = usai.get("details")
@@ -1158,7 +1268,7 @@ impl HttpHost {
                 // of the response did not match) are what the developer
                 // needs: always in the log, in the response only in dev.
                 let details = usai.get("details").cloned().unwrap_or(Value::Null);
-                tracing::error!(world = %world, workload, code, message = %error.message, %details, stack = error.stack.as_deref().unwrap_or(""), "application error");
+                tracing::error!(world = %world, workload, code = raw_code, message = %error.message, %details, stack = error.stack.as_deref().unwrap_or(""), "application error");
                 if self.config.expose_diagnostics {
                     if !details.is_null() {
                         body["error"]["details"] = details;

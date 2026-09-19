@@ -17,16 +17,27 @@ const Credentials = z.object({
 });
 const Signup = Credentials.extend({
   tenant: z.string().regex(/^[a-z0-9-]{2,40}$/),
+  /** The tenant's display name (defaults to the slug); returned by GET /me as `tenantName`. */
   name: z.string().min(1).max(120).optional(),
 });
 const Session = z.object({ token: z.string(), expiresAt: z.string() });
 const Me = z.object({
-  userId: z.string(),
-  tenantId: z.string(),
+  userId: z.string().uuid(),
+  tenantId: z.string().uuid(),
   email: z.string(),
   tenant: z.string(),
+  tenantName: z.string(),
 });
-const Webhook = z.object({ url: z.string().url().max(500), secret: z.string().min(16).max(200) });
+// http(s) only: `z.string().url()` alone accepts any scheme (javascript:, file:).
+const Webhook = z.object({
+  url: z
+    .string()
+    .url()
+    .max(500)
+    .regex(/^https?:\/\//, "http(s) URL"),
+  secret: z.string().min(16).max(200),
+});
+const WebhookSet = z.object({ url: z.string() });
 
 const hex = (bytes: ArrayBuffer | Uint8Array) =>
   Array.from(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), (b) =>
@@ -117,26 +128,31 @@ export const login = http.post(
   },
 );
 
-export const logout = http.post("/logout", { auth: session, resources: [db] }, async (ctx) => {
-  const raw = /^Bearer\s+(.+)$/i.exec(ctx.headers["authorization"] ?? "")?.[1]?.trim() ?? "";
-  await sql(ctx).execute(`delete from sessions where token_hash = $1`, [await sha256(raw)]);
-  return http.noContent();
-});
+export const logout = http.post(
+  "/logout",
+  { auth: session, response: { 204: z.null() }, resources: [db] },
+  async (ctx) => {
+    const raw = /^Bearer\s+(.+)$/i.exec(ctx.headers["authorization"] ?? "")?.[1]?.trim() ?? "";
+    await sql(ctx).execute(`delete from sessions where token_hash = $1`, [await sha256(raw)]);
+    return http.noContent();
+  },
+);
 
 export const me = http.get(
   "/me",
   { auth: session, response: { 200: Me }, resources: [db] },
   async (ctx) => {
-    const tenant = await sql(ctx).one<{ slug: string }>(`select slug from tenants where id = $1`, [
-      ctx.auth.tenantId,
-    ]);
-    return { ...ctx.auth, tenant: tenant!.slug };
+    const row = await sql(ctx).one<{ slug: string; name: string }>(
+      `select slug, name from tenants where id = $1`,
+      [ctx.auth.tenantId],
+    );
+    return { ...ctx.auth, tenant: row!.slug, tenantName: row!.name };
   },
 );
 
 export const setWebhook = http.put(
   "/tenant/webhook",
-  { auth: session, body: Webhook, resources: [db] },
+  { auth: session, body: Webhook, response: { 200: WebhookSet }, resources: [db] },
   async (ctx) => {
     await sql(ctx).execute(
       `update tenants set webhook_url = $1, webhook_secret = $2 where id = $3`,

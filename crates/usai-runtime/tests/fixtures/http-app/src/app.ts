@@ -1,6 +1,16 @@
 // HTTP fixture for the runtime's D2 acceptance tests. Every endpoint exists
 // to prove one contract; see crates/usai-runtime/tests/http.rs.
-import { defineApp, defineModule, http, auth, cache, errors, env, task } from "@sakaladev/usai";
+import {
+  defineApp,
+  defineModule,
+  http,
+  auth,
+  cache,
+  errors,
+  env,
+  task,
+  UsaiError,
+} from "@sakaladev/usai";
 import { z } from "zod";
 
 const Params = z.object({ id: z.string().uuid() });
@@ -73,6 +83,12 @@ export const persistent = http.post("/hits", { resources: [hits] }, async (ctx) 
 
 export const me = http.get("/me", { auth: authenticated }, async (ctx) => ctx.auth);
 
+// An operation's own failure surfacing through the handler (the shape a
+// PostgreSQL error has): the SQLSTATE is for the log, the client gets
+// `internal`.
+export const boomOperation = http.get("/boom-operation", {}, async () => {
+  throw new UsaiError("sql_22003", 500, "integer out of range");
+});
 export const boom = http.get("/boom", {}, async () => {
   throw new Error("kaboom with secret detail");
 });
@@ -290,6 +306,19 @@ export const endless = http.stream("/endless", {}, async (ctx, stream) => {
 
 export const plainStream = http.stream("/no-send", {}, async () => ({ nothing: "sent" }));
 
+// An authenticated socket: the resolver runs before the upgrade completes,
+// so a refusal is a 401, and a browser passes the token as the second
+// entry of `Sec-WebSocket-Protocol` ("bearer", token).
+export const privateChat = socket(
+  "/private-chat",
+  { auth: authenticated, outgoing: z.object({ user: z.string() }) },
+  {
+    async open(ctx) {
+      await ctx.send({ user: (ctx.auth as { userId: string }).userId });
+    },
+  },
+);
+
 export const chat = socket(
   "/chat",
   {
@@ -461,6 +490,8 @@ export default defineApp({
     slowTask,
     single,
     invokesSingle,
+    privateChat,
+    boomOperation,
     failingTask,
     invokesSlow,
     order,

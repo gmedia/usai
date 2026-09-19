@@ -400,7 +400,31 @@ async function runSocket(workload: Workload, input: SocketInput): Promise<unknow
     message?: (ctx: unknown) => unknown;
     close?: (ctx: unknown) => unknown;
   };
-  const auth = await authenticate(workload, base, { ...request, body: null });
+  // Browsers cannot set headers on `new WebSocket(url)`; the convention is
+  // `new WebSocket(url, ["bearer", token])` — the credential rides in
+  // `Sec-WebSocket-Protocol` and the server echoes the `bearer` subprotocol.
+  // The header-carrying request wins when both are present.
+  let headers = request.headers;
+  let protocol: string | undefined;
+  const offered = headers["sec-websocket-protocol"];
+  if (
+    workload.auth &&
+    offered &&
+    headers[(workload.auth.header ?? "authorization").toLowerCase()] === undefined
+  ) {
+    const parts = offered.split(",").map((p) => p.trim());
+    const at = parts.findIndex((p) => p.toLowerCase() === "bearer");
+    if (at >= 0 && parts[at + 1]) {
+      const header = workload.auth.header ?? "authorization";
+      const value =
+        header.toLowerCase() === "authorization" ? `Bearer ${parts[at + 1]}` : parts[at + 1];
+      headers = { ...headers, [header.toLowerCase()]: value } as Record<string, string>;
+      protocol = "bearer";
+    }
+  }
+  const auth = await authenticate(workload, base, { ...request, headers, body: null });
+  // Auth passed: let the upgrade complete (a refusal above answers 401 instead).
+  await op("socket.accept", protocol ? { protocol } : {});
   const outgoing = workload.contracts.response?.[200];
   const state: Record<string, unknown> = {};
   const ctx = {

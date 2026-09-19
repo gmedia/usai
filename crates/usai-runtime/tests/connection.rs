@@ -258,6 +258,80 @@ async fn drain_stops_an_endless_stream_gracefully() {
     finish(s).await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_authenticated_socket_refuses_before_the_upgrade_and_takes_a_browser_credential() {
+    let Some(s) = start().await else { return };
+    // No credential: the upgrade is refused with a status, not a 101 that
+    // closes at once — a browser can tell "log in again" from "retry".
+    let refused = s
+        .client
+        .get(format!("{}/private-chat", s.base))
+        .header("connection", "upgrade")
+        .header("upgrade", "websocket")
+        .header("sec-websocket-version", "13")
+        .header("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ==")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), 401, "{}", refused.text().await.unwrap());
+    // A wrong token: the resolver's own 401.
+    let wrong = s
+        .client
+        .get(format!("{}/private-chat", s.base))
+        .header("connection", "upgrade")
+        .header("upgrade", "websocket")
+        .header("sec-websocket-version", "13")
+        .header("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ==")
+        .header("authorization", "Bearer nope")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(wrong.status(), 401);
+    let body: Value = wrong.json().await.unwrap();
+    assert_eq!(body["error"]["message"], "bad token");
+    // The browser form: `new WebSocket(url, ["bearer", token])`.
+    let mut request =
+        tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(format!(
+            "{}/private-chat",
+            s.ws
+        ))
+        .unwrap();
+    request
+        .headers_mut()
+        .insert("sec-websocket-protocol", "bearer, secret".parse().unwrap());
+    let (mut ws, response) = tokio_tungstenite::connect_async(request)
+        .await
+        .expect("upgrade");
+    assert_eq!(response.status(), 101);
+    assert_eq!(
+        response.headers().get("sec-websocket-protocol").unwrap(),
+        "bearer",
+        "the selected subprotocol is echoed, as browsers require"
+    );
+    assert_eq!(recv_json(&mut ws).await, json!({ "user": "u1" }));
+    // Accounting: the refusals were 401s, the connection an upgrade.
+    let status: Value = s
+        .client
+        .get(format!("{}/_usai/status", s.base))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        status["http"]["by_workload"]["socket:/private-chat"]["4xx"],
+        json!(2),
+        "{status}"
+    );
+    assert_eq!(
+        status["http"]["by_workload"]["socket:/private-chat"]["2xx"],
+        json!(1),
+        "{status}"
+    );
+    finish(s).await;
+}
+
 async fn connect(
     s: &Server,
     user: &str,

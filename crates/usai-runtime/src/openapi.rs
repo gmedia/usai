@@ -60,7 +60,7 @@ fn parameters(location: &str, schema: &Value, always_required: bool) -> Vec<Valu
 fn error_schema() -> Value {
     json!({
         "type": "object",
-        "description": "Every error answer. `code` is stable and machine-readable: the workload's declared codes, `validation_failed` (400; `details.slot` names the rejected slot and `details.issues[]` carries `path` as a JSON pointer and `message`), `unauthorized` (401), `route_not_found` (404), `capacity_exhausted` (503), `unavailable` (503, a dependency), `deadline_exceeded` (504), `internal` (500, message sanitized).",
+        "description": "Every error answer. `code` is stable and machine-readable: the workload's declared codes, plus the runtime's: `validation_failed` (400; `details.slot` names the rejected slot and `details.issues[]` carries `path` as a JSON pointer and `message`), `invalid_json` (400, the body is not JSON), `bad_request` (400, another malformed input such as a cursor), `unauthorized` (401), `route_not_found` (404), `method_not_allowed` (405, with an `Allow` header), `payload_too_large` (413), `unsupported_media_type` (415), `upgrade_required` (426, a WebSocket route without an upgrade), `capacity_exhausted` (503), `unavailable` (503, a dependency), `deadline_exceeded` (504), `internal` (500, message sanitized; an operation's own failure is reported as `internal` too, its detail is in the server log). The application's declared codes are listed per operation.",
         "required": ["error"],
         "properties": {
             "error": {
@@ -274,11 +274,26 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
             operation["x-usai-stream"] = json!(true);
         }
         if lifetime == "connection" {
+            let c = &workload.contracts;
+            let incoming = c.message.as_ref().map(clean).unwrap_or(Value::Null);
+            let outgoing = c.response.get(&200).map(clean).unwrap_or(Value::Null);
             note(
                 &mut operation,
-                "WebSocket endpoint: send an HTTP upgrade. Messages follow the declared incoming/outgoing contracts; not described as HTTP bodies.",
+                &format!(
+                    "WebSocket endpoint: send an HTTP upgrade. From a browser, `new WebSocket(url, [\"bearer\", token])` carries the credential in Sec-WebSocket-Protocol when the route is authenticated; a refused credential is answered with the HTTP status before the upgrade. Messages are JSON text frames: incoming messages must match the `incoming` schema (an invalid one is answered with a validation_failed envelope and dropped, the connection stays open), outgoing messages match `outgoing`. Incoming schema: {}. Outgoing schema: {}. A draining server closes with code 1012.",
+                    if incoming.is_null() {
+                        "any".to_owned()
+                    } else {
+                        incoming.to_string()
+                    },
+                    if outgoing.is_null() {
+                        "any".to_owned()
+                    } else {
+                        outgoing.to_string()
+                    },
+                ),
             );
-            operation["x-usai-socket"] = json!(true);
+            operation["x-usai-socket"] = json!({ "incoming": incoming, "outgoing": outgoing });
         }
         if let Some(module) = &workload.module {
             operation["tags"] = json!([module]);
@@ -446,7 +461,11 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
                 || c.body.is_some()
                 || !c.in_world_only.is_empty();
             if validates {
-                responses.insert("400".into(), json!({ "description": "Boundary validation failed: code validation_failed, details.slot and details.issues[] (path, message)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UsaiError" } } } }));
+                responses.insert("400".into(), json!({ "description": "Boundary validation failed: code validation_failed, details.slot and details.issues[] (path, message); or invalid_json when the body is not JSON", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UsaiError" } } } }));
+            }
+            if c.body.is_some() {
+                responses.insert("413".into(), json!({ "description": "Body larger than the runtime's limit (1 MiB by default): payload_too_large", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UsaiError" } } } }));
+                responses.insert("415".into(), json!({ "description": "The body is not application/json: unsupported_media_type", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UsaiError" } } } }));
             }
         }
         for error in &workload.errors {

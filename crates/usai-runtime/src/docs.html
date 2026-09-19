@@ -835,7 +835,8 @@
     const currentPlan = () => requestPlan(o, values());
     if (o.kind === "websockets") {
       send.disabled = true;
-      form.append(el("p", { class: "hint" }, "A WebSocket is not sent from here; connect with ", el("code", {}, `new WebSocket(${JSON.stringify(baseUrl().replace(/^http/, "ws") + o.path)})`), "."));
+      const authed = o.op && o.op.security && o.op.security.length;
+      form.append(el("p", { class: "hint" }, "A WebSocket is not sent from here; connect with ", el("code", {}, authed ? `new WebSocket(${JSON.stringify(baseUrl().replace(/^http/, "ws") + o.path)}, ["bearer", token])` : `new WebSocket(${JSON.stringify(baseUrl().replace(/^http/, "ws") + o.path)})`), "."));
     }
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -984,6 +985,15 @@
     if (op["x-usai-raw"]) { any = true; req.append(el("p", { style: "margin-top:10px" }, "Raw endpoint: the handler reads the exact bytes; no request contract is declared.")); }
     if (!any) req.append(el("p", {}, "No parameters or body."));
     frag.append(req);
+    if (o.kind === "websockets") {
+      // The message contracts are the socket's request and response.
+      const sock = op["x-usai-socket"] && typeof op["x-usai-socket"] === "object" ? op["x-usai-socket"] : {};
+      const msgs = el("div", { class: "sec" }, el("h2", {}, "Messages"));
+      msgs.append(sock.incoming ? slotBlock("Incoming (client → server)", sock.incoming, [el("span", { class: "where w" }, "validated in the world; an invalid message is answered with an error envelope and dropped")]) : el("p", {}, "Incoming messages: no contract declared (any text frame)."));
+      msgs.append(sock.outgoing ? slotBlock("Outgoing (server → client)", sock.outgoing, []) : el("p", {}, "Outgoing messages: no contract declared."));
+      if (op.security && op.security.length) msgs.append(el("p", { class: "life-note" }, "Authenticated: a browser cannot set headers on a WebSocket — pass the token as the second subprotocol, ", el("code", {}, 'new WebSocket(url, ["bearer", token])'), "; the server echoes the bearer subprotocol. A refused credential is answered with the HTTP status (401) before the upgrade."));
+      frag.append(msgs);
+    }
     if (o.kind !== "websockets") frag.append(responsesBlock(op));
     if (o.kind !== "websockets") {
       const block = snippetBlock(o);

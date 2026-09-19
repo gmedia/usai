@@ -331,6 +331,10 @@ impl Runtime {
                 ("queue.publish", Arc::new(queue::PublishHandler)),
                 ("stream.start", Arc::new(crate::http::stream::StartHandler)),
                 ("stream.send", Arc::new(crate::http::stream::SendHandler)),
+                (
+                    "socket.accept",
+                    Arc::new(crate::http::socket::AcceptHandler),
+                ),
                 ("socket.recv", Arc::new(crate::http::socket::RecvHandler)),
                 ("socket.send", Arc::new(crate::http::socket::SendHandler)),
                 ("socket.close", Arc::new(crate::http::socket::CloseHandler)),

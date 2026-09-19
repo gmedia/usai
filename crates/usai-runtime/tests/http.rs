@@ -461,6 +461,12 @@ async fn errors_are_contracts_and_unexpected_failures_are_sanitized() {
         !body.to_string().contains("secret detail"),
         "internal detail leaked: {body}"
     );
+    // An operation's failure code (a SQLSTATE) is not a contract the client
+    // can act on: `internal` outside diagnostics, the code in the log.
+    let (status, body) = s.get("/boom-operation").await;
+    assert_eq!(status, 500);
+    assert_eq!(body["error"]["code"], "internal", "{body}");
+    assert!(!body.to_string().contains("22003"), "{body}");
     let (status, body) = s.get("/bad-shape").await;
     assert_eq!(status, 500, "{body}");
     assert_eq!(body["error"]["code"], "response_contract_violation");
@@ -904,7 +910,33 @@ async fn openapi_is_generated_from_the_definition() {
     assert!(webhook["responses"].get("default").is_none(), "{webhook}");
     // A WebSocket is not a raw HTTP exchange: 101/426, no request body.
     let chat = &doc["paths"]["/chat"]["get"];
-    assert_eq!(chat["x-usai-socket"], true, "{chat}");
+    assert_eq!(
+        chat["x-usai-socket"]["incoming"]["properties"]["text"]["type"], "string",
+        "{chat}"
+    );
+    assert_eq!(
+        chat["x-usai-socket"]["outgoing"]["properties"]["count"]["type"], "number",
+        "{chat}"
+    );
+    // A 405 names what is allowed; a body without a JSON media type on a
+    // JSON contract is a 415, not "null is not an object".
+    let r = s
+        .client
+        .patch(format!("{}/users", s.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 405);
+    assert_eq!(r.headers().get("allow").unwrap(), "POST");
+    let r = s
+        .client
+        .post(format!("{}/users", s.base))
+        .header("content-type", "text/plain")
+        .body("name=x")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 415, "{}", r.text().await.unwrap());
     assert!(chat["responses"].get("101").is_some(), "{chat}");
     assert!(chat["responses"].get("426").is_some(), "{chat}");
     assert!(chat.get("x-usai-raw").is_none(), "{chat}");

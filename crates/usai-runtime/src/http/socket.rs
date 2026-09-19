@@ -33,15 +33,36 @@ pub struct SocketLink {
     inbound: Mutex<mpsc::Receiver<Inbound>>,
     outbound: mpsc::Sender<Message>,
     pub stop: CancellationToken,
+    /// Fired once when the handler accepts the connection (`socket.accept`,
+    /// or implicitly on its first `recv`/`send`), carrying the subprotocol
+    /// to echo in the 101, if any. Until then the HTTP response is not
+    /// sent: an auth resolver that refuses answers a 401, not a 101 followed
+    /// by a bare close.
+    accepted: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<Option<String>>>>,
 }
 
 impl SocketLink {
-    pub fn new(inbound: mpsc::Receiver<Inbound>, outbound: mpsc::Sender<Message>) -> Arc<Self> {
-        Arc::new(Self {
-            inbound: Mutex::new(inbound),
-            outbound,
-            stop: CancellationToken::new(),
-        })
+    pub fn new(
+        inbound: mpsc::Receiver<Inbound>,
+        outbound: mpsc::Sender<Message>,
+    ) -> (Arc<Self>, tokio::sync::oneshot::Receiver<Option<String>>) {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        (
+            Arc::new(Self {
+                inbound: Mutex::new(inbound),
+                outbound,
+                stop: CancellationToken::new(),
+                accepted: std::sync::Mutex::new(Some(tx)),
+            }),
+            rx,
+        )
+    }
+
+    /// Marks the connection accepted; a second call is a no-op.
+    pub fn accept(&self, protocol: Option<String>) {
+        if let Some(tx) = self.accepted.lock().expect("accepted poisoned").take() {
+            let _ = tx.send(protocol);
+        }
     }
 }
 
@@ -118,12 +139,29 @@ fn link(ctx: &OpContext) -> Result<Arc<SocketLink>, OpOutcome> {
         .ok_or_else(|| OpOutcome::err("not_a_socket", 500, "this workload is not a socket"))
 }
 
+/// `socket.accept`: the handler (after its auth resolver) lets the upgrade
+/// complete; `{ "protocol": "bearer" }` names the subprotocol to echo.
+pub struct AcceptHandler;
+
+impl OpHandler for AcceptHandler {
+    fn start(&self, ctx: OpContext, payload: String) -> Result<OpFuture, OpOutcome> {
+        let link = link(&ctx)?;
+        let protocol = serde_json::from_str::<Value>(&payload)
+            .ok()
+            .and_then(|v| v.get("protocol").and_then(Value::as_str).map(str::to_owned));
+        link.accept(protocol);
+        Ok(Box::pin(async move { OpOutcome::ok(&json!(true)) }))
+    }
+}
+
 /// `socket.recv`: resolves with the next inbound event.
 pub struct RecvHandler;
 
 impl OpHandler for RecvHandler {
     fn start(&self, ctx: OpContext, _payload: String) -> Result<OpFuture, OpOutcome> {
         let link = link(&ctx)?;
+        // A bundle that predates `socket.accept` accepts by using the socket.
+        link.accept(None);
         let cancel = ctx.cancel.clone();
         Ok(Box::pin(async move {
             let mut inbound = link.inbound.lock().await;
@@ -152,6 +190,7 @@ pub struct SendHandler;
 impl OpHandler for SendHandler {
     fn start(&self, ctx: OpContext, payload: String) -> Result<OpFuture, OpOutcome> {
         let link = link(&ctx)?;
+        link.accept(None);
         let request: SendRequest = serde_json::from_str(&payload)
             .map_err(|e| OpOutcome::err("invalid_socket_send", 500, e.to_string()))?;
         let message = if let Some(text) = request.text {
