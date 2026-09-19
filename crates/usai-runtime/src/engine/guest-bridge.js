@@ -24,6 +24,7 @@
   let nextHoldId = 0;
   let entropySeed = null;
   let entropyCounter = 0;
+  let profiling = false;
 
   function bridgeError(code, message) {
     const error = new Error(message);
@@ -132,9 +133,16 @@
     // Per-world entropy from the host (32 bytes, hex), installed with the
     // invocation; `crypto` draws from it. Never reused across worlds: the
     // image is a snapshot, so the seed must arrive after the world exists.
-    seed(hex) {
+    seed(hex, profile) {
       entropySeed = hex;
       entropyCounter = 0;
+      profiling = profile === true;
+    },
+    // The SDK's phase ledger (dispatch, validation, handler, response) for
+    // the current invocation, in ms; empty unless the world was seeded with
+    // profiling on. Read by the host with the outcome.
+    profiling() {
+      return profiling;
     },
     pendingCount() {
       return pending.size;
@@ -204,9 +212,10 @@
       } catch (error) {
         promise = Promise.reject(error);
       }
+      const ledger = () => (profiling && sdk && typeof sdk.takeProfile === "function" ? sdk.takeProfile() : []);
       promise.then(
-        (value) => { outcome = { ok: true, value: value === undefined ? null : value }; },
-        (error) => { outcome = { ok: false, error: describeError(error) }; },
+        (value) => { outcome = { ok: true, value: value === undefined ? null : value, profile: ledger() }; },
+        (error) => { outcome = { ok: false, error: describeError(error), profile: ledger() }; },
       );
     },
     outcome() {

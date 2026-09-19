@@ -293,3 +293,130 @@ async fn workload_matrix_postgres() {
     let row = measure(&runtime, "crud + pg", "http:GET /users/:id", &input, n).await;
     print_table(&format!("{name} postgres n={n}"), &[row]);
 }
+
+/// The whole request: the same rows through the HTTP host (in-process
+/// listener, one keep-alive connection, c=1), attributed with the
+/// `x-usai-profile` header — host phases (route, decode, validate, admit,
+/// execute, encode), the runtime/driver/engine phases and the guest's own
+/// ledger (dispatch, validation, handler, response). This is the invoice the
+/// P8 parity study reads; `USAI_MATRIX_ROWS` selects rows.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore]
+async fn http_invoice() {
+    assert!(usai_runtime::engine::profiling(), "set USAI_PROFILE=1");
+    let n: usize = std::env::var("USAI_MATRIX_N")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(300);
+    let engine = usai_runtime::engine::from_env(64).unwrap();
+    let name = usai_runtime::engine::Engine::name(engine.as_ref()).to_string();
+    let runtime = runtime_for("tests/fixtures/bench-app", engine).await;
+    let host = usai_runtime::http::HttpHost::new(
+        Arc::clone(&runtime),
+        usai_runtime::http::HttpConfig {
+            addr: ([127, 0, 0, 1], 0).into(),
+            expose_diagnostics: false,
+            ..usai_runtime::http::HttpConfig::default()
+        },
+    );
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let token = shutdown.clone();
+    tokio::spawn(async move {
+        usai_runtime::http::serve(host, token, |addr| {
+            let _ = tx.send(addr);
+        })
+        .await
+        .unwrap();
+    });
+    let addr = rx.await.unwrap();
+    let client = reqwest::Client::builder()
+        .pool_max_idle_per_host(1)
+        .build()
+        .unwrap();
+    let only: Option<Vec<String>> = std::env::var("USAI_MATRIX_ROWS")
+        .ok()
+        .map(|v| v.split(',').map(|s| s.trim().to_string()).collect());
+    let routes: Vec<(&str, &str)> = vec![
+        ("sdk-only", "/sdk/x"),
+        ("zod/mini", "/mini/x"),
+        ("zod", "/zod/x"),
+    ];
+    println!("\n== {name} http invoice n={n} (ms per request, c=1, in-process listener) ==");
+    for (label, path) in routes {
+        if only.as_ref().is_some_and(|o| !o.iter().any(|x| x == label)) {
+            continue;
+        }
+        let url = format!("http://{addr}{path}");
+        for _ in 0..20 {
+            let r = client.get(&url).send().await.unwrap();
+            let status = r.status();
+            let body = r.text().await.unwrap_or_default();
+            assert_eq!(status, 200, "{label}: {body}");
+        }
+        let mut phases: BTreeMap<String, f64> = BTreeMap::new();
+        let t = Instant::now();
+        for _ in 0..n {
+            let r = client.get(&url).send().await.unwrap();
+            let header = r
+                .headers()
+                .get("x-usai-profile")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_owned();
+            let _ = r.bytes().await;
+            for item in header.split(',') {
+                if let Some((k, v)) = item.split_once('=') {
+                    *phases.entry(k.to_owned()).or_default() += v.parse::<f64>().unwrap_or(0.0);
+                }
+            }
+        }
+        let total = t.elapsed().as_secs_f64() * 1000.0 / n as f64;
+        for v in phases.values_mut() {
+            *v /= n as f64;
+        }
+        let get = |k: &str| phases.get(k).copied().unwrap_or(0.0);
+        let host_sum: f64 = ["route", "decode", "validate", "admit", "encode"]
+            .iter()
+            .map(|k| get(&format!("http.{k}")))
+            .sum();
+        let execute = get("http.execute");
+        let create = get("runtime.create");
+        let run = get("driver.run");
+        let retire = get("driver.retire");
+        let guest: Vec<(&String, &f64)> = phases
+            .iter()
+            .filter(|(k, _)| k.starts_with("guest."))
+            .collect();
+        let guest_sum: f64 = guest.iter().map(|(_, v)| **v).sum();
+        println!("\n{label}: end-to-end {total:.3} ms (client round trip, same process)");
+        println!(
+            "  host    route {:.3}  decode {:.3}  validate {:.3}  admit {:.3}  encode {:.3}   = {:.3}",
+            get("http.route"),
+            get("http.decode"),
+            get("http.validate"),
+            get("http.admit"),
+            get("http.encode"),
+            host_sum
+        );
+        println!(
+            "  execute {execute:.3}  = create {create:.3} + run {run:.3} + retire {retire:.3} + release {:.3}",
+            execute - create - run - retire
+        );
+        print!("  engine ");
+        for (k, v) in phases.iter().filter(|(k, _)| k.starts_with("engine.")) {
+            print!(" {}={v:.3}", k.trim_start_matches("engine."));
+        }
+        println!();
+        print!("  guest  ");
+        for (k, v) in &guest {
+            print!(" {}={v:.3}", k.trim_start_matches("guest."));
+        }
+        println!("   = {guest_sum:.3}");
+        println!(
+            "  unaccounted: run − engine − guest-ledger-overlap is not additive (guest phases lie inside invoke.jobs); client+network = {:.3}",
+            total - host_sum - execute
+        );
+    }
+    shutdown.cancel();
+}

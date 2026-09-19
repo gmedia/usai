@@ -42,9 +42,35 @@ interface HttpOutput {
   base64?: string;
 }
 
+// A phase ledger for the attribution harness (`USAI_PROFILE=1`): the host
+// seeds the world with profiling on, the SDK records where the time inside
+// the world went — dispatch (from `invoke` to the handler), validation of
+// each slot, the handler, the response contract — and the bridge ships it
+// with the outcome. Off by default: `mark` is a no-op and nothing allocates.
+let ledger: Array<[string, number]> | null = null;
+const now = (): number => {
+  const perf = (globalThis as { performance?: { now(): number } }).performance;
+  return perf !== undefined ? perf.now() : Date.now();
+};
+function profiling(): boolean {
+  const bridge = (globalThis as { __usai?: { profiling?: () => boolean } }).__usai;
+  return bridge !== undefined && typeof bridge.profiling === "function" && bridge.profiling();
+}
+function mark(phase: string, since: number): void {
+  if (ledger !== null) ledger.push([phase, now() - since]);
+}
+/** The ledger of the current invocation, taken once (the bridge calls it). */
+export function takeProfile(): Array<[string, number]> {
+  const out = ledger ?? [];
+  ledger = null;
+  return out;
+}
+
 function parse<S extends AnySchema>(slot: string, schema: S | undefined, value: unknown): unknown {
   if (!schema) return value;
+  const t = ledger !== null ? now() : 0;
   const result = validateWith(schema, value);
+  mark(`validate.${slot}`, t);
   if (!result.ok) {
     throw new UsaiError("validation_failed", 400, `${slot} failed validation`, { slot, issues: result.issues });
   }
@@ -160,8 +186,13 @@ async function runHttp(workload: Workload, input: HttpInput): Promise<HttpOutput
     headers: parse("headers", workload.contracts.headers, request.headers),
     body: parse("body", workload.contracts.body, decodeBody(request.body)),
   };
+  let t = ledger !== null ? now() : 0;
   const result = await (workload.handler as (ctx: unknown) => unknown)(ctx);
-  return encodeHttp(workload, result);
+  mark("handler", t);
+  t = ledger !== null ? now() : 0;
+  const output = encodeHttp(workload, result);
+  mark("response", t);
+  return output;
 }
 
 async function runTask(workload: Workload, input: TaskInput): Promise<unknown> {
@@ -275,9 +306,12 @@ async function runService(workload: Workload, input: ServiceInput): Promise<unkn
 }
 
 export async function invoke(app: AppDeclaration, index: number, inputJson: string): Promise<unknown> {
+  ledger = profiling() ? [] : null;
+  const t0 = ledger !== null ? now() : 0;
   const entry = flatten(app).workloads[index];
   if (!entry) throw new UsaiError("unknown_workload", 500, `no workload at index ${index}`);
   const input = JSON.parse(inputJson) as Input;
+  mark("dispatch", t0);
   // ctx.env carries typed values when the application declared them;
   // the host already validated presence and shape at activation.
   if (app.env) input.env = resolveEnv(app.env, input.env as Record<string, string | undefined>) as unknown as Record<string, string | number | boolean | undefined>;
@@ -319,5 +353,5 @@ export function warm(app: AppDeclaration): number {
 /** Installs the SDK on the guest global. Idempotent; the last SDK evaluated
  * in a bundle wins, which is the one the application imported. */
 export function install(): void {
-  globalThis.__usai_sdk = { invoke, describe, warm };
+  globalThis.__usai_sdk = { invoke, describe, warm, takeProfile };
 }

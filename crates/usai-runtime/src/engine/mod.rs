@@ -74,8 +74,20 @@ pub enum EngineError {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(untagged)]
 pub enum Outcome {
-    Ok { ok: bool, value: serde_json::Value },
-    Err { ok: bool, error: GuestError },
+    Ok {
+        ok: bool,
+        value: serde_json::Value,
+        /// Guest-side phase ledger (`guest.<phase>` in ms), present only
+        /// when the world was invoked with profiling on.
+        #[serde(default)]
+        profile: Vec<(String, f64)>,
+    },
+    Err {
+        ok: bool,
+        error: GuestError,
+        #[serde(default)]
+        profile: Vec<(String, f64)>,
+    },
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]

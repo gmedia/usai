@@ -296,7 +296,7 @@ impl WorldInstance for QuickJsWorld {
                 let seed: Function = b
                     .get("seed")
                     .map_err(|e| EngineError::Guest(describe(&ctx, e)))?;
-                seed.call::<_, ()>((entropy,))
+                seed.call::<_, ()>((entropy, super::profiling()))
                     .map_err(|e| EngineError::Guest(describe(&ctx, e)))?;
                 let invoke: Function = b
                     .get("invoke")

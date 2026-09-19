@@ -1069,8 +1069,9 @@ impl WorldInstance for WasmWorld {
     async fn invoke(&mut self, index: usize, input_json: &str) -> Result<(), EngineError> {
         let t = std::time::Instant::now();
         let code = format!(
-            "__usai.seed(\"{}\");__usai.invoke({index}, {});",
+            "__usai.seed(\"{}\", {});__usai.invoke({index}, {});",
             super::world_entropy(),
+            super::profiling(),
             js_string(input_json)
         );
         self.guest

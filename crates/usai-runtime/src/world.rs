@@ -393,9 +393,16 @@ impl WorldDriver {
             },
         };
 
+        let mut guest_profile = Vec::new();
         let outcome = match self.instance.outcome().await {
-            Ok(Some(Outcome::Ok { value, .. })) => Some(Ok(value)),
-            Ok(Some(Outcome::Err { error, .. })) => Some(Err(self.definition.map_error(error))),
+            Ok(Some(Outcome::Ok { value, profile, .. })) => {
+                guest_profile = profile;
+                Some(Ok(value))
+            }
+            Ok(Some(Outcome::Err { error, profile, .. })) => {
+                guest_profile = profile;
+                Some(Err(self.definition.map_error(error)))
+            }
             Ok(None) => None,
             Err(_) => None,
         };
@@ -435,6 +442,11 @@ impl WorldDriver {
                 "driver.run".into(),
                 started.elapsed().as_secs_f64() * 1000.0,
             ));
+            p.extend(
+                guest_profile
+                    .into_iter()
+                    .map(|(k, ms)| (format!("guest.{k}"), ms)),
+            );
             p
         } else {
             Vec::new()

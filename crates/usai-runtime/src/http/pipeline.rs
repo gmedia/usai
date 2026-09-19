@@ -112,6 +112,50 @@ pub(crate) struct GuestHttpOutput {
 
 pub type HttpResponse = Response<BoxBody<Bytes, Infallible>>;
 
+/// The host-side phases of one request, for the attribution harness
+/// (`USAI_PROFILE=1`): route → decode → validate → admit → execute → encode.
+/// Off, it holds an empty `Vec` (no allocation) and every `lap` is a no-op.
+struct Stopwatch {
+    on: bool,
+    last: std::time::Instant,
+    phases: Vec<(&'static str, f64)>,
+}
+
+impl Stopwatch {
+    fn start() -> Self {
+        Self {
+            on: crate::engine::profiling(),
+            last: std::time::Instant::now(),
+            phases: Vec::new(),
+        }
+    }
+
+    fn lap(&mut self, phase: &'static str) {
+        if self.on {
+            let now = std::time::Instant::now();
+            self.phases
+                .push((phase, (now - self.last).as_secs_f64() * 1000.0));
+            self.last = now;
+        }
+    }
+}
+
+/// `x-usai-profile: http.route=0.012,http.decode=0.030,…,guest.handler=0.201`
+/// — the whole invoice for one request, host and guest phases, only when
+/// profiling is on. The harness (`tests/profile_matrix.rs`, http mode)
+/// reads it; nobody else should.
+fn profile_header(host: &[(&'static str, f64)], world: &[(String, f64)]) -> Option<HeaderValue> {
+    let mut text = String::new();
+    for (k, v) in host {
+        text.push_str(&format!("http.{k}={v:.4},"));
+    }
+    for (k, v) in world {
+        text.push_str(&format!("{k}={v:.4},"));
+    }
+    text.pop();
+    HeaderValue::from_str(&text).ok()
+}
+
 fn json_response(status: StatusCode, body: &Value) -> HttpResponse {
     let bytes = serde_json::to_vec(body).unwrap_or_else(|_| b"{}".to_vec());
     Response::builder()
@@ -501,6 +545,7 @@ impl HttpHost {
     }
 
     async fn pipeline(&self, request: Request<Incoming>) -> Result<HttpResponse, Reply> {
+        let mut watch = Stopwatch::start();
         let compiled = self.compiled()?;
         let (parts, body) = request.into_parts();
         let path = parts.uri.path().to_owned();
@@ -555,6 +600,7 @@ impl HttpHost {
         // From here the workload is known: every outcome, refusal included,
         // is counted under its id (`usai_http_responses_total{workload}`).
         let workload_id = workload.id.clone();
+        watch.lap("route");
         let outcome: Result<HttpResponse, Reply> = async {
             let mut query = query_to_json(parts.uri.query());
             let mut headers = header_map_to_json(&parts.headers);
@@ -615,6 +661,7 @@ impl HttpHost {
                 json!({ "base64": base64::engine::general_purpose::STANDARD.encode(&raw_body) })
             };
 
+            watch.lap("decode");
             // 3. boundary validation, before any world exists (C6)
             let mut params = params;
             if let Some(SlotValidators {
@@ -649,6 +696,7 @@ impl HttpHost {
                 }
             }
 
+            watch.lap("validate");
             // 4. admit
             let admission = self
                 .runtime
@@ -691,8 +739,9 @@ impl HttpHost {
             let cancel = CancellationToken::new();
             // Dropping the request future (client gone) cancels the world.
             let _guard = cancel.clone().drop_guard();
+            watch.lap("admit");
             let t_execute = std::time::Instant::now();
-            let result = self
+            let mut result = self
             .runtime
             .execute(admission, input, cancel)
             .await
@@ -710,8 +759,21 @@ impl HttpHost {
                 world_ms = result.duration.as_secs_f64() * 1000.0,
                 "pipeline timing"
             );
+            watch.lap("execute");
             // 6. encode / commit
-            Ok(self.encode(&workload.id, result))
+            let world_profile = if watch.on {
+                std::mem::take(&mut result.profile)
+            } else {
+                Vec::new()
+            };
+            let mut response = self.encode(&workload.id, result);
+            if watch.on {
+                watch.lap("encode");
+                if let Some(v) = profile_header(&watch.phases, &world_profile) {
+                    response.headers_mut().insert("x-usai-profile", v);
+                }
+            }
+            Ok(response)
         }
         .await;
         match outcome {
