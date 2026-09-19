@@ -83,7 +83,7 @@ The full API surface is the SDK's type declarations — `node_modules/@sakaladev
 ```text
 my-app/
 ├── src/app.ts          # the application root: defineApp({...})
-├── usai.config.ts      # defineConfig({ app: "./src/app.ts", database: { migrations: { include: ["./src/**/migrations/*.sql"] }, seeders: { include: ["./src/**/seeders/*.ts"] } } })
+├── usai.config.ts      # defineConfig({ app: "./src/app.ts" }) — migrations default to ./src/**/migrations/*.sql + ./migrations/*.sql, seeders to ./src/**/seeders/*.ts (`usai config` prints the effective values and their sources)
 ├── package.json
 └── tsconfig.json
 ```
@@ -131,14 +131,14 @@ export const createUser = http.post("/users", { body: NewUser, response: { 201: 
 - Return a plain value for the default status, `http.created(...)` / `http.response(status, body, headers)` for explicit ones, `http.noContent()` for 204.
 - Errors: `errors.notFound()`, `errors.conflict()`, `errors.custom(code, status, message)`. Unknown exceptions are sanitized to `internal` under `usai run`; `usai dev` returns the exception message and stack to the client (`expose_diagnostics`) — details always go to the logs. A response that does not match its declared contract is a `500 response_contract_violation`; the failing paths are in the log and, in dev, in `error.details.issues`.
 - Declare what you throw and return: OpenAPI and `usai inspect` only know the statuses you put in `response: { … }` and the codes in `errors: [...]`; `errors.notFound()` in a handler does not add a 404 to the document by itself.
-- Validation issues use JSON-pointer paths (`/tags/0`) wherever the check ran — at the boundary or in the world.
+- Validation issues use JSON-pointer paths (`/tags/0`) wherever the check ran — at the boundary or in the world. The *message* differs by where it ran: the boundary's messages are JSON-Schema-derived (`"abc" does not match the expected format`), the world's are the library's own (`Invalid UUID`); the `code`, the `slot` and the paths are the same.
 - `ctx.resources` is typed from the workload's `resources: [...]`: `resources: [db]` with `const db = postgres("db")` makes `ctx.resources.db` a `PostgresHandle`, `cache.local` a `CacheLocalHandle`, `httpClient` an `HttpClientHandle`; an undeclared name is a compile error, and at runtime (`ctx.resources["x"]` without `resources: [x]`) a `500 resource_not_declared` that names the fix. Only an auth resolver's `ctx.resources` is untyped (cast to the handle).
 - Paths: `:id` declares a parameter; a literal segment always wins over a parameter at the same position (`/invoices/summary` beats `/invoices/:id`, whatever the declaration order); the same method and path twice fails the build; an undeclared path is `404 route_not_found` before any world exists.
 - `summary` (one line) and `description` (a paragraph) on any workload's options feed the reference page and the OpenAPI document; `auth.bearer({ description })` documents the security scheme.
 - Raw endpoints: `http.raw("/webhook", async (ctx) => http.rawResponse(200, "ok"))` — exact bytes via `ctx.request.bytes()`, no contracts, documented as opaque.
 - Auth is a declared boundary: `const authed = auth.bearer({ resolve: async (ctx, token) => … })`, then `http.get("/me", { auth: authed }, async (ctx) => ctx.auth)`.
 
-An auth `resolve` runs **inside the request's world** with the workload's declared `resources` and `env` (`ctx.resources["main"]` works there — ADR-0004): a session lookup is one query, and `usai inspect` shows `auth: <name> (resolved in world)`.
+An auth `resolve` runs **inside the request's world** with the workload's declared `resources` and `env` (`ctx.resources["main"]` works there — ADR-0004): a session lookup is one query, and `usai inspect` shows `auth: <name> (resolved in world)`. The order follows from that: **boundary validation comes first**, then the world, then the resolver — so an unauthenticated request with an invalid body gets the `400` (with its field-level issues), not a `401`, and only a request that passed its contracts costs a world. Both the missing credential (the SDK answers `unauthorized` before calling your resolver) and the wrong one (your resolver's `errors.unauthorized`) are decided in the world, so a `401` costs a world where a `400` does not. If the shape of a contract must not be visible to anonymous callers, put it behind a route whose contract is opaque (a raw endpoint) or accept that validation is public, as it is on any schema-first API.
 
 Raw endpoints (`http.raw`, exact bytes in — webhooks with signed bodies) can still declare `errors` and `responses: { 202: "accepted", 401: "bad signature" }` so the reference lists what the handler answers.
 
@@ -154,7 +154,7 @@ export const order = http.post("/orders", { body: Order }, async (ctx) => {
 });
 ```
 
-A finite world that ends with live asynchronous work (a stray `setTimeout`, an un-awaited promise holding a timer) is a **lifecycle error**: the runtime cancels it and logs a diagnostic naming the fix. Dispatched tasks are **not durable** — a crash may lose them; use the queue for durability.
+A finite world that ends with live asynchronous work (a stray `setTimeout`, an un-awaited promise holding a timer) is a **lifecycle error**: the runtime cancels it and logs a diagnostic naming the fix. What the client sees depends on what was live: a pending timer or promise is cancelled and the response the handler returned is **committed as returned** (the violation is a log line, the `x-usai-lifecycle: detached_work` header under `--diagnostics`, and `res.violations` in tests); an **operation already started** — a query, a fetch, a publish — whose result the handler never awaited is a `500 detached_work`, because the runtime cannot say whether the side effect happened. Dispatched tasks are **not durable** — a crash may lose them; use the queue for durability.
 
 ## 6. Cron and commands
 
@@ -182,7 +182,7 @@ export const listUsers = http.get("/users", { response: { 200: z.array(User) }, 
 export default defineApp({ workloads: [listUsers], resources: [db], env: env({ DATABASE_URL: env.url() }) });
 ```
 
-- **Row types.** Rows come back as `Record<string, unknown>`; a typed response contract makes the compiler ask for more. Say what a row is once, from the schema you already have: `type TaskRow = z.infer<typeof Task>; sql.one<TaskRow>(…)`. Column aliases (`total_cents::int as "totalCents"`) shape the row to the contract.
+- **Row types.** Rows come back as `Record<string, unknown>`; a typed response contract makes the compiler ask for more. Say what a row is once, from the schema you already have: `type TaskRow = z.infer<typeof Task>; sql.one<TaskRow>(…)`. Column aliases (`total_cents::int as "totalCents"`) shape the row to the contract. `timestamptz`/`timestamp`/`date` columns arrive as ISO-8601 strings (`2026-09-19T05:53:01.781761+00:00`) — do **not** cast them `::text`, which yields PostgreSQL's own form (`2026-09-19 12:53:01.78+07`) that JavaScript's `Date` does not parse reliably. `uuid`, `numeric`, enums and arrays arrive as strings, strings, strings and JSON arrays respectively. Response bodies are serialised with keys in sorted order, whatever order the query selected them in.
 - **Errors from SQL** arrive as `UsaiOperationError` with `err.usai.code` = `sql_<SQLSTATE>` (`sql_23505` for a unique violation, `sql_23503` foreign key, `sql_40001` serialization failure) and the server's message; connection loss is `connection_closed`, a full pool `resource_exhausted`. Catch by code: `if (isUsaiError(e) && e.usai.code === "sql_23505") throw errors.conflict("email taken")`.
 - `sql.query(text, params)` → rows; `sql.one(...)` → row or null; `sql.execute(...)` → affected count. Parameters are typed from the prepared statement (`$1::int`, uuid, jsonb, timestamptz, arrays, enums …) and encoded by the runtime; every other type (`interval`, `inet`, ranges, domains …) takes a string in its text form, parsed server-side like `'30 days'::interval`. A string that is not a valid uuid/timestamp for its slot is an `invalid_param` error (500) from the handler's point of view — validate boundary input with the schema first (`z.string().uuid()`). Timestamps accept ISO-8601 and PostgreSQL's own text output.
 - `sql.transaction(async (tx) => { … })` pins one connection for the callback: `tx.query/one/execute` run in one transaction, committed when the callback returns, rolled back when it throws (the error is rethrown). A handler that returns with the transaction still open is a lifecycle error — the runtime rolls back on its behalf and says so.
@@ -282,7 +282,7 @@ Deployment settings (port, budgets, limits) are runtime flags and environment, n
 ```bash
 usai build                     # .usai/build/{manifest.json, app.js} + cache/image.cwasm (engine cache for this host; install loads it in ms, drop it and install compiles)
 usai run --artifact .usai/build --port 8080 --status    # /_usai/status + /_usai/metrics + /_usai/docs + /_usai/openapi.json (all on in `usai dev`)
-curl :8080/_usai/status        # runtime truth: gauges, revisions, services, tasks, resources
+curl :8080/_usai/status        # runtime truth: gauges, revisions, services, tasks, resources, http (responses by class, rejections by reason, per-workload counts, a cumulative latency histogram with its bucket bounds under "le")
 curl :8080/_usai/metrics       # Prometheus text
 usai generate openapi --out openapi.json           # internal profile: everything the runtime knows (x-usai-*)
 usai generate openapi --public --out openapi.json  # consumer contract only: what ships to API consumers

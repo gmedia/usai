@@ -561,7 +561,23 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
         })
     });
     let revision = runtime.install(first.definition).await?;
-    runtime.activate(revision.id).await?;
+    // A failed first activation (typically the environment) is not the end
+    // of the session: nothing is served (503 `no_active_revision`) and the
+    // watcher stays up, so fixing `.env` or the source and saving recovers.
+    if let Err(e) = runtime.activate(revision.id).await {
+        let hint = match &e {
+            usai_runtime::RuntimeError::MissingEnv(name) => format!(
+                "
+  `usai dev` reads the shell environment and {}; add {name}=… there and save — the revision activates on the next change.",
+                dotenv_path.display()
+            ),
+            _ => String::new(),
+        };
+        eprintln!(
+            "activation failed: {e:#}{hint}
+(nothing is served until a revision activates; watching for changes)"
+        );
+    }
 
     let watched: Arc<std::sync::Mutex<Vec<PathBuf>>> =
         Arc::new(std::sync::Mutex::new(first.inputs));
@@ -608,6 +624,12 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
     })?;
     use notify::Watcher as _;
     watcher.watch(&watch_root, notify::RecursiveMode::Recursive)?;
+    // `.env` lives at the project root, which the application directory
+    // need not contain: watch the root's own entries too (non-recursively),
+    // so creating or editing `.env` re-activates without a source change.
+    if watch_root != root {
+        watcher.watch(root, notify::RecursiveMode::NonRecursive)?;
+    }
     if let Some(config_file) = &config.config_file {
         watcher.watch(config_file, notify::RecursiveMode::NonRecursive)?;
     }
@@ -711,9 +733,20 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
                                     });
                                 }
                             }
-                            Err(e) => eprintln!(
-                                "\nactivation failed: {e:#}\n(previous revision keeps serving)"
-                            ),
+                            Err(e) => {
+                                let serving = if rebuild_runtime.active().is_ok() {
+                                    "previous revision keeps serving"
+                                } else {
+                                    "nothing is served until a revision activates"
+                                };
+                                let hint = match &e {
+                                    usai_runtime::RuntimeError::MissingEnv(name) => {
+                                        format!("\n  add {name}=… to .env (or export it) and save")
+                                    }
+                                    _ => String::new(),
+                                };
+                                eprintln!("\nactivation failed: {e:#}{hint}\n({serving})");
+                            }
                         },
                         Err(e) => {
                             eprintln!("\ninstall failed: {e:#}\n(previous revision keeps serving)")
@@ -735,18 +768,20 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
         None,
         None,
         Some(Box::new(move |url| {
-            let revision = banner_runtime.active().expect("active");
-            print!(
-                "{}",
-                display::banner(
-                    &revision.definition,
-                    &format!("{} ({})", revision.id, revision.definition.identity()),
-                    Some(&url),
-                    Some(&banner_runtime.status()),
-                    true,
-                    true,
-                )
-            );
+            match banner_runtime.active() {
+                Ok(revision) => print!(
+                    "{}",
+                    display::banner(
+                        &revision.definition,
+                        &format!("{} ({})", revision.id, revision.definition.identity()),
+                        Some(&url),
+                        Some(&banner_runtime.status()),
+                        true,
+                        true,
+                    )
+                ),
+                Err(_) => println!("listening on {url} — no active revision yet (requests answer 503 no_active_revision)"),
+            }
             println!("\nwatching for changes (ctrl-c to stop)");
         })),
     )
@@ -796,9 +831,8 @@ async fn one_shot(
         }
         other => other?,
     };
-    for line in &result.logs {
-        eprintln!("[{}] {}", line.level, line.message);
-    }
+    // The application's lines were already streamed live by the `app`
+    // tracing target (with the workload and world); nothing is echoed twice.
     for violation in &result.violations {
         eprintln!("\nlifecycle: {}\n", violation.message);
     }
@@ -1002,9 +1036,6 @@ pub async fn db_seed(root: &Path, name: Option<&str>) -> Result<()> {
             .await;
         runtime.shutdown().await;
         let result = result?;
-        for line in &result.logs {
-            eprintln!("[{}] {}", line.level, line.message);
-        }
         match (&result.termination, &result.outcome) {
             (Termination::Completed, Some(Ok(_))) => println!(
                 "seeded {} ({})",

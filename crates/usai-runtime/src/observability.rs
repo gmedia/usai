@@ -93,13 +93,65 @@ pub struct HttpSnapshot {
     pub rejected_before_world: u64,
     pub upgrades: u64,
     pub streams: u64,
-    /// Cumulative counts per `LATENCY_BUCKETS` entry, then `+Inf`.
+    /// Cumulative counts per `LATENCY_BUCKETS` entry, then `+Inf`. Serialised
+    /// as `{ "le": [bounds…, "+Inf"], "count": […] }` so the JSON names its
+    /// bucket bounds.
+    #[serde(serialize_with = "serialize_latency")]
     pub latency_cumulative: Vec<u64>,
     pub latency_sum_seconds: f64,
-    /// Rejections by reason: route, validation, auth, capacity, draining, other.
+    /// Rejections by reason: route, validation, auth, capacity, draining,
+    /// other — serialised as an object keyed by reason.
+    #[serde(serialize_with = "serialize_rejections")]
     pub rejections: [u64; 6],
-    /// Per-workload response counts: workload id → [2xx, 3xx, 4xx, 5xx].
+    /// Per-workload response counts: workload id → [2xx, 3xx, 4xx, 5xx],
+    /// serialised as `{ "2xx": n, "3xx": n, "4xx": n, "5xx": n }`.
+    #[serde(serialize_with = "serialize_by_workload")]
     pub by_workload: std::collections::BTreeMap<String, [u64; 4]>,
+}
+
+pub const REJECTION_REASONS: [&str; 6] = [
+    "route",
+    "validation",
+    "auth",
+    "capacity",
+    "draining",
+    "other",
+];
+
+use serde_json::json;
+
+fn serialize_latency<S: serde::Serializer>(v: &[u64], s: S) -> Result<S::Ok, S::Error> {
+    use serde::ser::SerializeMap;
+    let mut le: Vec<serde_json::Value> = LATENCY_BUCKETS.iter().map(|b| json!(b)).collect();
+    le.push(json!("+Inf"));
+    let mut m = s.serialize_map(Some(2))?;
+    m.serialize_entry("le", &le)?;
+    m.serialize_entry("count", v)?;
+    m.end()
+}
+
+fn serialize_rejections<S: serde::Serializer>(v: &[u64; 6], s: S) -> Result<S::Ok, S::Error> {
+    use serde::ser::SerializeMap;
+    let mut m = s.serialize_map(Some(6))?;
+    for (reason, n) in REJECTION_REASONS.iter().zip(v) {
+        m.serialize_entry(reason, n)?;
+    }
+    m.end()
+}
+
+fn serialize_by_workload<S: serde::Serializer>(
+    v: &std::collections::BTreeMap<String, [u64; 4]>,
+    s: S,
+) -> Result<S::Ok, S::Error> {
+    use serde::ser::SerializeMap;
+    let mut m = s.serialize_map(Some(v.len()))?;
+    for (k, c) in v {
+        m.serialize_entry(
+            k,
+            &json!({ "2xx": c[0], "3xx": c[1], "4xx": c[2], "5xx": c[3] }),
+        )?;
+    }
+    m.end()
 }
 
 impl HttpStats {
@@ -572,18 +624,11 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
             "usai_http_rejections_total",
             "Requests refused before a world existed, by reason",
             "counter",
-            &[
-                "route",
-                "validation",
-                "auth",
-                "capacity",
-                "draining",
-                "other",
-            ]
-            .iter()
-            .zip(h.rejections.iter())
-            .map(|(reason, n)| (format!("reason=\"{reason}\""), *n as f64))
-            .collect::<Vec<_>>(),
+            &REJECTION_REASONS
+                .iter()
+                .zip(h.rejections.iter())
+                .map(|(reason, n)| (format!("reason=\"{reason}\""), *n as f64))
+                .collect::<Vec<_>>(),
         );
         // Histogram of time from request receipt to response start, for
         // requests that reached the pipeline's end (rejections included).
@@ -688,7 +733,7 @@ pub fn render_graph(definition: &crate::definition::ApplicationDefinition) -> St
                     .workload(d)
                     .map(|(_, t)| format!("{} [{}]", t.name, lifetime(&t.trigger)))
                     .unwrap_or_else(|| d.clone());
-                format!("dispatch → {target}")
+                format!("hands work to → {target}")
             })
             .collect();
         let all: Vec<String> = edges

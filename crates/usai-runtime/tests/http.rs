@@ -1135,12 +1135,16 @@ async fn status_and_metrics_derive_from_runtime_truth() {
         "{text}"
     );
     assert!(text.contains("usai_http_request_seconds_count 2"));
-    assert_eq!(status["http"]["rejections"], json!([0, 1, 0, 0, 0, 0]));
+    assert_eq!(
+        status["http"]["rejections"],
+        json!({ "route": 0, "validation": 1, "auth": 0, "capacity": 0, "draining": 0, "other": 0 })
+    );
+    assert_eq!(status["http"]["latency_cumulative"]["le"][0], json!(0.0005));
     // Not served on a host without the flag.
     let (status_code, _) = s.get("/_usai/metrics").await;
     assert_eq!(status_code, 404);
     let graph = usai_runtime::observability::render_graph(&s.runtime.active().unwrap().definition);
-    assert!(graph.contains("POST /orders [request]\n   ├── cache.local/audit [lease]\n   └── dispatch → record [task]"), "{graph}");
+    assert!(graph.contains("POST /orders [request]\n   ├── cache.local/audit [lease]\n   └── hands work to → record [task]"), "{graph}");
     token.cancel();
     s.shutdown.cancel();
 }

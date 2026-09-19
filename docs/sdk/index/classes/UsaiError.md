@@ -12,8 +12,12 @@ The runtime's own codes, which a client can meet on any operation:
 as a JSON pointer and `message`), `unauthorized` (401),
 `route_not_found` (404), `capacity_exhausted` (503), `unavailable`
 (503, a dependency), `deadline_exceeded` (504), `internal` (500),
-`detached_work` (500, the world ended with live work), and inside a
-world `resource_not_declared`, `unknown_task`, `cancelled` (499).
+`detached_work` (500 only when an *operation* the handler started was
+still in flight when it returned — its side effect is unknown; a live
+timer or promise is cancelled and the returned response is committed,
+with the violation logged and, under `--diagnostics`, in the
+`x-usai-lifecycle` header), and inside a world `resource_not_declared`,
+`unknown_task`, `cancelled` (499).
 
 ## Extends
 

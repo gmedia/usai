@@ -165,8 +165,19 @@ pub fn inspect(definition: &ApplicationDefinition) -> String {
             }
         }
     }
+    // Grouped by kind in a fixed order, whatever the declaration order.
+    const KIND_ORDER: [&str; 8] = [
+        "http", "stream", "socket", "task", "cron", "queue", "service", "command",
+    ];
+    let mut ordered: Vec<&_> = m.workloads.iter().collect();
+    ordered.sort_by_key(|w| {
+        KIND_ORDER
+            .iter()
+            .position(|k| *k == w.trigger.kind_name())
+            .unwrap_or(KIND_ORDER.len())
+    });
     let mut last_kind = "";
-    for w in &m.workloads {
+    for w in ordered {
         let kind = w.trigger.kind_name();
         if kind != last_kind {
             let title = match kind {
@@ -269,7 +280,7 @@ pub fn inspect(definition: &ApplicationDefinition) -> String {
             }
         }
         if !w.dispatches.is_empty() {
-            let _ = writeln!(out, "    dispatches:");
+            let _ = writeln!(out, "    hands work to (invoke or dispatch):");
             for d in &w.dispatches {
                 let _ = writeln!(out, "      {d}");
             }

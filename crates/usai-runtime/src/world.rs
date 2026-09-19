@@ -67,7 +67,7 @@ impl LifecycleViolation {
                 "The {kind} lifetime ended when its result was produced. Work that is still \
                  pending cannot remain owned by this world, so it was cancelled.\n\n\
                  Use:\n  \
-                 task()    for independent finite work (ctx.tasks.dispatch, awaited)\n  \
+                 task()    for independent finite work (await ctx.tasks.dispatch(task, input): the hand-off is awaited, the work runs on its own)\n  \
                  cron()    for scheduled work\n  \
                  service() for intentional long-running work\n\
                  or await the work before returning."
@@ -148,6 +148,9 @@ pub struct WorldShared {
     logs: Mutex<Vec<LogLine>>,
     accepting_ops: AtomicBool,
     max_logs: usize,
+    /// The workload id, so an application log line says which workload
+    /// wrote it without the application embedding the name itself.
+    workload: Arc<str>,
 }
 
 impl HostBindings for WorldShared {
@@ -200,11 +203,12 @@ impl HostBindings for WorldShared {
         // The application's own lines keep their level and carry a target
         // of their own (`app`), so the default filter shows them at INFO in
         // `dev` and `run` while the runtime's internals stay at their level.
+        let workload = &*self.workload;
         match level {
-            "error" => tracing::error!(target: "app", world = %self.id, "{message}"),
-            "warn" => tracing::warn!(target: "app", world = %self.id, "{message}"),
-            "debug" => tracing::debug!(target: "app", world = %self.id, "{message}"),
-            _ => tracing::info!(target: "app", world = %self.id, "{message}"),
+            "error" => tracing::error!(target: "app", workload, world = %self.id, "{message}"),
+            "warn" => tracing::warn!(target: "app", workload, world = %self.id, "{message}"),
+            "debug" => tracing::debug!(target: "app", workload, world = %self.id, "{message}"),
+            _ => tracing::info!(target: "app", workload, world = %self.id, "{message}"),
         }
     }
 }
@@ -259,6 +263,13 @@ impl WorldDriver {
     ) -> Result<Self, EngineError> {
         let id = ledger.next_world_id();
         let (tx, rx) = mpsc::channel(64);
+        let workload: Arc<str> = Arc::from(
+            spec.definition
+                .workloads()
+                .get(spec.workload_index)
+                .map(|w| w.id.as_str())
+                .unwrap_or(""),
+        );
         let shared = Arc::new(WorldShared {
             id,
             ledger: Arc::clone(&ledger),
@@ -272,6 +283,7 @@ impl WorldDriver {
             logs: Mutex::new(Vec::new()),
             accepting_ops: AtomicBool::new(true),
             max_logs: 1_000,
+            workload,
         });
         let bindings: Arc<dyn HostBindings> = Arc::clone(&shared) as Arc<dyn HostBindings>;
         let t_inst = std::time::Instant::now();

@@ -10,7 +10,7 @@ const ListQuery = z.object({ done: z.enum(["true", "false"]).optional(), limit: 
 type TodoRow = z.infer<typeof Todo>;
 
 const sql = (ctx: { resources: Record<string, unknown> }) => ctx.resources["main"] as PostgresHandle;
-const columns = `id, title, done, created_at::text as "createdAt", completed_at::text as "completedAt"`;
+const columns = `id, title, done, created_at as "createdAt", completed_at as "completedAt"`;
 
 export const list = http.get("/todos", { query: ListQuery, response: { 200: z.array(Todo) }, resources: [db] }, async (ctx) => {
   const where = ctx.query.done === undefined ? "" : `where done = ${ctx.query.done === "true"}`;

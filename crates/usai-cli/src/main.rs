@@ -311,10 +311,12 @@ async fn async_main() {
     // Logs go to stderr, results (inspect, app, generate) to stdout, so a
     // command's output can be piped while the runtime narrates.
     match cli.log_format.as_str() {
+        // JSON lines keep the target so `target == "app"` selects the
+        // application's own lines (`ctx.log`) from the runtime's.
         "json" => tracing_subscriber::fmt()
             .with_env_filter(filter)
             .with_writer(std::io::stderr)
-            .with_target(false)
+            .with_target(true)
             .json()
             .flatten_event(true)
             .init(),
@@ -322,6 +324,8 @@ async fn async_main() {
             .with_env_filter(filter)
             .with_writer(std::io::stderr)
             .with_target(false)
+            // Colour only when a person is looking (stderr is a terminal).
+            .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
             .compact()
             .init(),
         other => {
