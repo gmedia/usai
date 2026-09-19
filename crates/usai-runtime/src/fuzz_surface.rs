@@ -25,8 +25,13 @@ pub fn manifest(data: &[u8]) {
     let mut router = matchit::Router::new();
     for workload in definition.workloads() {
         match &workload.trigger {
-            Trigger::Http { path, .. } | Trigger::Stream { path, .. } | Trigger::Socket { path } => {
-                let _ = router.insert(crate::http::router::to_matchit_path(path), workload.id.clone());
+            Trigger::Http { path, .. }
+            | Trigger::Stream { path, .. }
+            | Trigger::Socket { path } => {
+                let _ = router.insert(
+                    crate::http::router::to_matchit_path(path),
+                    workload.id.clone(),
+                );
             }
             Trigger::Cron { schedule, .. } => {
                 let _ = std::str::FromStr::from_str(schedule).map(|_: croner::Cron| ());
@@ -65,7 +70,14 @@ pub fn sourcemap(data: &[u8]) {
         return;
     };
     if let Some(map) = crate::sourcemap::SourceMap::parse(text) {
-        for (line, column) in [(0, 0), (1, 1), (1, 0), (7, 3), (u32::MAX, u32::MAX), (1 << 20, 1 << 20)] {
+        for (line, column) in [
+            (0, 0),
+            (1, 1),
+            (1, 0),
+            (7, 3),
+            (u32::MAX, u32::MAX),
+            (1 << 20, 1 << 20),
+        ] {
             let _ = map.lookup(line, column);
         }
         let _ = map.map_stack("Error: x\n    at f (app.js:1:5)\n    at app.js:99999:1");

@@ -17,6 +17,10 @@ on:
 jobs:
   fuzz:
     runs-on: ubuntu-24.04
+    # rust-toolchain.toml pins stable for the workspace; libFuzzer needs
+    # nightly's -Z flags, so the whole job runs on nightly.
+    env:
+      RUSTUP_TOOLCHAIN: nightly
     strategy:
       fail-fast: false
       matrix:
@@ -30,13 +34,13 @@ jobs:
         with:
           workspaces: fuzz
           key: fuzz-${{ matrix.target }}
-      - run: cargo install cargo-fuzz --locked
+      - run: cargo +nightly install cargo-fuzz --locked
       - name: Fuzz ${{ matrix.target }}
         env:
           SECONDS_PER_TARGET: ${{ github.event.inputs.seconds || (github.event_name == 'schedule' && '600') || '120' }}
         run: |
           cd fuzz
-          cargo fuzz run ${{ matrix.target }} -- -max_total_time="$SECONDS_PER_TARGET" -timeout=20 -rss_limit_mb=4096
+          cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time="$SECONDS_PER_TARGET" -timeout=20 -rss_limit_mb=4096
       - name: Upload the reproducer
         if: failure()
         uses: actions/upload-artifact@v4
