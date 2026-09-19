@@ -34,7 +34,7 @@ use crate::definition::Code;
 
 /// The sealed core (`guest/PROVENANCE.md`).
 pub const CORE: &[u8] = include_bytes!("../../guest/quickjs-async.wasm");
-pub const CORE_SHA256: &str = "229f9082455869e9bcd4a02d11a141582260edd8e3be1b38a2c50d985ea80f70";
+pub const CORE_SHA256: &str = "d9e9d7b53077995b9fab145873a13ba4aced5073dee27a881bb0d42c1a9dfccd";
 
 const MAX_PAYLOAD: usize = 8 * 1024 * 1024;
 
@@ -343,10 +343,12 @@ fn link(engine: &WtEngine) -> Result<Linker<HostData>, EngineError> {
     Ok(linker)
 }
 
-const EXPORT_NAMES: [&str; 19] = [
+const EXPORT_NAMES: [&str; 21] = [
     "memory",
     "qjs_run_gc",
-    "qjs_usai_call",
+    "qjs_usai_inbuf",
+    "qjs_usai_enter",
+    "qjs_usai_settle",
     "wasm_malloc",
     "wasm_free",
     "qjs_init",
@@ -598,6 +600,34 @@ struct Guest {
     memory: Memory,
     exports: Vec<ModuleExport>,
     funcs: HashMap<&'static str, wasmtime::Func>,
+    /// The request path's exports, resolved once per world and kept as
+    /// typed handles: no export lookup, no type check per call (the R3
+    /// lesson — "typed exports resolved once").
+    hot: HotExports,
+    /// The guest-owned input buffer (`qjs_usai_inbuf`) and its capacity;
+    /// grown on demand, never freed by the host.
+    inbuf: (i32, usize),
+}
+
+#[derive(Default)]
+struct HotExports {
+    inbuf: Option<TypedFunc<i32, i32>>,
+    enter: Option<TypedFunc<(i32, i32, i32, i32), i64>>,
+    settle: Option<TypedFunc<(), i64>>,
+    complete: Option<TypedFunc<(i32, i32, i32, i32), i32>>,
+}
+
+macro_rules! hot {
+    ($self:ident, $store:ident, $field:ident, $name:literal, $p:ty, $r:ty) => {{
+        match &$self.hot.$field {
+            Some(f) => f.clone(),
+            None => {
+                let f = $self.func::<$p, $r>($store, $name)?;
+                $self.hot.$field = Some(f.clone());
+                f
+            }
+        }
+    }};
 }
 
 impl Guest {
@@ -621,6 +651,8 @@ impl Guest {
             memory,
             exports,
             funcs: HashMap::new(),
+            hot: HotExports::default(),
+            inbuf: (0, 0),
         })
     }
 
@@ -630,6 +662,8 @@ impl Guest {
             memory,
             exports,
             funcs: HashMap::new(),
+            hot: HotExports::default(),
+            inbuf: (0, 0),
         }
     }
 
@@ -739,10 +773,49 @@ impl Guest {
         Ok(text)
     }
 
+    /// Writes `bytes` into the guest-owned input buffer and returns its
+    /// address: one typed call when the buffer must grow, none otherwise.
+    fn stage(&mut self, store: &mut Store<HostData>, bytes: &[u8]) -> Result<i32, EngineError> {
+        if bytes.len() > self.inbuf.1 || self.inbuf.0 == 0 {
+            let f = hot!(self, store, inbuf, "qjs_usai_inbuf", i32, i32);
+            let ptr = f
+                .call(&mut *store, bytes.len().max(1) as i32)
+                .map_err(|e| EngineError::Guest(format!("qjs_usai_inbuf: {e:#}")))?;
+            if ptr <= 0 {
+                return Err(EngineError::Guest("guest input buffer unavailable".into()));
+            }
+            self.inbuf = (ptr, bytes.len().max(4096));
+        }
+        self.memory
+            .write(&mut *store, self.inbuf.0 as usize, bytes)
+            .map_err(|e| EngineError::Guest(e.to_string()))?;
+        Ok(self.inbuf.0)
+    }
+
+    /// Decodes a `(len << 32) | ptr` result (bit 63: exception text) from
+    /// guest memory; the core keeps the text until its next result.
+    fn owned_text(&self, store: &Store<HostData>, packed: i64) -> Result<String, EngineError> {
+        let packed = packed as u64;
+        let exception = packed >> 63 == 1;
+        let len = ((packed >> 32) & 0x7fff_ffff) as usize;
+        let ptr = (packed & 0xffff_ffff) as usize;
+        let data = self.memory.data(store);
+        let bytes = data
+            .get(ptr..ptr + len)
+            .ok_or_else(|| EngineError::Guest("result text out of bounds".into()))?;
+        let text = String::from_utf8_lossy(bytes).into_owned();
+        if exception {
+            Err(EngineError::Guest(text))
+        } else {
+            Ok(text)
+        }
+    }
+
     /// Calls `__usai[name](arg)` through the core's direct-call export
-    /// (ADR-0018): one buffer in guest memory holding `name\0arg`, one typed
-    /// call, the result read back as a string. No script is parsed or
-    /// compiled; this is the request hot path.
+    /// (ADR-0018): the argument staged in the guest-owned buffer as
+    /// `name\0arg`, one typed call, the result read straight from memory.
+    /// No script is parsed or compiled, nothing is allocated per call on
+    /// either side; this is the request hot path.
     async fn call(
         &mut self,
         store: &mut Store<HostData>,
@@ -753,11 +826,18 @@ impl Guest {
         buffer.extend_from_slice(name.as_bytes());
         buffer.push(0);
         buffer.extend_from_slice(arg.as_bytes());
-        let ptr = self.alloc(store, &buffer, false).await?;
-        let value = self
-            .call1::<(i32, i32, i32, i32), i32>(
-                store,
-                "qjs_usai_call",
+        let ptr = self.stage(store, &buffer)?;
+        let f = hot!(
+            self,
+            store,
+            enter,
+            "qjs_usai_enter",
+            (i32, i32, i32, i32),
+            i64
+        );
+        let packed = f
+            .call(
+                &mut *store,
                 (
                     ptr,
                     name.len() as i32,
@@ -765,12 +845,24 @@ impl Guest {
                     arg.len() as i32,
                 ),
             )
-            .await;
-        self.free(store, ptr).await?;
-        self.result_text(store, value?).await
+            .map_err(|e| EngineError::Guest(format!("{name}: {e:#}")))?;
+        self.owned_text(store, packed)
     }
 
-    /// A heap JSValue from `qjs_eval`/`qjs_usai_call`: the exception as an
+    /// Runs the job queue to quiescence inside the core and returns
+    /// `__usai.state()`: one call where the driver's loop used to make one
+    /// per job plus one for the state.
+    async fn settle(&mut self, store: &mut Store<HostData>) -> Result<GuestState, EngineError> {
+        let f = hot!(self, store, settle, "qjs_usai_settle", (), i64);
+        let packed = f
+            .call(&mut *store, ())
+            .map_err(|e| EngineError::Guest(format!("settle: {e:#}")))?;
+        let text = self.owned_text(store, packed)?;
+        serde_json::from_str::<GuestState>(&text)
+            .map_err(|e| EngineError::Guest(format!("guest state is not decodable: {e}")))
+    }
+
+    /// A heap JSValue from `qjs_eval`: the exception as an
     /// error, otherwise the value rendered as a string; freed either way.
     async fn result_text(
         &mut self,
@@ -816,26 +908,7 @@ impl Guest {
             .await;
         self.free(store, code_ptr).await?;
         self.free(store, name_ptr).await?;
-        let value = value?;
-        let is_exception = self
-            .call1::<i32, i32>(store, "qjs_is_exception", value)
-            .await?
-            != 0;
-        if is_exception {
-            self.call1::<i32, ()>(store, "qjs_free_value", value)
-                .await?;
-            let exception = self
-                .call1::<(), i32>(store, "qjs_get_exception", ())
-                .await?;
-            let text = self.string_of(store, exception).await?;
-            self.call1::<i32, ()>(store, "qjs_free_value", exception)
-                .await?;
-            return Err(EngineError::Guest(text));
-        }
-        let text = self.string_of(store, value).await?;
-        self.call1::<i32, ()>(store, "qjs_free_value", value)
-            .await?;
-        Ok(text)
+        self.result_text(store, value?).await
     }
 
     async fn run_jobs(&mut self, store: &mut Store<HostData>) -> Result<(), EngineError> {
@@ -862,16 +935,20 @@ impl Guest {
         status: u32,
         payload: &str,
     ) -> Result<i32, EngineError> {
-        let ptr = self.alloc(store, payload.as_bytes(), false).await?;
-        let result = self
-            .call1::<(i32, i32, i32, i32), i32>(
-                store,
-                "qjs_usai_op_complete",
-                (native as i32, status as i32, ptr, payload.len() as i32),
-            )
-            .await;
-        self.free(store, ptr).await?;
-        result
+        let ptr = self.stage(store, payload.as_bytes())?;
+        let f = hot!(
+            self,
+            store,
+            complete,
+            "qjs_usai_op_complete",
+            (i32, i32, i32, i32),
+            i32
+        );
+        f.call(
+            &mut *store,
+            (native as i32, status as i32, ptr, payload.len() as i32),
+        )
+        .map_err(|e| EngineError::Guest(format!("qjs_usai_op_complete: {e:#}")))
     }
 }
 
@@ -1042,6 +1119,7 @@ impl Engine for WasmEngine {
             guest,
             interrupt,
             phases,
+            settled: None,
         }))
     }
 
@@ -1090,6 +1168,9 @@ pub struct WasmWorld {
     guest: Guest,
     interrupt: Arc<AtomicBool>,
     phases: Vec<(&'static str, Duration)>,
+    /// The state `qjs_usai_settle` returned after the last guest activity;
+    /// valid until the next call into the guest, so `state()` costs nothing.
+    settled: Option<GuestState>,
 }
 
 impl WasmWorld {
@@ -1105,11 +1186,17 @@ impl WasmWorld {
 }
 
 impl WasmWorld {
-    /// Delivers completions queued by host imports during the last entry.
-    async fn drain_deferred(&mut self) -> Result<(), EngineError> {
+    /// Runs the job queue to quiescence and keeps the resulting state;
+    /// completions queued by host imports during the run are delivered and
+    /// the queue drained again until none appear.
+    async fn settle(&mut self, phase: &'static str) -> Result<(), EngineError> {
         loop {
+            let t = std::time::Instant::now();
+            let state = self.guest.settle(&mut self.store).await?;
+            self.account(phase, t);
             let deferred = std::mem::take(&mut self.store.data_mut().deferred);
             if deferred.is_empty() {
+                self.settled = Some(state);
                 return Ok(());
             }
             for (native, status, payload) in deferred {
@@ -1118,7 +1205,6 @@ impl WasmWorld {
                     .complete(&mut self.store, native, status, &payload)
                     .await?;
             }
-            self.guest.run_jobs(&mut self.store).await?;
         }
     }
 
@@ -1140,12 +1226,10 @@ impl WorldInstance for WasmWorld {
             super::world_entropy(),
             u8::from(super::profiling()),
         );
+        self.settled = None;
         self.guest.call(&mut self.store, "entry", &payload).await?;
         self.account("invoke.entry", t);
-        let t = std::time::Instant::now();
-        self.guest.run_jobs(&mut self.store).await?;
-        self.account("invoke.jobs", t);
-        self.drain_deferred().await
+        self.settle("invoke.settle").await
     }
 
     async fn deliver(&mut self, op: u64, ok: bool, payload: &str) -> Result<bool, EngineError> {
@@ -1153,21 +1237,20 @@ impl WorldInstance for WasmWorld {
             return Ok(false);
         };
         self.forget(native);
+        self.settled = None;
         let t = std::time::Instant::now();
         let status = self
             .guest
             .complete(&mut self.store, native, if ok { 0 } else { 1 }, payload)
             .await?;
         self.account("deliver.complete", t);
-        let t = std::time::Instant::now();
-        self.guest.run_jobs(&mut self.store).await?;
-        self.account("deliver.jobs", t);
-        self.drain_deferred().await?;
+        self.settle("deliver.settle").await?;
         Ok(status == 0)
     }
 
     async fn cancel(&mut self, reason: &str) -> Result<(), EngineError> {
         self.store.data_mut().accepting = false;
+        self.settled = None;
         self.guest.call(&mut self.store, "cancel", reason).await?;
         let outstanding: Vec<u32> = self.store.data().ledger_by_native.keys().copied().collect();
         for native in outstanding {
@@ -1177,11 +1260,11 @@ impl WorldInstance for WasmWorld {
                 .complete(&mut self.store, native, 2, reason)
                 .await?;
         }
-        self.guest.run_jobs(&mut self.store).await?;
-        self.drain_deferred().await
+        self.settle("cancel.settle").await
     }
 
     async fn stop(&mut self, reason: &str) -> Result<(), EngineError> {
+        self.settled = None;
         self.guest.call(&mut self.store, "stop", reason).await?;
         let timers: Vec<(u32, u64)> = self
             .store
@@ -1202,16 +1285,18 @@ impl WorldInstance for WasmWorld {
             self.forget(native);
             let _ = self.guest.complete(&mut self.store, native, 0, "").await?;
         }
-        self.guest.run_jobs(&mut self.store).await?;
-        self.drain_deferred().await
+        self.settle("stop.settle").await
     }
 
     async fn state(&mut self) -> Result<GuestState, EngineError> {
-        let t = std::time::Instant::now();
-        let text = self.guest.call(&mut self.store, "state", "").await?;
-        self.account("state", t);
-        serde_json::from_str::<GuestState>(&text)
-            .map_err(|e| EngineError::Guest(format!("guest state is not decodable: {e}")))
+        // Nothing changes in the guest without a host call, so the state the
+        // last settle returned is the state; the guest is asked only when
+        // no activity has produced one yet.
+        if let Some(state) = &self.settled {
+            return Ok(state.clone());
+        }
+        self.settle("state").await?;
+        Ok(self.settled.clone().expect("settle keeps the state"))
     }
 
     fn interrupter(&self) -> Arc<AtomicBool> {

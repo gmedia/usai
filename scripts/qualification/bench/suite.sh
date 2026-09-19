@@ -41,6 +41,16 @@ reset_db() {
   ') && "$USAI" --root "$here/app" db migrate >/dev/null
 }
 
+# Writes leave state behind (paid orders → 409s, inserted users): every
+# server measures class D and E from the same seeded state.
+reset_writes() {
+  (cd "$here" && node -e '
+    const { Client } = require("pg");
+    const c = new Client({ connectionString: process.env.DATABASE_URL });
+    c.connect().then(() => c.query("truncate payments; update orders set paid = false where paid; delete from users where id > 10000;")).then(() => c.end()).catch((e) => { console.error(e.message); process.exit(1); });
+  ')
+}
+
 prepare() {
   log "artifact"; "$USAI" --root "$here/app" build --no-typecheck >/dev/null || return 1
   log "rust control"; (cd "$here/baselines/rust-axum" && cargo build -q --release) || return 1
@@ -110,6 +120,7 @@ QUOTE='{"customer":"Ayu","email":"ayu@example.com","currency":"IDR","country":"I
 cell() {
   local name="$1" cls="$2" c="$3" port; port=$(port_of "$name")
   local base="http://127.0.0.1:$port" cpu0 cpu1 json
+  case "$cls" in D|E) reset_writes;; esac
   cpu0=$(cpu_seconds "$name")
   if [ "$cls" = D ] || [ "$c" -le 4 ] || ! command -v oha >/dev/null; then
     json=$(cd "$here" && pin_client node "$here/load.mjs" "$base" "$cls" "$c" "$DUR")

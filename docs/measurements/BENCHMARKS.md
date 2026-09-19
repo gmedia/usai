@@ -37,7 +37,10 @@ in every comparator (`baselines/`). The work is the same everywhere:
 
 `conformance.mjs` runs the 200/201, 400, 401, 404 and 409 cases of every
 class against a server and the suite refuses to measure one that deviates
-(status or parsed JSON; key order ignored).
+(status or parsed JSON; key order ignored). Before every D and E cell the
+suite resets what writes leave behind (payments, `paid` flags, inserted
+users), so every server pays the same orders from the same state and a 409
+count is a property of the random ids, not of the run order.
 
 ## Comparators
 

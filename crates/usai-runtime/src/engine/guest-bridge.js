@@ -25,6 +25,8 @@
   let entropySeed = null;
   let entropyCounter = 0;
   let profiling = false;
+  let entryMs = 0;
+  const clock = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
 
   function bridgeError(code, message) {
     const error = new Error(message);
@@ -212,7 +214,15 @@
       } catch (error) {
         promise = Promise.reject(error);
       }
-      const ledger = () => (profiling && sdk && typeof sdk.takeProfile === "function" ? sdk.takeProfile() : []);
+      // The bridge's own marks join the SDK's ledger: `bridge.entry` is the
+      // synchronous part of the call (seed, dispatch until the first await);
+      // `bridge.state` the outcome's serialisation, added when it is read.
+      const ledger = () => {
+        if (!profiling) return [];
+        const out = sdk && typeof sdk.takeProfile === "function" ? sdk.takeProfile() : [];
+        out.push(["bridge.entry", entryMs]);
+        return out;
+      };
       promise.then(
         (value) => { outcome = { ok: true, value: value === undefined ? null : value, profile: ledger() }; },
         (error) => { outcome = { ok: false, error: describeError(error), profile: ledger() }; },
@@ -229,12 +239,22 @@
       const second = payload.indexOf("\u001f", first + 1);
       const third = payload.indexOf("\u001f", second + 1);
       bridge.seed(payload.slice(0, first), payload.slice(first + 1, second) === "1");
+      const t = profiling ? clock() : 0;
       bridge.invoke(Number(payload.slice(second + 1, third)), payload.slice(third + 1));
+      if (profiling) entryMs = clock() - t;
       return "";
     },
     // `state`: the outcome (null until the handler settles) and the
     // pending-work count in one read, for the driver's loop.
     state() {
+      if (outcome !== null && profiling && Array.isArray(outcome.profile)) {
+        const t = clock();
+        const text = JSON.stringify({ outcome, pending: { count: pending.size, kinds: Array.from(pending.values(), (p) => p.kind) } });
+        // Reported on the next read; the settled state is read once, so
+        // record it on the object the host already parsed instead.
+        outcome.profile.push(["bridge.state", clock() - t]);
+        return JSON.stringify({ outcome, pending: { count: pending.size, kinds: Array.from(pending.values(), (p) => p.kind) } });
+      }
       return JSON.stringify({ outcome, pending: { count: pending.size, kinds: Array.from(pending.values(), (p) => p.kind) } });
     },
   };

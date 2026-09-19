@@ -178,10 +178,14 @@ function encodeHttp(workload: Workload, result: unknown): HttpOutput {
 }
 
 async function runHttp(workload: Workload, input: HttpInput): Promise<HttpOutput> {
+  let t = ledger !== null ? now() : 0;
   const base = makeBase(workload.resources, input.env);
+  mark("context", t);
   const { request } = input;
   const raw = workload.trigger["raw"] === true;
+  t = ledger !== null ? now() : 0;
   const auth = await authenticate(workload, base, request);
+  if (workload.auth) mark("auth", t);
   if (raw) {
     const bytes = request.body?.base64 !== undefined ? bytesFromBase64(request.body.base64) : new Uint8Array(0);
     const text = () => new TextDecoder().decode(bytes);
@@ -218,7 +222,7 @@ async function runHttp(workload: Workload, input: HttpInput): Promise<HttpOutput
       ? parseValidated("body", workload.contracts.body, request.body.json, request.validated)
       : parse("body", workload.contracts.body, decodeBody(request.body)),
   };
-  let t = ledger !== null ? now() : 0;
+  t = ledger !== null ? now() : 0;
   const result = await (workload.handler as (ctx: unknown) => unknown)(ctx);
   mark("handler", t);
   t = ledger !== null ? now() : 0;
@@ -359,7 +363,11 @@ export async function invoke(app: AppDeclaration, index: number, inputJson: stri
   mark("dispatch", t0);
   // ctx.env carries typed values when the application declared them;
   // the host already validated presence and shape at activation.
-  if (app.env) input.env = resolveEnv(app.env, input.env as Record<string, string | undefined>) as unknown as Record<string, string | number | boolean | undefined>;
+  if (app.env) {
+    const t = ledger !== null ? now() : 0;
+    input.env = resolveEnv(app.env, input.env as Record<string, string | undefined>) as unknown as Record<string, string | number | boolean | undefined>;
+    mark("env", t);
+  }
   const { workload } = entry;
   try {
     switch (input.kind) {

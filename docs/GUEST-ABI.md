@@ -43,10 +43,15 @@ Every operation payload crossing the boundary is a bounded, copied string. No ha
 
 Since ADR-0018 the host enters the guest by *calling* bridge functions
 with one string argument and reading one string back — never by evaluating
-a script per request (through 0.0.5 it evaluated `__usai.seed(…);__usai.invoke(…)`). On the Wasm core the export is
-`qjs_usai_call(name, name_len, arg, arg_len) -> JSValue*` (a heap value the
-host reads with `qjs_get_string` and frees); on the native reference engine
-it is a direct function call. The functions:
+a script per request (through 0.0.5 it evaluated
+`__usai.seed(…);__usai.invoke(…)`). On the Wasm core the argument is staged
+in a core-owned buffer (`qjs_usai_inbuf`), the call is
+`qjs_usai_enter(name, name_len, arg, arg_len) -> (len << 32) | ptr` and the
+result text is read straight from linear memory (valid until the next
+result; bit 63 marks an exception's text); `qjs_usai_settle()` runs the job
+queue to quiescence and returns `__usai.state()` in the same call. On the
+native reference engine these are direct function calls plus the runtime's
+own job loop. The functions:
 
 ```js
 __usai.entry("<seed hex>␟<0|1 profiling>␟<index>␟<inputJson>")  // seeds the world and starts workload `index`; the outcome is captured, never thrown
@@ -74,8 +79,9 @@ is the runtime's own business and needs no artifact change.
 
 ## Terminal state and detached work
 
-The world's work is terminal when `state().outcome` is non-null — the
-driver reads `state()` once per iteration and keeps the settled one. For
+The world's work is terminal when `state().outcome` is non-null — every
+call into the guest ends with a settle whose state the world keeps, so the
+driver's read costs nothing until the next call. For
 finite workloads the same read's `pending.count` decides: anything still
 pending is **detached work** (contract C3): it is reported as a lifecycle
 violation, cancelled, and the world ends anyway.

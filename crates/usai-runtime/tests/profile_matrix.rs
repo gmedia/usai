@@ -389,7 +389,7 @@ async fn invoice_row(client: &reqwest::Client, label: &str, url: &str, n: usize)
     for (k, v) in &guest {
         print!(" {}={v:.3}", k.trim_start_matches("guest."));
     }
-    println!("   = {guest_sum:.3}  (inside invoke.jobs/deliver.jobs)");
+    println!("   = {guest_sum:.3}  (inside invoke.entry/settle and deliver.settle)");
     println!(
         "  client+network (in-process reqwest) = {:.3}",
         total - host_sum - execute

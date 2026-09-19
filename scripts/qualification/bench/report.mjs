@@ -25,6 +25,6 @@ for (const [cls, title] of Object.entries(classes)) {
     const g = (k) => i[k] ?? 0;
     const host = ["route", "decode", "validate", "admit", "encode"].reduce((s, k) => s + g(`http.${k}`), 0);
     const guest = Object.entries(i).filter(([k]) => k.startsWith("guest.")).map(([k, v]) => `${k.slice(6)} ${v.toFixed(3)}`).join(", ");
-    console.log(`Usai invoice at c=1 (ms): host HTTP ${host.toFixed(3)} · execute ${g("http.execute").toFixed(3)} = create ${g("runtime.create").toFixed(3)} + run ${g("driver.run").toFixed(3)} + release ${(g("http.execute") - g("runtime.create") - g("driver.run") - g("driver.retire")).toFixed(3)} · engine: entry ${(g("engine.invoke.entry") + g("engine.invoke.eval")).toFixed(3)}, invoke.jobs ${g("engine.invoke.jobs").toFixed(3)}, state ${(g("engine.state") + g("engine.outcome.eval") + g("engine.pending.eval")).toFixed(3)} · guest: ${guest}\n`);
+    console.log(`Usai invoice at c=1 (ms): host HTTP ${host.toFixed(3)} · execute ${g("http.execute").toFixed(3)} = create ${g("runtime.create").toFixed(3)} + run ${g("driver.run").toFixed(3)} + release ${(g("http.execute") - g("runtime.create") - g("driver.run") - g("driver.retire")).toFixed(3)} · engine: entry ${(g("engine.invoke.entry") + g("engine.invoke.eval")).toFixed(3)}, settle ${(g("engine.invoke.settle") + g("engine.invoke.jobs") + g("engine.state") + g("engine.outcome.eval") + g("engine.pending.eval")).toFixed(3)}, deliver ${(g("engine.deliver.complete") + g("engine.deliver.settle") + g("engine.deliver.jobs")).toFixed(3)} · guest: ${guest}\n`);
   }
 }

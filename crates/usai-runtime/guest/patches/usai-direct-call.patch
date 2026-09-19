@@ -2,7 +2,7 @@ diff --git a/c/interface.c b/c/interface.c
 index 04a8691..f18191e 100644
 --- a/c/interface.c
 +++ b/c/interface.c
-@@ -1515,6 +1515,40 @@ int32_t qjs_usai_op_complete(uint32_t op_id, uint32_t status,
+@@ -1515,6 +1515,108 @@ int32_t qjs_usai_op_complete(uint32_t op_id, uint32_t status,
      return call_failed;
  }
  
@@ -10,12 +10,33 @@ index 04a8691..f18191e 100644
 + *
 + * The runtime enters the guest through the bridge's functions instead of
 + * evaluating a snippet per request: `__usai[name](arg)` with one string
-+ * argument, the result returned like `qjs_eval`'s (a heap JSValue the host
-+ * inspects with `qjs_is_exception` / `qjs_get_string` and frees). No
-+ * parsing, no compilation, no temporary script object on the hot path. */
++ * argument. The argument is written by the host into a buffer the core owns
++ * (`qjs_usai_inbuf`); the result text stays in a buffer the core owns until
++ * the next call and is read by the host straight from memory, encoded as
++ * `(len << 32) | ptr` with bit 63 set when it describes an exception. No
++ * parsing, no compilation, no temporary script object, no malloc/free
++ * round trips on the hot path. `qjs_usai_settle` runs the job queue to
++ * quiescence and returns `__usai.state()` in the same call. */
 +
-+__attribute__((export_name("qjs_usai_call")))
-+JSValue *qjs_usai_call(const char *name, size_t name_len, const char *arg, size_t arg_len)
++static char *usai_inbuf = NULL;
++static uint32_t usai_inbuf_cap = 0;
++static const char *usai_result = NULL;
++static const char usai_empty[1] = "";
++
++__attribute__((export_name("qjs_usai_inbuf")))
++uint32_t qjs_usai_inbuf(uint32_t size)
++{
++    if (size > usai_inbuf_cap) {
++        uint32_t cap = size < 4096 ? 4096 : size;
++        char *next = realloc(usai_inbuf, cap);
++        if (!next) return 0;
++        usai_inbuf = next;
++        usai_inbuf_cap = cap;
++    }
++    return (uint32_t)(uintptr_t)usai_inbuf;
++}
++
++static JSValue usai_call_bridge(const char *name, size_t name_len, const char *arg, size_t arg_len)
 +{
 +    JSValue global = JS_GetGlobalObject(ctx);
 +    JSValue bridge = JS_GetPropertyStr(ctx, global, "__usai");
@@ -37,15 +58,56 @@ index 04a8691..f18191e 100644
 +    JS_FreeValue(ctx, fn);
 +    JS_FreeValue(ctx, bridge);
 +    JS_FreeValue(ctx, global);
-+    return jsvalue_to_heap(result);
++    return result;
++}
++
++/* The value (or the pending exception) as text the core keeps until the
++ * next result; WTF-8 like qjs_get_string_len so lone surrogates survive. */
++static uint64_t usai_text_result(JSValue value)
++{
++    if (usai_result && usai_result != usai_empty) JS_FreeCString(ctx, usai_result);
++    usai_result = NULL;
++    uint64_t flag = 0;
++    if (JS_IsException(value)) {
++        flag = 1ULL << 63;
++        value = JS_GetException(ctx);
++    }
++    size_t len = 0;
++    const char *text = JS_ToCStringLen2(ctx, &len, value, false);
++    JS_FreeValue(ctx, value);
++    if (!text) {
++        JSValue dropped = JS_GetException(ctx);
++        JS_FreeValue(ctx, dropped);
++        text = usai_empty;
++        len = 0;
++    }
++    usai_result = text;
++    return flag | ((uint64_t)(uint32_t)len << 32) | (uint32_t)(uintptr_t)text;
++}
++
++__attribute__((export_name("qjs_usai_enter")))
++uint64_t qjs_usai_enter(const char *name, size_t name_len, const char *arg, size_t arg_len)
++{
++    return usai_text_result(usai_call_bridge(name, name_len, arg, arg_len));
++}
++
++__attribute__((export_name("qjs_usai_settle")))
++uint64_t qjs_usai_settle(void)
++{
++    JSContext *pctx;
++    for (int i = 0; i < 1000000; i++) {
++        int r = JS_ExecutePendingJob(rt, &pctx);
++        if (r == 0) break;
++        if (r < 0) {
++            /* A job that throws reports through the promise it belongs to;
++             * anything left on the context is dropped, as the host did. */
++            JSValue dropped = JS_GetException(pctx);
++            JS_FreeValue(pctx, dropped);
++        }
++    }
++    return usai_text_result(usai_call_bridge("state", 5, "", 0));
 +}
 +
  __attribute__((export_name("qjs_promise_state")))
  int qjs_promise_state(JSValue *promise) {
      return (int)JS_PromiseState(ctx, *promise);
-diff --git a/quickjs-ng b/quickjs-ng
---- a/quickjs-ng
-+++ b/quickjs-ng
-@@ -1 +1 @@
--Subproject commit 65641a0c1e85cc266d7613d6673a22ec834bb941
-+Subproject commit 65641a0c1e85cc266d7613d6673a22ec834bb941-dirty
