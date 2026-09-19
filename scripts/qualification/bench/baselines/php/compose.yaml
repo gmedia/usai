@@ -1,5 +1,8 @@
 # PHP-FPM + nginx comparator. DATABASE_URL must be reachable from the
-# containers (the suite passes host.docker.internal or the docker gateway).
+# containers: the suite rewrites 127.0.0.1 to host.docker.internal (the
+# docker gateway), so a PostgreSQL published only on 127.0.0.1 is NOT
+# reachable — publish it on the gateway too (`-p 172.17.0.1:54330:5432`)
+# or on all interfaces of a throwaway host.
 services:
   php:
     build: .

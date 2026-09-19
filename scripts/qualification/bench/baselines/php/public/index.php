@@ -4,6 +4,13 @@
 // nginx + php-fpm from compose.yaml.
 declare(strict_types=1);
 header('Content-Type: application/json');
+// A failure is a 500 with the shared envelope, never a 200 with an HTML
+// error page (display_errors is off in the image; this catches the rest).
+set_exception_handler(function (Throwable $e): void {
+  error_log($e->getMessage());
+  http_response_code(500);
+  echo json_encode(['error' => ['code' => 'internal', 'message' => 'internal error']]);
+});
 
 function reply(int $status, array $body): never { http_response_code($status); echo json_encode($body); exit; }
 function err(int $status, string $code, string $message): never { reply($status, ['error' => ['code' => $code, 'message' => $message]]); }

@@ -76,7 +76,7 @@ start_server() {
   local logf="$OUT/$name.server.log"
   if curl -s -m 1 -o /dev/null "http://127.0.0.1:$port/health"; then log "port $port is already in use (a stale $name?); refusing to measure someone else's process"; return 1; fi
   case "$name" in
-    usai) pin_server env USAI_MAX_WORLDS=256 ${USAI_PROFILE:+USAI_PROFILE=$USAI_PROFILE} "$USAI" --root "$here/app" run --artifact "$here/app/.usai/build" --port "$port" > "$logf" 2>&1 & SERVER_PID=$!;;
+    usai) pin_server env USAI_MAX_WORLDS=256 ${USAI_PROFILE:+USAI_PROFILE=$USAI_PROFILE} "$USAI" --root "$here/app" run --artifact "$here/app/.usai/build" --port "$port" --status > "$logf" 2>&1 & SERVER_PID=$!;;
     node) pin_server env PORT=$port node "$here/baselines/node-fastify/server.mjs" > "$logf" 2>&1 & SERVER_PID=$!;;
     bun)  pin_server env PORT=$port bun run "$here/baselines/bun-hono/server.ts" > "$logf" 2>&1 & SERVER_PID=$!;;
     deno) pin_server env PORT=$port deno run -A --quiet "$here/baselines/deno-hono/server.ts" > "$logf" 2>&1 & SERVER_PID=$!;;
