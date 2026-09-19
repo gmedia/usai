@@ -19,7 +19,14 @@ const jsonl = (p) =>
         .filter(Boolean)
         .map((l) => JSON.parse(l))
     : [];
-const json = (p) => (existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : null);
+const json = (p) => {
+  if (!existsSync(p)) return null;
+  try {
+    return JSON.parse(readFileSync(p, "utf8"));
+  } catch {
+    return null; // a load still running, or a client that failed to start
+  }
+};
 const mib = (kib) => (kib / 1024).toFixed(1);
 const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 const max = (xs) => (xs.length ? Math.max(...xs) : 0);
@@ -36,6 +43,10 @@ function window(samples, from, to) {
     last.procs.reduce((a, p) => a + p.cpuTicks, 0) -
     first.procs.reduce((a, p) => a + p.cpuTicks, 0);
   const cpuPct = seconds > 0 ? (ticks / first.hz / seconds) * 100 : 0;
+  const sysTicks =
+    last.procs.reduce((a, p) => a + (p.sysTicks ?? 0), 0) -
+    first.procs.reduce((a, p) => a + (p.sysTicks ?? 0), 0);
+  const sysPct = seconds > 0 ? (sysTicks / first.hz / seconds) * 100 : 0;
   const ctxtPerS = seconds > 0 ? (last.ctxt - first.ctxt) / seconds : 0;
   const minflt =
     last.procs.reduce((a, p) => a + p.minflt, 0) - first.procs.reduce((a, p) => a + p.minflt, 0);
@@ -49,6 +60,7 @@ function window(samples, from, to) {
     fds: mean(sumOver("fds")),
     threads: mean(sumOver("threads")),
     cpuPct,
+    sysPct,
     ctxtPerS,
     minfltPerS: seconds > 0 ? minflt / seconds : 0,
     memAvailMinMib: Math.min(...inside.map((s) => s.memAvailableKib)) / 1024,
@@ -87,7 +99,7 @@ for (const cell of cells.sort()) {
     continue;
   }
   console.log(
-    "| phase | s | procs | RSS Σ mean / max MiB | PSS Σ mean / max MiB | CPU % | ctxt/s (host) | minflt/s | fds | threads | MemAvailable min MiB |",
+    "| phase | s | procs | RSS Σ mean / max MiB | PSS Σ mean / max MiB | CPU % (sys) | ctxt/s (host) | minflt/s | fds | threads | MemAvailable min MiB |",
   );
   console.log("|---|---|---|---|---|---|---|---|---|---|---|");
   const rows = phases.length
@@ -97,7 +109,7 @@ for (const cell of cells.sort()) {
     const w = window(samples, ph.from, ph.to);
     if (!w) continue;
     console.log(
-      `| ${ph.phase} ${ph.args ?? ""} | ${(ph.to - ph.from).toFixed(0)} | ${w.procs} | ${mib(w.rssMeanKib)} / ${mib(w.rssMaxKib)} | ${mib(w.pssMeanKib)} / ${mib(w.pssMaxKib)} | ${w.cpuPct.toFixed(2)} | ${w.ctxtPerS.toFixed(0)} | ${w.minfltPerS.toFixed(0)} | ${w.fds.toFixed(0)} | ${w.threads.toFixed(0)} | ${w.memAvailMinMib.toFixed(0)} |`,
+      `| ${ph.phase} ${ph.args ?? ""} | ${(ph.to - ph.from).toFixed(0)} | ${w.procs} | ${mib(w.rssMeanKib)} / ${mib(w.rssMaxKib)} | ${mib(w.pssMeanKib)} / ${mib(w.pssMaxKib)} | ${w.cpuPct.toFixed(2)} (${w.sysPct.toFixed(2)}) | ${w.ctxtPerS.toFixed(0)} | ${w.minfltPerS.toFixed(0)} | ${w.fds.toFixed(0)} | ${w.threads.toFixed(0)} | ${w.memAvailMinMib.toFixed(0)} |`,
     );
   }
   // Per-process marginal cost in a density cell: the fleet's idle PSS / n.
