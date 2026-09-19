@@ -21,22 +21,22 @@ only; nothing here survives the response.
 
 ## Properties
 
-| Property | Modifier | Type | Description | Inherited from |
-| ------ | ------ | ------ | ------ | ------ |
-| <a id="method"></a> `method` | `readonly` | [`Method`](../type-aliases/Method.md) | - | - |
-| <a id="path"></a> `path` | `readonly` | `string` | - | - |
-| <a id="url"></a> `url` | `readonly` | `string` | - | - |
-| <a id="params"></a> `params` | `readonly` | `OutputOf`\<`O`\[`"params"`\], `Record`\<`string`, `string`\>\> | - | - |
-| <a id="query"></a> `query` | `readonly` | `OutputOf`\<`O`\[`"query"`\], `Record`\<`string`, `string` \| `string`[]\>\> | - | - |
-| <a id="headers"></a> `headers` | `readonly` | `OutputOf`\<`O`\[`"headers"`\], `Record`\<`string`, `string`\>\> | - | - |
-| <a id="body"></a> `body` | `readonly` | `OutputOf`\<`O`\[`"body"`\], `unknown`\> | - | - |
-| <a id="auth"></a> `auth` | `readonly` | `O`\[`"auth"`\] *extends* [`AuthDeclaration`](AuthDeclaration.md)\<`P`\> ? `P` : `undefined` | - | - |
-| <a id="resources"></a> `resources` | `readonly` | `Record`\<`string`, `unknown`\> | The declared resources by name, as their in-world handles ([PostgresHandle](PostgresHandle.md), [CacheLocalHandle](CacheLocalHandle.md), [HttpClientHandle](HttpClientHandle.md)). Reading an undeclared name throws `resource_not_declared` with the fix. | [`BaseContext`](BaseContext.md).[`resources`](BaseContext.md#resources) |
-| <a id="tasks"></a> `tasks` | `readonly` | [`TaskHandle`](TaskHandle.md) | Start tasks: owned (`invoke`) or transferred (`dispatch`). | [`BaseContext`](BaseContext.md).[`tasks`](BaseContext.md#tasks) |
-| <a id="queue"></a> `queue` | `readonly` | [`QueueHandle`](QueueHandle.md) | Publish to a queue topic; durable once the insert commits. | [`BaseContext`](BaseContext.md).[`queue`](BaseContext.md#queue) |
-| <a id="signal"></a> `signal` | `readonly` | [`UsaiAbortSignal`](UsaiAbortSignal.md) | Aborts when this world is cancelled. | [`BaseContext`](BaseContext.md).[`signal`](BaseContext.md#signal) |
-| <a id="env"></a> `env` | `readonly` | `Record`\<`string`, `string` \| `number` \| `boolean` \| `undefined`\> | The declared environment, typed: `env.int()` gives a number, `env.bool()` a boolean, `env.optional(...)` may be undefined. Narrow per key, or type it once: `const e = ctx.env as EnvValues<typeof spec>`. | [`BaseContext`](BaseContext.md).[`env`](BaseContext.md#env) |
-| <a id="log"></a> `log` | `readonly` | `Pick`\<[`ConsoleLike`](ConsoleLike.md), `"debug"` \| `"info"` \| `"warn"` \| `"error"`\> | Structured logging; lines carry the workload and world ids and reach the runtime's log (`target: "app"`). `console.*` is the same. | [`BaseContext`](BaseContext.md).[`log`](BaseContext.md#log) |
+| Property | Modifier | Type | Description | Overrides | Inherited from |
+| ------ | ------ | ------ | ------ | ------ | ------ |
+| <a id="method"></a> `method` | `readonly` | [`Method`](../type-aliases/Method.md) | - | - | - |
+| <a id="path"></a> `path` | `readonly` | `string` | The matched path, as requested. | - | - |
+| <a id="url"></a> `url` | `readonly` | `string` | Path plus query string. | - | - |
+| <a id="params"></a> `params` | `readonly` | `OutputOf`\<`O`\[`"params"`\], `Record`\<`string`, `string`\>\> | Path parameters, validated against `params` (strings when undeclared). | - | - |
+| <a id="query"></a> `query` | `readonly` | `OutputOf`\<`O`\[`"query"`\], `Record`\<`string`, `string` \| `string`[]\>\> | Query, validated against `query` (strings or arrays when undeclared). | - | - |
+| <a id="headers"></a> `headers` | `readonly` | `OutputOf`\<`O`\[`"headers"`\], `Record`\<`string`, `string`\>\> | Headers (lower-cased names), validated against `headers`. | - | - |
+| <a id="body"></a> `body` | `readonly` | `OutputOf`\<`O`\[`"body"`\], `unknown`\> | JSON body, validated against `body` (`unknown` when undeclared). | - | - |
+| <a id="auth"></a> `auth` | `readonly` | `O`\[`"auth"`\] *extends* [`AuthDeclaration`](AuthDeclaration.md)\<`P`\> ? `P` : `undefined` | The principal the `auth` declaration resolved; `undefined` without one. | - | - |
+| <a id="resources"></a> `resources` | `readonly` | [`ResourcesOf`](../type-aliases/ResourcesOf.md)\<`O`\[`"resources"`\]\> | The declared resources, typed by name from `resources: [...]`. | [`BaseContext`](BaseContext.md).[`resources`](BaseContext.md#resources) | - |
+| <a id="tasks"></a> `tasks` | `readonly` | [`TaskHandle`](TaskHandle.md) | Start tasks: owned (`invoke`) or transferred (`dispatch`). | - | [`BaseContext`](BaseContext.md).[`tasks`](BaseContext.md#tasks) |
+| <a id="queue"></a> `queue` | `readonly` | [`QueueHandle`](QueueHandle.md) | Publish to a queue topic; durable once the insert commits. | - | [`BaseContext`](BaseContext.md).[`queue`](BaseContext.md#queue) |
+| <a id="signal"></a> `signal` | `readonly` | [`UsaiAbortSignal`](UsaiAbortSignal.md) | Aborts when this world is cancelled. | - | [`BaseContext`](BaseContext.md).[`signal`](BaseContext.md#signal) |
+| <a id="env"></a> `env` | `readonly` | `Record`\<`string`, `string` \| `number` \| `boolean` \| `undefined`\> | The declared environment, parsed: `env.int()` gives a number, `env.bool()` a boolean, `env.optional(...)` may be undefined. The static type is the union of those; narrow per key, or type it once with `const e = ctx.env as EnvValues<typeof spec>` (the context does not carry the declaration's type). | - | [`BaseContext`](BaseContext.md).[`env`](BaseContext.md#env) |
+| <a id="log"></a> `log` | `readonly` | `Pick`\<[`ConsoleLike`](ConsoleLike.md), `"debug"` \| `"info"` \| `"warn"` \| `"error"`\> | Structured logging; lines carry the workload and world ids and reach the runtime's log (`target: "app"`). `console.*` is the same. | - | [`BaseContext`](BaseContext.md).[`log`](BaseContext.md#log) |
 
 ## Methods
 

@@ -14,6 +14,7 @@
   "disableSources": true,
   "githubPages": false,
   "hideGenerator": true,
+  "includeVersion": true,
   "cleanOutputDir": true,
   "treatWarningsAsErrors": false,
   "outputFileStrategy": "members",

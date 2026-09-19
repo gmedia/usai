@@ -1,9 +1,9 @@
 [@sakaladev/usai](../../README.md) / [index](../README.md) / RawHandler
 
-# Type Alias: RawHandler
+# Type Alias: RawHandler\<R *extends* [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)[] = [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)[]\>
 
 ```ts
-type RawHandler = (ctx: RawContext) => 
+type RawHandler<R extends ResourceDeclaration[] = ResourceDeclaration[]> = (ctx: RawContext<R>) => 
   | RawResponse
   | HttpResponse
   | Promise<
@@ -13,11 +13,17 @@ type RawHandler = (ctx: RawContext) =>
 
 The handler of `http.raw`.
 
+## Type Parameters
+
+| Type Parameter | Default type |
+| ------ | ------ |
+| `R` *extends* [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)[] | [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)[] |
+
 ## Parameters
 
 | Parameter | Type |
 | ------ | ------ |
-| `ctx` | [`RawContext`](../interfaces/RawContext.md) |
+| `ctx` | [`RawContext`](../interfaces/RawContext.md)\<`R`\> |
 
 ## Returns
 

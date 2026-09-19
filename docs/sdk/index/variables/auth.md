@@ -35,8 +35,10 @@ before any world exists.
 ```ts
 export const session = auth.bearer<Principal>({
   name: "session",
+  description: "The token from POST /login",
   resolve: async (ctx, token) => {
-    const row = await ctx.resources.db.one<Principal>("select … from sessions where token = $1", [token]);
+    // The resolver's ctx carries the workload's resources, untyped: cast to the handle.
+    const row = await (ctx.resources.db as PostgresHandle).one<Principal>("select … from sessions where token = $1", [token]);
     if (!row) throw errors.unauthorized("unknown or expired token");
     return row;
   },

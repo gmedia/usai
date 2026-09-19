@@ -18,7 +18,7 @@ export interface CacheLocalOptions {
  *
  * @category Resources
  */
-export interface CacheLocalDeclaration extends ResourceDeclaration {
+export interface CacheLocalDeclaration<Name extends string = string> extends ResourceDeclaration<Name, CacheLocalHandle> {
   readonly kind: "cache.local";
 }
 
@@ -40,7 +40,7 @@ export const cache = {
    * revisions too), never persisted, gone on restart, not shared between
    * replicas. Each call is one leased operation. The in-world handle is
    * {@link CacheLocalHandle}. */
-  local(name: string, options: CacheLocalOptions = {}): CacheLocalDeclaration {
+  local<const N extends string>(name: N, options: CacheLocalOptions = {}): CacheLocalDeclaration<N> {
     return {
       __usai: "resource",
       name,
@@ -98,7 +98,7 @@ export interface PostgresOptions {
  *
  * @category Resources
  */
-export interface PostgresDeclaration extends ResourceDeclaration {
+export interface PostgresDeclaration<Name extends string = string> extends ResourceDeclaration<Name, PostgresHandle> {
   readonly kind: "postgres";
 }
 
@@ -116,11 +116,13 @@ export interface PostgresDeclaration extends ResourceDeclaration {
  * applied by `usai db migrate` (never at startup). The same resource can
  * be declared by several modules with the same configuration.
  *
- * @param name Unique within the application; `ctx.resources[name]`.
+ * @param name Unique within the application; the handle is
+ * `ctx.resources[name]`, typed when the workload lists this declaration
+ * under `resources`.
  *
  * @example
  * ```ts
- * export const db = postgres("main");                       // reads DATABASE_URL
+ * export const db = postgres("db");                          // reads DATABASE_URL; `ctx.resources.db`
  * export const getUser = http.get("/users/:id", { params: Id, resources: [db] }, async (ctx) => {
  *   const user = await ctx.resources.db.one<User>("select * from users where id = $1", [ctx.params.id]);
  *   if (!user) throw errors.notFound();
@@ -130,7 +132,7 @@ export interface PostgresDeclaration extends ResourceDeclaration {
  *
  * @category Resources
  */
-export function postgres(name: string, options: PostgresOptions = {}): PostgresDeclaration {
+export function postgres<const N extends string>(name: N, options: PostgresOptions = {}): PostgresDeclaration<N> {
   const urlEnv = options.urlEnv ?? "DATABASE_URL";
   const config: Record<string, unknown> = { urlEnv };
   const pool: Record<string, unknown> = {};
@@ -217,7 +219,7 @@ export interface HttpClientOptions {
  *
  * @category Resources
  */
-export interface HttpClientDeclaration extends ResourceDeclaration {
+export interface HttpClientDeclaration<Name extends string = string> extends ResourceDeclaration<Name, HttpClientHandle> {
   readonly kind: "http.client";
 }
 
@@ -243,7 +245,7 @@ export interface HttpClientDeclaration extends ResourceDeclaration {
  *
  * @category Resources
  */
-export function httpClient(name: string, options: HttpClientOptions = {}): HttpClientDeclaration {
+export function httpClient<const N extends string>(name: N, options: HttpClientOptions = {}): HttpClientDeclaration<N> {
   const config: Record<string, unknown> = {};
   if (options.baseUrl !== undefined) config["baseUrl"] = options.baseUrl;
   if (options.baseUrlEnv !== undefined) config["baseUrlEnv"] = options.baseUrlEnv;

@@ -40,7 +40,7 @@ its `errors` option so the reference and the OpenAPI document say so.
 ## Example
 
 ```ts
-const invoice = await ctx.resources.db.one("select … where id = $1", [ctx.params.id]);
+const invoice = await ctx.resources.db.one("select … where id = $1", [ctx.params.id]); // resources: [db]
 if (!invoice) throw errors.notFound("invoice not found", { id: ctx.params.id });
 if (invoice.status !== "draft") throw errors.conflict("only a draft can be issued");
 ```

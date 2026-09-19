@@ -15,6 +15,14 @@ export interface UsaiErrorShape {
  * that status; from a task or queue message it is the outcome's error.
  * Any other thrown value is a 500 `internal` with a sanitized message.
  *
+ * The runtime's own codes, which a client can meet on any operation:
+ * `validation_failed` (400; `details.slot`, `details.issues[]` with `path`
+ * as a JSON pointer and `message`), `unauthorized` (401),
+ * `route_not_found` (404), `capacity_exhausted` (503), `unavailable`
+ * (503, a dependency), `deadline_exceeded` (504), `internal` (500),
+ * `detached_work` (500, the world ended with live work), and inside a
+ * world `resource_not_declared`, `unknown_task`, `cancelled` (499).
+ *
  * @category Errors
  */
 export class UsaiError extends Error {
@@ -46,7 +54,7 @@ function make(code: string, status: number) {
  *
  * @example
  * ```ts
- * const invoice = await ctx.resources.db.one("select … where id = $1", [ctx.params.id]);
+ * const invoice = await ctx.resources.db.one("select … where id = $1", [ctx.params.id]); // resources: [db]
  * if (!invoice) throw errors.notFound("invoice not found", { id: ctx.params.id });
  * if (invoice.status !== "draft") throw errors.conflict("only a draft can be issued");
  * ```

@@ -3,10 +3,10 @@
 # Function: cron()
 
 ```ts
-function cron(
+function cron<R extends ResourceDeclaration<string, unknown>[] = ResourceDeclaration<string, unknown>[]>(
    name: string, 
-   options: CronOptions, 
-   handler: (ctx: CronContext) => unknown
+   options: CronOptions<R>, 
+   handler: (ctx: CronContext<R>) => unknown
 ): Workload;
 ```
 
@@ -17,13 +17,19 @@ never tick the same job at once. A missed tick (the process was down)
 is not replayed. `usai cron run <name>` runs one tick without the
 clock, and `app.cron(name).run()` does the same in tests.
 
+## Type Parameters
+
+| Type Parameter | Default type |
+| ------ | ------ |
+| `R` *extends* [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)\<`string`, `unknown`\>[] | [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)\<`string`, `unknown`\>[] |
+
 ## Parameters
 
 | Parameter | Type | Description |
 | ------ | ------ | ------ |
 | `name` | `string` | Unique within the application; the id is `cron:<name>`. |
-| `options` | [`CronOptions`](../interfaces/CronOptions.md) | `schedule` (required), `overlap`, resources, `timeout`. |
-| `handler` | (`ctx`: [`CronContext`](../interfaces/CronContext.md)) => `unknown` | Runs once per tick. |
+| `options` | [`CronOptions`](../interfaces/CronOptions.md)\<`R`\> | `schedule` (required), `overlap`, resources, `timeout`. |
+| `handler` | (`ctx`: [`CronContext`](../interfaces/CronContext.md)\<`R`\>) => `unknown` | Runs once per tick. |
 
 ## Returns
 

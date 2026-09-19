@@ -2,7 +2,7 @@
 // infrastructure, a fresh world per message, explicit retry (ADR-0014).
 
 import type { AnySchema, Output } from "./schema.ts";
-import type { DeclaredError, ResourceDeclaration, Workload, WorkloadPolicies } from "./declarations.ts";
+import type { DeclaredError, ResourceDeclaration, ResourcesOf, Workload, WorkloadPolicies } from "./declarations.ts";
 import type { PostgresDeclaration } from "./resources.ts";
 import type { BaseContext } from "./runtime/context.ts";
 
@@ -23,7 +23,9 @@ export interface RetryOptions {
  *
  * @category Queues
  */
-export interface ConsumeOptions<M extends AnySchema | undefined> extends WorkloadPolicies {
+export interface ConsumeOptions<M extends AnySchema | undefined, R extends ResourceDeclaration[] = ResourceDeclaration[]> extends WorkloadPolicies {
+  /** A paragraph for the reference. */
+  description?: string;
   /** Schema for the message; validated before the message's world exists.
    * A message that fails validation is dead-lettered, not retried. */
   message?: M;
@@ -31,10 +33,16 @@ export interface ConsumeOptions<M extends AnySchema | undefined> extends Workloa
   concurrency?: number;
   /** Delivery is at-least-once; declare retry to accept re-delivery. */
   retry?: RetryOptions;
-  /** PostgreSQL resource backing the queue. Default: the first declared. */
+  /** PostgreSQL resource holding the `usai_queue` table. Default: the
+   * first `postgres` resource declared in the application (declaration
+   * order: app-level resources, then modules in order). Publishers use the
+   * same default, so one database serves every topic unless both sides
+   * name another. */
   database?: PostgresDeclaration;
   errors?: DeclaredError[];
-  resources?: ResourceDeclaration[];
+  /** Resources the message's world leases; `ctx.resources` is typed from
+   * this list. The queue's own database need not be listed. */
+  resources?: R;
 }
 
 /** The context of one message delivery: the validated `message`, the
@@ -42,8 +50,9 @@ export interface ConsumeOptions<M extends AnySchema | undefined> extends Workloa
  *
  * @category Queues
  */
-export interface QueueContext<M> extends BaseContext {
+export interface QueueContext<M, R = ResourceDeclaration[]> extends BaseContext {
   readonly message: M;
+  readonly resources: ResourcesOf<R>;
   /** 1-based attempt number. */
   readonly attempt: number;
   /** The queue's id for this message (the one `publish` returned). */
@@ -78,14 +87,14 @@ export interface QueueContext<M> extends BaseContext {
  * );
  * ```
  */
-function consume<M extends AnySchema | undefined = undefined>(
+function consume<M extends AnySchema | undefined = undefined, R extends ResourceDeclaration[] = ResourceDeclaration[]>(
   topic: string,
-  options: ConsumeOptions<M>,
-  handler: (ctx: QueueContext<M extends AnySchema ? Output<M> : unknown>) => unknown,
+  options: ConsumeOptions<M, R>,
+  handler: (ctx: QueueContext<M extends AnySchema ? Output<M> : unknown, R>) => unknown,
 ): Workload {
   const policies: WorkloadPolicies = {};
   if (options.timeout !== undefined) policies.timeout = options.timeout;
-  const resources = [...(options.resources ?? [])];
+  const resources: ResourceDeclaration[] = [...(options.resources ?? [])];
   if (options.database && !resources.some((r) => r.name === options.database!.name)) resources.push(options.database);
   const retry = options.retry
     ? { maxAttempts: options.retry.maxAttempts, backoff: options.retry.backoff ?? "fixed", baseMs: options.retry.baseMs ?? 1000 }
@@ -94,6 +103,7 @@ function consume<M extends AnySchema | undefined = undefined>(
     __usai: "workload",
     kind: "queue",
     name: topic,
+    ...(options.description ? { description: options.description } : {}),
     trigger: {
       topic,
       concurrency: options.concurrency ?? 1,
@@ -121,7 +131,14 @@ export const queue = { consume };
  * @category Queues
  */
 export interface QueueHandle {
-  /** Enqueues a message. Resolves once the insert is durable in the queue's
-   * database; processing happens in its own world later. */
+  /** Enqueue a message for the topic's consumer. Resolves with the
+   * message id once the row is durable in the queue's database (the
+   * consumer's `database`, by default the application's first `postgres`
+   * resource — the publishing workload need not declare it); processing
+   * happens later, in the consumer's own world, at least once. The message
+   * must satisfy the consumer's `message` schema or it is dead-lettered on
+   * arrival, so adding a new event means extending that schema first.
+   * Declare the edge with {@link publishes} so the reference links the two.
+   * `delayMs` holds the message back; `database` targets another queue. */
   publish(topic: string, message: unknown, options?: { delayMs?: number; database?: PostgresDeclaration }): Promise<{ id: string }>;
 }

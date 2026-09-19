@@ -24,6 +24,7 @@ const sha256 = async (text: string) => hex(await crypto.subtle.digest("SHA-256",
  * workload's resources (ADR-0004). */
 export const session = auth.bearer<Principal>({
   name: "session",
+  description: "The token from POST /signup or POST /login; expires after SESSION_TTL_HOURS.",
   resolve: async (ctx, token) => {
     const row = await sql(ctx).one<Principal>(
       `select u.id as "userId", u.tenant_id as "tenantId", u.email

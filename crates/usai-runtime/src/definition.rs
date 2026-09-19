@@ -235,6 +235,12 @@ pub struct WorkloadSpec {
     /// Stable identity inside the revision: `<kind>:<name>`.
     pub id: String,
     pub name: String,
+    /// One line for the reference and the OpenAPI `summary`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    /// A paragraph for the reference and the OpenAPI `description`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     #[serde(default)]
     pub module: Option<String>,
     pub trigger: Trigger,
@@ -339,6 +345,9 @@ pub struct AuthSpec {
     pub scheme: String,
     #[serde(default)]
     pub header: Option<String>,
+    /// Where the credential comes from, for the OpenAPI security scheme.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// The serializable manifest. This is what `usai build` writes and what the
@@ -622,6 +631,8 @@ mod tests {
             workloads: vec![WorkloadSpec {
                 id: "http:GET /x".into(),
                 name: "GET /x".into(),
+                summary: None,
+                description: None,
                 module: None,
                 trigger: Trigger::Http {
                     method: "GET".into(),

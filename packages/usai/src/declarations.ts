@@ -27,8 +27,11 @@ export interface DeclaredError {
  * @category Application
  */
 export interface AuthDeclaration<Principal = unknown> {
+  /** @internal */
   readonly __usai: "auth";
   readonly name: string;
+  /** For the OpenAPI security scheme: where the credential comes from. */
+  readonly description?: string;
   readonly scheme: "bearer" | "header" | "custom";
   readonly header?: string;
   readonly resolve: (ctx: unknown, credential: string | undefined) => Principal | Promise<Principal>;
@@ -40,10 +43,13 @@ export interface AuthDeclaration<Principal = unknown> {
  *
  * @category Application
  */
-export interface ResourceDeclaration {
+export interface ResourceDeclaration<Name extends string = string, Handle = unknown> {
+  /** @internal */
   readonly __usai: "resource";
-  readonly name: string;
+  readonly name: Name;
   readonly kind: string;
+  /** @internal Phantom: the in-world handle type, so `ctx.resources` can be typed from `resources: [...]`. */
+  readonly __handle?: Handle;
   /** Normalized, secret-free configuration. */
   readonly config: Record<string, unknown>;
   /** Env variable names that participate in the resource identity. */
@@ -52,17 +58,33 @@ export interface ResourceDeclaration {
   readonly methods: readonly string[];
 }
 
+/** `ctx.resources` for a workload that declared `resources: R`: one
+ * property per declaration, named by the resource, typed as its in-world
+ * handle ({@link PostgresHandle}, {@link CacheLocalHandle},
+ * {@link HttpClientHandle}). Without a declaration list it is
+ * `Record<string, unknown>`.
+ *
+ * @category Application */
+export type ResourcesOf<R> = R extends readonly ResourceDeclaration[]
+  ? { readonly [D in R[number] as D["name"]]: D extends ResourceDeclaration<string, infer H> ? H : unknown }
+  : Record<string, unknown>;
+
 /** Bounds every workload can declare.
  *
  * @category Application
  */
 export interface WorkloadPolicies {
   /** Per-invocation deadline (`"5s"`, `"500ms"`, or milliseconds). The
-   * world is cancelled when it passes; HTTP callers get 504. Undeclared:
-   * the runtime default (30 s) for requests, none for the other kinds. */
+   * world is cancelled when it passes: an HTTP caller gets 504, an
+   * `invoke` rejects with `deadline_exceeded`, a queue message counts as
+   * a failed attempt. Undeclared: the runtime default (30 s) for
+   * requests, none for the other kinds. */
   timeout?: string | number;
-  /** How many worlds of this workload may run at once; the next request
-   * is refused with 503 `capacity_exhausted`, not queued (ADR-0012). */
+  /** How many worlds of this workload may run at once. Past the bound the
+   * next one is refused, never queued: an HTTP request gets 503
+   * `capacity_exhausted`, `ctx.tasks.invoke`/`dispatch` reject with the
+   * same code in the caller's world, a queue consumer simply claims fewer
+   * messages (ADR-0012). */
   concurrency?: number;
 }
 
@@ -74,10 +96,18 @@ export interface WorkloadPolicies {
  * @category Application
  */
 export interface HttpContracts {
+  /** Path parameters (`/users/:id` → `{ id }`); strings before coercion. */
   params?: AnySchema;
+  /** Query string; a repeated key arrives as an array. */
   query?: AnySchema;
+  /** Request headers, lower-cased names. */
   headers?: AnySchema;
+  /** JSON request body. */
   body?: AnySchema;
+  /** One schema (status 200) or a map of status to schema. A plain return
+   * value is encoded with the lowest declared 2xx status and checked
+   * against its schema (`response_contract_violation`, 500, otherwise);
+   * `http.response(status, body)` picks another declared status. */
   response?: AnySchema | Record<number, AnySchema>;
 }
 
@@ -86,6 +116,11 @@ export interface HttpContracts {
  * @category Application
  */
 export interface HttpOptions extends HttpContracts, WorkloadPolicies {
+  /** One line for the reference and the OpenAPI `summary`. Without it the
+   * operation is shown by method and path. */
+  summary?: string;
+  /** A paragraph for the reference and the OpenAPI `description`. */
+  description?: string;
   /** Errors the handler throws, for the reference and the OpenAPI document. */
   errors?: DeclaredError[];
   /** The authentication boundary; its principal is `ctx.auth`. */
@@ -103,9 +138,15 @@ export interface HttpOptions extends HttpContracts, WorkloadPolicies {
  * @category Application
  */
 export interface Workload {
+  /** @internal */
   readonly __usai: "workload";
   readonly kind: "http" | "task" | "cron" | "command" | "service" | "queue" | "socket" | "stream";
   readonly name: string;
+  /** One line about the workload, for the reference and the OpenAPI `summary`. */
+  readonly summary?: string;
+  /** A paragraph about the workload, for the reference and the OpenAPI `description`. */
+  readonly description?: string;
+  /** Kind-specific facts (method and path, schedule, topic, …), as the manifest carries them. */
   readonly trigger: Record<string, unknown>;
   readonly contracts: {
     params?: AnySchema;
@@ -123,6 +164,7 @@ export interface Workload {
   /** Queue topics this workload publishes to (`publishes(...)`). */
   readonly publishes: string[];
   readonly policies: WorkloadPolicies;
+  /** @internal The handler, erased; the in-world dispatcher calls it with the kind's context. */
   readonly handler: (...args: never[]) => unknown;
 }
 
@@ -131,6 +173,7 @@ export interface Workload {
  * @category Application
  */
 export interface ModuleDeclaration {
+  /** @internal */
   readonly __usai: "module";
   readonly name: string;
   readonly workloads: readonly Workload[];
@@ -144,6 +187,7 @@ export interface ModuleDeclaration {
  * @category Application
  */
 export interface AppDeclaration {
+  /** @internal */
   readonly __usai: "app";
   readonly name: string;
   readonly description?: string;

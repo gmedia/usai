@@ -73,6 +73,8 @@ fn task(id: &str) -> WorkloadSpec {
     WorkloadSpec {
         id: id.into(),
         name: id.trim_start_matches("task:").into(),
+        summary: None,
+        description: None,
         module: None,
         trigger: Trigger::Task,
         contracts: Contracts::default(),

@@ -4,7 +4,7 @@
 
 ```ts
 const cache: {
-  local: CacheLocalDeclaration;
+  local: CacheLocalDeclaration<N>;
 };
 ```
 
@@ -14,7 +14,7 @@ Cache resources.
 
 | Name | Type | Description |
 | ------ | ------ | ------ |
-| `local()` | (`name`: `string`, `options?`: [`CacheLocalOptions`](../interfaces/CacheLocalOptions.md)) => [`CacheLocalDeclaration`](../interfaces/CacheLocalDeclaration.md) | A runtime-local cache: shared by every world in this process (across revisions too), never persisted, gone on restart, not shared between replicas. Each call is one leased operation. The in-world handle is [CacheLocalHandle](../interfaces/CacheLocalHandle.md). |
+| `local()` | (`name`: `N`, `options?`: [`CacheLocalOptions`](../interfaces/CacheLocalOptions.md)) => [`CacheLocalDeclaration`](../interfaces/CacheLocalDeclaration.md)\<`N`\> | A runtime-local cache: shared by every world in this process (across revisions too), never persisted, gone on restart, not shared between replicas. Each call is one leased operation. The in-world handle is [CacheLocalHandle](../interfaces/CacheLocalHandle.md). |
 
 ## Example
 

@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
   isCancelled: () => false,
 };
 
-const { defineApp, defineModule, http, task, cache, describe, MANIFEST_VERSION, errors, env } = await import("./index.ts");
+const { defineApp, defineModule, http, task, cache, describe, MANIFEST_VERSION, errors, env, postgres, httpClient, cron, queue } = await import("./index.ts");
 
 const stringSchema = {
   "~standard": {
@@ -89,3 +89,32 @@ test("an undeclared resource is a named error", async () => {
   assert.equal("then" in resources, false);
   assert.equal(JSON.stringify(resources), "{}");
 });
+
+test("ctx.resources is typed from the declaration list", () => {
+  const db = postgres("db");
+  const mailer = httpClient("mailer", { baseUrl: "https://mail.example" });
+  const hits = cache.local("hits");
+  // Compile-time: each handle has its own methods, and an undeclared name
+  // is a type error (checked by the `@ts-expect-error` lines).
+  const w = http.get("/x", { resources: [db, mailer, hits], summary: "one of each", description: "The three handle kinds." }, async (ctx) => {
+    const rows: Array<{ n: number }> = await ctx.resources.db.query<{ n: number }>("select 1 as n");
+    const res = await ctx.resources.mailer.fetch("/send", { json: rows });
+    const count = await ctx.resources.hits.increment("total");
+    // @ts-expect-error not declared on this workload
+    ctx.resources.other;
+    return { ok: res.ok, count };
+  });
+  assert.equal(w.summary, "one of each");
+  assert.equal(w.description, "The three handle kinds.");
+  const tick = cron("tick", { schedule: "* * * * *", resources: [hits] }, async (ctx) => ctx.resources.hits.clear());
+  assert.equal(tick.kind, "cron");
+  const consumer = queue.consume("t", { resources: [db], description: "d" }, async (ctx) => ctx.resources.db.execute("select 1"));
+  assert.equal(consumer.description, "d");
+  const bare = task("bare", {}, async (ctx) => {
+    // Without a list the map is open: `unknown` values, no type error.
+    const anything: unknown = ctx.resources["whatever"];
+    return anything;
+  });
+  assert.equal(bare.kind, "task");
+});
+

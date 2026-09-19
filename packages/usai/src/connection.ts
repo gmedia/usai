@@ -3,7 +3,7 @@
 // and ends with it.
 
 import type { AnySchema, Output } from "./schema.ts";
-import type { AuthDeclaration, Method, ResourceDeclaration, Workload, WorkloadPolicies } from "./declarations.ts";
+import type { AuthDeclaration, Method, ResourceDeclaration, ResourcesOf, Workload, WorkloadPolicies } from "./declarations.ts";
 import type { BaseContext } from "./runtime/context.ts";
 import type { HttpContracts } from "./declarations.ts";
 
@@ -28,7 +28,8 @@ export interface StreamHandle {
  *
  * @category Streams and WebSockets
  */
-export interface StreamContext extends BaseContext {
+export interface StreamContext<R = ResourceDeclaration[]> extends BaseContext {
+  readonly resources: ResourcesOf<R>;
   readonly method: Method;
   readonly path: string;
   readonly url: string;
@@ -41,11 +42,13 @@ export interface StreamContext extends BaseContext {
  *
  * @category Streams and WebSockets
  */
-export interface StreamOptions extends WorkloadPolicies {
+export interface StreamOptions<R extends ResourceDeclaration[] = ResourceDeclaration[]> extends WorkloadPolicies {
   /** Default `GET`. */
   method?: Method;
+  summary?: string;
+  description?: string;
   auth?: AuthDeclaration;
-  resources?: ResourceDeclaration[];
+  resources?: R;
   params?: HttpContracts["params"];
   query?: HttpContracts["query"];
 }
@@ -68,7 +71,7 @@ export interface StreamOptions extends WorkloadPolicies {
  * });
  * ```
  */
-function stream(path: string, options: StreamOptions, handler: (ctx: StreamContext, stream: StreamHandle) => unknown): Workload {
+function stream<R extends ResourceDeclaration[] = ResourceDeclaration[]>(path: string, options: StreamOptions<R>, handler: (ctx: StreamContext<R>, stream: StreamHandle) => unknown): Workload {
   const method = options.method ?? "GET";
   const contracts: Workload["contracts"] = {};
   if (options.params) contracts.params = options.params;
@@ -80,6 +83,8 @@ function stream(path: string, options: StreamOptions, handler: (ctx: StreamConte
     __usai: "workload",
     kind: "stream",
     name: `${method} ${path}`,
+    ...(options.summary ? { summary: options.summary } : {}),
+    ...(options.description ? { description: options.description } : {}),
     trigger: { method, path },
     contracts,
     errors: [],
@@ -101,7 +106,8 @@ export const streams = { stream };
  *
  * @category Streams and WebSockets
  */
-export interface SocketContext<Incoming, Outgoing> extends BaseContext {
+export interface SocketContext<Incoming, Outgoing, R = ResourceDeclaration[]> extends BaseContext {
+  readonly resources: ResourcesOf<R>;
   readonly path: string;
   readonly url: string;
   readonly params: Record<string, string>;
@@ -123,7 +129,9 @@ export interface SocketContext<Incoming, Outgoing> extends BaseContext {
  *
  * @category Streams and WebSockets
  */
-export interface SocketOptions<I extends AnySchema | undefined, O extends AnySchema | undefined> extends WorkloadPolicies {
+export interface SocketOptions<I extends AnySchema | undefined, O extends AnySchema | undefined, R extends ResourceDeclaration[] = ResourceDeclaration[]> extends WorkloadPolicies {
+  summary?: string;
+  description?: string;
   /** Schema for messages from the client. An invalid message is answered
    * with a `validation_failed` error envelope and dropped; the connection
    * stays open. */
@@ -131,7 +139,7 @@ export interface SocketOptions<I extends AnySchema | undefined, O extends AnySch
   /** Schema for messages to the client. */
   outgoing?: O;
   auth?: AuthDeclaration;
-  resources?: ResourceDeclaration[];
+  resources?: R;
 }
 
 type Out<S> = S extends AnySchema ? Output<S> : unknown;
@@ -140,13 +148,13 @@ type Out<S> = S extends AnySchema ? Output<S> : unknown;
  *
  * @category Streams and WebSockets
  */
-export interface SocketHandlers<I, O> {
+export interface SocketHandlers<I, O, R = ResourceDeclaration[]> {
   /** After the upgrade. */
-  open?(ctx: SocketContext<I, O>): unknown;
+  open?(ctx: SocketContext<I, O, R>): unknown;
   /** Once per incoming message, in order. */
-  message?(ctx: SocketContext<I, O>): unknown;
+  message?(ctx: SocketContext<I, O, R>): unknown;
   /** After the connection closed, whoever closed it. */
-  close?(ctx: SocketContext<I, O>): unknown;
+  close?(ctx: SocketContext<I, O, R>): unknown;
 }
 
 /**
@@ -168,10 +176,10 @@ export interface SocketHandlers<I, O> {
  *
  * @category Streams and WebSockets
  */
-export function socket<I extends AnySchema | undefined = undefined, O extends AnySchema | undefined = undefined>(
+export function socket<I extends AnySchema | undefined = undefined, O extends AnySchema | undefined = undefined, R extends ResourceDeclaration[] = ResourceDeclaration[]>(
   path: string,
-  options: SocketOptions<I, O>,
-  handlers: SocketHandlers<Out<I>, Out<O>>,
+  options: SocketOptions<I, O, R>,
+  handlers: SocketHandlers<Out<I>, Out<O>, R>,
 ): Workload {
   const contracts: Workload["contracts"] = {};
   if (options.incoming) contracts.message = options.incoming;
@@ -182,6 +190,8 @@ export function socket<I extends AnySchema | undefined = undefined, O extends An
     __usai: "workload",
     kind: "socket",
     name: path,
+    ...(options.summary ? { summary: options.summary } : {}),
+    ...(options.description ? { description: options.description } : {}),
     trigger: { path },
     contracts,
     errors: [],

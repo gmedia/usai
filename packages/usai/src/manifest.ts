@@ -30,6 +30,8 @@ export interface ManifestContracts {
 export interface ManifestWorkload {
   id: string;
   name: string;
+  summary?: string;
+  description?: string;
   module?: string;
   trigger: Record<string, unknown> & { kind: string };
   contracts: ManifestContracts;
@@ -55,7 +57,7 @@ export interface Manifest {
   modules: Array<{ name: string; migrations: string[]; seeders: string[] }>;
   workloads: ManifestWorkload[];
   resources: Array<{ name: string; kind: string; module?: string; config: Record<string, unknown>; env: string[] }>;
-  auth: Array<{ name: string; scheme: string; header?: string }>;
+  auth: Array<{ name: string; scheme: string; header?: string; description?: string }>;
   env: Array<{ name: string; kind: string; required: boolean; values: string[] }>;
   codeSha256: string;
   builtWith?: { sdk?: string; runtime?: string };
@@ -119,10 +121,10 @@ function trigger(workload: Workload): ManifestWorkload["trigger"] {
  * @category Build */
 export function describe(app: AppDeclaration): Manifest {
   const { workloads, resources } = flatten(app);
-  const authByName = new Map<string, { name: string; scheme: string; header?: string }>();
+  const authByName = new Map<string, { name: string; scheme: string; header?: string; description?: string }>();
   const manifestWorkloads: ManifestWorkload[] = workloads.map(({ workload, module }) => {
     if (workload.auth && !authByName.has(workload.auth.name)) {
-      authByName.set(workload.auth.name, { name: workload.auth.name, scheme: workload.auth.scheme, ...(workload.auth.header ? { header: workload.auth.header } : {}) });
+      authByName.set(workload.auth.name, { name: workload.auth.name, scheme: workload.auth.scheme, ...(workload.auth.header ? { header: workload.auth.header } : {}), ...(workload.auth.description ? { description: workload.auth.description } : {}) });
     }
     const timeoutMs = parseDuration(workload.policies.timeout);
     const entry: ManifestWorkload = {
@@ -136,6 +138,8 @@ export function describe(app: AppDeclaration): Manifest {
       publishes: [...workload.publishes],
     };
     if (module !== undefined) entry.module = module;
+    if (workload.summary !== undefined) entry.summary = workload.summary;
+    if (workload.description !== undefined) entry.description = workload.description;
     if (workload.auth) entry.auth = workload.auth.name;
     if (workload.policies.concurrency !== undefined) entry.maxConcurrency = workload.policies.concurrency;
     if (timeoutMs !== undefined) entry.timeoutMs = timeoutMs;

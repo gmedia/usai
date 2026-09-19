@@ -280,6 +280,11 @@
   dialog.search kbd { border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; background: var(--raised); }
   dialog.search .none { padding: 18px 16px; color: var(--muted); font-size: var(--text-sm); }
 
+  /* Touch: every control at least 44 px tall. */
+  @media (pointer: coarse) {
+    .nav li a, .nav summary, .tabs button, .seg button, .btn, .icon-btn, .search-btn, .fact, dialog.search li a { min-height: 44px; }
+    .list li { padding: 12px 0; }
+  }
   .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: var(--radius); font-size: var(--text-sm); z-index: 50; }
   .error-page { max-width: var(--measure); }
   .error-page pre { margin-top: 12px; }
@@ -1015,6 +1020,7 @@
       service: ["Persistent: one world starts with the revision and stops when the revision drains.", d.restart ? ` Restart policy: ${d.restart}.` : ""],
       queue: ["Consumes topic ", el("code", {}, d.topic || "?"), ", one fresh world per message", d.concurrency ? `, up to ${d.concurrency} at once` : "", ". A message is acknowledged when its world commits; a failure retries with backoff and dead-letters after the last attempt."],
     }[w.kind] || [`A ${w.kind} workload.`];
+    if (w.description) frag.append(el("p", { class: "lede", style: "color:var(--ink)" }, w.description));
     frag.append(el("p", { class: "lede" }, ...lede));
     const facts = el("div", { class: "facts" }, el("span", { class: "fact" }, "kind", el("b", {}, kindWord[w.kind] || w.kind)), el("span", { class: "fact" }, "lifetime", el("b", {}, w.lifetime)));
     if (w.module) facts.append(el("span", { class: "fact" }, "module", el("b", {}, w.module)));
@@ -1122,7 +1128,7 @@
         el("li", { class: "c-lease" }, el("b", {}, "Leases."), " Resources are owned by the runtime and leased per operation; a connection comes back to the pool only after a terminal outcome."),
         el("li", { class: "c-handoff" }, el("b", {}, "Hand-off."), " Work that outlives a response is dispatched to a task or published to a queue, explicitly; a world that ends with un-awaited work is a runtime error, not a silent drop.")));
     frag.append(contract);
-    frag.append(el("p", { class: "colophon" }, "Served by the Usai runtime at ", el("code", {}, "/_usai/docs"), " from ", el("a", { href: "openapi.json" }, el("code", {}, "/_usai/openapi.json")), ". The ", el("a", { href: "openapi.json?profile=public" }, "public profile"), " of that document is the consumer contract without the runtime facts, the same file ", el("code", {}, "usai generate openapi --public"), " writes."));
+    frag.append(el("p", { class: "colophon" }, "Served by the Usai runtime at ", el("code", {}, "/_usai/docs"), " from ", el("a", { href: "openapi.json" }, el("code", {}, "/_usai/openapi.json")), ". The ", el("a", { href: "openapi.json?profile=public" }, "public profile"), " of that document is the consumer contract without the runtime facts, the same file ", el("code", {}, "usai generate openapi --public"), " writes. What the SDK itself takes and promises (", el("code", {}, "http.get"), ", ", el("code", {}, "ctx.tasks.dispatch"), ", ", el("code", {}, "postgres"), ") is the ", el("a", { href: "https://github.com/gmedia/usai/tree/main/docs/sdk" }, "SDK reference"), "."));
     return frag;
   };
 

@@ -3,10 +3,10 @@
 # Function: socket()
 
 ```ts
-function socket<I extends AnySchema | undefined = undefined, O extends AnySchema | undefined = undefined>(
+function socket<I extends AnySchema | undefined = undefined, O extends AnySchema | undefined = undefined, R extends ResourceDeclaration<string, unknown>[] = ResourceDeclaration<string, unknown>[]>(
    path: string, 
-   options: SocketOptions<I, O>, 
-   handlers: SocketHandlers<Out<I>, Out<O>>
+   options: SocketOptions<I, O, R>, 
+   handlers: SocketHandlers<Out<I>, Out<O>, R>
 ): Workload;
 ```
 
@@ -23,14 +23,15 @@ restart) and `close` runs. `concurrency` bounds open connections.
 | ------ | ------ |
 | `I` *extends* [`AnySchema`](../type-aliases/AnySchema.md) \| `undefined` | `undefined` |
 | `O` *extends* [`AnySchema`](../type-aliases/AnySchema.md) \| `undefined` | `undefined` |
+| `R` *extends* [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)\<`string`, `unknown`\>[] | [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)\<`string`, `unknown`\>[] |
 
 ## Parameters
 
 | Parameter | Type |
 | ------ | ------ |
 | `path` | `string` |
-| `options` | [`SocketOptions`](../interfaces/SocketOptions.md)\<`I`, `O`\> |
-| `handlers` | [`SocketHandlers`](../interfaces/SocketHandlers.md)\<`Out`\<`I`\>, `Out`\<`O`\>\> |
+| `options` | [`SocketOptions`](../interfaces/SocketOptions.md)\<`I`, `O`, `R`\> |
+| `handlers` | [`SocketHandlers`](../interfaces/SocketHandlers.md)\<`Out`\<`I`\>, `Out`\<`O`\>, `R`\> |
 
 ## Returns
 

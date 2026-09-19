@@ -57,15 +57,19 @@ export interface UsaiAbortSignal {
  * @category Context
  */
 export interface TaskHandle {
-  /** **Owned** invocation: the task runs in a fresh world, this world waits
+  /** An **owned** invocation: the task runs in a fresh world, this world waits
    * for its result, and cancelling this world cancels the child. The
    * child's thrown {@link UsaiError} is rethrown here. Use it when the
    * response depends on the task. */
   invoke<T = unknown>(task: Workload, input?: unknown): Promise<T>;
-  /** **Ownership transfer**: the task runtime owns the child, which starts
-   * once this world commits; this world may end. Resolves with the child's
-   * id as soon as the hand-off is accepted — not durable across a runtime
-   * restart (publish to a queue for that). Declare the edge with
+  /** An **ownership transfer**: the task runtime owns the child, which
+   * starts once this world commits (its handler returned; for HTTP, the
+   * response is committed) — a world that throws hands nothing off. This
+   * world may end. Resolves with the child's id as soon as the hand-off is
+   * accepted; rejects with `capacity_exhausted` when the task's
+   * `concurrency` is full and `unknown_task` for a name that does not
+   * exist. Nobody receives the child's return value. Not durable across a
+   * runtime restart (publish to a queue for that). Declare the edge with
    * `dispatches(from, task)`. */
   dispatch(task: Workload, input?: unknown): Promise<{ id: string }>;
 }
@@ -90,9 +94,11 @@ export interface BaseContext {
   readonly queue: import("../queue.ts").QueueHandle;
   /** Aborts when this world is cancelled. */
   readonly signal: UsaiAbortSignal;
-  /** The declared environment, typed: `env.int()` gives a number,
-   * `env.bool()` a boolean, `env.optional(...)` may be undefined. Narrow
-   * per key, or type it once: `const e = ctx.env as EnvValues<typeof spec>`. */
+  /** The declared environment, parsed: `env.int()` gives a number,
+   * `env.bool()` a boolean, `env.optional(...)` may be undefined. The
+   * static type is the union of those; narrow per key, or type it once
+   * with `const e = ctx.env as EnvValues<typeof spec>` (the context does
+   * not carry the declaration's type). */
   readonly env: Record<string, string | number | boolean | undefined>;
   /** Structured logging; lines carry the workload and world ids and reach
    * the runtime's log (`target: "app"`). `console.*` is the same. */

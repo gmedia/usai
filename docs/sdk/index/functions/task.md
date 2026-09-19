@@ -3,10 +3,10 @@
 # Function: task()
 
 ```ts
-function task<I extends AnySchema | undefined = undefined>(
+function task<I extends AnySchema | undefined = undefined, R extends ResourceDeclaration<string, unknown>[] = ResourceDeclaration<string, unknown>[]>(
    name: string, 
-   options: TaskOptions<I>, 
-   handler: (ctx: TaskContext<I extends AnySchema ? Output<I> : unknown>) => unknown
+   options: TaskOptions<I, R>, 
+   handler: (ctx: TaskContext<I extends AnySchema ? Output<I> : unknown, R>) => unknown
 ): Workload;
 ```
 
@@ -28,14 +28,15 @@ restart; for durable hand-off publish to a queue.
 | Type Parameter | Default type |
 | ------ | ------ |
 | `I` *extends* [`AnySchema`](../type-aliases/AnySchema.md) \| `undefined` | `undefined` |
+| `R` *extends* [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)\<`string`, `unknown`\>[] | [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)\<`string`, `unknown`\>[] |
 
 ## Parameters
 
 | Parameter | Type | Description |
 | ------ | ------ | ------ |
-| `name` | `string` | Unique within the application; the id is `task:<name>`. |
-| `options` | [`TaskOptions`](../interfaces/TaskOptions.md)\<`I`\> | Input schema, errors, resources, `timeout`, `concurrency`. |
-| `handler` | (`ctx`: [`TaskContext`](../interfaces/TaskContext.md)\<`I` *extends* [`AnySchema`](../type-aliases/AnySchema.md) ? [`Output`](../type-aliases/Output.md)\<`I`\> : `unknown`\>) => `unknown` | Runs in the task's world; its return value is the `invoke` result. |
+| `name` | `string` | Unique within the application; the id is `task:<name>`. Any text; a colon is fine (`invoices:remind`). |
+| `options` | [`TaskOptions`](../interfaces/TaskOptions.md)\<`I`, `R`\> | Input schema, errors, resources, `timeout`, `concurrency`. |
+| `handler` | (`ctx`: [`TaskContext`](../interfaces/TaskContext.md)\<`I` *extends* [`AnySchema`](../type-aliases/AnySchema.md) ? [`Output`](../type-aliases/Output.md)\<`I`\> : `unknown`, `R`\>) => `unknown` | Runs in the task's world. Its return value is the `invoke` result; after a `dispatch` nobody receives it — the outcome shows only in the runtime's log and the task counters of `/_usai/status`, so a dispatched task records what matters in a resource. |
 
 ## Returns
 

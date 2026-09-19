@@ -749,6 +749,25 @@ async fn openapi_is_generated_from_the_definition() {
     assert_eq!(doc["info"]["version"], rev.definition.identity());
     let get_user = &doc["paths"]["/users/{id}"]["get"];
     assert_eq!(get_user["tags"], json!(["users"]));
+    assert_eq!(get_user["summary"], "One user");
+    assert_eq!(
+        get_user["description"],
+        "By id, with the page the caller asked for."
+    );
+    assert!(
+        doc["paths"]["/users"]["post"].get("summary").is_none(),
+        "no summary is invented"
+    );
+    assert_eq!(get_user["responses"]["200"]["description"], "OK");
+    assert_eq!(
+        doc["paths"]["/users"]["post"]["responses"]["201"]["description"],
+        "Created"
+    );
+    assert!(get_user["responses"]["503"].is_object() && get_user["responses"]["504"].is_object());
+    assert!(
+        !doc["paths"].to_string().contains("9007199254740991"),
+        "safe-integer bounds are not a contract"
+    );
     let params: Vec<(String, String, bool)> = get_user["parameters"]
         .as_array()
         .unwrap()

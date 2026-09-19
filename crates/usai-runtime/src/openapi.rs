@@ -9,11 +9,19 @@ use crate::definition::{ApplicationDefinition, Trigger, WorkloadSpec};
 
 /// Strips the `$schema` dialect key a provider may include; the document
 /// declares its dialect once at the top.
+/// JavaScript's safe-integer bounds, which schema libraries emit for
+/// `.int()`: not a contract, noise in the document.
+const SAFE_INT: f64 = 9_007_199_254_740_991.0;
+
 fn clean(schema: &Value) -> Value {
     match schema {
         Value::Object(map) => Value::Object(
             map.iter()
-                .filter(|(k, _)| k.as_str() != "$schema")
+                .filter(|(k, v)| {
+                    k.as_str() != "$schema"
+                        && !(k.as_str() == "minimum" && v.as_f64() == Some(-SAFE_INT))
+                        && !(k.as_str() == "maximum" && v.as_f64() == Some(SAFE_INT))
+                })
                 .map(|(k, v)| (k.clone(), clean(v)))
                 .collect(),
         ),
@@ -52,6 +60,7 @@ fn parameters(location: &str, schema: &Value, always_required: bool) -> Vec<Valu
 fn error_schema() -> Value {
     json!({
         "type": "object",
+        "description": "Every error answer. `code` is stable and machine-readable: the workload's declared codes, `validation_failed` (400; `details.slot` names the rejected slot and `details.issues[]` carries `path` as a JSON pointer and `message`), `unauthorized` (401), `route_not_found` (404), `capacity_exhausted` (503), `unavailable` (503, a dependency), `deadline_exceeded` (504), `internal` (500, message sanitized).",
         "required": ["error"],
         "properties": {
             "error": {
@@ -60,11 +69,35 @@ fn error_schema() -> Value {
                 "properties": {
                     "code": { "type": "string" },
                     "message": { "type": "string" },
-                    "details": {}
+                    "details": { "description": "Code-specific; for validation_failed: { slot, issues: [{ path, message }] }." }
                 }
             }
         }
     })
+}
+
+/// Appends a runtime note to an operation's description, after whatever
+/// the developer wrote.
+fn note(operation: &mut Value, text: &str) {
+    let existing = operation
+        .get("description")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    operation["description"] = json!(match existing {
+        Some(d) => format!("{d}\n\n{text}"),
+        None => text.to_owned(),
+    });
+}
+
+/// The reason phrase a consumer expects next to a status.
+fn reason(status: u16) -> &'static str {
+    match status {
+        200 => "OK",
+        201 => "Created",
+        202 => "Accepted",
+        204 => "No content",
+        _ => "Success",
+    }
 }
 
 fn operation_id(workload: &WorkloadSpec) -> String {
@@ -225,18 +258,25 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
         let (method, path, raw) = (&method, &path, &raw);
         let mut operation = json!({
             "operationId": operation_id(workload),
-            "summary": workload.name,
             "x-usai-lifetime": lifetime,
         });
+        if let Some(summary) = &workload.summary {
+            operation["summary"] = json!(summary);
+        }
+        if let Some(description) = &workload.description {
+            operation["description"] = json!(description);
+        }
         if lifetime == "stream" {
-            operation["description"] = json!(
-                "Streaming response: the connection stays open until the handler returns. Chunks are text/event-stream by default."
+            note(
+                &mut operation,
+                "Streaming response: the connection stays open until the handler returns. Chunks are text/event-stream by default.",
             );
             operation["x-usai-stream"] = json!(true);
         }
         if lifetime == "connection" {
-            operation["description"] = json!(
-                "WebSocket endpoint: send an HTTP upgrade. Messages follow the declared incoming/outgoing contracts; not described as HTTP bodies."
+            note(
+                &mut operation,
+                "WebSocket endpoint: send an HTTP upgrade. Messages follow the declared incoming/outgoing contracts; not described as HTTP bodies.",
             );
             operation["x-usai-socket"] = json!(true);
         }
@@ -313,8 +353,9 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
         let mut responses: Map<String, Value> = Map::new();
 
         if *raw {
-            operation["description"] = json!(
-                "Raw endpoint: the handler reads exact bytes and writes the response itself. The request body is not described; the statuses below are the ones the handler declares."
+            note(
+                &mut operation,
+                "Raw endpoint: the handler reads exact bytes and writes the response itself. The request body is not described; the statuses below are the ones the handler declares.",
             );
             operation["x-usai-raw"] = json!(true);
             operation["requestBody"] = json!({ "content": { "*/*": {} } });
@@ -354,24 +395,31 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
             }
             if !c.in_world_only.is_empty() {
                 operation["x-usai-validated-in-world"] = json!(c.in_world_only);
-                operation["description"] = json!(format!(
-                    "Contracts validated inside the world by their schema provider (no JSON Schema available): {}.",
-                    c.in_world_only.join(", ")
-                ));
+                note(
+                    &mut operation,
+                    &format!(
+                        "Contracts validated inside the world by their schema provider (no JSON Schema available): {}.",
+                        c.in_world_only.join(", ")
+                    ),
+                );
             }
             for (status, schema) in &c.response {
                 responses.insert(
                     status.to_string(),
-                    json!({
-                        "description": "Success",
-                        "content": { "application/json": { "schema": clean(schema) } }
-                    }),
+                    if *status == 204 {
+                        json!({ "description": reason(*status) })
+                    } else {
+                        json!({
+                            "description": reason(*status),
+                            "content": { "application/json": { "schema": clean(schema) } }
+                        })
+                    },
                 );
             }
             if c.response.is_empty() {
                 responses.insert(
                     "200".into(),
-                    json!({ "description": "Success", "content": { "application/json": {} } }),
+                    json!({ "description": "OK; the handler's return value as JSON (no contract declared), or 204 when it returns nothing", "content": { "application/json": {} } }),
                 );
             }
             let validates = c.params.is_some()
@@ -380,7 +428,7 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
                 || c.body.is_some()
                 || !c.in_world_only.is_empty();
             if validates {
-                responses.insert("400".into(), json!({ "description": "Boundary validation failed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UsaiError" } } } }));
+                responses.insert("400".into(), json!({ "description": "Boundary validation failed: code validation_failed, details.slot and details.issues[] (path, message)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UsaiError" } } } }));
             }
         }
         for error in &workload.errors {
@@ -393,7 +441,7 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
                 .entry("401".to_owned())
                 .or_insert_with(|| json!({ "description": "Authentication failed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UsaiError" } } } }));
             if let Some(spec) = definition.auth(auth) {
-                let scheme = match spec.scheme.as_str() {
+                let mut scheme = match spec.scheme.as_str() {
                     "bearer" => json!({ "type": "http", "scheme": "bearer" }),
                     "header" => {
                         json!({ "type": "apiKey", "in": "header", "name": spec.header.clone().unwrap_or_default() })
@@ -402,6 +450,9 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
                         json!({ "type": "apiKey", "in": "header", "name": "authorization", "description": "Custom authentication boundary" })
                     }
                 };
+                if let Some(description) = &spec.description {
+                    scheme["description"] = json!(description);
+                }
                 security_schemes.insert(auth.clone(), scheme);
                 operation["security"] = json!([{ auth: [] }]);
             }
@@ -409,6 +460,16 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
         responses
             .entry("500".to_owned())
             .or_insert_with(|| json!({ "description": "Unexpected failure (sanitized)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UsaiError" } } } }));
+        // Every operation can be refused or time out; a consumer must
+        // handle both, so the contract says so.
+        responses
+            .entry("503".to_owned())
+            .or_insert_with(|| json!({ "description": "Refused: capacity_exhausted (retry later) or unavailable (a dependency is down)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UsaiError" } } } }));
+        if lifetime == "request" {
+            responses
+                .entry("504".to_owned())
+                .or_insert_with(|| json!({ "description": "Deadline exceeded: deadline_exceeded", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UsaiError" } } } }));
+        }
         operation["responses"] = Value::Object(responses);
 
         let entry = paths
@@ -453,6 +514,9 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
                 "publishes": w.publishes,
                 "detail": detail,
             });
+            if let Some(description) = &w.description {
+                entry["description"] = json!(description);
+            }
             if let Some(schema) = &w.contracts.input {
                 entry["input"] = clean(schema);
             }
@@ -510,6 +574,8 @@ mod tests {
         let w = WorkloadSpec {
             id: "http:GET /users/:id".into(),
             name: "GET /users/:id".into(),
+            summary: None,
+            description: None,
             module: None,
             trigger: Trigger::Http {
                 method: "GET".into(),

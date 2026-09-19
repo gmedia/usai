@@ -3,20 +3,22 @@
 // D4 (task), D5 (cron, command), D9 (service).
 
 import type { AnySchema, Output } from "./schema.ts";
-import type { DeclaredError, ResourceDeclaration, Workload, WorkloadPolicies } from "./declarations.ts";
+import type { DeclaredError, ResourceDeclaration, ResourcesOf, Workload, WorkloadPolicies } from "./declarations.ts";
 import type { BaseContext } from "./runtime/context.ts";
 
 /** Options for {@link task}.
  *
  * @category Tasks, cron, commands, services
  */
-export interface TaskOptions<I extends AnySchema | undefined> extends WorkloadPolicies {
+export interface TaskOptions<I extends AnySchema | undefined, R extends ResourceDeclaration[] = ResourceDeclaration[]> extends WorkloadPolicies {
   /** Schema for the input; validated before the task's world exists. */
   input?: I;
+  /** A paragraph for the reference. */
+  description?: string;
   /** Errors the handler throws, for the reference. */
   errors?: DeclaredError[];
-  /** Resources this task leases. */
-  resources?: ResourceDeclaration[];
+  /** Resources this task leases; `ctx.resources` is typed from this list. */
+  resources?: R;
 }
 
 /** The context of one task invocation: the validated `input` plus
@@ -24,8 +26,9 @@ export interface TaskOptions<I extends AnySchema | undefined> extends WorkloadPo
  *
  * @category Tasks, cron, commands, services
  */
-export interface TaskContext<I> extends BaseContext {
+export interface TaskContext<I, R = ResourceDeclaration[]> extends BaseContext {
   readonly input: I;
+  readonly resources: ResourcesOf<R>;
 }
 
 /**
@@ -43,9 +46,13 @@ export interface TaskContext<I> extends BaseContext {
  * restart; for durable hand-off publish to a queue.
  *
  * @param name Unique within the application; the id is `task:<name>`.
+ * Any text; a colon is fine (`invoices:remind`).
  * @param options Input schema, errors, resources, `timeout`, `concurrency`.
- * @param handler Runs in the task's world; its return value is the
- * `invoke` result.
+ * @param handler Runs in the task's world. Its return value is the
+ * `invoke` result; after a `dispatch` nobody receives it — the outcome
+ * shows only in the runtime's log and the task counters of
+ * `/_usai/status`, so a dispatched task records what matters in a
+ * resource.
  *
  * @example
  * ```ts
@@ -66,10 +73,10 @@ export interface TaskContext<I> extends BaseContext {
  *
  * @category Tasks, cron, commands, services
  */
-export function task<I extends AnySchema | undefined = undefined>(
+export function task<I extends AnySchema | undefined = undefined, R extends ResourceDeclaration[] = ResourceDeclaration[]>(
   name: string,
-  options: TaskOptions<I>,
-  handler: (ctx: TaskContext<I extends AnySchema ? Output<I> : unknown>) => unknown,
+  options: TaskOptions<I, R>,
+  handler: (ctx: TaskContext<I extends AnySchema ? Output<I> : unknown, R>) => unknown,
 ): Workload {
   const policies: WorkloadPolicies = {};
   if (options.timeout !== undefined) policies.timeout = options.timeout;
@@ -78,6 +85,7 @@ export function task<I extends AnySchema | undefined = undefined>(
     __usai: "workload",
     kind: "task",
     name,
+    ...(options.description ? { description: options.description } : {}),
     trigger: {},
     contracts: options.input ? { input: options.input } : {},
     errors: options.errors ?? [],
@@ -93,15 +101,17 @@ export function task<I extends AnySchema | undefined = undefined>(
  *
  * @category Tasks, cron, commands, services
  */
-export interface CronOptions extends WorkloadPolicies {
+export interface CronOptions<R extends ResourceDeclaration[] = ResourceDeclaration[]> extends WorkloadPolicies {
+  /** A paragraph for the reference. */
+  description?: string;
   /** Cron expression, UTC: five fields (`minute hour day-of-month month
    * day-of-week`) or six with leading seconds. Validated at install. */
   schedule: string;
   /** What to do when a tick is due while the previous one still runs.
    * `skip` (default) drops the tick; `allow` starts another world. */
   overlap?: "allow" | "skip";
-  /** Resources the tick leases. */
-  resources?: ResourceDeclaration[];
+  /** Resources the tick leases; `ctx.resources` is typed from this list. */
+  resources?: R;
 }
 
 /** The context of one cron tick: `scheduledAt` (ISO 8601, the tick's
@@ -109,8 +119,9 @@ export interface CronOptions extends WorkloadPolicies {
  *
  * @category Tasks, cron, commands, services
  */
-export interface CronContext extends BaseContext {
+export interface CronContext<R = ResourceDeclaration[]> extends BaseContext {
   readonly scheduledAt: string;
+  readonly resources: ResourcesOf<R>;
 }
 
 /**
@@ -138,7 +149,7 @@ export interface CronContext extends BaseContext {
  *
  * @category Tasks, cron, commands, services
  */
-export function cron(name: string, options: CronOptions, handler: (ctx: CronContext) => unknown): Workload {
+export function cron<R extends ResourceDeclaration[] = ResourceDeclaration[]>(name: string, options: CronOptions<R>, handler: (ctx: CronContext<R>) => unknown): Workload {
   const policies: WorkloadPolicies = {};
   if (options.timeout !== undefined) policies.timeout = options.timeout;
   if (options.concurrency !== undefined) policies.concurrency = options.concurrency;
@@ -146,6 +157,7 @@ export function cron(name: string, options: CronOptions, handler: (ctx: CronCont
     __usai: "workload",
     kind: "cron",
     name,
+    ...(options.description ? { description: options.description } : {}),
     trigger: { schedule: options.schedule, overlap: options.overlap ?? "skip" },
     contracts: {},
     errors: [],
@@ -162,8 +174,19 @@ export function cron(name: string, options: CronOptions, handler: (ctx: CronCont
  *
  * @category Tasks, cron, commands, services
  */
-export interface CommandContext extends BaseContext {
+export interface CommandContext<R = ResourceDeclaration[]> extends BaseContext {
   readonly args: string[];
+  readonly resources: ResourcesOf<R>;
+}
+
+/** Options for {@link command}.
+ *
+ * @category Tasks, cron, commands, services */
+export interface CommandOptions<R extends ResourceDeclaration[] = ResourceDeclaration[]> extends WorkloadPolicies {
+  /** A paragraph for the reference. */
+  description?: string;
+  /** Resources the command leases; `ctx.resources` is typed from this list. */
+  resources?: R;
 }
 
 /**
@@ -183,9 +206,9 @@ export interface CommandContext extends BaseContext {
  * @category Tasks, cron, commands, services
  */
 export function command(name: string, handler: (ctx: CommandContext) => unknown): Workload;
-export function command(name: string, options: WorkloadPolicies & { resources?: ResourceDeclaration[] }, handler: (ctx: CommandContext) => unknown): Workload;
+export function command<R extends ResourceDeclaration[] = ResourceDeclaration[]>(name: string, options: CommandOptions<R>, handler: (ctx: CommandContext<R>) => unknown): Workload;
 export function command(name: string, a: unknown, b?: unknown): Workload {
-  const options = (typeof a === "function" ? {} : a) as WorkloadPolicies & { resources?: ResourceDeclaration[] };
+  const options = (typeof a === "function" ? {} : a) as CommandOptions;
   const handler = (typeof a === "function" ? a : b) as Workload["handler"];
   const policies: WorkloadPolicies = {};
   if (options.timeout !== undefined) policies.timeout = options.timeout;
@@ -193,6 +216,7 @@ export function command(name: string, a: unknown, b?: unknown): Workload {
     __usai: "workload",
     kind: "command",
     name,
+    ...(options.description ? { description: options.description } : {}),
     trigger: {},
     contracts: {},
     errors: [],
@@ -210,17 +234,21 @@ export function command(name: string, a: unknown, b?: unknown): Workload {
  *
  * @category Tasks, cron, commands, services
  */
-export interface ServiceContext extends BaseContext {
+export interface ServiceContext<R = ResourceDeclaration[]> extends BaseContext {
   sleep(duration: string | number): Promise<void>;
+  readonly resources: ResourcesOf<R>;
 }
 
 /** Options for {@link service}.
  *
  * @category Tasks, cron, commands, services
  */
-export interface ServiceOptions {
-  /** Resources the service leases (per operation, like every world). */
-  resources?: ResourceDeclaration[];
+export interface ServiceOptions<R extends ResourceDeclaration[] = ResourceDeclaration[]> {
+  /** A paragraph for the reference. */
+  description?: string;
+  /** Resources the service leases (per operation, like every world);
+   * `ctx.resources` is typed from this list. */
+  resources?: R;
   /** What happens when the service ends. Default `never`: it stays ended
    * until the next revision. `on-failure` restarts after a throw; `always`
    * restarts whenever it ends. Backoff doubles per restart. */
@@ -249,7 +277,7 @@ export interface ServiceOptions {
  * @category Tasks, cron, commands, services
  */
 export function service(name: string, handler: (ctx: ServiceContext) => unknown): Workload;
-export function service(name: string, options: ServiceOptions, handler: (ctx: ServiceContext) => unknown): Workload;
+export function service<R extends ResourceDeclaration[] = ResourceDeclaration[]>(name: string, options: ServiceOptions<R>, handler: (ctx: ServiceContext<R>) => unknown): Workload;
 export function service(name: string, a: unknown, b?: unknown): Workload {
   const options = (typeof a === "function" ? {} : a) as ServiceOptions;
   const handler = (typeof a === "function" ? a : b) as Workload["handler"];
@@ -258,6 +286,7 @@ export function service(name: string, a: unknown, b?: unknown): Workload {
     __usai: "workload",
     kind: "service",
     name,
+    ...(options.description ? { description: options.description } : {}),
     trigger: restart ? { restart } : {},
     contracts: {},
     errors: [],
@@ -270,9 +299,12 @@ export function service(name: string, a: unknown, b?: unknown): Workload {
 }
 
 /** Record that `from` invokes or dispatches the tasks `to`, so that `usai
- * graph`, `inspect` and the reference page show the edge (the runtime
- * refuses a dispatch to a task that does not exist either way). Returns
- * `from`, so it wraps a declaration in place.
+ * graph`, `inspect` and the reference page show the edge. The annotation
+ * is for the graph only: a dispatch to a task that is not listed here
+ * still runs, and a dispatch to a task that does not exist is refused at
+ * runtime (`unknown_task`) whether or not it is listed. Returns `from`, so
+ * it wraps a declaration in place. See {@link QueueHandle.publish} and
+ * {@link publishes} for the durable, cross-process equivalent.
  *
  * @category Tasks, cron, commands, services
  */
@@ -282,7 +314,9 @@ export function dispatches(from: Workload, ...to: Workload[]): Workload {
 }
 
 /** Record that `from` publishes to queue topics (names, or the consuming
- * `queue.consume` workloads), for `usai graph` and the reference page.
+ * `queue.consume` workloads) with {@link QueueHandle.publish}, for `usai
+ * graph` and the reference page (the consumer's page lists its
+ * publishers). Annotation only; the publish itself is `ctx.queue.publish`.
  * Returns `from`, so it wraps a declaration in place.
  *
  * @category Tasks, cron, commands, services
@@ -296,7 +330,9 @@ export function publishes(from: Workload, ...topics: Array<string | Workload>): 
  *
  * @category Tasks, cron, commands, services
  */
-export interface SeederContext extends BaseContext {}
+export interface SeederContext<R = ResourceDeclaration[]> extends BaseContext {
+  readonly resources: ResourcesOf<R>;
+}
 
 /** A seeder file's default export. Discovered by `usai db seed`, run as
  * finite work with access to the declared resources; never part of
@@ -316,7 +352,7 @@ export interface SeederDeclaration {
  *
  * @category Tasks, cron, commands, services
  */
-export function seeder(options: { resources?: ResourceDeclaration[] }, run: (ctx: SeederContext) => unknown): SeederDeclaration;
+export function seeder<R extends ResourceDeclaration[] = ResourceDeclaration[]>(options: { resources?: R }, run: (ctx: SeederContext<R>) => unknown): SeederDeclaration;
 export function seeder(run: (ctx: SeederContext) => unknown): SeederDeclaration;
 export function seeder(a: unknown, b?: unknown): SeederDeclaration {
   const options = (typeof a === "function" ? {} : a) as { resources?: ResourceDeclaration[] };

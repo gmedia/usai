@@ -14,15 +14,22 @@ publish(
    message: unknown, 
    options?: {
   delayMs?: number;
-  database?: PostgresDeclaration;
+  database?: PostgresDeclaration<string>;
 }
 ): Promise<{
   id: string;
 }>;
 ```
 
-Enqueues a message. Resolves once the insert is durable in the queue's
-database; processing happens in its own world later.
+Enqueue a message for the topic's consumer. Resolves with the
+message id once the row is durable in the queue's database (the
+consumer's `database`, by default the application's first `postgres`
+resource — the publishing workload need not declare it); processing
+happens later, in the consumer's own world, at least once. The message
+must satisfy the consumer's `message` schema or it is dead-lettered on
+arrival, so adding a new event means extending that schema first.
+Declare the edge with [publishes](../functions/publishes.md) so the reference links the two.
+`delayMs` holds the message back; `database` targets another queue.
 
 #### Parameters
 
@@ -30,9 +37,9 @@ database; processing happens in its own world later.
 | ------ | ------ |
 | `topic` | `string` |
 | `message` | `unknown` |
-| `options?` | \{ `delayMs?`: `number`; `database?`: [`PostgresDeclaration`](PostgresDeclaration.md); \} |
+| `options?` | \{ `delayMs?`: `number`; `database?`: [`PostgresDeclaration`](PostgresDeclaration.md)\<`string`\>; \} |
 | `options.delayMs?` | `number` |
-| `options.database?` | [`PostgresDeclaration`](PostgresDeclaration.md) |
+| `options.database?` | [`PostgresDeclaration`](PostgresDeclaration.md)\<`string`\> |
 
 #### Returns
 

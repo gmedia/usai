@@ -41,10 +41,10 @@ export const ticker = service("ticker", { resources: [cache], restart: { mode: "
 ## Call Signature
 
 ```ts
-function service(
+function service<R extends ResourceDeclaration<string, unknown>[] = ResourceDeclaration<string, unknown>[]>(
    name: string, 
-   options: ServiceOptions, 
-   handler: (ctx: ServiceContext) => unknown
+   options: ServiceOptions<R>, 
+   handler: (ctx: ServiceContext<R>) => unknown
 ): Workload;
 ```
 
@@ -56,13 +56,19 @@ throwing ends the service; `restart` decides what happens next. A
 service is supervised per revision, so a replacement revision gets its
 own instance and the old one stops with its revision.
 
+### Type Parameters
+
+| Type Parameter | Default type |
+| ------ | ------ |
+| `R` *extends* [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)\<`string`, `unknown`\>[] | [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)\<`string`, `unknown`\>[] |
+
 ### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
 | `name` | `string` |
-| `options` | [`ServiceOptions`](../interfaces/ServiceOptions.md) |
-| `handler` | (`ctx`: [`ServiceContext`](../interfaces/ServiceContext.md)) => `unknown` |
+| `options` | [`ServiceOptions`](../interfaces/ServiceOptions.md)\<`R`\> |
+| `handler` | (`ctx`: [`ServiceContext`](../interfaces/ServiceContext.md)\<`R`\>) => `unknown` |
 
 ### Returns
 

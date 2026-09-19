@@ -1,7 +1,7 @@
 // HTTP workload declarations (`GOAL.md` §10–§15, ADR-0003, ADR-0004).
 
 import type { AnySchema, Output } from "./schema.ts";
-import type { AuthDeclaration, DeclaredError, HttpOptions, Method, Workload, WorkloadPolicies } from "./declarations.ts";
+import type { AuthDeclaration, DeclaredError, HttpOptions, Method, ResourceDeclaration, ResourcesOf, Workload, WorkloadPolicies } from "./declarations.ts";
 import type { BaseContext } from "./runtime/context.ts";
 
 /** Explicit response: status, headers, and a body the runtime encodes.
@@ -54,13 +54,22 @@ type ResponseOf<O extends HttpOptions> = O["response"] extends AnySchema
  */
 export interface HttpContext<O extends HttpOptions = HttpOptions> extends BaseContext {
   readonly method: Method;
+  /** The matched path, as requested. */
   readonly path: string;
+  /** Path plus query string. */
   readonly url: string;
+  /** Path parameters, validated against `params` (strings when undeclared). */
   readonly params: OutputOf<O["params"], Record<string, string>>;
+  /** Query, validated against `query` (strings or arrays when undeclared). */
   readonly query: OutputOf<O["query"], Record<string, string | string[]>>;
+  /** Headers (lower-cased names), validated against `headers`. */
   readonly headers: OutputOf<O["headers"], Record<string, string>>;
+  /** JSON body, validated against `body` (`unknown` when undeclared). */
   readonly body: OutputOf<O["body"], unknown>;
+  /** The principal the `auth` declaration resolved; `undefined` without one. */
   readonly auth: O["auth"] extends AuthDeclaration<infer P> ? P : undefined;
+  /** The declared resources, typed by name from `resources: [...]`. */
+  readonly resources: ResourcesOf<O["resources"]>;
 }
 
 /** The context of a raw request (`http.raw`): no contracts, the exact
@@ -68,13 +77,16 @@ export interface HttpContext<O extends HttpOptions = HttpOptions> extends BaseCo
  *
  * @category HTTP
  */
-export interface RawContext extends BaseContext {
+export interface RawContext<R = ResourceDeclaration[]> extends BaseContext {
   readonly method: Method;
   readonly path: string;
   readonly url: string;
   readonly params: Record<string, string>;
   readonly query: Record<string, string | string[]>;
   readonly headers: Record<string, string>;
+  /** The declared resources, typed by name from `resources: [...]`. */
+  readonly resources: ResourcesOf<R>;
+  /** The request body, once: bytes, text, or parsed JSON. */
   readonly request: {
     bytes(): Promise<Uint8Array>;
     text(): Promise<string>;
@@ -103,6 +115,8 @@ function declare<O extends HttpOptions>(method: Method, path: string, options: O
     __usai: "workload",
     kind: "http",
     name: `${method} ${path}`,
+    ...(options.summary ? { summary: options.summary } : {}),
+    ...(options.description ? { description: options.description } : {}),
     trigger: { method, path, raw: false },
     contracts,
     errors: options.errors ?? [],
@@ -126,11 +140,13 @@ function method(m: Method): Declare {
  *
  * @category HTTP
  */
-export interface RawOptions extends WorkloadPolicies {
+export interface RawOptions<R extends ResourceDeclaration[] = ResourceDeclaration[]> extends WorkloadPolicies {
   /** HTTP method. Default `POST`. */
   method?: Method;
+  summary?: string;
+  description?: string;
   auth?: AuthDeclaration;
-  resources?: import("./declarations.ts").ResourceDeclaration[];
+  resources?: R;
   /** Errors the handler answers with (documented in the reference). */
   errors?: DeclaredError[];
   /** Statuses the handler writes, with a description each — the reference
@@ -139,11 +155,9 @@ export interface RawOptions extends WorkloadPolicies {
 }
 
 /** The handler of `http.raw`. */
-export type RawHandler = (ctx: RawContext) => RawResponse | HttpResponse | Promise<RawResponse | HttpResponse>;
+export type RawHandler<R extends ResourceDeclaration[] = ResourceDeclaration[]> = (ctx: RawContext<R>) => RawResponse | HttpResponse | Promise<RawResponse | HttpResponse>;
 
-/** Low-level escape hatch: exact bytes in, raw response out. Schema
- * validation and generated docs are unavailable for this endpoint. */
-function raw(path: string, options: RawOptions, handler: RawHandler): Workload;
+function raw<R extends ResourceDeclaration[]>(path: string, options: RawOptions<R>, handler: RawHandler<R>): Workload;
 function raw(path: string, handler: RawHandler): Workload;
 function raw(path: string, a: RawOptions | RawHandler, b?: RawHandler): Workload {
   const options: RawOptions = typeof a === "function" ? {} : a;
@@ -156,6 +170,8 @@ function raw(path: string, a: RawOptions | RawHandler, b?: RawHandler): Workload
     __usai: "workload",
     kind: "http",
     name: `${m} ${path}`,
+    ...(options.summary ? { summary: options.summary } : {}),
+    ...(options.description ? { description: options.description } : {}),
     trigger: { method: m, path, raw: true, ...(options.responses ? { responses: options.responses } : {}) },
     contracts: {},
     errors: options.errors ?? [],
@@ -184,9 +200,18 @@ import { streams } from "./connection.ts";
  * un-awaited resource operation at that point is a lifecycle error, not a
  * silent drop (hand work off with `ctx.tasks.dispatch` instead).
  *
- * `response` is one schema (status 200) or a map of status to schema;
- * `errors` lists the `{ code, status }` pairs the handler throws so the
+ * `response` is one schema (status 200) or a map of status to schema; a
+ * plain return value takes the lowest declared 2xx status (200 without a
+ * declaration; 204 when it returns nothing), `http.response`/`created`/…
+ * pick another. `errors` lists the `{ code, status }` pairs the handler
+ * throws, `summary`/`description` describe the operation, so the
  * reference page and the OpenAPI document can say so.
+ *
+ * Paths: `/users/:id` declares a parameter. A literal segment always wins
+ * over a parameter at the same position (`/invoices/summary` beats
+ * `/invoices/:id`, whatever the declaration order); the same method and
+ * path twice is a build error; a path nobody declares is 404
+ * `route_not_found` before any world exists.
  *
  * @example
  * ```ts
@@ -204,9 +229,6 @@ import { streams } from "./connection.ts";
  * @category HTTP
  */
 export const http = {
-  /** Streaming response (`text/event-stream` by default): a
-   * connection-bound world that lives until the handler returns; see
-   * {@link StreamHandle}. */
   stream: streams.stream,
   /** `GET` endpoint. */
   get: method("GET"),

@@ -3,7 +3,7 @@
 # Function: postgres()
 
 ```ts
-function postgres(name: string, options?: PostgresOptions): PostgresDeclaration;
+function postgres<N extends string>(name: N, options?: PostgresOptions): PostgresDeclaration<N>;
 ```
 
 Declare a PostgreSQL resource. The runtime owns the pool for its whole
@@ -19,21 +19,27 @@ Migrations are SQL files matched by the module's `migrations` globs,
 applied by `usai db migrate` (never at startup). The same resource can
 be declared by several modules with the same configuration.
 
+## Type Parameters
+
+| Type Parameter |
+| ------ |
+| `N` *extends* `string` |
+
 ## Parameters
 
 | Parameter | Type | Description |
 | ------ | ------ | ------ |
-| `name` | `string` | Unique within the application; `ctx.resources[name]`. |
+| `name` | `N` | Unique within the application; the handle is `ctx.resources[name]`, typed when the workload lists this declaration under `resources`. |
 | `options` | [`PostgresOptions`](../interfaces/PostgresOptions.md) | - |
 
 ## Returns
 
-[`PostgresDeclaration`](../interfaces/PostgresDeclaration.md)
+[`PostgresDeclaration`](../interfaces/PostgresDeclaration.md)\<`N`\>
 
 ## Example
 
 ```ts
-export const db = postgres("main");                       // reads DATABASE_URL
+export const db = postgres("db");                          // reads DATABASE_URL; `ctx.resources.db`
 export const getUser = http.get("/users/:id", { params: Id, resources: [db] }, async (ctx) => {
   const user = await ctx.resources.db.one<User>("select * from users where id = $1", [ctx.params.id]);
   if (!user) throw errors.notFound();

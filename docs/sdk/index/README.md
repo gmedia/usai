@@ -6,7 +6,26 @@
 its natural lifetime. Public surface for v0 (breaking changes allowed
 before alpha). Start with [defineApp](functions/defineApp.md), then [http](variables/http.md),
 [task](functions/task.md), [cron](functions/cron.md), [queue](variables/queue.md), [postgres](functions/postgres.md); every
-handler receives a [BaseContext](interfaces/BaseContext.md).
+handler receives a [BaseContext](interfaces/BaseContext.md). What *your* application
+declares — every operation, what it leases and hands off, a request
+panel — is the application reference at `/_usai/docs` on a running
+`usai dev`.
+
+Vocabulary used throughout:
+- **world** — the fresh, isolated execution of one unit of work (a
+  request, a task, a cron tick, a queue message, a connection, a
+  service). Nothing survives it except what it wrote to a resource.
+- **commit** — the moment a world's work counts: its handler returned
+  (for HTTP, the response head is sent; for a queue message, it is
+  acknowledged). Hand-offs start after it; a throw means no commit.
+- **lease** — a resource operation owned by the world for its duration
+  (one connection per statement, one request per `fetch`); returned
+  only after a terminal outcome.
+- **hand-off** — `ctx.tasks.dispatch` or `ctx.queue.publish`: work that
+  outlives the world, with a new owner, declared explicitly.
+- **revision** — one immutable application definition installed in the
+  runtime; a deploy installs a new one and **drains** the old (in-flight
+  work finishes, persistent workloads are asked to stop).
 
 ## Application
 
@@ -16,6 +35,7 @@ handler receives a [BaseContext](interfaces/BaseContext.md).
 | [DeclaredError](interfaces/DeclaredError.md) | An error a workload declares it may answer with (`errors: [...]`), so the reference and the OpenAPI document list it. |
 | [AuthDeclaration](interfaces/AuthDeclaration.md) | What `auth.bearer`/`auth.header`/`auth.custom` return: a named boundary reused by reference. `Principal` is the type of `ctx.auth`. |
 | [ResourceDeclaration](interfaces/ResourceDeclaration.md) | What `postgres(...)`, `cache.local(...)` and `httpClient(...)` return. A plain object: the build reads it into the manifest, the runtime owns the resource it names, and a workload lists it under `resources`. |
+| [ResourcesOf](type-aliases/ResourcesOf.md) | `ctx.resources` for a workload that declared `resources: R`: one property per declaration, named by the resource, typed as its in-world handle ([PostgresHandle](interfaces/PostgresHandle.md), [CacheLocalHandle](interfaces/CacheLocalHandle.md), [HttpClientHandle](interfaces/HttpClientHandle.md)). Without a declaration list it is `Record<string, unknown>`. |
 | [WorkloadPolicies](interfaces/WorkloadPolicies.md) | Bounds every workload can declare. |
 | [HttpContracts](interfaces/HttpContracts.md) | The schema slots of an HTTP endpoint. Any Standard Schema (`zod`, `valibot`, `arktype`, …) works; slots whose schema can describe itself as JSON Schema are validated before a world exists, the others inside it. |
 | [HttpOptions](interfaces/HttpOptions.md) | Options of `http.get`/`post`/…: contracts, policies, errors, auth, resources. |
@@ -62,12 +82,13 @@ handler receives a [BaseContext](interfaces/BaseContext.md).
 | [CronContext](interfaces/CronContext.md) | The context of one cron tick: `scheduledAt` (ISO 8601, the tick's nominal time) plus [BaseContext](interfaces/BaseContext.md). |
 | [cron](functions/cron.md) | Declare a scheduled job. Each due tick runs in a **fresh world**, finite, bounded by `timeout`. The scheduler belongs to the revision: it starts when the revision activates and stops when it drains, so two revisions never tick the same job at once. A missed tick (the process was down) is not replayed. `usai cron run <name>` runs one tick without the clock, and `app.cron(name).run()` does the same in tests. |
 | [CommandContext](interfaces/CommandContext.md) | The context of one command run: the command-line `args` plus [BaseContext](interfaces/BaseContext.md). |
+| [CommandOptions](interfaces/CommandOptions.md) | Options for [command](functions/command.md). |
 | [command](functions/command.md) | Declare a command: finite work run on demand from the command line (`usai app <name> [args]`), in a fresh world with the declared resources. The return value is printed as JSON; a thrown error exits non-zero. Commands are for operators (a stats report, a one-off repair), not for startup: nothing runs a command unless someone asks. |
 | [ServiceContext](interfaces/ServiceContext.md) | The context of a service: [BaseContext](interfaces/BaseContext.md) plus `sleep`. Watch `ctx.signal` — it aborts when the revision drains, and `sleep` resolves early then. |
 | [ServiceOptions](interfaces/ServiceOptions.md) | Options for [service](functions/service.md). |
 | [service](functions/service.md) | Declare a service: the one **persistent** lifetime. One world starts when the revision activates, runs the handler, and is asked to stop (`ctx.signal` aborts) when the revision drains; a handler that ignores the signal is cancelled at the drain bound. The handler returning or throwing ends the service; `restart` decides what happens next. A service is supervised per revision, so a replacement revision gets its own instance and the old one stops with its revision. |
-| [dispatches](functions/dispatches.md) | Record that `from` invokes or dispatches the tasks `to`, so that `usai graph`, `inspect` and the reference page show the edge (the runtime refuses a dispatch to a task that does not exist either way). Returns `from`, so it wraps a declaration in place. |
-| [publishes](functions/publishes.md) | Record that `from` publishes to queue topics (names, or the consuming `queue.consume` workloads), for `usai graph` and the reference page. Returns `from`, so it wraps a declaration in place. |
+| [dispatches](functions/dispatches.md) | Record that `from` invokes or dispatches the tasks `to`, so that `usai graph`, `inspect` and the reference page show the edge. The annotation is for the graph only: a dispatch to a task that is not listed here still runs, and a dispatch to a task that does not exist is refused at runtime (`unknown_task`) whether or not it is listed. Returns `from`, so it wraps a declaration in place. See [QueueHandle.publish](interfaces/QueueHandle.md#publish) and [publishes](functions/publishes.md) for the durable, cross-process equivalent. |
+| [publishes](functions/publishes.md) | Record that `from` publishes to queue topics (names, or the consuming `queue.consume` workloads) with [QueueHandle.publish](interfaces/QueueHandle.md#publish), for `usai graph` and the reference page (the consumer's page lists its publishers). Annotation only; the publish itself is `ctx.queue.publish`. Returns `from`, so it wraps a declaration in place. |
 | [SeederContext](interfaces/SeederContext.md) | The context a seeder runs with: [BaseContext](interfaces/BaseContext.md). |
 | [SeederDeclaration](interfaces/SeederDeclaration.md) | A seeder file's default export. Discovered by `usai db seed`, run as finite work with access to the declared resources; never part of startup. |
 | [seeder](functions/seeder.md) | Declare a seeder (the default export of a file matched by the module's `seeders` globs). `usai db seed [name]` runs it as finite work with the declared resources. |

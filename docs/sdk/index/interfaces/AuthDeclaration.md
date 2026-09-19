@@ -13,10 +13,10 @@ boundary reused by reference. `Principal` is the type of `ctx.auth`.
 
 ## Properties
 
-| Property | Modifier | Type |
-| ------ | ------ | ------ |
-| <a id="__usai"></a> `__usai` | `readonly` | `"auth"` |
-| <a id="name"></a> `name` | `readonly` | `string` |
-| <a id="scheme"></a> `scheme` | `readonly` | `"bearer"` \| `"header"` \| `"custom"` |
-| <a id="header"></a> `header?` | `readonly` | `string` |
-| <a id="resolve"></a> `resolve` | `readonly` | (`ctx`: `unknown`, `credential`: `string` \| `undefined`) => `Principal` \| `Promise`\<`Principal`\> |
+| Property | Modifier | Type | Description |
+| ------ | ------ | ------ | ------ |
+| <a id="name"></a> `name` | `readonly` | `string` | - |
+| <a id="description"></a> `description?` | `readonly` | `string` | For the OpenAPI security scheme: where the credential comes from. |
+| <a id="scheme"></a> `scheme` | `readonly` | `"bearer"` \| `"header"` \| `"custom"` | - |
+| <a id="header"></a> `header?` | `readonly` | `string` | - |
+| <a id="resolve"></a> `resolve` | `readonly` | (`ctx`: `unknown`, `credential`: `string` \| `undefined`) => `Principal` \| `Promise`\<`Principal`\> | - |

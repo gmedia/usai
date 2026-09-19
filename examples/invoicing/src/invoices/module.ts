@@ -15,7 +15,7 @@ const NewInvoice = z.object({
 const Status = z.enum(["draft", "issued", "paid", "overdue", "void"]);
 const Invoice = z.object({
   id: z.string(), number: z.number().int(), customer: z.string(), currency: z.string(), status: Status,
-  totalCents: z.number().int(), dueDate: z.string(), issuedAt: z.string().nullable(), paidAt: z.string().nullable(), createdAt: z.string(),
+  totalCents: z.number().int().min(0), dueDate: z.string().date(), issuedAt: z.string().datetime({ offset: true }).nullable(), paidAt: z.string().datetime({ offset: true }).nullable(), createdAt: z.string().datetime({ offset: true }),
 });
 const InvoiceWithItems = Invoice.extend({ items: z.array(Item.extend({ id: z.number().int() })) });
 const Page = z.object({ items: z.array(Invoice), nextCursor: z.string().nullable() });
@@ -32,7 +32,7 @@ async function publish(ctx: { queue: { publish(topic: string, message: unknown):
   await ctx.queue.publish("webhook.deliver", { tenantId, invoiceId, event });
 }
 
-export const create = http.post("/invoices", { auth: session, body: NewInvoice, response: { 201: InvoiceWithItems }, resources: [db] }, async (ctx) => {
+export const create = http.post("/invoices", { summary: "Create a draft invoice", description: "The invoice starts as a draft; issue it to make it payable and notify the tenant's webhook.", auth: session, body: NewInvoice, response: { 201: InvoiceWithItems }, resources: [db] }, async (ctx) => {
   const total = ctx.body.items.reduce((sum, i) => sum + i.quantity * i.unitCents, 0);
   // Number, header and items commit together or not at all.
   const id = await sql(ctx).transaction(async (tx) => {
@@ -56,12 +56,12 @@ async function load(db: SqlExecutor, tenantId: string, id: string) {
   return { ...invoice, items };
 }
 
-export const get = http.get("/invoices/:id", { auth: session, params: Id, response: { 200: InvoiceWithItems }, errors: [{ code: "not_found", status: 404 }], resources: [db] }, async (ctx) =>
+export const get = http.get("/invoices/:id", { summary: "One invoice with its line items", auth: session, params: Id, response: { 200: InvoiceWithItems }, errors: [{ code: "not_found", status: 404 }], resources: [db] }, async (ctx) =>
   load(sql(ctx), ctx.auth.tenantId, ctx.params.id),
 );
 
 // Keyset pagination on (created_at, id): stable under inserts, no OFFSET.
-export const list = http.get("/invoices", { auth: session, query: ListQuery, response: { 200: Page }, resources: [db] }, async (ctx) => {
+export const list = http.get("/invoices", { summary: "List the tenant's invoices", description: "Newest first, cursor-paginated; filter by status.", auth: session, query: ListQuery, response: { 200: Page }, resources: [db] }, async (ctx) => {
   const params: unknown[] = [ctx.auth.tenantId, ctx.query.limit + 1];
   let where = `tenant_id = $1`;
   if (ctx.query.status) { params.push(ctx.query.status); where += ` and status = $${params.length}`; }
@@ -91,19 +91,19 @@ async function transition(ctx: { resources: Record<string, unknown>; auth: { ten
 }
 
 // `publishes(...)` records the hand-off to the queue for `usai graph` and the API docs.
-export const issue = publishes(http.post("/invoices/:id/issue", { auth: session, params: Id, response: { 200: Invoice }, errors: [{ code: "not_found", status: 404 }, { code: "conflict", status: 409 }], resources: [db] }, async (ctx) => {
+export const issue = publishes(http.post("/invoices/:id/issue", { summary: "Issue a draft", description: "Draft → issued. Publishes invoice.issued to the tenant's webhook.", auth: session, params: Id, response: { 200: Invoice }, errors: [{ code: "not_found", status: 404 }, { code: "conflict", status: 409 }], resources: [db] }, async (ctx) => {
   const row = await transition(ctx, ["draft"], "issued", "issued_at");
   await publish(ctx, ctx.auth.tenantId, row.id, "invoice.issued");
   return row;
 }), "webhook.deliver");
 
-export const pay = publishes(http.post("/invoices/:id/pay", { auth: session, params: Id, response: { 200: Invoice }, errors: [{ code: "not_found", status: 404 }, { code: "conflict", status: 409 }], resources: [db] }, async (ctx) => {
+export const pay = publishes(http.post("/invoices/:id/pay", { summary: "Mark an invoice paid", description: "Issued or overdue → paid. Publishes invoice.paid.", auth: session, params: Id, response: { 200: Invoice }, errors: [{ code: "not_found", status: 404 }, { code: "conflict", status: 409 }], resources: [db] }, async (ctx) => {
   const row = await transition(ctx, ["issued", "overdue"], "paid", "paid_at");
   await publish(ctx, ctx.auth.tenantId, row.id, "invoice.paid");
   return row;
 }), "webhook.deliver");
 
-export const remove = http.delete("/invoices/:id", { auth: session, params: Id, errors: [{ code: "not_found", status: 404 }, { code: "conflict", status: 409 }], resources: [db] }, async (ctx) => {
+export const remove = http.delete("/invoices/:id", { summary: "Void a draft", auth: session, params: Id, response: { 204: z.null() }, errors: [{ code: "not_found", status: 404 }, { code: "conflict", status: 409 }], resources: [db] }, async (ctx) => {
   const gone = await sql(ctx).execute(`delete from invoices where tenant_id = $1 and id = $2 and status = 'draft'`, [ctx.auth.tenantId, ctx.params.id]);
   if (gone === 0) {
     const exists = await sql(ctx).one(`select 1 from invoices where tenant_id = $1 and id = $2`, [ctx.auth.tenantId, ctx.params.id]);

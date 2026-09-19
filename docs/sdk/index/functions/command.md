@@ -36,12 +36,10 @@ export const stats = command("invoices:stats", { resources: [db] }, async (ctx) 
 ## Call Signature
 
 ```ts
-function command(
+function command<R extends ResourceDeclaration<string, unknown>[] = ResourceDeclaration<string, unknown>[]>(
    name: string, 
-   options: WorkloadPolicies & {
-  resources?: ResourceDeclaration[];
-}, 
-   handler: (ctx: CommandContext) => unknown
+   options: CommandOptions<R>, 
+   handler: (ctx: CommandContext<R>) => unknown
 ): Workload;
 ```
 
@@ -51,13 +49,19 @@ The return value is printed as JSON; a thrown error exits non-zero.
 Commands are for operators (a stats report, a one-off repair), not for
 startup: nothing runs a command unless someone asks.
 
+### Type Parameters
+
+| Type Parameter | Default type |
+| ------ | ------ |
+| `R` *extends* [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)\<`string`, `unknown`\>[] | [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)\<`string`, `unknown`\>[] |
+
 ### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
 | `name` | `string` |
-| `options` | [`WorkloadPolicies`](../interfaces/WorkloadPolicies.md) & \{ `resources?`: [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)[]; \} |
-| `handler` | (`ctx`: [`CommandContext`](../interfaces/CommandContext.md)) => `unknown` |
+| `options` | [`CommandOptions`](../interfaces/CommandOptions.md)\<`R`\> |
+| `handler` | (`ctx`: [`CommandContext`](../interfaces/CommandContext.md)\<`R`\>) => `unknown` |
 
 ### Returns
 

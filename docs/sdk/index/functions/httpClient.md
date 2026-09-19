@@ -3,7 +3,7 @@
 # Function: httpClient()
 
 ```ts
-function httpClient(name: string, options?: HttpClientOptions): HttpClientDeclaration;
+function httpClient<N extends string>(name: N, options?: HttpClientOptions): HttpClientDeclaration<N>;
 ```
 
 Declare an outbound HTTP client. There is no global `fetch` in a world;
@@ -16,16 +16,22 @@ origin is pinned and any other origin is `origin_refused` before the
 request leaves. A non-2xx status is data (`ok: false`), not an exception;
 connection failures and timeouts throw and map to 503 for HTTP callers.
 
+## Type Parameters
+
+| Type Parameter |
+| ------ |
+| `N` *extends* `string` |
+
 ## Parameters
 
 | Parameter | Type |
 | ------ | ------ |
-| `name` | `string` |
+| `name` | `N` |
 | `options` | [`HttpClientOptions`](../interfaces/HttpClientOptions.md) |
 
 ## Returns
 
-[`HttpClientDeclaration`](../interfaces/HttpClientDeclaration.md)
+[`HttpClientDeclaration`](../interfaces/HttpClientDeclaration.md)\<`N`\>
 
 ## Example
 

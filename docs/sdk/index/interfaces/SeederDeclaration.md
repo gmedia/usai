@@ -11,5 +11,5 @@ startup.
 | Property | Modifier | Type |
 | ------ | ------ | ------ |
 | <a id="__usai"></a> `__usai` | `readonly` | `"seeder"` |
-| <a id="resources"></a> `resources` | `readonly` | readonly [`ResourceDeclaration`](ResourceDeclaration.md)[] |
+| <a id="resources"></a> `resources` | `readonly` | readonly [`ResourceDeclaration`](ResourceDeclaration.md)\<`string`, `unknown`\>[] |
 | <a id="run"></a> `run` | `readonly` | (`ctx`: [`SeederContext`](SeederContext.md)) => `unknown` |

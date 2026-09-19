@@ -132,7 +132,9 @@ export const createUser = http.post("/users", { body: NewUser, response: { 201: 
 - Errors: `errors.notFound()`, `errors.conflict()`, `errors.custom(code, status, message)`. Unknown exceptions are sanitized to `internal` under `usai run`; `usai dev` returns the exception message and stack to the client (`expose_diagnostics`) — details always go to the logs. A response that does not match its declared contract is a `500 response_contract_violation`; the failing paths are in the log and, in dev, in `error.details.issues`.
 - Declare what you throw and return: OpenAPI and `usai inspect` only know the statuses you put in `response: { … }` and the codes in `errors: [...]`; `errors.notFound()` in a handler does not add a 404 to the document by itself.
 - Validation issues use JSON-pointer paths (`/tags/0`) wherever the check ran — at the boundary or in the world.
-- A resource the workload did not declare (`ctx.resources["x"]` without `resources: [x]`) is a `500 resource_not_declared` that names the fix.
+- `ctx.resources` is typed from the workload's `resources: [...]`: `resources: [db]` with `const db = postgres("db")` makes `ctx.resources.db` a `PostgresHandle`, `cache.local` a `CacheLocalHandle`, `httpClient` an `HttpClientHandle`; an undeclared name is a compile error, and at runtime (`ctx.resources["x"]` without `resources: [x]`) a `500 resource_not_declared` that names the fix. Only an auth resolver's `ctx.resources` is untyped (cast to the handle).
+- Paths: `:id` declares a parameter; a literal segment always wins over a parameter at the same position (`/invoices/summary` beats `/invoices/:id`, whatever the declaration order); the same method and path twice fails the build; an undeclared path is `404 route_not_found` before any world exists.
+- `summary` (one line) and `description` (a paragraph) on any workload's options feed the reference page and the OpenAPI document; `auth.bearer({ description })` documents the security scheme.
 - Raw endpoints: `http.raw("/webhook", async (ctx) => http.rawResponse(200, "ok"))` — exact bytes via `ctx.request.bytes()`, no contracts, documented as opaque.
 - Auth is a declared boundary: `const authed = auth.bearer({ resolve: async (ctx, token) => … })`, then `http.get("/me", { auth: authed }, async (ctx) => ctx.auth)`.
 
@@ -200,7 +202,7 @@ export const orders = queue.consume("orders", { message: OrderEvent, concurrency
 await ctx.queue.publish("orders", { orderId });
 ```
 
-The v0 queue lives in PostgreSQL (`usai_queue`). Delivery is at-least-once; retry is only what you declare; exhausted messages go to the `dead` state.
+The v0 queue lives in PostgreSQL (`usai_queue`, created by the runtime in the consumer's `database` — by default the application's first `postgres` resource, which is also where `publish` writes; the publishing workload need not declare that resource). Delivery is at-least-once; retry is only what you declare; exhausted messages go to the `dead` state. A message must satisfy the consumer's `message` schema or it is dead-lettered on arrival — to add an event to an existing topic, extend the consumer's schema first, then publish it. Wrap the publisher in `publishes(workload, "orders")` so the reference links producer and consumer.
 
 ## 9. Streams and WebSockets
 
