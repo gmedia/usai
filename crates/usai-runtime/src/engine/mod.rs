@@ -70,6 +70,16 @@ pub enum EngineError {
     Capacity,
 }
 
+/// One read of the guest: the outcome once the handler settled, and what
+/// is still pending (`docs/GUEST-ABI.md`, `__usai.state()`).
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct GuestState {
+    #[serde(default)]
+    pub outcome: Option<Outcome>,
+    #[serde(default)]
+    pub pending: Pending,
+}
+
 /// What the guest hands back when the invoked handler settles.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(untagged)]
@@ -223,8 +233,9 @@ pub trait WorldInstance: Send {
     /// Asks the guest to finish: the signal fires, pending timers resolve,
     /// other operations complete normally. Used for persistent workloads.
     async fn stop(&mut self, reason: &str) -> Result<(), EngineError>;
-    async fn outcome(&mut self) -> Result<Option<Outcome>, EngineError>;
-    async fn pending(&mut self) -> Result<Pending, EngineError>;
+    /// The outcome (when the handler has settled) and the live pending
+    /// operations, read together: one guest call per driver iteration.
+    async fn state(&mut self) -> Result<GuestState, EngineError>;
     /// Setting this flag aborts guest execution at its next safe point. Used
     /// by the driver's watchdog for runaway synchronous code.
     fn interrupter(&self) -> Arc<std::sync::atomic::AtomicBool>;

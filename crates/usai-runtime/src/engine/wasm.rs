@@ -27,14 +27,14 @@ use wasmtime::{
 use wasmtime_wizer::{WasmtimeWizer, Wizer};
 
 use super::{
-    Compiled, Engine, EngineError, GUEST_BRIDGE, HostBindings, Outcome, Pending, RefusingBindings,
+    Compiled, Engine, EngineError, GUEST_BRIDGE, GuestState, HostBindings, RefusingBindings,
     WorldInstance,
 };
 use crate::definition::Code;
 
 /// The sealed core (`guest/PROVENANCE.md`).
 pub const CORE: &[u8] = include_bytes!("../../guest/quickjs-async.wasm");
-pub const CORE_SHA256: &str = "c4e58003609cc13ebc23b7c987999d6a5d366be5b84afe7f6f240aeb2a9dcf11";
+pub const CORE_SHA256: &str = "229f9082455869e9bcd4a02d11a141582260edd8e3be1b38a2c50d985ea80f70";
 
 const MAX_PAYLOAD: usize = 8 * 1024 * 1024;
 
@@ -343,9 +343,10 @@ fn link(engine: &WtEngine) -> Result<Linker<HostData>, EngineError> {
     Ok(linker)
 }
 
-const EXPORT_NAMES: [&str; 18] = [
+const EXPORT_NAMES: [&str; 19] = [
     "memory",
     "qjs_run_gc",
+    "qjs_usai_call",
     "wasm_malloc",
     "wasm_free",
     "qjs_init",
@@ -733,6 +734,65 @@ impl Guest {
         Ok(text)
     }
 
+    /// Calls `__usai[name](arg)` through the core's direct-call export
+    /// (ADR-0018): one buffer in guest memory holding `name\0arg`, one typed
+    /// call, the result read back as a string. No script is parsed or
+    /// compiled; this is the request hot path.
+    async fn call(
+        &mut self,
+        store: &mut Store<HostData>,
+        name: &str,
+        arg: &str,
+    ) -> Result<String, EngineError> {
+        let mut buffer = Vec::with_capacity(name.len() + 1 + arg.len());
+        buffer.extend_from_slice(name.as_bytes());
+        buffer.push(0);
+        buffer.extend_from_slice(arg.as_bytes());
+        let ptr = self.alloc(store, &buffer, false).await?;
+        let value = self
+            .call1::<(i32, i32, i32, i32), i32>(
+                store,
+                "qjs_usai_call",
+                (
+                    ptr,
+                    name.len() as i32,
+                    ptr + name.len() as i32 + 1,
+                    arg.len() as i32,
+                ),
+            )
+            .await;
+        self.free(store, ptr).await?;
+        self.result_text(store, value?).await
+    }
+
+    /// A heap JSValue from `qjs_eval`/`qjs_usai_call`: the exception as an
+    /// error, otherwise the value rendered as a string; freed either way.
+    async fn result_text(
+        &mut self,
+        store: &mut Store<HostData>,
+        value: i32,
+    ) -> Result<String, EngineError> {
+        let is_exception = self
+            .call1::<i32, i32>(store, "qjs_is_exception", value)
+            .await?
+            != 0;
+        if is_exception {
+            self.call1::<i32, ()>(store, "qjs_free_value", value)
+                .await?;
+            let exception = self
+                .call1::<(), i32>(store, "qjs_get_exception", ())
+                .await?;
+            let text = self.string_of(store, exception).await?;
+            self.call1::<i32, ()>(store, "qjs_free_value", exception)
+                .await?;
+            return Err(EngineError::Guest(text));
+        }
+        let text = self.string_of(store, value).await?;
+        self.call1::<i32, ()>(store, "qjs_free_value", value)
+            .await?;
+        Ok(text)
+    }
+
     /// Evaluates a global script and returns its result rendered as a string.
     async fn eval(
         &mut self,
@@ -835,11 +895,6 @@ impl WasmEngine {
             module,
         }))
     }
-}
-
-/// Renders a Rust string as a JavaScript string literal.
-fn js_string(text: &str) -> String {
-    serde_json::to_string(text).unwrap_or_else(|_| "\"\"".into())
 }
 
 #[async_trait]
@@ -1075,16 +1130,13 @@ impl WasmWorld {
 impl WorldInstance for WasmWorld {
     async fn invoke(&mut self, index: usize, input_json: &str) -> Result<(), EngineError> {
         let t = std::time::Instant::now();
-        let code = format!(
-            "__usai.seed(\"{}\", {});__usai.invoke({index}, {});",
+        let payload = format!(
+            "{}\u{1f}{}\u{1f}{index}\u{1f}{input_json}",
             super::world_entropy(),
-            super::profiling(),
-            js_string(input_json)
+            u8::from(super::profiling()),
         );
-        self.guest
-            .eval(&mut self.store, &code, "usai:invoke")
-            .await?;
-        self.account("invoke.eval", t);
+        self.guest.call(&mut self.store, "entry", &payload).await?;
+        self.account("invoke.entry", t);
         let t = std::time::Instant::now();
         self.guest.run_jobs(&mut self.store).await?;
         self.account("invoke.jobs", t);
@@ -1111,10 +1163,7 @@ impl WorldInstance for WasmWorld {
 
     async fn cancel(&mut self, reason: &str) -> Result<(), EngineError> {
         self.store.data_mut().accepting = false;
-        let code = format!("__usai.cancel({});", js_string(reason));
-        self.guest
-            .eval(&mut self.store, &code, "usai:cancel")
-            .await?;
+        self.guest.call(&mut self.store, "cancel", reason).await?;
         let outstanding: Vec<u32> = self.store.data().ledger_by_native.keys().copied().collect();
         for native in outstanding {
             self.forget(native);
@@ -1128,8 +1177,7 @@ impl WorldInstance for WasmWorld {
     }
 
     async fn stop(&mut self, reason: &str) -> Result<(), EngineError> {
-        let code = format!("__usai.stop({});", js_string(reason));
-        self.guest.eval(&mut self.store, &code, "usai:stop").await?;
+        self.guest.call(&mut self.store, "stop", reason).await?;
         let timers: Vec<(u32, u64)> = self
             .store
             .data()
@@ -1153,34 +1201,12 @@ impl WorldInstance for WasmWorld {
         self.drain_deferred().await
     }
 
-    async fn outcome(&mut self) -> Result<Option<Outcome>, EngineError> {
+    async fn state(&mut self) -> Result<GuestState, EngineError> {
         let t = std::time::Instant::now();
-        let text = self
-            .guest
-            .eval(&mut self.store, "(__usai.outcome() ?? '')", "usai:outcome")
-            .await?;
-        self.account("outcome.eval", t);
-        if text.is_empty() {
-            return Ok(None);
-        }
-        serde_json::from_str::<Outcome>(&text)
-            .map(Some)
-            .map_err(|e| EngineError::Guest(format!("outcome is not decodable: {e}")))
-    }
-
-    async fn pending(&mut self) -> Result<Pending, EngineError> {
-        let t = std::time::Instant::now();
-        let text = self
-            .guest
-            .eval(
-                &mut self.store,
-                "JSON.stringify({ count: __usai.pendingCount(), kinds: __usai.pendingKinds() })",
-                "usai:pending",
-            )
-            .await?;
-        self.account("pending.eval", t);
-        serde_json::from_str::<Pending>(&text)
-            .map_err(|e| EngineError::Guest(format!("pending is not decodable: {e}")))
+        let text = self.guest.call(&mut self.store, "state", "").await?;
+        self.account("state", t);
+        serde_json::from_str::<GuestState>(&text)
+            .map_err(|e| EngineError::Guest(format!("guest state is not decodable: {e}")))
     }
 
     fn interrupter(&self) -> Arc<AtomicBool> {

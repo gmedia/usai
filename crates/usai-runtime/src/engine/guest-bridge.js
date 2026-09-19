@@ -221,6 +221,22 @@
     outcome() {
       return outcome === null ? null : JSON.stringify(outcome);
     },
+    // ---- direct-call ABI (ADR-0018): one string in, one string out ----
+    // `entry`: seed ␟ profiling ␟ index ␟ input JSON — seeds the world and
+    // starts the handler in one guest call instead of an evaluated snippet.
+    entry(payload) {
+      const first = payload.indexOf("\u001f");
+      const second = payload.indexOf("\u001f", first + 1);
+      const third = payload.indexOf("\u001f", second + 1);
+      bridge.seed(payload.slice(0, first), payload.slice(first + 1, second) === "1");
+      bridge.invoke(Number(payload.slice(second + 1, third)), payload.slice(third + 1));
+      return "";
+    },
+    // `state`: the outcome (null until the handler settles) and the
+    // pending-work count in one read, for the driver's loop.
+    state() {
+      return JSON.stringify({ outcome, pending: { count: pending.size, kinds: Array.from(pending.values(), (p) => p.kind) } });
+    },
   };
   Object.freeze(bridge);
   Object.defineProperty(globalThis, "__usai", { value: bridge, writable: false, configurable: false });

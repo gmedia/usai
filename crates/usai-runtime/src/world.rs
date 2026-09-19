@@ -15,7 +15,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::definition::{ApplicationDefinition, LifetimeFamily, WorkloadSpec};
 use crate::engine::{
-    Compiled, Engine, EngineError, GuestError, HostBindings, Outcome, WorldInstance,
+    Compiled, Engine, EngineError, GuestError, GuestState, HostBindings, Outcome, WorldInstance,
 };
 use crate::host_ops::{ChildRecord, Completion, OpContext, OpExtensions, spawn_operation};
 use crate::ownership::{Gauges, Ledger, OpId, WorldId, dec, inc};
@@ -246,6 +246,9 @@ pub struct WorldDriver {
     /// When the deadline elapses, as an instant, so synchronous guest runs
     /// can be bounded by it too (see `watchdog`).
     deadline_at: Option<Instant>,
+    /// The guest state the drive loop read when the handler settled, so the
+    /// end of `run` does not read it again.
+    last_state: Option<GuestState>,
 }
 
 impl WorldDriver {
@@ -303,6 +306,7 @@ impl WorldDriver {
             instantiate: t_inst.elapsed(),
             watch,
             deadline_at: spec.deadline.map(|d| Instant::now() + d),
+            last_state: None,
         })
     }
 
@@ -393,24 +397,36 @@ impl WorldDriver {
             },
         };
 
+        // One read of the guest at the end: the driver's loop already
+        // fetched the settled state, so this is only a call when the
+        // world ended some other way (deadline, cancel, fault).
+        let state = match self.last_state.take() {
+            Some(state) => Some(state),
+            None => self.instance.state().await.ok(),
+        };
         let mut guest_profile = Vec::new();
-        let outcome = match self.instance.outcome().await {
-            Ok(Some(Outcome::Ok { value, profile, .. })) => {
-                guest_profile = profile;
-                Some(Ok(value))
-            }
-            Ok(Some(Outcome::Err { error, profile, .. })) => {
-                guest_profile = profile;
-                Some(Err(self.definition.map_error(error)))
-            }
-            Ok(None) => None,
-            Err(_) => None,
+        let (outcome, pending) = match state {
+            Some(GuestState { outcome, pending }) => (
+                match outcome {
+                    Some(Outcome::Ok { value, profile, .. }) => {
+                        guest_profile = profile;
+                        Some(Ok(value))
+                    }
+                    Some(Outcome::Err { error, profile, .. }) => {
+                        guest_profile = profile;
+                        Some(Err(self.definition.map_error(error)))
+                    }
+                    None => None,
+                },
+                Some(pending),
+            ),
+            None => (None, None),
         };
 
         let mut violations = Vec::new();
         if matches!(termination, Termination::Completed)
             && self.workload().lifetime() == LifetimeFamily::Finite
-            && let Ok(pending) = self.instance.pending().await
+            && let Some(pending) = pending
             && pending.count > 0
         {
             inc(&self.gauges.detached_work_detected);
@@ -485,9 +501,12 @@ impl WorldDriver {
         tokio::pin!(deadline);
         let mut stop = self.stop.clone();
         loop {
-            match self.instance.outcome().await {
-                Ok(Some(_)) => return Termination::Completed,
-                Ok(None) => {}
+            match self.instance.state().await {
+                Ok(state) if state.outcome.is_some() => {
+                    self.last_state = Some(state);
+                    return Termination::Completed;
+                }
+                Ok(_) => {}
                 Err(e) => {
                     return Termination::Faulted {
                         detail: e.to_string(),

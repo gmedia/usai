@@ -11,3 +11,5 @@ dist/
 fuzz/target/
 fuzz/artifacts/
 fuzz/coverage/
+# generated corpus entries; the curated seeds are tracked (add a new one with git add -f)
+fuzz/corpus/

@@ -305,10 +305,23 @@ async function runService(workload: Workload, input: ServiceInput): Promise<unkn
   return (workload.handler as (ctx: unknown) => unknown)(base);
 }
 
+// The application is immutable once evaluated (the image is a snapshot of
+// it), so its flattened workload list is computed once — at warm-up, in the
+// snapshot — and never per request (C13: no per-world definition rebuilds).
+const flattened = new WeakMap<AppDeclaration, ReturnType<typeof flatten>>();
+function workloadsOf(app: AppDeclaration): ReturnType<typeof flatten> {
+  let f = flattened.get(app);
+  if (!f) {
+    f = flatten(app);
+    flattened.set(app, f);
+  }
+  return f;
+}
+
 export async function invoke(app: AppDeclaration, index: number, inputJson: string): Promise<unknown> {
   ledger = profiling() ? [] : null;
   const t0 = ledger !== null ? now() : 0;
-  const entry = flatten(app).workloads[index];
+  const entry = workloadsOf(app).workloads[index];
   if (!entry) throw new UsaiError("unknown_workload", 500, `no workload at index ${index}`);
   const input = JSON.parse(inputJson) as Input;
   mark("dispatch", t0);
@@ -352,7 +365,7 @@ export function warm(app: AppDeclaration): number {
       if (r.ok) touched += 1;
     }
   };
-  for (const { workload } of flatten(app).workloads) {
+  for (const { workload } of workloadsOf(app).workloads) {
     const c = workload.contracts;
     for (const s of [c.params, c.query, c.headers, c.body, c.input, c.message]) if (s) one(s);
     for (const s of Object.values(c.response ?? {})) if (s) one(s);

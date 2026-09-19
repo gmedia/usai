@@ -16,7 +16,7 @@ malformed requests); these targets go deeper on the parsers.
 
 ```bash
 rustup toolchain install nightly && cargo +nightly install cargo-fuzz
-cargo +nightly fuzz run manifest -- -max_total_time=300      # seeds in fuzz/corpus/<target>
+cargo +nightly fuzz run manifest -- -max_total_time=300      # seeds in fuzz/corpus/<target> (tracked; what a run adds there is ignored — `git add -f` a new seed)
 cargo +nightly fuzz run http_boundary -- -max_total_time=300
 cargo +nightly fuzz run sourcemap -- -max_total_time=300
 ```

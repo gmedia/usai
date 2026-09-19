@@ -41,18 +41,38 @@ Every operation payload crossing the boundary is a bounded, copied string. No ha
 
 ## Host → guest
 
+Since ADR-0018 the host enters the guest by *calling* bridge functions
+with one string argument and reading one string back — never by evaluating
+a script per request (through 0.0.5 it evaluated `__usai.seed(…);__usai.invoke(…)`). On the Wasm core the export is
+`qjs_usai_call(name, name_len, arg, arg_len) -> JSValue*` (a heap value the
+host reads with `qjs_get_string` and frees); on the native reference engine
+it is a direct function call. The functions:
+
 ```js
-__usai.invoke(index, inputJson)     // starts workload `index`; the outcome is captured, never thrown
+__usai.entry("<seed hex>␟<0|1 profiling>␟<index>␟<inputJson>")  // seeds the world and starts workload `index`; the outcome is captured, never thrown
+__usai.state() -> string            // JSON: { outcome: null | {ok:true,value,profile?} | {ok:false,error:{name,message,stack?,usai?},profile?},
+                                    //         pending: { count, kinds } }
 __usai.complete(id, ok, payload)    // delivers one completion; returns whether a pending op accepted it
 __usai.cancel(reason)               // rejects all pending ops with code "cancelled"; fires onCancel listeners
-__usai.outcome() -> string | null   // JSON: {ok:true,value} | {ok:false,error:{name,message,stack?,usai?}}
+__usai.stop(reason)                 // graceful stop: the signal fires, timers resolve, other ops complete
 ```
 
-The host calls these only when the guest is idle (never re-entrantly). After every call it runs the microtask queue to quiescence.
+`invoke(index, inputJson)` and `outcome()` remain as the functions `entry`
+and `state` compose. The host calls these only when the guest is idle (never
+re-entrantly). After every call it runs the microtask queue to quiescence.
+The SDK stamps the ABI it speaks into the manifest (`builtWith.abi`) — the
+SDK↔bridge surface (`__usai_sdk.*`, the `__usai` natives), which ADR-0018
+did not change; a runtime whose bridge speaks another refuses the artifact
+at install. How the host enters the bridge (`qjs_usai_call` vs `qjs_eval`)
+is the runtime's own business and needs no artifact change.
 
 ## Terminal state and detached work
 
-The world's work is terminal when `outcome()` is non-null. For finite workloads the host then reads `pendingCount()`; anything still pending is **detached work** (contract C3): it is reported as a lifecycle violation, cancelled, and the world ends anyway.
+The world's work is terminal when `state().outcome` is non-null — the
+driver reads `state()` once per iteration and keeps the settled one. For
+finite workloads the same read's `pending.count` decides: anything still
+pending is **detached work** (contract C3): it is reported as a lifecycle
+violation, cancelled, and the world ends anyway.
 
 ## Errors
 

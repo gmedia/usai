@@ -13,11 +13,14 @@ use sha2::{Digest, Sha256};
 /// Manifest format version. Bump when a field changes meaning.
 pub const MANIFEST_VERSION: u32 = 1;
 
-/// The host↔guest contract the runtime's bridge speaks (`docs/GUEST-ABI.md`).
-/// The SDK stamps the ABI it was written against into `builtWith.abi`; a
-/// different number is refused at install, because the symptom otherwise
-/// is a world fault on every request. Bumped when the bridge's surface or
-/// the invocation protocol changes; independent of the manifest format.
+/// The contract between the SDK inside the bundle and the runtime's bridge
+/// (`docs/GUEST-ABI.md`: `__usai_sdk.invoke/describe/warm`, the `__usai`
+/// natives the SDK calls). The SDK stamps the ABI it was written against
+/// into `builtWith.abi`; a different number is refused at install, because
+/// the symptom otherwise is a world fault on every request. Bumped when
+/// that surface changes incompatibly; independent of the manifest format
+/// and of how the host enters the bridge (ADR-0018 changed the latter
+/// without touching this).
 pub const GUEST_ABI: u32 = 1;
 
 /// The three lifetime families of `GOAL.md` §9.

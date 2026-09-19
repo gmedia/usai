@@ -251,7 +251,17 @@ async fn invalid_boundary_input_fails_before_any_world_exists() {
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    let before = s.runtime.ledger().gauges.snapshot();
+    // A service is reported running slightly before its world is counted;
+    // wait until the gauge has been still for a moment before reading it.
+    let mut before = s.runtime.ledger().gauges.snapshot();
+    loop {
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let now = s.runtime.ledger().gauges.snapshot();
+        if now.worlds_created == before.worlds_created {
+            break;
+        }
+        before = now;
+    }
     let (status, body) = s.get("/users/not-a-uuid").await;
     assert_eq!(status, 400, "{body}");
     assert_eq!(body["error"]["code"], "validation_failed");

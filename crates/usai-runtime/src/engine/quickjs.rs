@@ -14,9 +14,7 @@ use rquickjs::{
     Value, WriteOptions, context::EvalOptions,
 };
 
-use super::{
-    Compiled, Engine, EngineError, GUEST_BRIDGE, HostBindings, Outcome, Pending, WorldInstance,
-};
+use super::{Compiled, Engine, EngineError, GUEST_BRIDGE, GuestState, HostBindings, WorldInstance};
 use crate::definition::Code;
 
 const MODULE_NAME: &str = "usai:app";
@@ -366,55 +364,23 @@ impl WorldInstance for QuickJsWorld {
             .await
     }
 
-    async fn outcome(&mut self) -> Result<Option<Outcome>, EngineError> {
+    async fn state(&mut self) -> Result<GuestState, EngineError> {
         let t = std::time::Instant::now();
         let r = self
             .context
             .with(|ctx| {
                 let b = bridge(&ctx)?;
-                let outcome: Function = b
-                    .get("outcome")
+                let state: Function = b
+                    .get("state")
                     .map_err(|e| EngineError::Guest(describe(&ctx, e)))?;
-                let raw: Option<String> = outcome
-                    .call(())
+                let json: String = state
+                    .call(("",))
                     .map_err(|e| EngineError::Guest(describe(&ctx, e)))?;
-                match raw {
-                    None => Ok(None),
-                    Some(json) => serde_json::from_str::<Outcome>(&json)
-                        .map(Some)
-                        .map_err(|e| EngineError::Guest(format!("outcome is not decodable: {e}"))),
-                }
+                serde_json::from_str::<GuestState>(&json)
+                    .map_err(|e| EngineError::Guest(format!("guest state is not decodable: {e}")))
             })
             .await;
-        self.account("outcome", t);
-        r
-    }
-
-    async fn pending(&mut self) -> Result<Pending, EngineError> {
-        let t = std::time::Instant::now();
-        let r = self
-            .context
-            .with(|ctx| {
-                let b = bridge(&ctx)?;
-                let count: Function = b
-                    .get("pendingCount")
-                    .map_err(|e| EngineError::Guest(describe(&ctx, e)))?;
-                let kinds: Function = b
-                    .get("pendingKinds")
-                    .map_err(|e| EngineError::Guest(describe(&ctx, e)))?;
-                let count: f64 = count
-                    .call(())
-                    .map_err(|e| EngineError::Guest(describe(&ctx, e)))?;
-                let kinds: Vec<String> = kinds
-                    .call(())
-                    .map_err(|e| EngineError::Guest(describe(&ctx, e)))?;
-                Ok(Pending {
-                    count: count as u32,
-                    kinds,
-                })
-            })
-            .await;
-        self.account("pending", t);
+        self.account("state", t);
         r
     }
 

@@ -51,3 +51,4 @@ Briefly, with the reason each was not chosen.
 | [0015](0015-execution-substrate-quickjs-native.md) | Bootstrap/reference substrate is native QuickJS-ng behind an engine boundary | accepted as scaffolding; production superseded by 0016 | — |
 | [0016](0016-wasm-substrate-preinitialized-image.md) | Production substrate: Wasmtime + pre-initialized QuickJS image, pooling + COW | accepted (v0), production evidence pending | ADR-0015 revisit |
 | [0017](0017-egress-crypto-transactions-as-capabilities.md) | Outbound HTTP is a declared resource; `crypto` subset with per-world entropy; a transaction is one owned operation | accepted (v0) | ADR-0013 follow-ups |
+| [0018](0018-direct-call-guest-abi.md) | The host enters the guest by calling bridge functions (`qjs_usai_call`: `entry`, `state`, `cancel`, `stop`), never by evaluating a script on the request path | accepted (v0) | P1/P2 lever #5, P8 |

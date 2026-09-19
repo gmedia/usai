@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the guest core (quickjs-async.wasm) from pinned sources.
 #
-#   guest/build.sh              # -O2 (the production core)
+#   guest/build.sh              # -O3 (the production core)
 #   OPT=-Oz guest/build.sh      # reproduces the research core byte for byte
 #                               # (sha256 6b33cb45…), given the same toolchain
 #
@@ -14,7 +14,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/../../.." && pwd)"
 build="${USAI_GUEST_BUILD:-$repo/target/guest-build}"
 sdk="${WASI_SDK:-$HOME/.cache/usai/wasi-sdk-32}"
-opt="${OPT:--O2}"
+opt="${OPT:--O3}"
 
 QUICKJS_WASI_URL=https://github.com/vercel-labs/quickjs-wasi.git
 QUICKJS_WASI_COMMIT=54c4d2dd4be2445409aeab603ecfc3bb209c7310
@@ -47,7 +47,7 @@ checkout "$src" "$QUICKJS_WASI_URL" "$QUICKJS_WASI_COMMIT"
 checkout "$ng" "$QUICKJS_NG_URL" "$QUICKJS_NG_COMMIT"
 
 for patch in exp011a-entropy-quickjs-ng.patch; do git -C "$ng" apply "$here/patches/$patch"; done
-for patch in exp011a-entropy-quickjs-wasi.patch exp011c-quickjs-wasi-async-bridge.patch; do git -C "$src" apply "$here/patches/$patch"; done
+for patch in exp011a-entropy-quickjs-wasi.patch exp011c-quickjs-wasi-async-bridge.patch usai-direct-call.patch; do git -C "$src" apply "$here/patches/$patch"; done
 
 make -C "$src" WASI_SDK="$sdk" clean >/dev/null
 make -C "$src" WASI_SDK="$sdk" OPT="$opt" quickjs.wasm
