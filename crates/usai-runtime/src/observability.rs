@@ -283,30 +283,59 @@ pub fn process_metrics() -> Vec<MetricFamily> {
         "gauge",
         vec![(String::new(), started)],
     ));
-    #[cfg(target_os = "linux")]
-    {
-        if let Ok(statm) = std::fs::read_to_string("/proc/self/statm")
-            && let Some(pages) = statm
-                .split_whitespace()
-                .nth(1)
-                .and_then(|p| p.parse::<f64>().ok())
-        {
-            let page = 4096.0;
-            out.push((
-                "usai_process_resident_memory_bytes",
-                "Resident set size",
-                "gauge",
-                vec![(String::new(), pages * page)],
-            ));
-        }
-        if let Ok(dir) = std::fs::read_dir("/proc/self/fd") {
-            out.push((
-                "usai_process_open_fds",
-                "Open file descriptors",
-                "gauge",
-                vec![(String::new(), dir.count() as f64)],
-            ));
-        }
+    if let Some(p) = crate::procfs::read() {
+        let kib = 1024.0;
+        out.push((
+            "usai_process_resident_memory_bytes",
+            "Resident set size",
+            "gauge",
+            vec![(String::new(), p.rss_kib as f64 * kib)],
+        ));
+        out.push((
+            "usai_process_proportional_memory_bytes",
+            "Proportional set size (shared pages divided among their sharers): the honest per-process footprint",
+            "gauge",
+            vec![(String::new(), p.pss_kib as f64 * kib)],
+        ));
+        out.push((
+            "usai_process_virtual_memory_bytes",
+            "Virtual size (address space reserved per world slot up front; not resident)",
+            "gauge",
+            vec![(String::new(), p.vm_kib as f64 * kib)],
+        ));
+        out.push((
+            "usai_process_resident_memory_peak_bytes",
+            "Peak resident set size since start",
+            "gauge",
+            vec![(String::new(), p.rss_peak_kib as f64 * kib)],
+        ));
+        out.push((
+            "usai_process_page_faults_total",
+            "Page faults since start, by kind",
+            "counter",
+            vec![
+                ("kind=\"minor\"".into(), p.minor_faults as f64),
+                ("kind=\"major\"".into(), p.major_faults as f64),
+            ],
+        ));
+        out.push((
+            "usai_process_cpu_seconds_total",
+            "CPU consumed since start, user + system",
+            "counter",
+            vec![(String::new(), p.cpu_seconds)],
+        ));
+        out.push((
+            "usai_process_threads",
+            "OS threads",
+            "gauge",
+            vec![(String::new(), p.threads as f64)],
+        ));
+        out.push((
+            "usai_process_open_fds",
+            "Open file descriptors",
+            "gauge",
+            vec![(String::new(), p.open_fds as f64)],
+        ));
     }
     out
 }
@@ -782,6 +811,7 @@ mod tests {
             resources: vec![],
             worlds_in_use: 1,
             worlds_max: 256,
+            process: None,
         };
         let text = render_prometheus(
             &status,

@@ -486,6 +486,10 @@ impl WasmEngine {
                 .name("usai-epoch".into())
                 .spawn(move || {
                     loop {
+                        // A tick only matters to a live world's deadline
+                        // callback; with none live the thread parks (an
+                        // idle process wakes for nothing).
+                        crate::idle::wait_until_active();
                         std::thread::sleep(EPOCH_TICK);
                         for engine in &engines {
                             engine.increment_epoch();

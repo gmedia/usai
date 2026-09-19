@@ -662,6 +662,9 @@ fn watchdog_service() -> &'static WatchdogService {
             .name("usai-watchdog".into())
             .spawn(move || {
                 loop {
+                    // Nothing to enforce while no world is live: park instead
+                    // of waking 200 times a second in an idle process.
+                    crate::idle::wait_until_active();
                     std::thread::sleep(WATCHDOG_TICK);
                     let now = service.epoch.elapsed().as_nanos() as u64;
                     let mut slots = service.slots.lock().expect("watchdog poisoned");
@@ -683,6 +686,12 @@ fn watchdog_service() -> &'static WatchdogService {
     })
 }
 
+impl Drop for WatchSlot {
+    fn drop(&mut self) {
+        crate::idle::leave();
+    }
+}
+
 impl WatchSlot {
     /// Registers a slot for a world (one lock per world, not per guest call).
     fn register(flag: Arc<AtomicBool>) -> Arc<Self> {
@@ -697,6 +706,8 @@ impl WatchSlot {
             .lock()
             .expect("watchdog poisoned")
             .push(Arc::downgrade(&slot));
+        // The tickers run while this slot lives (see `Drop`).
+        crate::idle::enter();
         slot
     }
 }

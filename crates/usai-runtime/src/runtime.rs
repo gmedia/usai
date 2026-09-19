@@ -250,6 +250,10 @@ pub struct RuntimeStatus {
     pub resources: Vec<ResourceStatus>,
     pub worlds_in_use: u32,
     pub worlds_max: u32,
+    /// What the process holds right now (RSS, PSS, faults, CPU, threads,
+    /// fds), read from `/proc/self` for this answer; absent off Linux.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub process: Option<crate::procfs::ProcessStatus>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -975,6 +979,7 @@ impl Runtime {
             resources: self.resources.statuses(),
             worlds_in_use: self.world_budget.in_use(),
             worlds_max: self.world_budget.max(),
+            process: crate::procfs::read(),
         }
     }
 
