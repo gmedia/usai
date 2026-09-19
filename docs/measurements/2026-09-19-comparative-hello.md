@@ -40,7 +40,10 @@ guest calls per request, boundary contracts validated twice (host JSON
 Schema, then Zod's first-parse path inside every fresh world), the slot
 reset. It is where the throughput gap comes from (≈2× below Node, ≈5× below
 Bun/Deno at c=64 on this host); P8 (`docs/ROADMAP.md`) is the audit that
-removes what the semantics never asked for. On the same VM without the soak running, the attribution
+removes what the semantics never asked for — and did, the same day: at c=1
+on the same host the hello request went from 1.70 to 0.90 ms p50 (CPU 1.45
+→ 0.65 ms) and the contract-heavy class from 5.27 to 1.28 ms
+(`2026-09-19-p8-parity.md`, with the invoice of what remains). On the same VM without the soak running, the attribution
 campaign measured 9.8k req/s at c=16 (`2026-09-18-execution-path-attribution.md`),
 so roughly a third of the gap here is the background load.
 

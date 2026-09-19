@@ -108,11 +108,16 @@ The invoice attributes one request's wall time (`x-usai-profile`, only when
 http.route/decode/validate/admit/encode   the host, before and after the world
 http.execute                              = runtime.create + driver.run + driver.retire + release (instance drop, slot reset)
 engine.instantiate.*                      store, instance, exports, seed
-engine.invoke.eval / invoke.jobs          entering the guest; the SDK's dispatch and the handler run inside invoke.jobs
-engine.deliver.*                          host-operation completions delivered back
-engine.outcome.eval / pending.eval        reading the result and the pending-work count
-guest.dispatch/validate.<slot>/handler/response   the SDK's ledger inside the world (overlaps invoke.jobs/deliver.jobs)
+engine.invoke.entry                       entering the guest (`__usai.entry`): the SDK's synchronous dispatch runs inside it
+engine.invoke.settle                      the job queue drained in the core and the state read back (`qjs_usai_settle`)
+engine.deliver.complete / deliver.settle  a host-operation completion delivered, then the queue drained again
+guest.bridge.entry                        the bridge's synchronous part of entry (up to the first await)
+guest.dispatch/env/context/auth/validate.<slot>/handler/response   the SDK's ledger inside the world (overlaps entry/settle)
 ```
+
+Through 0.0.5 the engine lines read `invoke.eval / invoke.jobs /
+outcome.eval / pending.eval`, one guest call per job and per read
+(ADR-0018 replaced them).
 
 What the semantics require is the fresh world (instantiate + reset) and the
 ownership accounting; everything else is implementation and is fair game
