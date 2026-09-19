@@ -4,6 +4,7 @@
 
 import { type AppDeclaration, type Workload, flatten, parseDuration, workloadId } from "./declarations.ts";
 import { jsonSchemaOf } from "./schema.ts";
+import { hostFinal } from "./runtime/prepare.ts";
 
 /** The manifest format this SDK writes; the runtime states which formats
  * it understands and refuses the others with a rebuild hint.
@@ -32,6 +33,9 @@ export interface ManifestContracts {
   message?: Record<string, unknown>;
   response?: Record<string, Record<string, unknown>>;
   inWorldOnly?: string[];
+  /** Input slots validated once, at the boundary: the schema's output is
+   * provably its input, so the world does not parse them again. */
+  boundaryFinal?: string[];
 }
 
 export interface ManifestWorkload {
@@ -73,12 +77,15 @@ export interface Manifest {
 function describeContracts(workload: Workload): ManifestContracts {
   const out: ManifestContracts = {};
   const inWorldOnly: string[] = [];
+  const boundaryFinal: string[] = [];
   for (const slot of ["params", "query", "headers", "body", "input", "message"] as const) {
     const schema = workload.contracts[slot];
     if (!schema) continue;
     const json = jsonSchemaOf(schema, "input");
-    if (json) out[slot] = json;
-    else inWorldOnly.push(slot);
+    if (json) {
+      out[slot] = json;
+      if (workload.kind === "http" && hostFinal(schema)) boundaryFinal.push(slot);
+    } else inWorldOnly.push(slot);
   }
   if (workload.contracts.response) {
     const response: Record<string, Record<string, unknown>> = {};
@@ -90,6 +97,7 @@ function describeContracts(workload: Workload): ManifestContracts {
     if (Object.keys(response).length > 0) out.response = response;
   }
   if (inWorldOnly.length > 0) out.inWorldOnly = inWorldOnly;
+  if (boundaryFinal.length > 0) out.boundaryFinal = boundaryFinal;
   return out;
 }
 

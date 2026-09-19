@@ -240,3 +240,210 @@ export function structuralSample(schema: AnySchema): { value: unknown } | undefi
     return undefined;
   }
 }
+
+// ---- validate once ----------------------------------------------------------
+//
+// The host validates every input slot that has a JSON Schema before the
+// world exists (C6). The guest parsed the same value again because a
+// validator may do more than accept or reject: fill defaults, coerce,
+// transform, strip unknown keys. When the schema provably does none of
+// that — its output *is* its input for every value it accepts — the second
+// parse is work the semantics never asked for, and the guest replaces it
+// with a *finalizer* for the slots the host reports as validated. Anything
+// unproven keeps the double pass; correctness first.
+//
+// The finalizer is exact by construction, not by re-implementation: it
+// walks the value along the schema's structure, runs each node's own
+// library checks (`check._zod.check`, the functions Zod's parse would run —
+// the whitelist guarantees none is application code) and strips the keys a
+// plain `z.object` does not declare (the one structural effect Zod has on
+// an accepted value; `strictObject` refused them at the host already,
+// `looseObject` keeps them). If any check or type test fails — the host and
+// Zod disagree on a length counted in code points vs UTF-16 units, on a
+// Unicode digit in a regex — it yields `REPARSE` and the guest runs the
+// full Zod parse, whose issues are then reported exactly as before.
+
+/** Returns the value Zod's parse would return, or `REPARSE` when only the
+ * full parse can decide (and produce the issues). */
+export type Finalizer = (value: unknown) => unknown;
+/** Sentinel: the fast path could not prove acceptance; parse for real. */
+export const REPARSE: unique symbol = Symbol("usai.reparse");
+
+class NotFinal extends Error {}
+
+type ZodCheckFn = (payload: { value: unknown; issues: unknown[] }) => unknown;
+
+/** The node's own checks as one function: true when all pass. */
+function checksOf(d: ZodInternals["def"]): ((v: unknown) => boolean) | undefined {
+  const checks = (d.checks ?? []) as Array<{ _zod?: { def?: Record<string, unknown>; check?: ZodCheckFn } }>;
+  if (checks.length === 0) return undefined;
+  const fns: ZodCheckFn[] = [];
+  for (const c of checks) {
+    const kind = c._zod?.def?.["check"];
+    const fn = c._zod?.check;
+    if (typeof kind !== "string" || !LIBRARY_CHECKS.has(kind) || typeof fn !== "function") throw new NotFinal();
+    fns.push(fn);
+  }
+  return (v) => {
+    for (const fn of fns) {
+      const payload = { value: v, issues: [] as unknown[] };
+      fn(payload);
+      if (payload.issues.length > 0) return false;
+    }
+    return true;
+  };
+}
+
+/** A scalar node: type test plus the node's checks; the value itself is
+ * the output. */
+function scalar(test: (v: unknown) => boolean, d: ZodInternals["def"]): Finalizer {
+  const checks = checksOf(d);
+  return (v) => (test(v) && (checks === undefined || checks(v)) ? v : REPARSE);
+}
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+function zodFinalizer(s: unknown, depth = 0): Finalizer {
+  const zi = internals(s);
+  if (!zi || !zi.def || depth > 32) throw new NotFinal();
+  const d = zi.def;
+  const type = d.type;
+  if (typeof type !== "string") throw new NotFinal();
+  // `z.coerce.*` is the base type with a `coerce` flag; the host coerces
+  // URL scalars the same way, but the proof stays conservative.
+  if (d["coerce"] === true) throw new NotFinal();
+  switch (type) {
+    case "string": return scalar((v) => typeof v === "string", d);
+    case "number": return scalar((v) => typeof v === "number" && Number.isFinite(v), d);
+    case "int": return scalar((v) => typeof v === "number" && Number.isInteger(v), d);
+    case "boolean": return scalar((v) => typeof v === "boolean", d);
+    case "null": return scalar((v) => v === null, d);
+    case "literal": {
+      const values = new Set((d["values"] as unknown[]) ?? []);
+      return scalar((v) => values.has(v), d);
+    }
+    case "enum": {
+      const values = new Set(Object.values((d["entries"] as Record<string, unknown>) ?? {}));
+      return scalar((v) => values.has(v), d);
+    }
+    case "any":
+    case "unknown": return scalar(() => true, d);
+    case "optional":
+    case "nullable":
+    case "nonoptional": {
+      if ((d.checks ?? []).length > 0) throw new NotFinal();
+      const inner = zodFinalizer(d["innerType"], depth + 1);
+      if (type === "optional") return (v) => (v === undefined ? v : inner(v));
+      if (type === "nullable") return (v) => (v === null ? v : inner(v));
+      return (v) => (v === undefined ? REPARSE : inner(v));
+    }
+    case "union": {
+      if ((d.checks ?? []).length > 0) throw new NotFinal();
+      const options = ((d["options"] as unknown[]) ?? []).map((o) => zodFinalizer(o, depth + 1));
+      if (!options.length) throw new NotFinal();
+      // First accepting option wins, as in Zod.
+      return (v) => {
+        for (const option of options) {
+          const out = option(v);
+          if (out !== REPARSE) return out;
+        }
+        return REPARSE;
+      };
+    }
+    case "array": {
+      const item = zodFinalizer(d["element"], depth + 1);
+      const checks = checksOf(d);
+      return (v) => {
+        if (!Array.isArray(v) || (checks !== undefined && !checks(v))) return REPARSE;
+        const out = new Array<unknown>(v.length);
+        for (let i = 0; i < v.length; i++) {
+          const x = item(v[i]);
+          if (x === REPARSE) return REPARSE;
+          out[i] = x;
+        }
+        return out;
+      };
+    }
+    case "tuple": {
+      const items = ((d["items"] as unknown[]) ?? []).map((t) => zodFinalizer(t, depth + 1));
+      const rest = d["rest"] ? zodFinalizer(d["rest"], depth + 1) : undefined;
+      const checks = checksOf(d);
+      return (v) => {
+        if (!Array.isArray(v) || (checks !== undefined && !checks(v))) return REPARSE;
+        if (rest === undefined ? v.length !== items.length : v.length < items.length) return REPARSE;
+        const out = new Array<unknown>(v.length);
+        for (let i = 0; i < v.length; i++) {
+          const x = (items[i] ?? rest!)(v[i]);
+          if (x === REPARSE) return REPARSE;
+          out[i] = x;
+        }
+        return out;
+      };
+    }
+    case "record": {
+      const key = zodFinalizer(d["keyType"], depth + 1);
+      const value = zodFinalizer(d["valueType"], depth + 1);
+      const checks = checksOf(d);
+      return (v) => {
+        if (!isPlainObject(v) || (checks !== undefined && !checks(v))) return REPARSE;
+        const out: Record<string, unknown> = {};
+        for (const k of Object.keys(v)) {
+          if (key(k) === REPARSE) return REPARSE;
+          const x = value(v[k]);
+          if (x === REPARSE) return REPARSE;
+          out[k] = x;
+        }
+        return out;
+      };
+    }
+    case "object": {
+      const shape = d["shape"] as Record<string, unknown>;
+      if (!isPlainObject(shape)) throw new NotFinal();
+      const keys = Object.keys(shape);
+      const fields = keys.map((k) => zodFinalizer(shape[k], depth + 1));
+      const optional = keys.map((k) => (internals(shape[k])?.def.type as string | undefined) === "optional");
+      const catchall = d["catchall"] ? (internals(d["catchall"])?.def.type as string | undefined) : undefined;
+      // undefined: plain object, undeclared keys are stripped. never:
+      // strictObject, the host refused them. unknown/any: looseObject,
+      // they pass through. A typed catchall validates them: not proven.
+      if (catchall !== undefined && catchall !== "never" && catchall !== "unknown" && catchall !== "any") throw new NotFinal();
+      const keep = catchall === "unknown" || catchall === "any";
+      const checks = checksOf(d);
+      return (v) => {
+        if (!isPlainObject(v) || (checks !== undefined && !checks(v))) return REPARSE;
+        const out: Record<string, unknown> = {};
+        for (let i = 0; i < keys.length; i++) {
+          const k = keys[i]!;
+          if (!(k in v)) {
+            if (!optional[i]) return REPARSE;
+            continue;
+          }
+          const x = fields[i]!(v[k]);
+          if (x === REPARSE) return REPARSE;
+          out[k] = x;
+        }
+        if (keep) for (const k of Object.keys(v)) if (!(k in out) && !keys.includes(k)) out[k] = v[k];
+        return out;
+      };
+    }
+    default:
+      // date, bigint, nan, readonly, default, prefault, catch, pipe,
+      // transform, lazy, custom, intersection, map, set, …: the output may
+      // differ from the input or application code may run.
+      throw new NotFinal();
+  }
+}
+
+/** The finalizer for a schema whose output is provably its (host-validated)
+ * input, or `undefined` when the schema may change the value or run
+ * application code (defaults, coercion, transforms, catch, readonly,
+ * dates, …). Zod only. */
+export function hostFinal(schema: AnySchema): Finalizer | undefined {
+  try {
+    const vendor = (schema as { "~standard"?: { vendor?: string } })["~standard"]?.vendor;
+    if (vendor !== "zod") return undefined;
+    return zodFinalizer(schema);
+  } catch {
+    return undefined;
+  }
+}

@@ -3,7 +3,7 @@
 // invokes the handler, and encodes the outcome for the host.
 
 import { type AppDeclaration, type Workload, flatten } from "../declarations.ts";
-import { prepareSchema, structuralSample } from "./prepare.ts";
+import { type Finalizer, REPARSE, hostFinal, prepareSchema, structuralSample } from "./prepare.ts";
 import { UsaiError, isUsaiError } from "../errors.ts";
 import { isHttpResponse, isRawResponse } from "../http.ts";
 import { type AnySchema, validateWith } from "../schema.ts";
@@ -22,6 +22,9 @@ interface HttpInput {
     query: Record<string, string | string[]>;
     headers: Record<string, string>;
     body: { json?: unknown; text?: string; base64?: string } | null;
+    /** The slots the host validated against their JSON Schema before the
+     * world existed (C6). Absent when the host did not say. */
+    validated?: string[];
   };
 }
 
@@ -75,6 +78,31 @@ function parse<S extends AnySchema>(slot: string, schema: S | undefined, value: 
     throw new UsaiError("validation_failed", 400, `${slot} failed validation`, { slot, issues: result.issues });
   }
   return result.value;
+}
+
+// Validate once (ADR-0018 follow-up, `docs/LIFECYCLE-CONTRACTS.md` C6): when
+// the host already validated a slot and the schema's output is provably its
+// input (`hostFinal`), the guest applies the finalizer instead of parsing
+// again. The proof is computed once per schema — at warm-up, so it lives in
+// the image — and never per request.
+const finalizers = new WeakMap<AnySchema, Finalizer | null>();
+function finalizerOf(schema: AnySchema): Finalizer | null {
+  let f = finalizers.get(schema);
+  if (f === undefined) {
+    f = hostFinal(schema) ?? null;
+    finalizers.set(schema, f);
+  }
+  return f;
+}
+function parseValidated<S extends AnySchema>(slot: string, schema: S | undefined, value: unknown, validated: string[] | undefined): unknown {
+  if (!schema || !validated || !validated.includes(slot)) return parse(slot, schema, value);
+  const finalize = finalizerOf(schema);
+  if (finalize === null) return parse(slot, schema, value);
+  const t = ledger !== null ? now() : 0;
+  const out = finalize(value);
+  if (out === REPARSE) return parse(slot, schema, value);
+  mark(`validate.${slot}`, t);
+  return out;
 }
 
 function bytesFromBase64(b64: string): Uint8Array {
@@ -181,10 +209,14 @@ async function runHttp(workload: Workload, input: HttpInput): Promise<HttpOutput
     method: request.method,
     path: request.path,
     url: request.url,
-    params: parse("params", workload.contracts.params, request.params),
-    query: parse("query", workload.contracts.query, request.query),
-    headers: parse("headers", workload.contracts.headers, request.headers),
-    body: parse("body", workload.contracts.body, decodeBody(request.body)),
+    params: parseValidated("params", workload.contracts.params, request.params, request.validated),
+    query: parseValidated("query", workload.contracts.query, request.query, request.validated),
+    headers: parseValidated("headers", workload.contracts.headers, request.headers, request.validated),
+    // The host validated `body.json` (or null when there was none); only
+    // that exact value may skip the guest parse.
+    body: request.body?.json !== undefined
+      ? parseValidated("body", workload.contracts.body, request.body.json, request.validated)
+      : parse("body", workload.contracts.body, decodeBody(request.body)),
   };
   let t = ledger !== null ? now() : 0;
   const result = await (workload.handler as (ctx: unknown) => unknown)(ctx);
@@ -359,6 +391,7 @@ export function warm(app: AppDeclaration): number {
     touched += prepareSchema(s);
     // The accepting path, when the schema provably runs no application
     // code on it: one real parse in the snapshot instead of one per world.
+    finalizerOf(s);
     const sample = structuralSample(s);
     if (sample) {
       const r = validateWith(s, sample.value);

@@ -664,6 +664,10 @@ impl HttpHost {
             watch.lap("decode");
             // 3. boundary validation, before any world exists (C6)
             let mut params = params;
+            // The slots validated here, told to the world so the SDK can
+            // skip its own parse where the manifest proved it final
+            // (`Contracts::boundary_final`).
+            let mut validated: Vec<&'static str> = Vec::new();
             if let Some(SlotValidators {
                 params: p,
                 query: q,
@@ -694,6 +698,12 @@ impl HttpHost {
                     let candidate = body_json.get("json").cloned().unwrap_or(Value::Null);
                     validate("body", v, &candidate)?;
                 }
+                validated.extend(
+                    [("params", p), ("query", q), ("headers", h), ("body", b)]
+                        .into_iter()
+                        .filter(|(_, v)| v.is_some())
+                        .map(|(name, _)| name),
+                );
             }
 
             watch.lap("validate");
@@ -729,6 +739,7 @@ impl HttpHost {
                 "query": query,
                 "headers": headers,
                 "body": body_json,
+                "validated": validated,
             });
             if route.kind == RouteKind::Stream {
                 return self

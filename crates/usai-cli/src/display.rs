@@ -229,7 +229,16 @@ pub fn inspect(definition: &ApplicationDefinition) -> String {
             ("message", c.message.is_some()),
         ] {
             if present {
-                let _ = writeln!(out, "    {slot}: validated before world creation");
+                let once = c.boundary_final.iter().any(|f| f == slot);
+                let _ = writeln!(
+                    out,
+                    "    {slot}: validated before world creation{}",
+                    if once {
+                        " (once; the world only strips undeclared keys)"
+                    } else {
+                        ""
+                    }
+                );
             }
         }
         for slot in &c.in_world_only {

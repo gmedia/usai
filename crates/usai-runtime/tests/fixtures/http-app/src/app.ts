@@ -27,6 +27,11 @@ export const createUser = http.post("/users", { body: Body, response: { 201: Use
   http.created({ id: "6f1a2b3c-4d5e-4f60-8a71-92b3c4d5e6f7", ...ctx.body }),
 );
 
+// Validate once: a structural body is final at the boundary (the world
+// only strips undeclared keys); a transform keeps the in-world parse.
+export const shape = http.post("/shape", { body: z.object({ a: z.string(), n: z.number().optional() }) }, async (ctx) => ({ keys: Object.keys(ctx.body) }));
+export const shaped = http.post("/shape-transform", { body: z.object({ a: z.string().transform((v) => v.toUpperCase()) }) }, async (ctx) => ({ a: ctx.body.a }));
+
 export const counter = http.get("/counter", {}, async () => {
   globalThis.__mutable = ((globalThis.__mutable as number | undefined) ?? 0) + 1;
   return { counter: globalThis.__mutable, hits: await ctx_hits() };
@@ -251,7 +256,7 @@ export default defineApp({
     counter, persistent, me, boom, badShape, detach, detachWrite, slow, echoQuery, webhook, sendReceipt,
     record, slowTask, failingTask, invokesSlow, order, auditRead, badDispatch, everySecond, overlapping, nightly, reconcile,
     ledgerSync, serviceLocalRead, events, endless, plainStream, chat, socketLocalRead, memoryHog, crashy, inspectUrl, busy, undeclared,
-    egress, egressOther, egressSlow, egressBytes, noFetch, cryptoRoute, passwordRoute,
+    egress, egressOther, egressSlow, egressBytes, noFetch, cryptoRoute, passwordRoute, shape, shaped,
   ],
   resources: [hits, audit, upstream],
   env: env({ GREETING: env.optional(env.string()), UPSTREAM_URL: env.url() }),

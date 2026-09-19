@@ -226,6 +226,11 @@ pub struct Contracts {
     /// the default status for a plain return.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub response: BTreeMap<u16, serde_json::Value>,
+    /// Input slots the SDK proved final at the boundary: the schema's output
+    /// is its input, so the world applies no second parse to what the host
+    /// validated (the host reports the validated slots in the request).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub boundary_final: Vec<String>,
     /// Which contract slots exist in the source but could not be described as
     /// JSON Schema. Validation for these happens in the world.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

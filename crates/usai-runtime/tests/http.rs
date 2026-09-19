@@ -304,6 +304,54 @@ async fn invalid_boundary_input_fails_before_any_world_exists() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn boundary_final_slots_keep_zod_semantics_without_a_second_parse() {
+    let Some(s) = start().await else { return };
+    // Skipped parse: undeclared keys are still stripped, declared kept.
+    let r = s
+        .client
+        .post(format!("{}/shape", s.base))
+        .json(&json!({ "a": "x", "n": 2, "undeclared": true }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(
+        r.json::<Value>().await.unwrap(),
+        json!({ "keys": ["a", "n"] })
+    );
+    // Absent optional stays absent.
+    let r = s
+        .client
+        .post(format!("{}/shape", s.base))
+        .json(&json!({ "a": "x" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.json::<Value>().await.unwrap(), json!({ "keys": ["a"] }));
+    // A transform is not final: the world parses and the handler sees its output.
+    let r = s
+        .client
+        .post(format!("{}/shape-transform", s.base))
+        .json(&json!({ "a": "x" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(r.json::<Value>().await.unwrap(), json!({ "a": "X" }));
+    // The boundary still rejects before any world exists.
+    let r = s
+        .client
+        .post(format!("{}/shape", s.base))
+        .json(&json!({ "a": 1 }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 400);
+    s.baseline().await;
+    s.shutdown.cancel();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn created_and_no_content_helpers() {
     let Some(s) = start().await else { return };
     let r = s
@@ -430,7 +478,7 @@ async fn errors_are_contracts_and_unexpected_failures_are_sanitized() {
         panic!("boom must fail: {:?}", r.outcome)
     };
     let stack = error.stack.expect("a stack");
-    assert!(stack.contains("src/app.ts:42:"), "unmapped stack:\n{stack}");
+    assert!(stack.contains("src/app.ts:47:"), "unmapped stack:\n{stack}");
     assert!(
         !stack.contains("usai:app:"),
         "unmapped frame left:\n{stack}"
@@ -725,6 +773,17 @@ async fn manifest_describes_the_application() {
         "zod described params as JSON Schema"
     );
     assert!(get_user.contracts.response.contains_key(&200));
+    // Validate once: params (a uuid string) are final at the boundary; the
+    // query carries a default, so the world still parses it.
+    assert_eq!(get_user.contracts.boundary_final, ["params"]);
+    let create = rev.definition.workload("http:POST /users").unwrap().1;
+    assert_eq!(create.contracts.boundary_final, ["body"]);
+    let shaped = rev
+        .definition
+        .workload("http:POST /shape-transform")
+        .unwrap()
+        .1;
+    assert!(shaped.contracts.boundary_final.is_empty());
     let me = rev.definition.workload("http:GET /me").unwrap().1;
     assert_eq!(me.auth.as_deref(), Some("token"));
     let webhook = rev.definition.workload("http:POST /webhook").unwrap().1;
