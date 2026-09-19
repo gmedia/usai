@@ -218,6 +218,7 @@ pub async fn run(
     max_worlds: u32,
     no_cron: bool,
     no_queue: bool,
+    diagnostics: bool,
 ) -> Result<()> {
     let trusted = trusted_signers(&require_signature)?;
     if !trusted.is_empty() {
@@ -317,7 +318,7 @@ pub async fn run(
         runtime,
         host,
         port,
-        false,
+        diagnostics,
         status,
         status_addr,
         stop_requested,

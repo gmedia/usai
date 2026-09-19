@@ -713,6 +713,10 @@ mod tests {
     fn prometheus_text_is_well_formed() {
         let status = RuntimeStatus {
             engine: "quickjs",
+            scheduler: crate::runtime::SchedulerStatus {
+                cron: true,
+                queue: true,
+            },
             compiled_images_live: 1,
             gauges: crate::ownership::GaugeSnapshot {
                 worlds_created: 3,

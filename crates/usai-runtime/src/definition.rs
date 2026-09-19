@@ -503,7 +503,11 @@ impl ApplicationDefinition {
             });
         }
         // An absent ABI is the one SDKs stamped nothing for (ABI 1).
-        let abi = manifest.built_with.as_ref().and_then(|b| b.abi).unwrap_or(1);
+        let abi = manifest
+            .built_with
+            .as_ref()
+            .and_then(|b| b.abi)
+            .unwrap_or(1);
         if abi != GUEST_ABI {
             return Err(DefinitionError::UnsupportedAbi {
                 found: abi,
@@ -706,7 +710,9 @@ mod tests {
             abi: Some(GUEST_ABI + 1),
         });
         let err = ApplicationDefinition::new(m, code.clone()).unwrap_err();
-        assert!(matches!(err, DefinitionError::UnsupportedAbi { found, .. } if found == GUEST_ABI + 1));
+        assert!(
+            matches!(err, DefinitionError::UnsupportedAbi { found, .. } if found == GUEST_ABI + 1)
+        );
         assert!(err.to_string().contains("9.9.9"), "{err}");
         // Older artifacts stamped nothing and spoke ABI 1.
         let mut m = manifest(&code);

@@ -16,6 +16,7 @@ test("scaffolds the hello template with the project name substituted", () => {
   assert.equal(pkg.dependencies["@sakaladev/usai"], "^0.0.1");
   assert.match(readFileSync(join(target, "src/app.ts"), "utf8"), /name: "my-app"/);
   assert.ok(existsSync(join(target, ".gitignore")) && !existsSync(join(target, "_gitignore")));
+  assert.ok(existsSync(join(target, ".env.example")));
   assert.ok(existsSync(join(target, "pnpm-workspace.yaml")));
   assert.ok(existsSync(join(target, ".dockerignore")) && existsSync(join(target, "compose.yaml")) && existsSync(join(target, "Dockerfile")));
   const compose = readFileSync(join(target, "compose.yaml"), "utf8");

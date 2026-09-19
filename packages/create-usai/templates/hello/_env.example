@@ -1,0 +1,5 @@
+# Copy to .env for development: `usai dev` and `usai test` read .env; `usai run` never does
+# (production takes the process environment). Declare what the application
+# needs with `env({ ... })` in src/app.ts; resources name their own variables.
+#
+# DATABASE_URL=postgres://user:password@127.0.0.1:5432/app

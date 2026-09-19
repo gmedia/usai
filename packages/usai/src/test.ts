@@ -42,6 +42,10 @@ export interface TestResponse {
   headers: Record<string, string>;
   body: unknown;
   text: string;
+  /** Lifecycle violations the request's world committed (`detached_work`,
+   * …), from the `x-usai-lifecycle` header the harness's runtime exposes.
+   * A request that followed the rules has `[]`; assert on it. */
+  violations: string[];
 }
 
 /** Options for `app.http.*`.
@@ -171,7 +175,9 @@ export async function testApp(options: TestAppOptions = {}): Promise<TestApp> {
     if (seed) await runCli(binary, ["--root", root, "db", "seed", ...(typeof seed === "string" ? [seed] : [])], env);
   }
   const token = `test-${Math.random().toString(36).slice(2)}`;
-  const args = ["--root", root, "run", "--port", "0", "--control", "127.0.0.1:0", "--announce", ...(options.args ?? [])];
+  // --diagnostics: the runtime reports lifecycle violations and error details
+  // to the client, which is what a test wants to assert on.
+  const args = ["--root", root, "run", "--port", "0", "--control", "127.0.0.1:0", "--announce", "--diagnostics", ...(options.args ?? [])];
   const child: ChildProcess = spawn(binary, args, {
     env: { ...process.env, USAI_CONTROL_TOKEN: token, RUST_LOG: process.env["RUST_LOG"] ?? "warn", ...(options.env ?? {}) },
     stdio: ["ignore", "pipe", "inherit"],
@@ -221,7 +227,8 @@ export async function testApp(options: TestAppOptions = {}): Promise<TestApp> {
     }
     const out: Record<string, string> = {};
     res.headers.forEach((v, k) => { out[k] = v; });
-    return { status: res.status, headers: out, body: parsed, text };
+    const violations = (out["x-usai-lifecycle"] ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    return { status: res.status, headers: out, body: parsed, text, violations };
   };
 
   let closed = false;

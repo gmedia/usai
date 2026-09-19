@@ -93,6 +93,11 @@ enum Command {
         /// for dedicating replicas, not for correctness
         #[arg(long, env = "USAI_NO_QUEUE")]
         no_queue: bool,
+        /// Expose diagnostics to clients as `usai dev` does: error details in
+        /// 500 bodies and the x-usai-lifecycle / x-usai-server-ms headers.
+        /// For tests and trusted networks only (USAI_DIAGNOSTICS=1)
+        #[arg(long, env = "USAI_DIAGNOSTICS")]
+        diagnostics: bool,
     },
     /// Build, serve, and rebuild on change as a new revision
     Dev {
@@ -354,6 +359,7 @@ async fn async_main() {
             max_worlds,
             no_cron,
             no_queue,
+            diagnostics,
         } => {
             commands::run(
                 &root,
@@ -368,6 +374,7 @@ async fn async_main() {
                 max_worlds,
                 no_cron,
                 no_queue,
+                diagnostics,
             )
             .await
         }

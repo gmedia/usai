@@ -20,6 +20,7 @@ the environment contract. Mirrors the runtime's `Manifest` exactly.
 | <a id="auth"></a> `auth` | \{ `name`: `string`; `scheme`: `string`; `header?`: `string`; `description?`: `string`; \}[] |
 | <a id="env"></a> `env` | \{ `name`: `string`; `kind`: `string`; `required`: `boolean`; `values`: `string`[]; \}[] |
 | <a id="codesha256"></a> `codeSha256` | `string` |
-| <a id="builtwith"></a> `builtWith?` | \{ `sdk?`: `string`; `runtime?`: `string`; \} |
+| <a id="builtwith"></a> `builtWith?` | \{ `sdk?`: `string`; `runtime?`: `string`; `abi?`: `number`; \} |
 | `builtWith.sdk?` | `string` |
 | `builtWith.runtime?` | `string` |
+| `builtWith.abi?` | `number` |

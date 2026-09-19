@@ -182,6 +182,7 @@ Vocabulary used throughout:
 | Name | Description |
 | ------ | ------ |
 | [MANIFEST\_VERSION](variables/MANIFEST_VERSION.md) | The manifest format this SDK writes; the runtime states which formats it understands and refuses the others with a rebuild hint. |
+| [GUEST\_ABI](variables/GUEST_ABI.md) | The host↔guest contract this SDK's in-world runtime speaks (`docs/GUEST-ABI.md`). Stamped into `builtWith.abi`; a runtime with a different bridge refuses the artifact at install instead of faulting every world. |
 | [Manifest](interfaces/Manifest.md) | What `usai build` writes to `manifest.json`: the application as data — every workload with its trigger, contracts (JSON Schema) and policies, every resource with its secret-free configuration, the auth schemes, the environment contract. Mirrors the runtime's `Manifest` exactly. |
 | [describe](functions/describe.md) | Turn an [AppDeclaration](interfaces/AppDeclaration.md) into its [Manifest](interfaces/Manifest.md). The build phase calls it inside a capability-less world; call it yourself to assert on an application's shape in a unit test. Throws on a duplicate workload, a conflicting resource redeclaration, or a hole in a list. |
 

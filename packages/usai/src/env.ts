@@ -50,6 +50,18 @@ export type EnvValues<S extends Record<string, EnvField<unknown>>> = {
  * names (`DATABASE_URL`, `baseUrlEnv`) are required by that resource and
  * need no declaration here. `usai run` never reads `.env`; `usai dev` does.
  *
+ * Field constructors (all required unless wrapped in `env.optional`):
+ *
+ * | Constructor | `ctx.env.X` | Accepts |
+ * |---|---|---|
+ * | `env.string()` | `string` | any text |
+ * | `env.url()` | `string` | a URL, kept as text |
+ * | `env.secret()` | `string` | any text; never printed by `inspect` |
+ * | `env.int()` | `number` | an integer |
+ * | `env.bool()` | `boolean` | `true`/`1`, `false`/`0` |
+ * | `env.enum([...])` | the union | one of the listed values |
+ * | `env.optional(field)` | `T \| undefined` | absent or empty → `undefined` |
+ *
  * @example
  * ```ts
  * export default defineApp({

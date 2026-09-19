@@ -338,7 +338,7 @@ test("users", async () => {
 });
 ```
 
-`testApp` needs the `usai` binary (`USAI_BIN` or on `PATH`) and the project's declared environment (pass `env: { DATABASE_URL }`). With `migrate: true` (or `migrate: { seed: true }`) it runs `usai db migrate` / `usai db seed` first — for a throwaway database. Lifecycle-specific tests are ordinary: mutate in one request, read in the next, and assert the mutation is gone.
+`testApp` needs the `usai` binary (`USAI_BIN` or on `PATH`) and the project's declared environment (pass `env: { DATABASE_URL }`). With `migrate: true` (or `migrate: { seed: true }`) it runs `usai db migrate` / `usai db seed` first — for a throwaway database (`usai test` reads `.env`, so point `DATABASE_URL` at one that may be wiped). The harness starts the runtime with `--diagnostics`: every `TestResponse` carries `violations` (the world's lifecycle violations, e.g. `detached_work` for an un-awaited `dispatch`) — assert `deepEqual(res.violations, [])` on the requests that matter — and 500 bodies carry the error details. Lifecycle-specific tests are ordinary: mutate in one request, read in the next, and assert the mutation is gone.
 
 `app.http.post(path, { body })` sends an object as JSON (`content-type: application/json`) and a string byte-for-byte (for signed webhook bodies: sign the string, send the string). Every call returns `{ status, headers, body, text }` — `body` is parsed JSON when the response is JSON.
 

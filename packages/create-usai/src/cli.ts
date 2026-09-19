@@ -50,7 +50,7 @@ export function scaffold(options: ScaffoldOptions): string {
   });
   // npm strips `.gitignore` from published packages, so the template ships
   // it as `_gitignore`.
-  for (const [from, to] of [["_gitignore", ".gitignore"], ["_dockerignore", ".dockerignore"]] as const) {
+  for (const [from, to] of [["_gitignore", ".gitignore"], ["_dockerignore", ".dockerignore"], ["_env.example", ".env.example"]] as const) {
     if (existsSync(join(target, from))) renameSync(join(target, from), join(target, to));
   }
   return target;
