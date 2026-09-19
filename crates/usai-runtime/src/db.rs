@@ -53,6 +53,19 @@ pub enum DbError {
     Resource(#[from] ResourceError),
 }
 
+/// A glob a module declares that matches nothing is almost always the
+/// module-relative form (`./migrations/*.sql` next to the module file):
+/// globs are root-relative in v0, and the config's own defaults would hide
+/// the mistake. The config's globs are allowed to be empty (a project
+/// without migrations); a module's are named.
+fn warn_if_empty(what: &str, pattern: &str, source: &str, matched: usize) {
+    if matched == 0 && source.starts_with("module ") {
+        tracing::warn!(
+            "{source} declares {what} {pattern:?}, which matches no file: globs are root-relative (`./src/<module>/{what}/…`), not relative to the module file"
+        );
+    }
+}
+
 /// Discovers migration files from root-relative globs. Names are file
 /// basenames; ordering is by name, then path, so `001_users.sql` runs
 /// before `002_orders.sql` regardless of which directory declares it.
@@ -66,10 +79,12 @@ pub fn discover_migrations(
         let pattern_str = absolute.to_string_lossy().into_owned();
         let paths =
             glob::glob(&pattern_str).map_err(|e| DbError::Glob(pattern.clone(), e.to_string()))?;
+        let mut matched = 0usize;
         for path in paths.flatten() {
             if !path.is_file() {
                 continue;
             }
+            matched += 1;
             let name = path
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
@@ -85,6 +100,7 @@ pub fn discover_migrations(
                 source: source.clone(),
             });
         }
+        warn_if_empty("migrations", pattern, source, matched);
     }
     files.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.path.cmp(&b.path)));
     for pair in files.windows(2) {
@@ -169,8 +185,13 @@ pub fn discover_seeders(
         let absolute = root.join(pattern.trim_start_matches("./"));
         let paths = glob::glob(&absolute.to_string_lossy())
             .map_err(|e| DbError::Glob(pattern.clone(), e.to_string()))?;
+        let mut matched = 0usize;
         for path in paths.flatten() {
-            if !path.is_file() || files.iter().any(|f| f.path == path) {
+            if !path.is_file() {
+                continue;
+            }
+            matched += 1;
+            if files.iter().any(|f| f.path == path) {
                 continue;
             }
             let name = path
@@ -183,6 +204,7 @@ pub fn discover_seeders(
                 source: source.clone(),
             });
         }
+        warn_if_empty("seeders", pattern, source, matched);
     }
     files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(files)

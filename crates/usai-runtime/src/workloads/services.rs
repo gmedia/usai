@@ -134,10 +134,11 @@ impl Supervisor {
                         }
                         Err(e) => (ServiceState::Failed, Some(e.to_string()), None),
                     };
+                    let world_text = world.map(|w| w.to_string()).unwrap_or_default();
                     if state == ServiceState::Failed {
-                        tracing::error!(service = %name, world = ?world, error = ?error, "service ended with failure");
+                        tracing::error!(service = %name, world = %world_text, error = error.as_deref().unwrap_or(""), "service ended with failure");
                     } else {
-                        tracing::info!(service = %name, world = ?world, "service stopped");
+                        tracing::info!(service = %name, world = %world_text, "service stopped");
                     }
                     sup.set(index, state, world, error);
                     // Restart applies only while the revision wants the service
@@ -150,6 +151,17 @@ impl Supervisor {
                         }
                         && (restart.max_restarts == 0 || restarts < restart.max_restarts);
                     if !wants_restart {
+                        if state == ServiceState::Failed && !sup.stop.is_cancelled() {
+                            // The supervisor gives up here: the state stays
+                            // `failed` in /_usai/status and the metrics until
+                            // the next activation; readiness is unaffected.
+                            tracing::error!(
+                                service = %name,
+                                restarts,
+                                max_restarts = restart.max_restarts,
+                                "service gave up: restart policy exhausted (state failed until the next activation; /_usai/ready does not depend on services)"
+                            );
+                        }
                         return;
                     }
                     restarts += 1;

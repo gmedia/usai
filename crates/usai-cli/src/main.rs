@@ -99,6 +99,11 @@ enum Command {
         /// you mean them. One-shot commands never run services
         #[arg(long, env = "USAI_NO_SERVICES")]
         no_services: bool,
+        /// How long a shutdown or a revision replacement waits for in-flight
+        /// work before cancelling it, in seconds (USAI_DRAIN_TIMEOUT). Set the
+        /// orchestrator's grace period above this
+        #[arg(long, env = "USAI_DRAIN_TIMEOUT", default_value_t = 30)]
+        drain_timeout: u64,
         /// Expose diagnostics to clients as `usai dev` does: error details in
         /// 500 bodies and the x-usai-lifecycle / x-usai-server-ms headers.
         /// For tests and trusted networks only (USAI_DIAGNOSTICS=1)
@@ -151,6 +156,16 @@ enum Command {
     Db {
         #[command(subcommand)]
         action: DbAction,
+    },
+    /// Probe a running instance's liveness or readiness and exit 0 / 1: a
+    /// container healthcheck without curl in the image
+    Probe {
+        /// `live` or `ready`
+        which: String,
+        /// The listener that serves /_usai/* (`--status-addr`, or the app
+        /// listener with `--status`); USAI_STATUS_ADDR is the environment form
+        #[arg(long, env = "USAI_STATUS_ADDR", default_value = "127.0.0.1:9090")]
+        addr: String,
     },
     /// Run the project's tests with `usai/test` pointed at this binary
     Test {
@@ -386,6 +401,7 @@ async fn async_main() {
             no_cron,
             no_queue,
             no_services,
+            drain_timeout,
             diagnostics,
         } => {
             commands::run(
@@ -402,11 +418,13 @@ async fn async_main() {
                 no_cron,
                 no_queue,
                 no_services,
+                drain_timeout,
                 diagnostics,
             )
             .await
         }
         Command::Dev { host, port } => commands::dev(&root, &host, port).await,
+        Command::Probe { which, addr } => commands::probe(&which, &addr).await,
         Command::Inspect { json } => commands::inspect(&root, json).await,
         Command::Graph => commands::graph(&root).await,
         Command::Config { json } => commands::config(&root, json).await,

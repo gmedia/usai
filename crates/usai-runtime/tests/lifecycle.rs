@@ -373,7 +373,7 @@ async fn runaway_synchronous_code_is_interrupted() {
 async fn unknown_operation_is_refused_not_hung() {
     let rt = runtime().await;
     let r = rt.invoke("task:unknown-op", json!(null)).await.unwrap();
-    assert_eq!(value(&r)["code"], "op_refused");
+    assert_eq!(value(&r)["code"], "unknown_operation");
     assert_baseline(&rt);
 }
 

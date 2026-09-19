@@ -164,6 +164,24 @@ export const failingTask = task("failing", {}, async () => {
   throw errors.conflict("nope");
 });
 export const invokesSlow = task("invokes-slow", {}, async (ctx) => ctx.tasks.invoke(slowTask));
+// One at a time: a second invoke while the first holds the slot is refused
+// with `capacity_exhausted` in the caller's world.
+export const single = task("single", { concurrency: 1 }, async (ctx) => {
+  await ctx.sleep("1s");
+  return { done: true };
+});
+export const invokesSingle = task("invokes-single", {}, async (ctx) => {
+  const first = ctx.tasks.invoke(single);
+  await ctx.sleep("100ms");
+  try {
+    await ctx.tasks.invoke(single);
+    return { second: "ran" };
+  } catch (e) {
+    return { second: (e as { usai?: { code: string; status: number } }).usai };
+  } finally {
+    await first;
+  }
+});
 
 export const order = dispatches(
   http.post("/orders", { body: z.object({ id: z.string() }), resources: [audit] }, async (ctx) => {
@@ -441,6 +459,8 @@ export default defineApp({
     sendReceipt,
     record,
     slowTask,
+    single,
+    invokesSingle,
     failingTask,
     invokesSlow,
     order,

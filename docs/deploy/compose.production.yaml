@@ -48,7 +48,7 @@ services:
     mem_limit: 512m
     stop_grace_period: 35s    # drain bound (30 s) + margin
     restart: unless-stopped
-    healthcheck: { test: ["CMD", "usai", "--version"], interval: 30s }   # liveness; readiness is GET :9090/_usai/ready from the proxy/orchestrator
+    healthcheck: { test: ["CMD", "usai", "probe", "live", "--addr", "127.0.0.1:9090"], interval: 30s, timeout: 5s }   # liveness (the process answers); readiness is `usai probe ready` / GET :9090/_usai/ready from the proxy/orchestrator
 
   caddy:
     image: caddy:2

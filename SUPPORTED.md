@@ -32,6 +32,7 @@ and nothing is promised.
 | One runtime instance behind a reverse proxy | ✓ | the topology the P5/P6 campaigns qualified (`docs/deploy/compose.production.yaml`) |
 | N replicas behind a load balancer, one PostgreSQL | ✓ with the rules below | HTTP and queue consumers need nothing: consumers claim messages with `FOR UPDATE SKIP LOCKED`, so replicas share the work; migrations serialize on an advisory lock, so several `migrate` jobs at once apply each file exactly once |
 | Cron on N replicas | **every instance that runs the scheduler ticks every schedule** | there is no leader election; run the scheduler on exactly one replica (`usai run --no-cron` / `USAI_NO_CRON=1` on the others) or write idempotent jobs. The topology does not change the application's semantics silently: each instance's `/_usai/status` says whether it schedules |
+| `service()` on N replicas | **every instance that runs services has its own instance of each** | there is no leader election; a service that must be single (an ingest loop) runs on one replica (`usai run --no-services` / `USAI_NO_SERVICES=1` on the others) or is written for N (`for update skip locked`). One-shot commands (`usai app`, `db migrate`, …) never start services |
 | Rolling deployment | ✓ | each instance drains its own in-flight work (`docs/runbooks/deploy-and-rollback.md`); connection-bound worlds are closed at the drain bound (WebSocket 1012, stream ended) and clients reconnect to the new instance |
 | `cache.local` across replicas | ✗ | per process by definition; shared state belongs in PostgreSQL |
 

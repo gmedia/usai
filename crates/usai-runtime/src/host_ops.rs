@@ -257,7 +257,16 @@ pub fn spawn_operation(
     payload: String,
     completions: tokio::sync::mpsc::Sender<Completion>,
 ) -> Result<OpId, OpOutcome> {
-    let future = start_builtin(kind, ctx.clone(), payload)?;
+    // A handler that cannot even start (no such task, the task's
+    // concurrency is full, an unknown operation kind) still answers the
+    // guest with its own outcome — `unknown_task`, `capacity_exhausted`,
+    // `unknown_operation` — delivered like any completion, instead of a
+    // bare "host refused operation" that names neither the cause nor the
+    // target. The refusal path is for a world that no longer accepts work.
+    let future: OpFuture = match start_builtin(kind, ctx.clone(), payload) {
+        Ok(future) => future,
+        Err(outcome) => Box::pin(async move { outcome }),
+    };
     let op = ctx.op;
     let world = ctx.world;
     let guard = OpGuard::new(Arc::clone(ledger), op);

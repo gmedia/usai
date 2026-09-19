@@ -15,11 +15,11 @@
 - More capacity on this instance: `usai run --max-worlds <n>`
   (`USAI_MAX_WORLDS`); each world reserves memory up front (see
   memory-pressure). Per-workload bounds come from the application
-  (`maxConcurrency` on a workload).
-- More instances behind the proxy: the runtime is stateless; only the
-  cron scheduler and queue consumers should run on one instance per
-  application (`cron_scheduler`/`queue_consumers` in the runtime
-  configuration).
+  (`concurrency` on a workload).
+- More instances behind the proxy: the runtime is stateless; run the cron
+  scheduler on exactly one instance (`--no-cron` / `USAI_NO_CRON=1` on the
+  others), queue consumers wherever you want the work done (`--no-queue`
+  dedicates replicas), services where you mean them (`--no-services`).
 - A slow dependency, not traffic: if `usai_resource{metric="in_use"}` is at
   `max` while worlds are live, the pool is the bottleneck (503
   `resource_exhausted`); raise `pool.max` or fix the query.

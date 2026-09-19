@@ -219,6 +219,7 @@ pub async fn run(
     no_cron: bool,
     no_queue: bool,
     no_services: bool,
+    drain_timeout: u64,
     diagnostics: bool,
 ) -> Result<()> {
     let trusted = trusted_signers(&require_signature)?;
@@ -248,6 +249,7 @@ pub async fn run(
             cron_scheduler: !no_cron,
             queue_consumers: !no_queue,
             services: !no_services,
+            drain_timeout: Duration::from_secs(drain_timeout.max(1)),
             ..RuntimeConfig::default()
         },
     );
@@ -466,9 +468,13 @@ async fn serve_until_signal(
         tracing::info!("shutting down: draining in-flight work (a second signal forces the exit)");
     }
     shutdown.cancel();
+    // The server's own connections get the runtime's drain bound plus a
+    // margin, so the total stays predictable for the orchestrator's grace
+    // period (`--drain-timeout`).
+    let connection_bound = runtime.config().drain_timeout + Duration::from_secs(5);
     let drain = async {
         runtime.shutdown().await;
-        let _ = tokio::time::timeout(Duration::from_secs(35), server).await;
+        let _ = tokio::time::timeout(connection_bound, server).await;
     };
     tokio::select! {
         _ = drain => { if !quiet { tracing::info!("drained; ownership returned to baseline"); } }
@@ -878,6 +884,34 @@ pub async fn task_run(root: &Path, name: &str, input: &str) -> Result<()> {
     one_shot(root, async |rt| rt.run_task(name, input).await).await
 }
 
+/// `usai probe live|ready`: one GET against the status listener, exit 0 on
+/// 200. Made for `HEALTHCHECK` / `livenessProbe` in an image that carries
+/// no curl; the body is printed when the answer is not 200 so a failing
+/// readiness names its resource.
+pub async fn probe(which: &str, addr: &str) -> Result<()> {
+    if which != "live" && which != "ready" {
+        anyhow::bail!("usai probe <live|ready>");
+    }
+    let url = format!("http://{addr}/_usai/{which}");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()?;
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .with_context(|| format!("{url}: no answer"))?;
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if status.is_success() {
+        println!("{which}: ok");
+        Ok(())
+    } else {
+        eprintln!("{which}: {status} {body}");
+        std::process::exit(1)
+    }
+}
+
 pub async fn queue_run(root: &Path, topic: &str, message: &str) -> Result<()> {
     let message: serde_json::Value =
         serde_json::from_str(message).context("--message must be JSON")?;
@@ -1055,15 +1089,23 @@ pub async fn db_seed(root: &Path, name: Option<&str>) -> Result<()> {
         runtime.shutdown().await;
         let result = result?;
         match (&result.termination, &result.outcome) {
-            (Termination::Completed, Some(Ok(_))) => println!(
-                "seeded {} ({})",
-                seeder.name,
-                seeder
-                    .path
-                    .strip_prefix(&config.root)
-                    .unwrap_or(&seeder.path)
-                    .display()
-            ),
+            (Termination::Completed, Some(Ok(value))) => {
+                // The seeder's return value, like a command's, is the report.
+                let value = value.get("value").unwrap_or(value);
+                let report = match value {
+                    serde_json::Value::Null => String::new(),
+                    v => format!(" → {v}"),
+                };
+                println!(
+                    "seeded {} ({}){report}",
+                    seeder.name,
+                    seeder
+                        .path
+                        .strip_prefix(&config.root)
+                        .unwrap_or(&seeder.path)
+                        .display()
+                )
+            }
             (Termination::Completed, Some(Err(e))) => {
                 anyhow::bail!("seeder {} failed: {}: {}", seeder.name, e.name, e.message)
             }

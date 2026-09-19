@@ -130,7 +130,17 @@ async fn owned_task_failure_reaches_the_parent_as_a_contract() {
         "invoke must wait for the child"
     );
     let r = rt.invoke("http:GET /bad-dispatch", json!({ "kind": "http", "env": {}, "request": { "method": "GET", "path": "/bad-dispatch", "url": "/bad-dispatch", "params": {}, "query": {}, "headers": {}, "body": null } })).await.unwrap();
-    assert_eq!(value(&r)["json"]["code"], "op_refused");
+    // Dispatching a task that does not exist is answered by name, not by a
+    // bare refusal (it was `op_refused` through 0.0.5)…
+    assert_eq!(value(&r)["json"]["code"], "unknown_task");
+    // …and so is a task whose concurrency is full: `capacity_exhausted`, 503.
+    let r = rt.run_task("invokes-single", json!(null)).await.unwrap();
+    assert_eq!(
+        value(&r)["value"]["second"],
+        json!({ "code": "capacity_exhausted", "status": 503 }),
+        "{:?}",
+        r.outcome
+    );
     let r = rt.run_task("failing", json!(null)).await.unwrap();
     let err = r.outcome.unwrap().unwrap_err();
     assert_eq!(err.usai.unwrap()["code"], "conflict");
