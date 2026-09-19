@@ -167,11 +167,20 @@ function encodeHttp(workload: Workload, result: unknown): HttpOutput {
   }
   const schema = workload.contracts.response?.[status];
   if (schema) {
-    const checked = validateWith(schema, body);
-    if (!checked.ok) {
-      throw new UsaiError("response_contract_violation", 500, `response for status ${status} does not match its contract`, { issues: checked.issues });
+    // The same exact shortcut as for input slots: a final schema's
+    // finalizer returns what the parse would (checks run, undeclared keys
+    // stripped) or REPARSE, in which case the parse produces the issues.
+    const finalize = finalizerOf(schema);
+    const fast = finalize === null ? REPARSE : finalize(body);
+    if (fast !== REPARSE) {
+      body = fast;
+    } else {
+      const checked = validateWith(schema, body);
+      if (!checked.ok) {
+        throw new UsaiError("response_contract_violation", 500, `response for status ${status} does not match its contract`, { issues: checked.issues });
+      }
+      body = checked.value;
     }
-    body = checked.value;
   }
   if (status === 204 || body === undefined) return { status, headers };
   return { status, headers, json: body === undefined ? null : body };
@@ -183,8 +192,9 @@ async function runHttp(workload: Workload, input: HttpInput): Promise<HttpOutput
   mark("context", t);
   const { request } = input;
   const raw = workload.trigger["raw"] === true;
+  // No declared auth: no resolver, no await (one microtask hop fewer).
   t = ledger !== null ? now() : 0;
-  const auth = await authenticate(workload, base, request);
+  const auth = workload.auth ? await authenticate(workload, base, request) : undefined;
   if (workload.auth) mark("auth", t);
   if (raw) {
     const bytes = request.body?.base64 !== undefined ? bytesFromBase64(request.body.base64) : new Uint8Array(0);

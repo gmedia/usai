@@ -214,9 +214,8 @@
       } catch (error) {
         promise = Promise.reject(error);
       }
-      // The bridge's own marks join the SDK's ledger: `bridge.entry` is the
-      // synchronous part of the call (seed, dispatch until the first await);
-      // `bridge.state` the outcome's serialisation, added when it is read.
+      // The bridge's own mark joins the SDK's ledger: `bridge.entry` is the
+      // synchronous part of the call (dispatch until the first await).
       const ledger = () => {
         if (!profiling) return [];
         const out = sdk && typeof sdk.takeProfile === "function" ? sdk.takeProfile() : [];
@@ -247,14 +246,6 @@
     // `state`: the outcome (null until the handler settles) and the
     // pending-work count in one read, for the driver's loop.
     state() {
-      if (outcome !== null && profiling && Array.isArray(outcome.profile)) {
-        const t = clock();
-        const text = JSON.stringify({ outcome, pending: { count: pending.size, kinds: Array.from(pending.values(), (p) => p.kind) } });
-        // Reported on the next read; the settled state is read once, so
-        // record it on the object the host already parsed instead.
-        outcome.profile.push(["bridge.state", clock() - t]);
-        return JSON.stringify({ outcome, pending: { count: pending.size, kinds: Array.from(pending.values(), (p) => p.kind) } });
-      }
       return JSON.stringify({ outcome, pending: { count: pending.size, kinds: Array.from(pending.values(), (p) => p.kind) } });
     },
   };
