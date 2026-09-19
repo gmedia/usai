@@ -6,6 +6,10 @@ listed patch.
 
 ## wasmtime 48.0.2 — pagemap slot reset: complete traversal, and reset paged-out dirty pages
 
+Upstream: <https://github.com/bytecodealliance/wasmtime/pull/14357> (open,
+2026-09-19; `docs/upstream/wasmtime-pagemap-reset.md`). Until it lands, this
+directory is the provenance record.
+
 `src/runtime/vm/sys/unix/pagemap.rs`, one function, two behaviours
 (`wasmtime-pagemap-reset.patch`):
 

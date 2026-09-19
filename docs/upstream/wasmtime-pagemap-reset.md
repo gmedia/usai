@@ -1,10 +1,11 @@
 # Upstreaming the Wasmtime pagemap reset patch
 
-Status (2026-09-19): fork `HasanH47/wasmtime`, branch
-`pagemap-reset-complete-traversal` (the patch plus unit tests, on upstream
-`main` at `7ad2e73`), ready for the maintainer to open the PR from:
-<https://github.com/bytecodealliance/wasmtime/compare/main...HasanH47:wasmtime:pagemap-reset-complete-traversal>.
-Upstream `main` still has both behaviours this repository patches (`crates/wasmtime/src/runtime/vm/sys/unix/pagemap.rs`:
+Status (2026-09-19): **PR open** —
+<https://github.com/bytecodealliance/wasmtime/pull/14357> (fork
+`HasanH47/wasmtime`, branch `pagemap-reset-complete-traversal`: the patch
+plus three unit tests in `pagemap.rs`, on upstream `main` at `7ad2e73`).
+Review feedback is applied on that branch; the vendored patch follows what
+lands. Upstream `main` still has both behaviours this repository patches (`crates/wasmtime/src/runtime/vm/sys/unix/pagemap.rs`:
 `MAX_REGIONS = 32` with `walk_end` treated as the end, and a category mask
 requiring `PRESENT`). Latest release: v48.0.2, the version vendored here.
 Nothing to rebase yet; the patch applies to `main` as is.
