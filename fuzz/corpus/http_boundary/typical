@@ -1,0 +1,1 @@
+a=1&a=2&b=x&page=3{"properties":{"page":{"type":"integer"},"a":{"type":"array","items":{"type":"integer"}}}}{"status":201,"headers":{"x-a":"b"},"json":{"ok":true}}

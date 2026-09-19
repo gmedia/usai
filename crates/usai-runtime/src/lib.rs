@@ -17,6 +17,8 @@ pub mod control;
 pub mod db;
 pub mod definition;
 pub mod engine;
+#[cfg(feature = "fuzzing")]
+pub mod fuzz_surface;
 pub mod host_ops;
 pub mod http;
 pub mod observability;

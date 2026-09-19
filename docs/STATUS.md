@@ -12,8 +12,9 @@ Product breadth             ESTABLISHED — stop broadening; depth now
 Milestone acceptance        AUDITED — docs/ACCEPTANCE-AUDIT.md: all D0–D15 items ✓ or ◐, no ✗
 Production substrate        Wasm image + pooling/COW (ADR-0016); attributed and fixed on the research VM
                             (hello 1.01 ms p50, 13.6k req/s at c=16, 0 faults); 1 h soak: 49 M requests, 0 errors, RSS +0.9 %
-Developer preview           v0.0.4 (2026-09-18) — one tag publishes binaries (linux x86_64/aarch64, macOS arm64), npm
-                            (@sakaladev/usai, @sakaladev/create-usai) and Docker images (runtime + dev, amd64 + arm64)
+Developer preview           v0.0.5 (2026-09-19) — one tag publishes binaries (linux x86_64/aarch64, macOS arm64), npm
+                            (@sakaladev/usai, @sakaladev/create-usai) and Docker images (runtime + dev, amd64 + arm64);
+                            main since then: P7 fixes, the documentation split, typed ctx.resources, replica flags (0.0.6 candidate)
 Production ready            NO — see "Production readiness" below
 ```
 
@@ -29,17 +30,19 @@ traffic yet. The gates in `docs/ROADMAP.md`, with where each stands:
 | Distribution (P3.5) | ✓ | native binary, `pnpm usai` wrapper, Docker runtime/dev images, compose path, artifact↔runtime compatibility refused before serving, smoke test in CI and after every release |
 | Real application built as a user (P4) | ✓ | `examples/invoicing` (tenants, sessions, transactional invoices, pagination, signed retried webhooks over outbound HTTP, cron, command, seeder, test through the real runtime) — GUIDE §17; primitives it forced: ADR-0017, enum params. A second outside-developer run (notes API) fed 14 fixes |
 | Operational qualification (P5) | ✓ | production-shaped deployment (Caddy → runtime image → PostgreSQL) broken 13 ways under load; `docs/runbooks/` (8 pages: which metric, which log line, what workloads do, when it recovers); findings fixed (503 for unavailable dependencies, migrations in the artifact, bounded revisions, self-retiring revisions); evidence `docs/measurements/2026-09-18-p5-p6-qualification.md` |
-| Reliability qualification (P6) | ◐ | 1 000 revision replacements under load (2.04 M requests, 0 errors, flat RSS after the malloc-arena fix), DB flap ×10, restart loop ×10, overload (only 503 capacity), dead-letter — all passed; **24 h soak running** (started 2026-09-18 22:18 UTC), 72 h not yet |
+| Reliability qualification (P6) | ◐ | 1 000 revision replacements under load (2.04 M requests, 0 errors, flat RSS after the malloc-arena fix), DB flap ×10, restart loop ×10, overload (only 503 capacity), dead-letter — all passed; **24 h soak running** (started 2026-09-18 22:18 UTC; at 3 h: 8.3 M worlds, RSS 57 MiB, 0 detached work); chained on the VM after it: the **connection campaign** (`p6/run.sh conn-churn`: SSE + WebSocket cycles, connections held through a revision replacement, an app restart and a proxy restart, abrupt client death, unread streams, idle sockets — the deployment-level WS/SSE evidence `SUPPORTED.md` claims) and then the **72 h soak** |
 | External developer validation (P7) | ◐ | four fresh-eyes runs (0.0.1: 21 items; 0.0.4: 14; **0.0.5: three personas — payment webhooks, a Rails developer's multi-tenant SaaS, an SRE deploying from the public docs — 0 blockers on the developer side, 2 on the operator side, ~25 frictions, all fixed below**); doc-to-first-200 in 4–10 min for all three; no human outside developers yet |
 | Frozen contracts, `SUPPORTED.md`, upgrade matrix (RC) | ◐ | `SUPPORTED.md` written; runtime × artifact (N, N−1) matrix tested in CI against the last release; contracts still move within 0.0.x (they must, until P7 says the API is right) |
 | Supply chain | ✓ | artifact signing (`usai keygen` / `build --sign` / `run --require-signature`, native image covered, control installs verified); RustSec + npm audit in CI; binaries with SHA-256, npm via Trusted Publishing, images by digest |
-| Security qualification | ◐ | threat model, `SECURITY.md`; robustness tests (600 mutated artifacts, 600 garbage control/HTTP requests: no panic, no leaked work); worlds are semantic isolation, not a hostile sandbox (ADR-0008); no coverage-guided fuzzing yet |
+| Security qualification | ◐ | threat model, `SECURITY.md`; robustness tests (600 mutated artifacts, 600 garbage control/HTTP requests: no panic, no leaked work); worlds are semantic isolation, not a hostile sandbox (ADR-0008); coverage-guided fuzzing (`fuzz/`, libFuzzer: manifest → definition → OpenAPI/router/cron/env, the HTTP boundary and guest output, source maps) two minutes per target on every push and ten nightly — young: the corpus is days old, not months |
 | Comparative benchmarks | ✓ (first run) | hello endpoint vs Node/Bun/Deno on the VM: `docs/measurements/2026-09-19-comparative-hello.md` — ≈1 ms per request is the model's price (2× below Node, 5× below Bun/Deno at c=64); reported as it came out |
 | Vendored Wasmtime patch | ◐ | provenance in `vendor/README.md`, PR text and upstream status in `docs/upstream/wasmtime-pagemap-reset.md` (upstream `main` unchanged as of 2026-09-18); the freshness tests are the rebase tests; the PR itself is a maintainer's public action |
 
-Next gates: **P6** long soaks (24 h running, then 72 h) and **P7** outside
-developers building from the public docs alone; RC freezes contracts only
-after P7 says the API is right.
+Next gates: **P6** long soaks (24 h running, then the connection campaign and 72 h, chained on the VM) and **P7** outside
+developers building from the public docs alone (three real humans, unguided, would already be informative); RC freezes contracts only
+after P7 says the API is right. Wording after a clean 24 h: *alpha, production qualification in progress* — no longer a preview, not yet a support promise.
+
+Multi-instance: the topology is now stated (`SUPPORTED.md`): HTTP and queues share work across replicas, migrations serialize on an advisory lock, **cron ticks on every instance that schedules** (`--no-cron` elsewhere); a two-replica campaign has not been run.
 
 Current phase (`docs/ROADMAP.md`): **P5 done, P6 soaking, P7 in progress.** Depth, not breadth.
 

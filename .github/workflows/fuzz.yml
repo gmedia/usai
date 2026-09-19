@@ -1,0 +1,46 @@
+name: fuzz
+
+# Coverage-guided fuzzing of the parsers where trust changes hands (fuzz/README.md).
+# Two minutes per target on every push that touches them, ten minutes nightly.
+on:
+  push:
+    branches: [main]
+    paths: ["crates/**", "fuzz/**", ".github/workflows/fuzz.yml"]
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: "Seconds per target"
+        default: "600"
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [manifest, http_boundary, sourcemap]
+    steps:
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+          key: fuzz-${{ matrix.target }}
+      - run: cargo install cargo-fuzz --locked
+      - name: Fuzz ${{ matrix.target }}
+        env:
+          SECONDS_PER_TARGET: ${{ github.event.inputs.seconds || (github.event_name == 'schedule' && '600') || '120' }}
+        run: |
+          cd fuzz
+          cargo fuzz run ${{ matrix.target }} -- -max_total_time="$SECONDS_PER_TARGET" -timeout=20 -rss_limit_mb=4096
+      - name: Upload the reproducer
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}
+          if-no-files-found: ignore

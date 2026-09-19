@@ -1,0 +1,926 @@
+{
+  "manifestVersion": 1,
+  "name": "http-fixture",
+  "modules": [
+    {
+      "name": "users",
+      "migrations": [],
+      "seeders": []
+    }
+  ],
+  "workloads": [
+    {
+      "id": "http:GET /users/:id",
+      "name": "GET /users/:id",
+      "module": "users",
+      "trigger": {
+        "kind": "http",
+        "method": "GET",
+        "path": "/users/:id",
+        "raw": false
+      },
+      "contracts": {
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "id": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
+        "query": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "page": {
+              "default": 1,
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "tags": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
+        "response": {
+          "200": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "additionalProperties": false,
+            "properties": {
+              "email": {
+                "format": "email",
+                "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+                "type": "string"
+              },
+              "id": {
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "email"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "errors": [],
+      "auth": null,
+      "resources": [],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:POST /users",
+      "name": "POST /users",
+      "module": "users",
+      "trigger": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/users",
+        "raw": false
+      },
+      "contracts": {
+        "body": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "email": {
+              "format": "email",
+              "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+              "type": "string"
+            },
+            "name": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "email"
+          ],
+          "type": "object"
+        },
+        "response": {
+          "201": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "additionalProperties": false,
+            "properties": {
+              "email": {
+                "format": "email",
+                "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+                "type": "string"
+              },
+              "id": {
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "email"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "errors": [],
+      "auth": null,
+      "resources": [],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:DELETE /users/:id",
+      "name": "DELETE /users/:id",
+      "module": "users",
+      "trigger": {
+        "kind": "http",
+        "method": "DELETE",
+        "path": "/users/:id",
+        "raw": false
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:GET /counter",
+      "name": "GET /counter",
+      "module": null,
+      "trigger": {
+        "kind": "http",
+        "method": "GET",
+        "path": "/counter",
+        "raw": false
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:POST /hits",
+      "name": "POST /hits",
+      "module": null,
+      "trigger": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/hits",
+        "raw": false
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [
+        "hits"
+      ],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:GET /me",
+      "name": "GET /me",
+      "module": null,
+      "trigger": {
+        "kind": "http",
+        "method": "GET",
+        "path": "/me",
+        "raw": false
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": "token",
+      "resources": [],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:GET /boom",
+      "name": "GET /boom",
+      "module": null,
+      "trigger": {
+        "kind": "http",
+        "method": "GET",
+        "path": "/boom",
+        "raw": false
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:GET /bad-shape",
+      "name": "GET /bad-shape",
+      "module": null,
+      "trigger": {
+        "kind": "http",
+        "method": "GET",
+        "path": "/bad-shape",
+        "raw": false
+      },
+      "contracts": {
+        "response": {
+          "200": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "additionalProperties": false,
+            "properties": {
+              "email": {
+                "format": "email",
+                "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+                "type": "string"
+              },
+              "id": {
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "email"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "errors": [],
+      "auth": null,
+      "resources": [],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:GET /detach",
+      "name": "GET /detach",
+      "module": null,
+      "trigger": {
+        "kind": "http",
+        "method": "GET",
+        "path": "/detach",
+        "raw": false
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:GET /slow",
+      "name": "GET /slow",
+      "module": null,
+      "trigger": {
+        "kind": "http",
+        "method": "GET",
+        "path": "/slow",
+        "raw": false
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": 200
+    },
+    {
+      "id": "http:GET /echo",
+      "name": "GET /echo",
+      "module": null,
+      "trigger": {
+        "kind": "http",
+        "method": "GET",
+        "path": "/echo",
+        "raw": false
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:POST /webhook",
+      "name": "POST /webhook",
+      "module": null,
+      "trigger": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/webhook",
+        "raw": true
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "task:send-receipt",
+      "name": "send-receipt",
+      "module": null,
+      "trigger": {
+        "kind": "task"
+      },
+      "contracts": {
+        "input": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "orderId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "orderId"
+          ],
+          "type": "object"
+        }
+      },
+      "errors": [],
+      "auth": null,
+      "resources": [],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "task:record",
+      "name": "record",
+      "module": null,
+      "trigger": {
+        "kind": "task"
+      },
+      "contracts": {
+        "input": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "what": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "what"
+          ],
+          "type": "object"
+        }
+      },
+      "errors": [],
+      "auth": null,
+      "resources": [
+        "audit"
+      ],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "task:slow",
+      "name": "slow",
+      "module": null,
+      "trigger": {
+        "kind": "task"
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "task:failing",
+      "name": "failing",
+      "module": null,
+      "trigger": {
+        "kind": "task"
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "task:invokes-slow",
+      "name": "invokes-slow",
+      "module": null,
+      "trigger": {
+        "kind": "task"
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:POST /orders",
+      "name": "POST /orders",
+      "module": null,
+      "trigger": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/orders",
+        "raw": false
+      },
+      "contracts": {
+        "body": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        }
+      },
+      "errors": [],
+      "auth": null,
+      "resources": [
+        "audit"
+      ],
+      "dispatches": [
+        "task:record"
+      ],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:GET /audit/:key",
+      "name": "GET /audit/:key",
+      "module": null,
+      "trigger": {
+        "kind": "http",
+        "method": "GET",
+        "path": "/audit/:key",
+        "raw": false
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [
+        "audit"
+      ],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:GET /bad-dispatch",
+      "name": "GET /bad-dispatch",
+      "module": null,
+      "trigger": {
+        "kind": "http",
+        "method": "GET",
+        "path": "/bad-dispatch",
+        "raw": false
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "cron:every-second",
+      "name": "every-second",
+      "module": null,
+      "trigger": {
+        "kind": "cron",
+        "schedule": "* * * * * *",
+        "timeout_ms": null,
+        "overlap": "skip"
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [
+        "audit"
+      ],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "cron:overlapping",
+      "name": "overlapping",
+      "module": null,
+      "trigger": {
+        "kind": "cron",
+        "schedule": "* * * * * *",
+        "timeout_ms": null,
+        "overlap": "skip"
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [
+        "audit"
+      ],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "cron:nightly",
+      "name": "nightly",
+      "module": null,
+      "trigger": {
+        "kind": "cron",
+        "schedule": "0 3 * * *",
+        "timeout_ms": null,
+        "overlap": "skip"
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": 300000
+    },
+    {
+      "id": "command:reconcile",
+      "name": "reconcile",
+      "module": null,
+      "trigger": {
+        "kind": "command"
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [
+        "audit"
+      ],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "service:ledger-sync",
+      "name": "ledger-sync",
+      "module": null,
+      "trigger": {
+        "kind": "service",
+        "restart": {
+          "mode": "never",
+          "backoffMs": 1000,
+          "maxRestarts": 10
+        }
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [
+        "audit"
+      ],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:GET /service-local",
+      "name": "GET /service-local",
+      "module": null,
+      "trigger": {
+        "kind": "http",
+        "method": "GET",
+        "path": "/service-local",
+        "raw": false
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "stream:GET /events",
+      "name": "GET /events",
+      "module": null,
+      "trigger": {
+        "kind": "stream",
+        "method": "GET",
+        "path": "/events"
+      },
+      "contracts": {
+        "query": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "n": {
+              "default": 3,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "errors": [],
+      "auth": null,
+      "resources": [],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "stream:GET /endless",
+      "name": "GET /endless",
+      "module": null,
+      "trigger": {
+        "kind": "stream",
+        "method": "GET",
+        "path": "/endless"
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "stream:GET /no-send",
+      "name": "GET /no-send",
+      "module": null,
+      "trigger": {
+        "kind": "stream",
+        "method": "GET",
+        "path": "/no-send"
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "socket:/chat",
+      "name": "/chat",
+      "module": null,
+      "trigger": {
+        "kind": "socket",
+        "path": "/chat"
+      },
+      "contracts": {
+        "message": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "type": "object"
+        },
+        "response": {
+          "200": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "additionalProperties": false,
+            "properties": {
+              "count": {
+                "type": "number"
+              },
+              "echo": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "echo",
+              "count"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "errors": [],
+      "auth": null,
+      "resources": [
+        "audit"
+      ],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:GET /socket-local",
+      "name": "GET /socket-local",
+      "module": null,
+      "trigger": {
+        "kind": "http",
+        "method": "GET",
+        "path": "/socket-local",
+        "raw": false
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "task:memory-hog",
+      "name": "memory-hog",
+      "module": null,
+      "trigger": {
+        "kind": "task"
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "service:crashy",
+      "name": "crashy",
+      "module": null,
+      "trigger": {
+        "kind": "service",
+        "restart": {
+          "mode": "on-failure",
+          "backoffMs": 20,
+          "maxRestarts": 3
+        }
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [
+        "audit"
+      ],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:POST /url",
+      "name": "POST /url",
+      "module": null,
+      "trigger": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/url",
+        "raw": false
+      },
+      "contracts": {
+        "body": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "url": {
+              "format": "uri",
+              "type": "string"
+            }
+          },
+          "required": [
+            "url"
+          ],
+          "type": "object"
+        }
+      },
+      "errors": [],
+      "auth": null,
+      "resources": [],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:GET /busy",
+      "name": "GET /busy",
+      "module": null,
+      "trigger": {
+        "kind": "http",
+        "method": "GET",
+        "path": "/busy",
+        "raw": false
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": 300
+    },
+    {
+      "id": "http:GET /undeclared",
+      "name": "GET /undeclared",
+      "module": null,
+      "trigger": {
+        "kind": "http",
+        "method": "GET",
+        "path": "/undeclared",
+        "raw": false
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [],
+      "dispatches": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    }
+  ],
+  "resources": [
+    {
+      "name": "hits",
+      "kind": "cache.local",
+      "module": null,
+      "config": {},
+      "env": []
+    },
+    {
+      "name": "audit",
+      "kind": "cache.local",
+      "module": null,
+      "config": {},
+      "env": []
+    }
+  ],
+  "auth": [
+    {
+      "name": "token",
+      "scheme": "bearer",
+      "header": "authorization"
+    }
+  ],
+  "env": [
+    {
+      "name": "GREETING",
+      "kind": "string",
+      "required": false,
+      "values": []
+    }
+  ],
+  "codeSha256": "982211a72335cf728d06ab45d187a0dd662d219053dd3292f095dfbdcf75deb1"
+}

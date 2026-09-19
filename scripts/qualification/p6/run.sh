@@ -26,6 +26,8 @@ status() { curl -s -m 3 "$BASE/_usai/status" || echo '{"unreachable":true}'; }
 health() { curl -s -m 2 -o /dev/null -w "%{http_code}" "$BASE/invoices" || echo 000; }
 wait_healthy() { local d=$((SECONDS + ${1:-120})); while [ $SECONDS -lt $d ]; do [ "$(health)" = "401" ] && return 0; sleep 0.5; done; return 1; }
 rss_mb() { docker stats --no-stream --format "{{.MemUsage}}" usai-p5-app-1 | sed 's/MiB.*//; s/ //g'; }
+cpu_pct() { docker stats --no-stream --format "{{.CPUPerc}}" usai-p5-app-1 | tr -d '%'; }
+fds() { docker exec usai-p5-app-1 sh -c 'ls /proc/1/fd | wc -l' 2>/dev/null || echo null; }
 summarize() {
   node -e '
     const fs=require("fs"); const lines=fs.readFileSync(process.argv[1],"utf8").trim().split("\n").filter(Boolean).map(JSON.parse);
@@ -202,13 +204,18 @@ soak() {
   local t0=$SECONDS
   while kill -0 "$pid" 2>/dev/null; do
     sleep 60
-    echo "{\"t\":$((SECONDS - t0)),\"rssMiB\":\"$(rss_mb)\",\"status\":$(status)}" >> "$samples"
+    # One sample a minute: memory, CPU, open descriptors and the runtime's
+    # own status (ownership gauges, pool/quarantine, queue depth, images,
+    # latency histogram) — the drift a long soak is for.
+    echo "{\"t\":$((SECONDS - t0)),\"rssMiB\":\"$(rss_mb)\",\"cpuPct\":\"$(cpu_pct)\",\"fds\":$(fds),\"status\":$(status)}" >> "$samples"
   done
   echo "soak end $(date -u +%FT%TZ); load: $(summarize "$out")"
   node -e '
     const fs=require("fs"); const s=fs.readFileSync(process.argv[1],"utf8").trim().split("\n").map(JSON.parse);
     const rss=s.map(x=>parseFloat(x.rssMiB)); const g=s.map(x=>x.status.gauges||{});
-    console.log(JSON.stringify({samples:s.length, rssFirst:rss[0], rssMax:Math.max(...rss), rssLast:rss[rss.length-1], liveWorldsMax:Math.max(...g.map(x=>x.liveWorlds||0)), liveOpsLast:g[g.length-1].liveOps, quarantined:(s[s.length-1].status.resources||[]).map(r=>r.quarantined)}));
+    const fds=s.map(x=>x.fds).filter(x=>typeof x==="number"); const cpu=s.map(x=>parseFloat(x.cpuPct)).filter(x=>!isNaN(x));
+    const q=(a,p)=>{const b=[...a].sort((x,y)=>x-y); return b.length?b[Math.min(b.length-1,Math.floor(p*b.length))]:null;};
+    console.log(JSON.stringify({samples:s.length, rssFirst:rss[0], rssMax:Math.max(...rss), rssLast:rss[rss.length-1], fdsFirst:fds[0]??null, fdsMax:fds.length?Math.max(...fds):null, fdsLast:fds[fds.length-1]??null, cpuMedian:q(cpu,0.5), cpuP95:q(cpu,0.95), liveWorldsMax:Math.max(...g.map(x=>x.liveWorlds||0)), liveOpsLast:g[g.length-1].liveOps, worldsCreated:g[g.length-1].worldsCreated, detached:g[g.length-1].detachedWorkDetected, imagesLive:s[s.length-1].status.compiledImagesLive, quarantined:(s[s.length-1].status.resources||[]).map(r=>r.quarantined)}));
   ' "$samples"
 }
 

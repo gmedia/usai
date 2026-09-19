@@ -98,7 +98,7 @@ impl Reply {
 }
 
 #[derive(Deserialize)]
-struct GuestHttpOutput {
+pub(crate) struct GuestHttpOutput {
     status: u16,
     #[serde(default)]
     headers: BTreeMap<String, String>,
@@ -156,7 +156,7 @@ fn header_map_to_json(headers: &HeaderMap) -> Value {
     Value::Object(out)
 }
 
-fn query_to_json(query: Option<&str>) -> Value {
+pub(crate) fn query_to_json(query: Option<&str>) -> Value {
     let mut out = serde_json::Map::new();
     for (key, value) in form_urlencoded::parse(query.unwrap_or("").as_bytes()) {
         let key = key.into_owned();
@@ -178,7 +178,7 @@ fn query_to_json(query: Option<&str>) -> Value {
 /// String-typed transports (path, query, headers) carry scalars as text.
 /// When the schema says a top-level property is a number/integer/boolean,
 /// convert before validating, so `?page=2` satisfies `{type: integer}`.
-fn coerce_scalars(schema: &Value, value: &mut Value) {
+pub(crate) fn coerce_scalars(schema: &Value, value: &mut Value) {
     let (Some(properties), Value::Object(object)) =
         (schema.get("properties").and_then(Value::as_object), value)
     else {
@@ -995,6 +995,22 @@ impl HttpHost {
         output: GuestHttpOutput,
         violations: &[crate::world::LifecycleViolation],
     ) -> HttpResponse {
+        let lifecycle = (self.config.expose_diagnostics && !violations.is_empty()).then(|| {
+            violations
+                .iter()
+                .map(|v| v.code)
+                .collect::<Vec<_>>()
+                .join(",")
+        });
+        render_output(output, lifecycle)
+    }
+}
+
+/// The guest's HTTP output as a response: status, headers it set (invalid
+/// header values are dropped, never a panic), and a body from `json`,
+/// `text` or `base64`, with a content type when the handler set none.
+pub(crate) fn render_output(output: GuestHttpOutput, lifecycle: Option<String>) -> HttpResponse {
+    {
         let status =
             StatusCode::from_u16(output.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
         let mut builder = Response::builder().status(status);
@@ -1007,15 +1023,8 @@ impl HttpHost {
                 builder = builder.header(name.as_str(), v);
             }
         }
-        if self.config.expose_diagnostics && !violations.is_empty() {
-            builder = builder.header(
-                "x-usai-lifecycle",
-                violations
-                    .iter()
-                    .map(|v| v.code)
-                    .collect::<Vec<_>>()
-                    .join(","),
-            );
+        if let Some(codes) = lifecycle {
+            builder = builder.header("x-usai-lifecycle", codes);
         }
         let (bytes, content_type) = if let Some(json) = output.json {
             (
@@ -1046,7 +1055,9 @@ impl HttpHost {
                 )
             })
     }
+}
 
+impl HttpHost {
     /// Known application errors map to their declared status; anything else
     /// is sanitized (C11).
     fn application_error(

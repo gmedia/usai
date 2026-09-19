@@ -6,3 +6,8 @@ dist/
 .DS_Store
 .idea/
 .vscode/
+
+# cargo-fuzz
+fuzz/target/
+fuzz/artifacts/
+fuzz/coverage/

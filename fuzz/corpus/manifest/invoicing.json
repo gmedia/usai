@@ -1,0 +1,1403 @@
+{
+  "manifestVersion": 1,
+  "name": "invoicing",
+  "description": "Multi-tenant invoicing: API keys per tenant, invoices with line items and payments, webhook delivery through a durable queue with retries and dead-lettering, a nightly overdue sweep.",
+  "modules": [
+    {
+      "name": "auth",
+      "migrations": [
+        "./src/auth/migrations/*.sql"
+      ],
+      "seeders": []
+    },
+    {
+      "name": "invoices",
+      "migrations": [
+        "./src/invoices/migrations/*.sql"
+      ],
+      "seeders": [
+        "./src/invoices/seeders/*.ts"
+      ]
+    },
+    {
+      "name": "webhooks",
+      "migrations": [],
+      "seeders": []
+    }
+  ],
+  "workloads": [
+    {
+      "id": "http:POST /signup",
+      "name": "POST /signup",
+      "module": "auth",
+      "trigger": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/signup",
+        "raw": false
+      },
+      "contracts": {
+        "body": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "email": {
+              "format": "email",
+              "maxLength": 200,
+              "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 120,
+              "minLength": 1,
+              "type": "string"
+            },
+            "password": {
+              "maxLength": 200,
+              "minLength": 12,
+              "type": "string"
+            },
+            "tenant": {
+              "pattern": "^[a-z0-9-]{2,40}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "email",
+            "password",
+            "tenant"
+          ],
+          "type": "object"
+        },
+        "response": {
+          "201": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "additionalProperties": false,
+            "properties": {
+              "expiresAt": {
+                "type": "string"
+              },
+              "token": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "token",
+              "expiresAt"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "errors": [
+        {
+          "code": "conflict",
+          "status": 409
+        }
+      ],
+      "auth": null,
+      "resources": [
+        "main"
+      ],
+      "dispatches": [],
+      "publishes": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:POST /login",
+      "name": "POST /login",
+      "module": "auth",
+      "trigger": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/login",
+        "raw": false
+      },
+      "contracts": {
+        "body": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "email": {
+              "format": "email",
+              "maxLength": 200,
+              "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+              "type": "string"
+            },
+            "password": {
+              "maxLength": 200,
+              "minLength": 12,
+              "type": "string"
+            },
+            "tenant": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "email",
+            "password",
+            "tenant"
+          ],
+          "type": "object"
+        },
+        "response": {
+          "200": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "additionalProperties": false,
+            "properties": {
+              "expiresAt": {
+                "type": "string"
+              },
+              "token": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "token",
+              "expiresAt"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "errors": [
+        {
+          "code": "unauthorized",
+          "status": 401
+        }
+      ],
+      "auth": null,
+      "resources": [
+        "main"
+      ],
+      "dispatches": [],
+      "publishes": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:POST /logout",
+      "name": "POST /logout",
+      "module": "auth",
+      "trigger": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/logout",
+        "raw": false
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": "session",
+      "resources": [
+        "main"
+      ],
+      "dispatches": [],
+      "publishes": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:GET /me",
+      "name": "GET /me",
+      "module": "auth",
+      "trigger": {
+        "kind": "http",
+        "method": "GET",
+        "path": "/me",
+        "raw": false
+      },
+      "contracts": {
+        "response": {
+          "200": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "additionalProperties": false,
+            "properties": {
+              "email": {
+                "type": "string"
+              },
+              "tenant": {
+                "type": "string"
+              },
+              "tenantId": {
+                "type": "string"
+              },
+              "userId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "userId",
+              "tenantId",
+              "email",
+              "tenant"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "errors": [],
+      "auth": "session",
+      "resources": [
+        "main"
+      ],
+      "dispatches": [],
+      "publishes": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:PUT /tenant/webhook",
+      "name": "PUT /tenant/webhook",
+      "module": "auth",
+      "trigger": {
+        "kind": "http",
+        "method": "PUT",
+        "path": "/tenant/webhook",
+        "raw": false
+      },
+      "contracts": {
+        "body": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "secret": {
+              "maxLength": 200,
+              "minLength": 16,
+              "type": "string"
+            },
+            "url": {
+              "format": "uri",
+              "maxLength": 500,
+              "type": "string"
+            }
+          },
+          "required": [
+            "url",
+            "secret"
+          ],
+          "type": "object"
+        }
+      },
+      "errors": [],
+      "auth": "session",
+      "resources": [
+        "main"
+      ],
+      "dispatches": [],
+      "publishes": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:POST /invoices",
+      "name": "POST /invoices",
+      "summary": "Create a draft invoice",
+      "description": "The invoice starts as a draft; issue it to make it payable and notify the tenant's webhook.",
+      "module": "invoices",
+      "trigger": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/invoices",
+        "raw": false
+      },
+      "contracts": {
+        "body": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "currency": {
+              "enum": [
+                "USD",
+                "EUR",
+                "IDR"
+              ],
+              "type": "string"
+            },
+            "customer": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            "dueDate": {
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "type": "string"
+            },
+            "items": {
+              "items": {
+                "properties": {
+                  "description": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "quantity": {
+                    "maximum": 10000,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "unitCents": {
+                    "maximum": 100000000,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "description",
+                  "quantity",
+                  "unitCents"
+                ],
+                "type": "object"
+              },
+              "maxItems": 100,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "customer",
+            "currency",
+            "dueDate",
+            "items"
+          ],
+          "type": "object"
+        },
+        "response": {
+          "201": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "additionalProperties": false,
+            "properties": {
+              "createdAt": {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                "type": "string"
+              },
+              "currency": {
+                "type": "string"
+              },
+              "customer": {
+                "type": "string"
+              },
+              "dueDate": {
+                "format": "date",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "issuedAt": {
+                "anyOf": [
+                  {
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "description": {
+                      "maxLength": 200,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "id": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "quantity": {
+                      "maximum": 10000,
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "unitCents": {
+                      "maximum": 100000000,
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "description",
+                    "quantity",
+                    "unitCents",
+                    "id"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "number": {
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer"
+              },
+              "paidAt": {
+                "anyOf": [
+                  {
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "status": {
+                "enum": [
+                  "draft",
+                  "issued",
+                  "paid",
+                  "overdue",
+                  "void"
+                ],
+                "type": "string"
+              },
+              "totalCents": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "number",
+              "customer",
+              "currency",
+              "status",
+              "totalCents",
+              "dueDate",
+              "issuedAt",
+              "paidAt",
+              "createdAt",
+              "items"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "errors": [],
+      "auth": "session",
+      "resources": [
+        "main"
+      ],
+      "dispatches": [],
+      "publishes": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:GET /invoices/:id",
+      "name": "GET /invoices/:id",
+      "summary": "One invoice with its line items",
+      "module": "invoices",
+      "trigger": {
+        "kind": "http",
+        "method": "GET",
+        "path": "/invoices/:id",
+        "raw": false
+      },
+      "contracts": {
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "id": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
+        "response": {
+          "200": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "additionalProperties": false,
+            "properties": {
+              "createdAt": {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                "type": "string"
+              },
+              "currency": {
+                "type": "string"
+              },
+              "customer": {
+                "type": "string"
+              },
+              "dueDate": {
+                "format": "date",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "issuedAt": {
+                "anyOf": [
+                  {
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "description": {
+                      "maxLength": 200,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "id": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "quantity": {
+                      "maximum": 10000,
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "unitCents": {
+                      "maximum": 100000000,
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "description",
+                    "quantity",
+                    "unitCents",
+                    "id"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "number": {
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer"
+              },
+              "paidAt": {
+                "anyOf": [
+                  {
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "status": {
+                "enum": [
+                  "draft",
+                  "issued",
+                  "paid",
+                  "overdue",
+                  "void"
+                ],
+                "type": "string"
+              },
+              "totalCents": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "number",
+              "customer",
+              "currency",
+              "status",
+              "totalCents",
+              "dueDate",
+              "issuedAt",
+              "paidAt",
+              "createdAt",
+              "items"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "errors": [
+        {
+          "code": "not_found",
+          "status": 404
+        }
+      ],
+      "auth": "session",
+      "resources": [
+        "main"
+      ],
+      "dispatches": [],
+      "publishes": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:GET /invoices",
+      "name": "GET /invoices",
+      "summary": "List the tenant's invoices",
+      "description": "Newest first, cursor-paginated; filter by status.",
+      "module": "invoices",
+      "trigger": {
+        "kind": "http",
+        "method": "GET",
+        "path": "/invoices",
+        "raw": false
+      },
+      "contracts": {
+        "query": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "status": {
+              "enum": [
+                "draft",
+                "issued",
+                "paid",
+                "overdue",
+                "void"
+              ],
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "response": {
+          "200": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "additionalProperties": false,
+            "properties": {
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "createdAt": {
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                      "type": "string"
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "customer": {
+                      "type": "string"
+                    },
+                    "dueDate": {
+                      "format": "date",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "issuedAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "number": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "paidAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "status": {
+                      "enum": [
+                        "draft",
+                        "issued",
+                        "paid",
+                        "overdue",
+                        "void"
+                      ],
+                      "type": "string"
+                    },
+                    "totalCents": {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "number",
+                    "customer",
+                    "currency",
+                    "status",
+                    "totalCents",
+                    "dueDate",
+                    "issuedAt",
+                    "paidAt",
+                    "createdAt"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "nextCursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "items",
+              "nextCursor"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "errors": [],
+      "auth": "session",
+      "resources": [
+        "main"
+      ],
+      "dispatches": [],
+      "publishes": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:POST /invoices/:id/issue",
+      "name": "POST /invoices/:id/issue",
+      "summary": "Issue a draft",
+      "description": "Draft → issued. Publishes invoice.issued to the tenant's webhook.",
+      "module": "invoices",
+      "trigger": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/invoices/:id/issue",
+        "raw": false
+      },
+      "contracts": {
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "id": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
+        "response": {
+          "200": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "additionalProperties": false,
+            "properties": {
+              "createdAt": {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                "type": "string"
+              },
+              "currency": {
+                "type": "string"
+              },
+              "customer": {
+                "type": "string"
+              },
+              "dueDate": {
+                "format": "date",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "issuedAt": {
+                "anyOf": [
+                  {
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "number": {
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer"
+              },
+              "paidAt": {
+                "anyOf": [
+                  {
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "status": {
+                "enum": [
+                  "draft",
+                  "issued",
+                  "paid",
+                  "overdue",
+                  "void"
+                ],
+                "type": "string"
+              },
+              "totalCents": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "number",
+              "customer",
+              "currency",
+              "status",
+              "totalCents",
+              "dueDate",
+              "issuedAt",
+              "paidAt",
+              "createdAt"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "errors": [
+        {
+          "code": "not_found",
+          "status": 404
+        },
+        {
+          "code": "conflict",
+          "status": 409
+        }
+      ],
+      "auth": "session",
+      "resources": [
+        "main"
+      ],
+      "dispatches": [],
+      "publishes": [
+        "webhook.deliver"
+      ],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:POST /invoices/:id/pay",
+      "name": "POST /invoices/:id/pay",
+      "summary": "Mark an invoice paid",
+      "description": "Issued or overdue → paid. Publishes invoice.paid.",
+      "module": "invoices",
+      "trigger": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/invoices/:id/pay",
+        "raw": false
+      },
+      "contracts": {
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "id": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
+        "response": {
+          "200": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "additionalProperties": false,
+            "properties": {
+              "createdAt": {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                "type": "string"
+              },
+              "currency": {
+                "type": "string"
+              },
+              "customer": {
+                "type": "string"
+              },
+              "dueDate": {
+                "format": "date",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "issuedAt": {
+                "anyOf": [
+                  {
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "number": {
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer"
+              },
+              "paidAt": {
+                "anyOf": [
+                  {
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "status": {
+                "enum": [
+                  "draft",
+                  "issued",
+                  "paid",
+                  "overdue",
+                  "void"
+                ],
+                "type": "string"
+              },
+              "totalCents": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "number",
+              "customer",
+              "currency",
+              "status",
+              "totalCents",
+              "dueDate",
+              "issuedAt",
+              "paidAt",
+              "createdAt"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "errors": [
+        {
+          "code": "not_found",
+          "status": 404
+        },
+        {
+          "code": "conflict",
+          "status": 409
+        }
+      ],
+      "auth": "session",
+      "resources": [
+        "main"
+      ],
+      "dispatches": [],
+      "publishes": [
+        "webhook.deliver"
+      ],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:DELETE /invoices/:id",
+      "name": "DELETE /invoices/:id",
+      "summary": "Void a draft",
+      "module": "invoices",
+      "trigger": {
+        "kind": "http",
+        "method": "DELETE",
+        "path": "/invoices/:id",
+        "raw": false
+      },
+      "contracts": {
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "id": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
+        "response": {
+          "204": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "null"
+          }
+        }
+      },
+      "errors": [
+        {
+          "code": "not_found",
+          "status": 404
+        },
+        {
+          "code": "conflict",
+          "status": 409
+        }
+      ],
+      "auth": "session",
+      "resources": [
+        "main"
+      ],
+      "dispatches": [],
+      "publishes": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "stream:GET /invoices/live",
+      "name": "GET /invoices/live",
+      "summary": "Live counts as server-sent events",
+      "description": "Sends a `counts` event immediately and then every `everyMs` milliseconds until the client disconnects; the world lives as long as the connection.",
+      "module": "invoices",
+      "trigger": {
+        "kind": "stream",
+        "method": "GET",
+        "path": "/invoices/live"
+      },
+      "contracts": {
+        "query": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "everyMs": {
+              "default": 1000,
+              "maximum": 30000,
+              "minimum": 200,
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "errors": [],
+      "auth": "session",
+      "resources": [
+        "main"
+      ],
+      "dispatches": [],
+      "publishes": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "socket:/invoices/socket",
+      "name": "/invoices/socket",
+      "summary": "Ask for counts over a WebSocket",
+      "description": "On open the server sends `hello`; each `{ \"type\": \"counts\" }` message is answered with the tenant's counts. One world per connection; `ctx.state` counts the questions.",
+      "module": "invoices",
+      "trigger": {
+        "kind": "socket",
+        "path": "/invoices/socket"
+      },
+      "contracts": {
+        "message": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "type": {
+              "const": "counts",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        "response": {
+          "200": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "tenantId": {
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "hello",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "tenantId"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "count": {
+                    "maximum": 9007199254740991,
+                    "minimum": -9007199254740991,
+                    "type": "integer"
+                  },
+                  "issuedTotalCents": {
+                    "maximum": 9007199254740991,
+                    "minimum": -9007199254740991,
+                    "type": "integer"
+                  },
+                  "overdue": {
+                    "maximum": 9007199254740991,
+                    "minimum": -9007199254740991,
+                    "type": "integer"
+                  },
+                  "type": {
+                    "const": "counts",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "count",
+                  "overdue",
+                  "issuedTotalCents",
+                  "type"
+                ],
+                "type": "object"
+              }
+            ]
+          }
+        }
+      },
+      "errors": [],
+      "auth": "session",
+      "resources": [
+        "main"
+      ],
+      "dispatches": [],
+      "publishes": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "cron:mark-overdue",
+      "name": "mark-overdue",
+      "module": "invoices",
+      "trigger": {
+        "kind": "cron",
+        "schedule": "15 0 * * *",
+        "timeout_ms": null,
+        "overlap": "skip"
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [
+        "main"
+      ],
+      "dispatches": [],
+      "publishes": [
+        "webhook.deliver"
+      ],
+      "maxConcurrency": null,
+      "timeoutMs": 300000
+    },
+    {
+      "id": "command:invoices:stats",
+      "name": "invoices:stats",
+      "module": "invoices",
+      "trigger": {
+        "kind": "command"
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": [
+        "main"
+      ],
+      "dispatches": [],
+      "publishes": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "queue:webhook.deliver",
+      "name": "webhook.deliver",
+      "module": "webhooks",
+      "trigger": {
+        "kind": "queue",
+        "topic": "webhook.deliver",
+        "concurrency": 4,
+        "database": "main",
+        "retry": {
+          "maxAttempts": 5,
+          "backoff": "exponential",
+          "baseMs": 500
+        }
+      },
+      "contracts": {
+        "message": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "event": {
+              "enum": [
+                "invoice.issued",
+                "invoice.paid",
+                "invoice.overdue"
+              ],
+              "type": "string"
+            },
+            "invoiceId": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            },
+            "tenantId": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "tenantId",
+            "invoiceId",
+            "event"
+          ],
+          "type": "object"
+        }
+      },
+      "errors": [],
+      "auth": null,
+      "resources": [
+        "main",
+        "webhooks"
+      ],
+      "dispatches": [],
+      "publishes": [],
+      "maxConcurrency": null,
+      "timeoutMs": 15000
+    }
+  ],
+  "resources": [
+    {
+      "name": "main",
+      "kind": "postgres",
+      "module": "auth",
+      "config": {
+        "pool": {
+          "max": 8
+        },
+        "urlEnv": "DATABASE_URL"
+      },
+      "env": [
+        "DATABASE_URL"
+      ]
+    },
+    {
+      "name": "webhooks",
+      "kind": "http.client",
+      "module": "webhooks",
+      "config": {
+        "maxConcurrent": 8,
+        "timeoutMs": 5000
+      },
+      "env": []
+    }
+  ],
+  "auth": [
+    {
+      "name": "session",
+      "scheme": "bearer",
+      "header": "authorization",
+      "description": "The token from POST /signup or POST /login; expires after SESSION_TTL_HOURS."
+    }
+  ],
+  "env": [
+    {
+      "name": "DATABASE_URL",
+      "kind": "url",
+      "required": true,
+      "values": []
+    },
+    {
+      "name": "SESSION_TTL_HOURS",
+      "kind": "int",
+      "required": false,
+      "values": []
+    }
+  ],
+  "codeSha256": "0267f8e0765b39129af3df92f035c056f2fd722f0ef127507aed436cfcc0be92",
+  "builtWith": {
+    "sdk": "0.0.5",
+    "runtime": "0.0.5"
+  }
+}
