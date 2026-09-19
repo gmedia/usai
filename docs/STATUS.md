@@ -17,7 +17,7 @@ Developer preview           v0.0.4 (2026-09-18) — one tag publishes binaries (
 Production ready            NO — see "Production readiness" below
 ```
 
-## Production readiness (honest report, 2026-09-18)
+## Production readiness (honest report, 2026-09-19)
 
 Usai is a **developer preview**. Run it for development, evaluation and
 internal tools you can afford to restart; do not put it in front of paying
