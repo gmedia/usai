@@ -32,10 +32,13 @@ function window(samples, from, to) {
   const first = inside[0];
   const last = inside[inside.length - 1];
   const seconds = last.t - first.t;
-  const ticks = last.procs.reduce((a, p) => a + p.cpuTicks, 0) - first.procs.reduce((a, p) => a + p.cpuTicks, 0);
+  const ticks =
+    last.procs.reduce((a, p) => a + p.cpuTicks, 0) -
+    first.procs.reduce((a, p) => a + p.cpuTicks, 0);
   const cpuPct = seconds > 0 ? (ticks / first.hz / seconds) * 100 : 0;
   const ctxtPerS = seconds > 0 ? (last.ctxt - first.ctxt) / seconds : 0;
-  const minflt = last.procs.reduce((a, p) => a + p.minflt, 0) - first.procs.reduce((a, p) => a + p.minflt, 0);
+  const minflt =
+    last.procs.reduce((a, p) => a + p.minflt, 0) - first.procs.reduce((a, p) => a + p.minflt, 0);
   return {
     n: inside.length,
     procs: first.procs.length,
@@ -63,7 +66,8 @@ function loadSummary(p) {
       .reduce((a, [, v]) => a + v, 0);
     return `${o.summary.requestsPerSec.toFixed(0)} req/s, p50 ${(o.metrics.latency_ms?.p50 ?? o.latencyPercentiles?.p50 * 1000).toFixed(2)} ms, p99 ${(o.metrics.latency_ms?.p99 ?? o.latencyPercentiles?.p99 * 1000).toFixed(2)} ms, ≥400: ${bad}`;
   }
-  if (o.rps !== undefined) return `${o.rps} req/s, p50 ${o.p50} ms, p99 ${o.p99} ms, 4xx ${o.s4xx} 5xx ${o.s5xx} err ${o.errors}`;
+  if (o.rps !== undefined)
+    return `${o.rps} req/s, p50 ${o.p50} ms, p99 ${o.p99} ms, 4xx ${o.s4xx} 5xx ${o.s5xx} err ${o.errors}`;
   return "";
 }
 
@@ -82,9 +86,13 @@ for (const cell of cells.sort()) {
     console.log("(no samples)\n");
     continue;
   }
-  console.log("| phase | s | procs | RSS Σ mean / max MiB | PSS Σ mean / max MiB | CPU % | ctxt/s (host) | minflt/s | fds | threads | MemAvailable min MiB |");
+  console.log(
+    "| phase | s | procs | RSS Σ mean / max MiB | PSS Σ mean / max MiB | CPU % | ctxt/s (host) | minflt/s | fds | threads | MemAvailable min MiB |",
+  );
   console.log("|---|---|---|---|---|---|---|---|---|---|---|");
-  const rows = phases.length ? phases : [{ phase: "all", args: "", from: samples[0].t, to: samples[samples.length - 1].t }];
+  const rows = phases.length
+    ? phases
+    : [{ phase: "all", args: "", from: samples[0].t, to: samples[samples.length - 1].t }];
   for (const ph of rows) {
     const w = window(samples, ph.from, ph.to);
     if (!w) continue;
@@ -96,7 +104,10 @@ for (const cell of cells.sort()) {
   const settle = phases.find((p) => p.phase === "settle" || p.phase === "idle");
   if (settle && result.n) {
     const w = window(samples, settle.from, settle.to);
-    if (w) console.log(`\nidle per process: RSS ${mib(w.rssMeanKib / result.n)} MiB, PSS ${mib(w.pssMeanKib / result.n)} MiB, CPU ${(w.cpuPct / result.n).toFixed(3)} %`);
+    if (w)
+      console.log(
+        `\nidle per process: RSS ${mib(w.rssMeanKib / result.n)} MiB, PSS ${mib(w.pssMeanKib / result.n)} MiB, CPU ${(w.cpuPct / result.n).toFixed(3)} %`,
+      );
   }
   const loads = readdirSync(d).filter((f) => f.startsWith("load-") || f.startsWith("burst-"));
   for (const f of loads.sort()) {

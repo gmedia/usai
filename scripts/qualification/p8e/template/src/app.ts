@@ -62,9 +62,13 @@ export const health = http.get(
 
 // Present so the runtime holds a task queue and a cron scheduler like a
 // real application; the cron never fires during a run.
-export const reindex = task("reindex", { input: z.object({ n: z.number().int() }) }, async (ctx) => ({
-  n: ctx.input.n,
-}));
+export const reindex = task(
+  "reindex",
+  { input: z.object({ n: z.number().int() }) },
+  async (ctx) => ({
+    n: ctx.input.n,
+  }),
+);
 
 export const nightly = cron("nightly", { schedule: "0 3 * * *", resources: [db] }, async (ctx) => {
   const row = await ctx.resources.db.one<{ n: number }>("select count(*)::int as n from users");
