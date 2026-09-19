@@ -249,8 +249,11 @@ export function structuralSample(schema: AnySchema): { value: unknown } | undefi
 // transform, strip unknown keys. When the schema provably does none of
 // that — its output *is* its input for every value it accepts — the second
 // parse is work the semantics never asked for, and the guest replaces it
-// with a *finalizer* for the slots the host reports as validated. Anything
-// unproven keeps the double pass; correctness first.
+// with a *finalizer* for the slots the host reports as validated. The
+// finalizer reproduces the two things Zod does to an accepted value beyond
+// accepting it — filling `.default()`s and stripping undeclared keys —
+// because both are Zod's own, not application code. Anything unproven keeps
+// the double pass; correctness first.
 //
 // The finalizer is exact by construction, not by re-implementation: it
 // walks the value along the schema's structure, runs each node's own
@@ -309,9 +312,10 @@ function zodFinalizer(s: unknown, depth = 0): Finalizer {
   const d = zi.def;
   const type = d.type;
   if (typeof type !== "string") throw new NotFinal();
-  // `z.coerce.*` is the base type with a `coerce` flag; the host coerces
-  // URL scalars the same way, but the proof stays conservative.
-  if (d["coerce"] === true) throw new NotFinal();
+  // `z.coerce.*` is the base type with a `coerce` flag: `Number(v)` of a
+  // number is the number, so a value that already has the type (the host
+  // coerced URL scalars against the JSON Schema) is final; anything else
+  // fails the type test below and is reparsed, where Zod coerces it.
   switch (type) {
     case "string": return scalar((v) => typeof v === "string", d);
     case "number": return scalar((v) => typeof v === "number" && Number.isFinite(v), d);
@@ -336,6 +340,15 @@ function zodFinalizer(s: unknown, depth = 0): Finalizer {
       if (type === "optional") return (v) => (v === undefined ? v : inner(v));
       if (type === "nullable") return (v) => (v === null ? v : inner(v));
       return (v) => (v === undefined ? REPARSE : inner(v));
+    }
+    case "default": {
+      // Zod 4: an absent value *is* the default, unparsed; a present one is
+      // the inner schema's output. `defaultValue` is a getter that may call
+      // the application's factory — at request time, exactly when Zod's own
+      // parse would call it, never at proof time.
+      if ((d.checks ?? []).length > 0) throw new NotFinal();
+      const inner = zodFinalizer(d["innerType"], depth + 1);
+      return (v) => (v === undefined ? (d as { defaultValue?: unknown }).defaultValue : inner(v));
     }
     case "union": {
       if ((d.checks ?? []).length > 0) throw new NotFinal();
@@ -401,7 +414,9 @@ function zodFinalizer(s: unknown, depth = 0): Finalizer {
       if (!isPlainObject(shape)) throw new NotFinal();
       const keys = Object.keys(shape);
       const fields = keys.map((k) => zodFinalizer(shape[k], depth + 1));
-      const optional = keys.map((k) => (internals(shape[k])?.def.type as string | undefined) === "optional");
+      // Zod skips an absent key only for an optional field; every other
+      // field runs with `undefined` (a default fills in, anything else fails).
+      const optional = keys.map((k) => (internals(shape[k]) as { optin?: string } | undefined)?.optin === "optional");
       const catchall = d["catchall"] ? (internals(d["catchall"])?.def.type as string | undefined) : undefined;
       // undefined: plain object, undeclared keys are stripped. never:
       // strictObject, the host refused them. unknown/any: looseObject,
@@ -415,7 +430,10 @@ function zodFinalizer(s: unknown, depth = 0): Finalizer {
         for (let i = 0; i < keys.length; i++) {
           const k = keys[i]!;
           if (!(k in v)) {
-            if (!optional[i]) return REPARSE;
+            if (optional[i]) continue;
+            const x = fields[i]!(undefined);
+            if (x === REPARSE) return REPARSE;
+            out[k] = x;
             continue;
           }
           const x = fields[i]!(v[k]);
@@ -427,17 +445,17 @@ function zodFinalizer(s: unknown, depth = 0): Finalizer {
       };
     }
     default:
-      // date, bigint, nan, readonly, default, prefault, catch, pipe,
-      // transform, lazy, custom, intersection, map, set, …: the output may
-      // differ from the input or application code may run.
+      // date, bigint, nan, readonly, prefault, catch, pipe, transform,
+      // lazy, custom, intersection, map, set, …: the output may differ from
+      // the input or application code may run.
       throw new NotFinal();
   }
 }
 
 /** The finalizer for a schema whose output is provably its (host-validated)
- * input, or `undefined` when the schema may change the value or run
- * application code (defaults, coercion, transforms, catch, readonly,
- * dates, …). Zod only. */
+ * input — plus Zod's own defaults and key stripping — or `undefined` when
+ * the schema may change the value or run application code (transforms,
+ * preprocess, catch, prefault, readonly, dates, `.trim()`, …). Zod only. */
 export function hostFinal(schema: AnySchema): Finalizer | undefined {
   try {
     const vendor = (schema as { "~standard"?: { vendor?: string } })["~standard"]?.vendor;

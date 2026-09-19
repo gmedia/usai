@@ -773,9 +773,9 @@ async fn manifest_describes_the_application() {
         "zod described params as JSON Schema"
     );
     assert!(get_user.contracts.response.contains_key(&200));
-    // Validate once: params (a uuid string) are final at the boundary; the
-    // query carries a default, so the world still parses it.
-    assert_eq!(get_user.contracts.boundary_final, ["params"]);
+    // Validate once: params (a uuid string) and the query (a default and
+    // an optional array) are final at the boundary.
+    assert_eq!(get_user.contracts.boundary_final, ["params", "query"]);
     let create = rev.definition.workload("http:POST /users").unwrap().1;
     assert_eq!(create.contracts.boundary_final, ["body"]);
     let shaped = rev

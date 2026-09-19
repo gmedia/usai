@@ -51,6 +51,11 @@ test("hostFinal reproduces zod's output for structural schemas", () => {
       },
     ],
     [z.array(z.object({ q: z.number().min(0.5) })), [{ q: 1, r: 2 }]],
+    // Defaults: absent is the default (unparsed, as Zod 4 does), present is the value.
+    [z.object({ p: z.enum(["a", "b"]).default("a"), f: z.string().default(() => "gen"), o: z.object({ x: z.string() }).default({ x: "d", extra: 1 } as never) }), {}],
+    [z.object({ p: z.enum(["a", "b"]).default("a"), f: z.string().default(() => "gen") }), { p: "b", f: "x" }],
+    // Coercion on a value that already has the type is the identity.
+    [z.object({ id: z.coerce.number().int().min(1) }), { id: 42 }],
     // A union of objects: the first accepting option decides what is stripped.
     [z.union([z.object({ k: z.string() }), z.object({ j: z.string() })]), { j: "x", k: 1 }],
     [z.union([z.object({ k: z.string() }), z.object({ j: z.string() })]), { j: "x", k: "y" }],
@@ -75,6 +80,7 @@ test("hostFinal reparses when zod's own checks would reject", () => {
     [z.tuple([z.string()]), ["a", "b"]],
     [z.union([z.literal("a"), z.literal("b")]), "c"],
     [z.array(z.string()).min(2), ["a"]],
+    [z.object({ a: z.string().default("d"), b: z.string() }), { a: "x" }],
   ];
   for (const [schema, value] of cases) {
     const finalize = hostFinal(schema);
@@ -82,16 +88,20 @@ test("hostFinal reparses when zod's own checks would reject", () => {
     assert.equal(finalize(value), REPARSE, JSON.stringify(value));
     assert.equal(schema.safeParse(value).success, false, "zod rejects it too");
   }
+  // A coercible value is not final (the finalizer never coerces); the full
+  // parse then coerces it, as it always did.
+  const coerce = z.object({ id: z.coerce.number().int() });
+  assert.equal(hostFinal(coerce)!({ id: "42" }), REPARSE);
+  assert.deepEqual(coerce.parse({ id: "42" }), { id: 42 });
 });
 
 test("hostFinal refuses schemas whose output may differ from the input", () => {
   const refused = [
-    z.object({ a: z.string().default("d") }),
-    z.object({ a: z.coerce.number() }),
     z.object({ a: z.string().transform((s) => s.length) }),
     z.object({ a: z.string().refine((s) => s.length > 2) }),
     z.object({ a: z.string().trim() }),
     z.object({ a: z.string().catch("c") }),
+    z.object({ a: z.string().min(3).prefault("x") }),
     z.object({ a: z.date() }),
     z.object({ a: z.string() }).readonly(),
     z.object({ a: z.string() }).catchall(z.number()),

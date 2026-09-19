@@ -407,6 +407,11 @@ fn base_config() -> Config {
     // Profiling knobs (not application configuration).
     let epoch = std::env::var("USAI_WASM_EPOCH").as_deref() != Ok("0");
     config.epoch_interruption(epoch);
+    // `USAI_WASM_PERFMAP=1` writes /tmp/perf-<pid>.map so `perf report`
+    // names the core's functions inside JIT code (Linux only; engineering).
+    if std::env::var("USAI_WASM_PERFMAP").as_deref() == Ok("1") {
+        config.profiler(wasmtime::ProfilingStrategy::PerfMap);
+    }
     if let Ok(level) = std::env::var("USAI_WASM_OPT") {
         config.cranelift_opt_level(match level.as_str() {
             "none" => wasmtime::OptLevel::None,
