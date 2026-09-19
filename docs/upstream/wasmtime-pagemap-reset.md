@@ -1,7 +1,10 @@
 # Upstreaming the Wasmtime pagemap reset patch
 
-Status (2026-09-18): upstream `main` still has both behaviours this
-repository patches (`crates/wasmtime/src/runtime/vm/sys/unix/pagemap.rs`:
+Status (2026-09-19): fork `HasanH47/wasmtime`, branch
+`pagemap-reset-complete-traversal` (the patch plus unit tests, on upstream
+`main` at `7ad2e73`), ready for the maintainer to open the PR from:
+<https://github.com/bytecodealliance/wasmtime/compare/main...HasanH47:wasmtime:pagemap-reset-complete-traversal>.
+Upstream `main` still has both behaviours this repository patches (`crates/wasmtime/src/runtime/vm/sys/unix/pagemap.rs`:
 `MAX_REGIONS = 32` with `walk_end` treated as the end, and a category mask
 requiring `PRESENT`). Latest release: v48.0.2, the version vendored here.
 Nothing to rebase yet; the patch applies to `main` as is.
@@ -53,13 +56,20 @@ instance per request (pooling allocator, `memory_init_cow`, `pagemap_scan`):
    belong together.
 
 The patch keeps the fixed stack buffer (64 regions) and loops the ioctl,
-so there is still no allocation on the reset path. Tests included:
+so there is still no allocation on the reset path. Unit tests in
+`pagemap.rs` (they skip where `PAGEMAP_SCAN` is unavailable):
 
-- `a_reused_slot_is_fresh_after_fragmented_writes`: one byte every other
-  page (hundreds of regions), the next instance sees zeros;
-- `a_reused_slot_is_fresh_even_after_its_pages_were_paged_out`:
-  `MADV_PAGEOUT` between two instances; fails with the old mask on a host
-  with swap.
+- `reset_resumes_past_the_region_buffer`: 200 disjoint dirty pages in a
+  400-page mapping, `keep_resident` = everything — all 200 reset in place,
+  nothing decommitted, the mapping reads zero;
+- `reset_stops_at_the_page_budget`: same mapping, `keep_resident` = 100
+  pages — exactly 100 reset, the rest decommitted;
+- `reset_covers_dirty_pages_that_were_paged_out`: 64 dirty pages,
+  `MADV_PAGEOUT`, then the reset — every page reset (on a host with swap
+  this fails with the old `PRESENT` mask; elsewhere it is the ordinary
+  reset).
 
 Measurements and the perf ledger are in the Usai repository
-(`docs/measurements/2026-09-18-execution-path-attribution.md`).
+(`docs/measurements/2026-09-18-execution-path-attribution.md`); its
+engine tests (`a_reused_slot_is_fresh_*`) exercise the same behaviour
+through a real pooling allocator.
