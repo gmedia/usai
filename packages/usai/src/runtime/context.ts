@@ -3,7 +3,14 @@
 // operation; nothing escapes the world's ownership.
 
 import type { ResourceDeclaration, Workload } from "../declarations.ts";
-import type { CacheLocalHandle, FetchInit, FetchResponse, HttpClientHandle, PostgresHandle, SqlExecutor } from "../resources.ts";
+import type {
+  CacheLocalHandle,
+  FetchInit,
+  FetchResponse,
+  HttpClientHandle,
+  PostgresHandle,
+  SqlExecutor,
+} from "../resources.ts";
 import { UsaiError } from "../errors.ts";
 
 /** What `ctx.log` and `console` offer inside a world.
@@ -110,7 +117,10 @@ export interface BaseContext {
 }
 
 export async function op<T = unknown>(kind: string, payload: unknown): Promise<T> {
-  const raw = await globalThis.__usai.op(kind, typeof payload === "string" ? payload : JSON.stringify(payload));
+  const raw = await globalThis.__usai.op(
+    kind,
+    typeof payload === "string" ? payload : JSON.stringify(payload),
+  );
   return raw === "" ? (undefined as T) : (JSON.parse(raw) as T);
 }
 
@@ -120,32 +130,54 @@ export function makeSignal(): UsaiAbortSignal {
   globalThis.__usai.onCancel((r) => {
     reason = r;
     for (const fn of listeners) {
-      try { fn(r); } catch { /* listener errors never break cancellation */ }
+      try {
+        fn(r);
+      } catch {
+        /* listener errors never break cancellation */
+      }
     }
   });
   return {
-    get aborted() { return reason !== undefined; },
-    get reason() { return reason; },
+    get aborted() {
+      return reason !== undefined;
+    },
+    get reason() {
+      return reason;
+    },
     addEventListener(_type, listener) {
       if (reason !== undefined) listener(reason);
       else listeners.push(listener);
     },
     throwIfAborted() {
-      if (reason !== undefined) throw new UsaiError("cancelled", 499, `work was cancelled: ${reason}`);
+      if (reason !== undefined)
+        throw new UsaiError("cancelled", 499, `work was cancelled: ${reason}`);
     },
   };
 }
 
-function resourceCall(name: string, method: string, args: Record<string, unknown>): Promise<unknown> {
+function resourceCall(
+  name: string,
+  method: string,
+  args: Record<string, unknown>,
+): Promise<unknown> {
   return op("resource", { name, method, args });
 }
 
 function cacheLocalHandle(name: string): CacheLocalHandle {
   return {
     get: (key) => resourceCall(name, "get", { key }) as Promise<never>,
-    set: (key, value, options) => resourceCall(name, "set", { key, value, ...(options?.ttlMs !== undefined ? { ttlMs: options.ttlMs } : {}) }) as Promise<boolean>,
+    set: (key, value, options) =>
+      resourceCall(name, "set", {
+        key,
+        value,
+        ...(options?.ttlMs !== undefined ? { ttlMs: options.ttlMs } : {}),
+      }) as Promise<boolean>,
     delete: (key) => resourceCall(name, "delete", { key }) as Promise<boolean>,
-    increment: (key, by) => resourceCall(name, "increment", { key, ...(by !== undefined ? { by } : {}) }) as Promise<number>,
+    increment: (key, by) =>
+      resourceCall(name, "increment", {
+        key,
+        ...(by !== undefined ? { by } : {}),
+      }) as Promise<number>,
     clear: () => resourceCall(name, "clear", {}) as Promise<boolean>,
   };
 }
@@ -153,9 +185,12 @@ function cacheLocalHandle(name: string): CacheLocalHandle {
 function sqlExecutor(name: string, lease?: number): SqlExecutor {
   const extra = lease === undefined ? {} : { lease };
   return {
-    query: (sql, params = []) => resourceCall(name, "query", { sql, params, ...extra }) as Promise<never[]>,
-    one: (sql, params = []) => resourceCall(name, "one", { sql, params, ...extra }) as Promise<never>,
-    execute: (sql, params = []) => resourceCall(name, "execute", { sql, params, ...extra }) as Promise<number>,
+    query: (sql, params = []) =>
+      resourceCall(name, "query", { sql, params, ...extra }) as Promise<never[]>,
+    one: (sql, params = []) =>
+      resourceCall(name, "one", { sql, params, ...extra }) as Promise<never>,
+    execute: (sql, params = []) =>
+      resourceCall(name, "execute", { sql, params, ...extra }) as Promise<number>,
   };
 }
 
@@ -195,7 +230,8 @@ function httpClientHandle(name: string): HttpClientHandle {
       let body = init.body;
       if (init.json !== undefined) {
         body = JSON.stringify(init.json);
-        if (!Object.keys(headers).some((h) => h.toLowerCase() === "content-type")) headers["content-type"] = "application/json";
+        if (!Object.keys(headers).some((h) => h.toLowerCase() === "content-type"))
+          headers["content-type"] = "application/json";
       }
       const args: Record<string, unknown> = { url, headers };
       if (init.method !== undefined) args["method"] = init.method;
@@ -217,14 +253,16 @@ function httpClientHandle(name: string): HttpClientHandle {
         ok: raw.ok,
         headers: raw.headers,
         text,
-        json: <T,>() => JSON.parse(text()) as T,
+        json: <T>() => JSON.parse(text()) as T,
         bytes,
       };
     },
   };
 }
 
-function genericHandle(declaration: ResourceDeclaration): Record<string, (args?: Record<string, unknown>) => Promise<unknown>> {
+function genericHandle(
+  declaration: ResourceDeclaration,
+): Record<string, (args?: Record<string, unknown>) => Promise<unknown>> {
   const handle: Record<string, (args?: Record<string, unknown>) => Promise<unknown>> = {};
   for (const method of declaration.methods) {
     handle[method] = (args = {}) => resourceCall(declaration.name, method, args);
@@ -232,14 +270,19 @@ function genericHandle(declaration: ResourceDeclaration): Record<string, (args?:
   return handle;
 }
 
-export function makeResources(declarations: readonly ResourceDeclaration[]): Record<string, unknown> {
+export function makeResources(
+  declarations: readonly ResourceDeclaration[],
+): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const declaration of declarations) {
     out[declaration.name] =
-      declaration.kind === "cache.local" ? cacheLocalHandle(declaration.name)
-      : declaration.kind === "postgres" ? postgresHandle(declaration.name)
-      : declaration.kind === "http.client" ? httpClientHandle(declaration.name)
-      : genericHandle(declaration);
+      declaration.kind === "cache.local"
+        ? cacheLocalHandle(declaration.name)
+        : declaration.kind === "postgres"
+          ? postgresHandle(declaration.name)
+          : declaration.kind === "http.client"
+            ? httpClientHandle(declaration.name)
+            : genericHandle(declaration);
   }
   // A resource the workload did not declare is a lifecycle mistake, not
   // `undefined`: say so, with the fix, instead of failing later on
@@ -248,8 +291,14 @@ export function makeResources(declarations: readonly ResourceDeclaration[]): Rec
   return new Proxy(out, {
     get(target, key, receiver) {
       if (typeof key === "string" && !(key in target) && key !== "then" && key !== "toJSON") {
-        const hint = declared.length ? `declared here: ${declared.join(", ")}` : "this workload declares no resources";
-        throw new UsaiError("resource_not_declared", 500, `resource "${key}" is not declared on this workload (${hint}); add it to the workload's \`resources: [...]\``);
+        const hint = declared.length
+          ? `declared here: ${declared.join(", ")}`
+          : "this workload declares no resources";
+        throw new UsaiError(
+          "resource_not_declared",
+          500,
+          `resource "${key}" is not declared on this workload (${hint}); add it to the workload's \`resources: [...]\``,
+        );
       }
       return Reflect.get(target, key, receiver);
     },
@@ -259,13 +308,17 @@ export function makeResources(declarations: readonly ResourceDeclaration[]): Rec
 export function parseDurationMs(value: string | number): number {
   if (typeof value === "number") return value;
   const match = /^(\d+(?:\.\d+)?)\s*(ms|s|m|h)?$/.exec(value.trim());
-  if (!match) throw new UsaiError("invalid_duration", 500, `invalid duration ${JSON.stringify(value)}`);
+  if (!match)
+    throw new UsaiError("invalid_duration", 500, `invalid duration ${JSON.stringify(value)}`);
   const n = Number(match[1]);
   const unit = match[2] ?? "ms";
   return unit === "s" ? n * 1000 : unit === "m" ? n * 60_000 : unit === "h" ? n * 3_600_000 : n;
 }
 
-export function makeBase(resources: readonly ResourceDeclaration[], env: Record<string, string | number | boolean | undefined>): BaseContext {
+export function makeBase(
+  resources: readonly ResourceDeclaration[],
+  env: Record<string, string | number | boolean | undefined>,
+): BaseContext {
   return {
     resources: makeResources(resources),
     tasks: {
@@ -274,11 +327,17 @@ export function makeBase(resources: readonly ResourceDeclaration[], env: Record<
     },
     queue: {
       publish: (topic, message, options) =>
-        op("queue.publish", { topic, message: message ?? null, ...(options?.delayMs !== undefined ? { delayMs: options.delayMs } : {}), ...(options?.database ? { database: options.database.name } : {}) }),
+        op("queue.publish", {
+          topic,
+          message: message ?? null,
+          ...(options?.delayMs !== undefined ? { delayMs: options.delayMs } : {}),
+          ...(options?.database ? { database: options.database.name } : {}),
+        }),
     },
     signal: makeSignal(),
     env,
     log: console,
-    sleep: (duration) => new Promise<void>((resolve) => setTimeout(() => resolve(), parseDurationMs(duration))),
+    sleep: (duration) =>
+      new Promise<void>((resolve) => setTimeout(() => resolve(), parseDurationMs(duration))),
   };
 }

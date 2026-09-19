@@ -218,6 +218,7 @@ pub async fn run(
     max_worlds: u32,
     no_cron: bool,
     no_queue: bool,
+    no_services: bool,
     diagnostics: bool,
 ) -> Result<()> {
     let trusted = trusted_signers(&require_signature)?;
@@ -246,6 +247,7 @@ pub async fn run(
             default_app_concurrency: max_worlds.max(1),
             cron_scheduler: !no_cron,
             queue_consumers: !no_queue,
+            services: !no_services,
             ..RuntimeConfig::default()
         },
     );
@@ -254,6 +256,9 @@ pub async fn run(
     }
     if no_queue {
         tracing::info!("queue consumers off on this instance (--no-queue)");
+    }
+    if no_services {
+        tracing::info!("services off on this instance (--no-services)");
     }
     let revision = runtime.install(definition).await?;
     runtime.activate(revision.id).await.map_err(|e| match e {
@@ -800,6 +805,7 @@ async fn one_shot(
         RuntimeConfig {
             cron_scheduler: false,
             queue_consumers: false,
+            services: false,
             ..RuntimeConfig::default()
         },
     );
@@ -892,6 +898,7 @@ async fn with_active_runtime<T>(
         RuntimeConfig {
             cron_scheduler: false,
             queue_consumers: false,
+            services: false,
             ..RuntimeConfig::default()
         },
     );
@@ -917,6 +924,7 @@ async fn with_artifact_runtime<T>(
         RuntimeConfig {
             cron_scheduler: false,
             queue_consumers: false,
+            services: false,
             ..RuntimeConfig::default()
         },
     );
@@ -1035,6 +1043,7 @@ pub async fn db_seed(root: &Path, name: Option<&str>) -> Result<()> {
             RuntimeConfig {
                 cron_scheduler: false,
                 queue_consumers: false,
+                services: false,
                 ..RuntimeConfig::default()
             },
         );
@@ -1101,6 +1110,7 @@ pub async fn bench(root: &Path, path: &str, concurrency: usize, duration: Durati
         RuntimeConfig {
             cron_scheduler: false,
             queue_consumers: false,
+            services: false,
             ..RuntimeConfig::default()
         },
     );

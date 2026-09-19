@@ -12,9 +12,28 @@ import type { AnySchema } from "../schema.ts";
  * check or callback can execute (an `invalid_type` issue aborts the check
  * chain; only checks with a user `when` predicate still run). */
 const ZOD_FAIL_FAST = new Set([
-  "object", "array", "tuple", "record", "map", "set",
-  "string", "number", "int", "bigint", "boolean", "date", "symbol",
-  "null", "undefined", "void", "never", "literal", "enum", "nan", "file", "template_literal",
+  "object",
+  "array",
+  "tuple",
+  "record",
+  "map",
+  "set",
+  "string",
+  "number",
+  "int",
+  "bigint",
+  "boolean",
+  "date",
+  "symbol",
+  "null",
+  "undefined",
+  "void",
+  "never",
+  "literal",
+  "enum",
+  "nan",
+  "file",
+  "template_literal",
 ]);
 
 /** Wrappers that, given `undefined`, either return without touching the
@@ -35,7 +54,9 @@ const internals = (s: unknown): ZodInternals | undefined =>
   s && typeof s === "object" ? (s as { _zod?: ZodInternals })._zod : undefined;
 
 function hasWhen(d: ZodInternals["def"]): boolean {
-  return (d.checks ?? []).some((c) => typeof (c as { _zod?: ZodInternals })?._zod?.def?.when === "function");
+  return (d.checks ?? []).some(
+    (c) => typeof (c as { _zod?: ZodInternals })?._zod?.def?.when === "function",
+  );
 }
 
 /** True when `run({ value: undefined })` on this node provably executes no
@@ -47,7 +68,8 @@ function zodFailsFast(s: unknown, depth = 0): boolean {
   const type = d.type;
   if (typeof type !== "string") return false;
   if (ZOD_FAIL_FAST.has(type)) return !hasWhen(d);
-  if (ZOD_FORWARDING.has(type)) return (d.checks ?? []).length === 0 && zodFailsFast(d.innerType, depth + 1);
+  if (ZOD_FORWARDING.has(type))
+    return (d.checks ?? []).length === 0 && zodFailsFast(d.innerType, depth + 1);
   if (type === "pipe") return (d.checks ?? []).length === 0 && zodFailsFast(d.in, depth + 1);
   return false;
 }
@@ -56,7 +78,11 @@ function zodPrepare(root: unknown): number {
   const seen = new Set<object>();
   let touched = 0;
   const run = (zi: ZodInternals, value: unknown): void => {
-    try { zi.run?.({ value, issues: [] }, { async: false }); } catch { /* the library's business */ }
+    try {
+      zi.run?.({ value, issues: [] }, { async: false });
+    } catch {
+      /* the library's business */
+    }
   };
   const visit = (s: unknown): void => {
     if (!s || typeof s !== "object" || seen.has(s)) return;
@@ -67,7 +93,11 @@ function zodPrepare(root: unknown): number {
     touched++;
     // Lazily defined structural properties (pure computations over the def).
     for (const k of ["propValues", "values", "pattern", "optin", "optout"]) {
-      try { void zi[k]; } catch { /* a getter that throws is the library's business */ }
+      try {
+        void zi[k];
+      } catch {
+        /* a getter that throws is the library's business */
+      }
     }
     if (zodFailsFast(s)) {
       // The type check fails at once on `undefined`; object/array/… nodes
@@ -83,7 +113,18 @@ function zodPrepare(root: unknown): number {
       if (Object.keys(shape).every((k) => zodFailsFast(shape[k]))) run(zi, {});
     }
     if (shape && typeof shape === "object") for (const k of Object.keys(shape)) visit(shape[k]);
-    for (const k of ["element", "innerType", "in", "out", "valueType", "keyType", "catchall", "left", "right"]) if (d[k]) visit(d[k]);
+    for (const k of [
+      "element",
+      "innerType",
+      "in",
+      "out",
+      "valueType",
+      "keyType",
+      "catchall",
+      "left",
+      "right",
+    ])
+      if (d[k]) visit(d[k]);
     for (const k of ["options", "items"]) {
       const list = d[k];
       if (Array.isArray(list)) for (const o of list) visit(o);
@@ -100,7 +141,10 @@ export function prepareSchema(schema: AnySchema): number {
     const vendor = (schema as { "~standard"?: { vendor?: string } })["~standard"]?.vendor;
     if (vendor === "zod") return zodPrepare(schema);
     const hook = (schema as { "~usai"?: { prepare?: () => unknown } })["~usai"]?.prepare;
-    if (typeof hook === "function") { hook(); return 1; }
+    if (typeof hook === "function") {
+      hook();
+      return 1;
+    }
     return 0;
   } catch {
     return 0;
@@ -120,12 +164,75 @@ export function prepareSchema(schema: AnySchema): number {
 // `overwrite`, `custom`, `lazy`). `default`/`prefault`/`catch` are allowed
 // because the sample always supplies the value, so their getters never run.
 
-const STRUCTURAL = new Set(["object", "array", "tuple", "record", "string", "number", "int", "bigint", "boolean", "date", "literal", "enum", "null", "undefined", "any", "unknown", "nan", "optional", "nullable", "readonly", "nonoptional", "default", "prefault", "catch", "union", "pipe"]);
-const LIBRARY_CHECKS = new Set(["min_length", "max_length", "length_equals", "greater_than", "less_than", "multiple_of", "string_format", "number_format", "bigint_format", "min_size", "max_size", "size_equals"]);
+const STRUCTURAL = new Set([
+  "object",
+  "array",
+  "tuple",
+  "record",
+  "string",
+  "number",
+  "int",
+  "bigint",
+  "boolean",
+  "date",
+  "literal",
+  "enum",
+  "null",
+  "undefined",
+  "any",
+  "unknown",
+  "nan",
+  "optional",
+  "nullable",
+  "readonly",
+  "nonoptional",
+  "default",
+  "prefault",
+  "catch",
+  "union",
+  "pipe",
+]);
+const LIBRARY_CHECKS = new Set([
+  "min_length",
+  "max_length",
+  "length_equals",
+  "greater_than",
+  "less_than",
+  "multiple_of",
+  "string_format",
+  "number_format",
+  "bigint_format",
+  "min_size",
+  "max_size",
+  "size_equals",
+]);
 const FORMAT_SAMPLES: Record<string, string> = {
-  email: "sample@example.com", url: "https://example.com/", uri: "https://example.com/", uuid: "6f1a2b3c-4d5e-4f60-8a71-92b3c4d5e6f7", guid: "6f1a2b3c-4d5e-4f60-8a71-92b3c4d5e6f7",
-  datetime: "2026-01-01T00:00:00Z", date: "2026-01-01", time: "00:00:00", duration: "PT1S", ipv4: "192.0.2.1", ipv6: "2001:db8::1", cidrv4: "192.0.2.0/24", cidrv6: "2001:db8::/32",
-  base64: "aGVsbG8=", base64url: "aGVsbG8", e164: "+15550000000", emoji: "😀", nanoid: "V1StGXR8_Z5jdHi6B-myT", cuid: "cjld2cjxh0000qzrmn831i7rn", cuid2: "tz4a98xxat96iws9zmbrgj3a", ulid: "01ARZ3NDEKTSV4RRFFQ69G5FAV", ksuid: "0ujsszwN8NRY24YaXiTIE2VWDTS", xid: "9m4e2mr0ui3e8a215n4g", lowercase: "sample", uppercase: "SAMPLE", jwt: "eyJhbGciOiJIUzI1NiJ9.e30.ZRrHA1JJJW8opsbCGfG_HACGpVUMN_a9IV7pAx_Zmeo",
+  email: "sample@example.com",
+  url: "https://example.com/",
+  uri: "https://example.com/",
+  uuid: "6f1a2b3c-4d5e-4f60-8a71-92b3c4d5e6f7",
+  guid: "6f1a2b3c-4d5e-4f60-8a71-92b3c4d5e6f7",
+  datetime: "2026-01-01T00:00:00Z",
+  date: "2026-01-01",
+  time: "00:00:00",
+  duration: "PT1S",
+  ipv4: "192.0.2.1",
+  ipv6: "2001:db8::1",
+  cidrv4: "192.0.2.0/24",
+  cidrv6: "2001:db8::/32",
+  base64: "aGVsbG8=",
+  base64url: "aGVsbG8",
+  e164: "+15550000000",
+  emoji: "😀",
+  nanoid: "V1StGXR8_Z5jdHi6B-myT",
+  cuid: "cjld2cjxh0000qzrmn831i7rn",
+  cuid2: "tz4a98xxat96iws9zmbrgj3a",
+  ulid: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  ksuid: "0ujsszwN8NRY24YaXiTIE2VWDTS",
+  xid: "9m4e2mr0ui3e8a215n4g",
+  lowercase: "sample",
+  uppercase: "SAMPLE",
+  jwt: "eyJhbGciOiJIUzI1NiJ9.e30.ZRrHA1JJJW8opsbCGfG_HACGpVUMN_a9IV7pAx_Zmeo",
 };
 
 class NotStructural extends Error {}
@@ -141,10 +248,25 @@ function zodSample(s: unknown, depth = 0): unknown {
   if (typeof type !== "string" || !STRUCTURAL.has(type)) throw new NotStructural();
   const checks = (d.checks ?? []) as Array<{ _zod?: { def?: Record<string, unknown> } }>;
   const named = checks.map((c) => c._zod?.def ?? {});
-  if (named.some((c) => typeof c["check"] !== "string" || !LIBRARY_CHECKS.has(c["check"] as string))) throw new NotStructural();
+  if (
+    named.some((c) => typeof c["check"] !== "string" || !LIBRARY_CHECKS.has(c["check"] as string))
+  )
+    throw new NotStructural();
   const num = (k: string): number | undefined => {
     const c = named.find((x) => x["check"] === k);
-    return c ? Number(c[k === "greater_than" || k === "less_than" ? "value" : k === "multiple_of" ? "value" : "minimum" in c ? "minimum" : "maximum"] ?? c["value"]) : undefined;
+    return c
+      ? Number(
+          c[
+            k === "greater_than" || k === "less_than"
+              ? "value"
+              : k === "multiple_of"
+                ? "value"
+                : "minimum" in c
+                  ? "minimum"
+                  : "maximum"
+          ] ?? c["value"],
+        )
+      : undefined;
   };
   switch (type) {
     case "string": {
@@ -155,7 +277,19 @@ function zodSample(s: unknown, depth = 0): unknown {
           // A user regex is data, not code: try a few plausible strings.
           const pattern = fmt["pattern"];
           if (!(pattern instanceof RegExp)) throw new NotStructural();
-          const candidate = ["x", "2026-01-01", "1", "a", "sample", "sample@example.com", "2026-01-01T00:00:00Z", "ABC-123", "12345", "+15550000000", "https://example.com/"].find((c) => pattern.test(c));
+          const candidate = [
+            "x",
+            "2026-01-01",
+            "1",
+            "a",
+            "sample",
+            "sample@example.com",
+            "2026-01-01T00:00:00Z",
+            "ABC-123",
+            "12345",
+            "+15550000000",
+            "https://example.com/",
+          ].find((c) => pattern.test(c));
           if (candidate === undefined) throw new NotStructural();
           return candidate;
         }
@@ -164,7 +298,9 @@ function zodSample(s: unknown, depth = 0): unknown {
         return sample;
       }
       const min = named.find((c) => c["check"] === "min_length")?.["minimum"] as number | undefined;
-      const exact = named.find((c) => c["check"] === "length_equals")?.["length"] as number | undefined;
+      const exact = named.find((c) => c["check"] === "length_equals")?.["length"] as
+        | number
+        | undefined;
       return "x".repeat(Math.max(1, exact ?? min ?? 1));
     }
     case "number":
@@ -179,23 +315,37 @@ function zodSample(s: unknown, depth = 0): unknown {
       if (type === "int" || named.some((c) => c["check"] === "number_format")) v = Math.ceil(v);
       return v;
     }
-    case "bigint": return 1n;
-    case "boolean": return true;
-    case "date": return new Date(0);
-    case "literal": return (d["values"] as unknown[])?.[0];
-    case "enum": { const e = d["entries"] as Record<string, unknown> | undefined; const vals = e ? Object.values(e) : []; if (!vals.length) throw new NotStructural(); return vals[0]; }
-    case "null": return null;
-    case "undefined": return undefined;
+    case "bigint":
+      return 1n;
+    case "boolean":
+      return true;
+    case "date":
+      return new Date(0);
+    case "literal":
+      return (d["values"] as unknown[])?.[0];
+    case "enum": {
+      const e = d["entries"] as Record<string, unknown> | undefined;
+      const vals = e ? Object.values(e) : [];
+      if (!vals.length) throw new NotStructural();
+      return vals[0];
+    }
+    case "null":
+      return null;
+    case "undefined":
+      return undefined;
     case "any":
-    case "unknown": return "sample";
-    case "nan": return NaN;
+    case "unknown":
+      return "sample";
+    case "nan":
+      return NaN;
     case "optional":
     case "nullable":
     case "readonly":
     case "nonoptional":
     case "default":
     case "prefault":
-    case "catch": return zodSample(d["innerType"], depth + 1);
+    case "catch":
+      return zodSample(d["innerType"], depth + 1);
     case "pipe": {
       // `pipe` is a transform unless the out side is a plain schema
       // that accepts the in side's output (e.g. `z.coerce`); only accept
@@ -215,17 +365,21 @@ function zodSample(s: unknown, depth = 0): unknown {
       const item = zodSample(d["element"], depth + 1);
       return Array.from({ length: n }, () => item);
     }
-    case "tuple": return ((d["items"] as unknown[]) ?? []).map((t) => zodSample(t, depth + 1));
-    case "record": return { key: zodSample(d["valueType"], depth + 1) };
+    case "tuple":
+      return ((d["items"] as unknown[]) ?? []).map((t) => zodSample(t, depth + 1));
+    case "record":
+      return { key: zodSample(d["valueType"], depth + 1) };
     case "object": {
       const shape = d["shape"] as Record<string, unknown>;
       if (!shape || typeof shape !== "object") throw new NotStructural();
-      if (d["catchall"] && (internals(d["catchall"])?.def.type as string) !== "never") throw new NotStructural();
+      if (d["catchall"] && (internals(d["catchall"])?.def.type as string) !== "never")
+        throw new NotStructural();
       const out: Record<string, unknown> = {};
       for (const k of Object.keys(shape)) out[k] = zodSample(shape[k], depth + 1);
       return out;
     }
-    default: throw new NotStructural();
+    default:
+      throw new NotStructural();
   }
 }
 
@@ -278,13 +432,16 @@ type ZodCheckFn = (payload: { value: unknown; issues: unknown[] }) => unknown;
 
 /** The node's own checks as one function: true when all pass. */
 function checksOf(d: ZodInternals["def"]): ((v: unknown) => boolean) | undefined {
-  const checks = (d.checks ?? []) as Array<{ _zod?: { def?: Record<string, unknown>; check?: ZodCheckFn } }>;
+  const checks = (d.checks ?? []) as Array<{
+    _zod?: { def?: Record<string, unknown>; check?: ZodCheckFn };
+  }>;
   if (checks.length === 0) return undefined;
   const fns: ZodCheckFn[] = [];
   for (const c of checks) {
     const kind = c._zod?.def?.["check"];
     const fn = c._zod?.check;
-    if (typeof kind !== "string" || !LIBRARY_CHECKS.has(kind) || typeof fn !== "function") throw new NotFinal();
+    if (typeof kind !== "string" || !LIBRARY_CHECKS.has(kind) || typeof fn !== "function")
+      throw new NotFinal();
     fns.push(fn);
   }
   return (v) => {
@@ -304,7 +461,8 @@ function scalar(test: (v: unknown) => boolean, d: ZodInternals["def"]): Finalize
   return (v) => (test(v) && (checks === undefined || checks(v)) ? v : REPARSE);
 }
 
-const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
 
 function zodFinalizer(s: unknown, depth = 0): Finalizer {
   const zi = internals(s);
@@ -317,11 +475,16 @@ function zodFinalizer(s: unknown, depth = 0): Finalizer {
   // coerced URL scalars against the JSON Schema) is final; anything else
   // fails the type test below and is reparsed, where Zod coerces it.
   switch (type) {
-    case "string": return scalar((v) => typeof v === "string", d);
-    case "number": return scalar((v) => typeof v === "number" && Number.isFinite(v), d);
-    case "int": return scalar((v) => typeof v === "number" && Number.isInteger(v), d);
-    case "boolean": return scalar((v) => typeof v === "boolean", d);
-    case "null": return scalar((v) => v === null, d);
+    case "string":
+      return scalar((v) => typeof v === "string", d);
+    case "number":
+      return scalar((v) => typeof v === "number" && Number.isFinite(v), d);
+    case "int":
+      return scalar((v) => typeof v === "number" && Number.isInteger(v), d);
+    case "boolean":
+      return scalar((v) => typeof v === "boolean", d);
+    case "null":
+      return scalar((v) => v === null, d);
     case "literal": {
       const values = new Set((d["values"] as unknown[]) ?? []);
       return scalar((v) => values.has(v), d);
@@ -331,7 +494,8 @@ function zodFinalizer(s: unknown, depth = 0): Finalizer {
       return scalar((v) => values.has(v), d);
     }
     case "any":
-    case "unknown": return scalar(() => true, d);
+    case "unknown":
+      return scalar(() => true, d);
     case "optional":
     case "nullable":
     case "nonoptional": {
@@ -383,7 +547,8 @@ function zodFinalizer(s: unknown, depth = 0): Finalizer {
       const checks = checksOf(d);
       return (v) => {
         if (!Array.isArray(v) || (checks !== undefined && !checks(v))) return REPARSE;
-        if (rest === undefined ? v.length !== items.length : v.length < items.length) return REPARSE;
+        if (rest === undefined ? v.length !== items.length : v.length < items.length)
+          return REPARSE;
         const out = new Array<unknown>(v.length);
         for (let i = 0; i < v.length; i++) {
           const x = (items[i] ?? rest!)(v[i]);
@@ -416,12 +581,22 @@ function zodFinalizer(s: unknown, depth = 0): Finalizer {
       const fields = keys.map((k) => zodFinalizer(shape[k], depth + 1));
       // Zod skips an absent key only for an optional field; every other
       // field runs with `undefined` (a default fills in, anything else fails).
-      const optional = keys.map((k) => (internals(shape[k]) as { optin?: string } | undefined)?.optin === "optional");
-      const catchall = d["catchall"] ? (internals(d["catchall"])?.def.type as string | undefined) : undefined;
+      const optional = keys.map(
+        (k) => (internals(shape[k]) as { optin?: string } | undefined)?.optin === "optional",
+      );
+      const catchall = d["catchall"]
+        ? (internals(d["catchall"])?.def.type as string | undefined)
+        : undefined;
       // undefined: plain object, undeclared keys are stripped. never:
       // strictObject, the host refused them. unknown/any: looseObject,
       // they pass through. A typed catchall validates them: not proven.
-      if (catchall !== undefined && catchall !== "never" && catchall !== "unknown" && catchall !== "any") throw new NotFinal();
+      if (
+        catchall !== undefined &&
+        catchall !== "never" &&
+        catchall !== "unknown" &&
+        catchall !== "any"
+      )
+        throw new NotFinal();
       const keep = catchall === "unknown" || catchall === "any";
       const checks = checksOf(d);
       return (v) => {
@@ -440,7 +615,8 @@ function zodFinalizer(s: unknown, depth = 0): Finalizer {
           if (x === REPARSE) return REPARSE;
           out[k] = x;
         }
-        if (keep) for (const k of Object.keys(v)) if (!(k in out) && !keys.includes(k)) out[k] = v[k];
+        if (keep)
+          for (const k of Object.keys(v)) if (!(k in out) && !keys.includes(k)) out[k] = v[k];
         return out;
       };
     }

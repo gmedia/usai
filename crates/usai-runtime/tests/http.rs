@@ -478,7 +478,22 @@ async fn errors_are_contracts_and_unexpected_failures_are_sanitized() {
         panic!("boom must fail: {:?}", r.outcome)
     };
     let stack = error.stack.expect("a stack");
-    assert!(stack.contains("src/app.ts:47:"), "unmapped stack:\n{stack}");
+    // The frame points at the `throw` in the fixture, whatever line the
+    // formatter put it on.
+    let source = std::fs::read_to_string(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/http-app/src/app.ts"),
+    )
+    .unwrap();
+    let line = source
+        .lines()
+        .position(|l| l.contains("kaboom with secret detail"))
+        .expect("the fixture throws")
+        + 1;
+    assert!(
+        stack.contains(&format!("src/app.ts:{line}:")),
+        "unmapped stack:\n{stack}"
+    );
     assert!(
         !stack.contains("usai:app:"),
         "unmapped frame left:\n{stack}"

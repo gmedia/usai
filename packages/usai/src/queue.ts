@@ -2,7 +2,13 @@
 // infrastructure, a fresh world per message, explicit retry (ADR-0014).
 
 import type { AnySchema, Output } from "./schema.ts";
-import type { DeclaredError, ResourceDeclaration, ResourcesOf, Workload, WorkloadPolicies } from "./declarations.ts";
+import type {
+  DeclaredError,
+  ResourceDeclaration,
+  ResourcesOf,
+  Workload,
+  WorkloadPolicies,
+} from "./declarations.ts";
 import type { PostgresDeclaration } from "./resources.ts";
 import type { BaseContext } from "./runtime/context.ts";
 
@@ -23,7 +29,10 @@ export interface RetryOptions {
  *
  * @category Queues
  */
-export interface ConsumeOptions<M extends AnySchema | undefined, R extends ResourceDeclaration[] = ResourceDeclaration[]> extends WorkloadPolicies {
+export interface ConsumeOptions<
+  M extends AnySchema | undefined,
+  R extends ResourceDeclaration[] = ResourceDeclaration[],
+> extends WorkloadPolicies {
   /** A paragraph for the reference. */
   description?: string;
   /** Schema for the message; validated before the message's world exists.
@@ -87,7 +96,10 @@ export interface QueueContext<M, R = ResourceDeclaration[]> extends BaseContext 
  * );
  * ```
  */
-function consume<M extends AnySchema | undefined = undefined, R extends ResourceDeclaration[] = ResourceDeclaration[]>(
+function consume<
+  M extends AnySchema | undefined = undefined,
+  R extends ResourceDeclaration[] = ResourceDeclaration[],
+>(
   topic: string,
   options: ConsumeOptions<M, R>,
   handler: (ctx: QueueContext<M extends AnySchema ? Output<M> : unknown, R>) => unknown,
@@ -95,9 +107,14 @@ function consume<M extends AnySchema | undefined = undefined, R extends Resource
   const policies: WorkloadPolicies = {};
   if (options.timeout !== undefined) policies.timeout = options.timeout;
   const resources: ResourceDeclaration[] = [...(options.resources ?? [])];
-  if (options.database && !resources.some((r) => r.name === options.database!.name)) resources.push(options.database);
+  if (options.database && !resources.some((r) => r.name === options.database!.name))
+    resources.push(options.database);
   const retry = options.retry
-    ? { maxAttempts: options.retry.maxAttempts, backoff: options.retry.backoff ?? "fixed", baseMs: options.retry.baseMs ?? 1000 }
+    ? {
+        maxAttempts: options.retry.maxAttempts,
+        backoff: options.retry.backoff ?? "fixed",
+        baseMs: options.retry.baseMs ?? 1000,
+      }
     : undefined;
   return {
     __usai: "workload",
@@ -140,5 +157,9 @@ export interface QueueHandle {
    * arrival, so adding a new event means extending that schema first.
    * Declare the edge with {@link publishes} so the reference links the two.
    * `delayMs` holds the message back; `database` targets another queue. */
-  publish(topic: string, message: unknown, options?: { delayMs?: number; database?: PostgresDeclaration }): Promise<{ id: string }>;
+  publish(
+    topic: string,
+    message: unknown,
+    options?: { delayMs?: number; database?: PostgresDeclaration },
+  ): Promise<{ id: string }>;
 }

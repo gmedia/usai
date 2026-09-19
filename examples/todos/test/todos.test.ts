@@ -5,9 +5,15 @@ import { testApp } from "@sakaladev/usai/test";
 // Needs a database: DATABASE_URL (a throwaway one — the test migrates it).
 const url = process.env["DATABASE_URL"];
 
-test("todos: create, complete, list, activity via task, cron and command", { skip: url ? false : "set DATABASE_URL" }, async () => {
+test("todos: create, complete, list, activity via task, cron and command", {
+  skip: url ? false : "set DATABASE_URL",
+}, async () => {
   const root = new URL("..", import.meta.url).pathname;
-  const app = await testApp({ root, env: { DATABASE_URL: url!, APP_ENV: "development" }, migrate: { seed: true } });
+  const app = await testApp({
+    root,
+    env: { DATABASE_URL: url!, APP_ENV: "development" },
+    migrate: { seed: true },
+  });
   try {
     const created = await app.http.post("/todos", { body: { title: "write the tutorial" } });
     assert.equal(created.status, 201, created.text);
@@ -28,7 +34,9 @@ test("todos: create, complete, list, activity via task, cron and command", { ski
 
     // The activity rows are written by dispatched tasks; invoke the task
     // directly to see it work, and the command to read the totals.
-    const recorded = await app.task("record-activity").invoke({ todoId: todo.id, event: "deleted" });
+    const recorded = await app
+      .task("record-activity")
+      .invoke({ todoId: todo.id, event: "deleted" });
     assert.equal(recorded.ok, true, JSON.stringify(recorded.error));
     const purged = await app.cron("purge-completed").run<{ purged: number }>();
     assert.equal(purged.ok, true);

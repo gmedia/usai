@@ -2,22 +2,12 @@
   "extends": "../../../../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "types": [
-      "@sakaladev/usai/globals"
-    ],
+    "types": ["@sakaladev/usai/globals"],
     "baseUrl": ".",
     "paths": {
-      "@sakaladev/usai": [
-        "../../../../../packages/usai/src/index.ts"
-      ],
-      "@sakaladev/usai/config": [
-        "../../../../../packages/usai/src/config.ts"
-      ]
+      "@sakaladev/usai": ["../../../../../packages/usai/src/index.ts"],
+      "@sakaladev/usai/config": ["../../../../../packages/usai/src/config.ts"]
     }
   },
-  "include": [
-    "src",
-    "seeders",
-    "usai.config.ts"
-  ]
+  "include": ["src", "seeders", "usai.config.ts"]
 }

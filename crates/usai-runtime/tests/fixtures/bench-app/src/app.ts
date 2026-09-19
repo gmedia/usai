@@ -18,7 +18,9 @@ export const objects = task("objects", {}, async () => {
   for (let i = 0; i < 5_000; i++) items.push({ id: i, name: `item-${i}`, tags: ["a", "b"] });
   return items.length;
 });
-const doc = Object.fromEntries(Array.from({ length: 200 }, (_, i) => [`k${i}`, { n: i, s: `value-${i}`, l: [i, i + 1, i + 2] }]));
+const doc = Object.fromEntries(
+  Array.from({ length: 200 }, (_, i) => [`k${i}`, { n: i, s: `value-${i}`, l: [i, i + 1, i + 2] }]),
+);
 export const json = task("json", {}, async () => JSON.parse(JSON.stringify(doc)).k199.n);
 
 // --- host round trips ------------------------------------------------------
@@ -36,7 +38,11 @@ export const sdkOnly = http.get("/sdk/:name", {}, async (ctx) => ({ hello: ctx.p
 
 const MiniParams = zm.object({ name: zm.string().check(zm.minLength(1), zm.maxLength(40)) });
 const MiniGreeting = zm.object({ hello: zm.string() });
-export const mini = http.get("/mini/:name", { params: MiniParams, response: MiniGreeting }, async (ctx) => ({ hello: ctx.params.name }));
+export const mini = http.get(
+  "/mini/:name",
+  { params: MiniParams, response: MiniGreeting },
+  async (ctx) => ({ hello: ctx.params.name }),
+);
 
 const Params = z.object({ name: z.string().min(1).max(40) });
 const Greeting = z.object({ hello: z.string() });
@@ -46,7 +52,11 @@ export const full = http.get("/zod/:name", { params: Params, response: Greeting 
 });
 
 // --- validator warm-up: is the cost per parse, or per first parse? --------
-const Warm = z.object({ name: z.string().min(1).max(40), n: z.number().int(), tags: z.array(z.string()) });
+const Warm = z.object({
+  name: z.string().min(1).max(40),
+  n: z.number().int(),
+  tags: z.array(z.string()),
+});
 const warmInput = { name: "x", n: 1, tags: ["a"] };
 export const zod1 = task("zod1", {}, async () => Warm.parse(warmInput).n);
 export const zod10 = task("zod10", {}, async () => {
@@ -54,7 +64,11 @@ export const zod10 = task("zod10", {}, async () => {
   for (let i = 0; i < 10; i++) n += Warm.parse(warmInput).n;
   return n;
 });
-const WarmMini = zm.object({ name: zm.string().check(zm.minLength(1), zm.maxLength(40)), n: zm.int(), tags: zm.array(zm.string()) });
+const WarmMini = zm.object({
+  name: zm.string().check(zm.minLength(1), zm.maxLength(40)),
+  n: zm.int(),
+  tags: zm.array(zm.string()),
+});
 export const mini1 = task("mini1", {}, async () => zm.parse(WarmMini, warmInput).n);
 export const mini10 = task("mini10", {}, async () => {
   let n = 0;
@@ -63,20 +77,54 @@ export const mini10 = task("mini10", {}, async () => {
 });
 
 // --- realistic CRUD without a database --------------------------------------
-const Item = z.object({ id: z.number().int(), title: z.string().min(1).max(120), done: z.boolean(), tags: z.array(z.string()).max(10) });
+const Item = z.object({
+  id: z.number().int(),
+  title: z.string().min(1).max(120),
+  done: z.boolean(),
+  tags: z.array(z.string()).max(10),
+});
 const Create = Item.omit({ id: true });
 const store = new Map<number, z.infer<typeof Item>>();
-for (let i = 1; i <= 50; i++) store.set(i, { id: i, title: `todo ${i}`, done: i % 3 === 0, tags: ["home", "work"].slice(0, i % 3) });
+for (let i = 1; i <= 50; i++)
+  store.set(i, {
+    id: i,
+    title: `todo ${i}`,
+    done: i % 3 === 0,
+    tags: ["home", "work"].slice(0, i % 3),
+  });
 
-export const crudList = http.get("/todos", { response: z.array(Item) }, async () => [...store.values()].filter((t) => !t.done).slice(0, 20));
-export const crudCreate = http.post("/todos", { body: Create, response: { 201: Item } }, async (ctx) => {
-  const id = store.size + 1;
-  const item = { id, ...ctx.body };
-  store.set(id, item);
-  return http.created(item);
-});
+export const crudList = http.get("/todos", { response: z.array(Item) }, async () =>
+  [...store.values()].filter((t) => !t.done).slice(0, 20),
+);
+export const crudCreate = http.post(
+  "/todos",
+  { body: Create, response: { 201: Item } },
+  async (ctx) => {
+    const id = store.size + 1;
+    const item = { id, ...ctx.body };
+    store.set(id, item);
+    return http.created(item);
+  },
+);
 
 export default defineApp({
   name: "bench",
-  workloads: [empty, constant, loop, objects, json, host1, host8, sdkOnly, mini, full, zod1, zod10, mini1, mini10, crudList, crudCreate],
+  workloads: [
+    empty,
+    constant,
+    loop,
+    objects,
+    json,
+    host1,
+    host8,
+    sdkOnly,
+    mini,
+    full,
+    zod1,
+    zod10,
+    mini1,
+    mini10,
+    crudList,
+    crudCreate,
+  ],
 });

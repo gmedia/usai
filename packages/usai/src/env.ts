@@ -21,8 +21,15 @@ export interface EnvField<T> {
   readonly _type?: T;
 }
 
-function field<T>(kind: EnvKind, parse: (raw: string) => T, required = true, values?: readonly string[]): EnvField<T> {
-  return values === undefined ? { __usai: "env-field", kind, required, parse } : { __usai: "env-field", kind, required, parse, values };
+function field<T>(
+  kind: EnvKind,
+  parse: (raw: string) => T,
+  required = true,
+  values?: readonly string[],
+): EnvField<T> {
+  return values === undefined
+    ? { __usai: "env-field", kind, required, parse }
+    : { __usai: "env-field", kind, required, parse, values };
 }
 
 /** The application's environment contract (`defineApp({ env })`).
@@ -103,22 +110,37 @@ env.bool = (): EnvField<boolean> =>
   });
 /** One of the listed values. */
 env.enum = <const V extends readonly string[]>(values: V): EnvField<V[number]> =>
-  field("enum", (raw) => {
-    if (!values.includes(raw)) throw new Error(`expected one of ${values.join(", ")}, got ${JSON.stringify(raw)}`);
-    return raw as V[number];
-  }, true, values);
+  field(
+    "enum",
+    (raw) => {
+      if (!values.includes(raw))
+        throw new Error(`expected one of ${values.join(", ")}, got ${JSON.stringify(raw)}`);
+      return raw as V[number];
+    },
+    true,
+    values,
+  );
 /** Make a field optional: absent or empty gives `undefined`. */
 env.optional = <T>(inner: EnvField<T>): EnvField<T | undefined> =>
   inner.values === undefined
     ? { __usai: "env-field", kind: inner.kind, required: false, parse: inner.parse }
-    : { __usai: "env-field", kind: inner.kind, required: false, values: inner.values, parse: inner.parse };
+    : {
+        __usai: "env-field",
+        kind: inner.kind,
+        required: false,
+        values: inner.values,
+        parse: inner.parse,
+      };
 
 /** Resolve declared values from a raw map (what the host does at
  * activation). Throws on the first violation, naming the variable.
  *
  * @category Environment
  */
-export function resolveEnv<S extends Record<string, EnvField<unknown>>>(decl: EnvDeclaration<S>, raw: Record<string, string | undefined>): EnvValues<S> {
+export function resolveEnv<S extends Record<string, EnvField<unknown>>>(
+  decl: EnvDeclaration<S>,
+  raw: Record<string, string | undefined>,
+): EnvValues<S> {
   const out: Record<string, unknown> = {};
   for (const [name, f] of Object.entries(decl.fields)) {
     const value = raw[name];

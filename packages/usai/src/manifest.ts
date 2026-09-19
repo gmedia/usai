@@ -2,7 +2,13 @@
 // module in a capability-less world and calls `describe`. The shape mirrors
 // `crates/usai-runtime/src/definition.rs` exactly.
 
-import { type AppDeclaration, type Workload, flatten, parseDuration, workloadId } from "./declarations.ts";
+import {
+  type AppDeclaration,
+  type Workload,
+  flatten,
+  parseDuration,
+  workloadId,
+} from "./declarations.ts";
 import { jsonSchemaOf } from "./schema.ts";
 import { hostFinal } from "./runtime/prepare.ts";
 
@@ -22,7 +28,8 @@ export const GUEST_ABI = 1 as const;
  * for compatibility diagnostics; not part of the application's identity).
  * Replaced at build time from package.json; the fallback is for source checkouts. */
 declare const __USAI_SDK_VERSION__: string | undefined;
-export const SDK_VERSION: string = typeof __USAI_SDK_VERSION__ === "string" ? __USAI_SDK_VERSION__ : "source";
+export const SDK_VERSION: string =
+  typeof __USAI_SDK_VERSION__ === "string" ? __USAI_SDK_VERSION__ : "source";
 
 export interface ManifestContracts {
   params?: Record<string, unknown>;
@@ -67,7 +74,13 @@ export interface Manifest {
   description?: string;
   modules: Array<{ name: string; migrations: string[]; seeders: string[] }>;
   workloads: ManifestWorkload[];
-  resources: Array<{ name: string; kind: string; module?: string; config: Record<string, unknown>; env: string[] }>;
+  resources: Array<{
+    name: string;
+    kind: string;
+    module?: string;
+    config: Record<string, unknown>;
+    env: string[];
+  }>;
   auth: Array<{ name: string; scheme: string; header?: string; description?: string }>;
   env: Array<{ name: string; kind: string; required: boolean; values: string[] }>;
   codeSha256: string;
@@ -113,14 +126,21 @@ function trigger(workload: Workload): ManifestWorkload["trigger"] {
       };
     case "cron": {
       const timeoutMs = parseDuration(workload.policies.timeout);
-      return { kind: "cron", schedule: workload.trigger["schedule"], overlap: workload.trigger["overlap"] ?? "skip", ...(timeoutMs !== undefined ? { timeoutMs } : {}) };
+      return {
+        kind: "cron",
+        schedule: workload.trigger["schedule"],
+        overlap: workload.trigger["overlap"] ?? "skip",
+        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      };
     }
     case "queue":
       return {
         kind: "queue",
         topic: workload.trigger["topic"],
         concurrency: workload.trigger["concurrency"] ?? 1,
-        ...(workload.trigger["database"] !== undefined ? { database: workload.trigger["database"] } : {}),
+        ...(workload.trigger["database"] !== undefined
+          ? { database: workload.trigger["database"] }
+          : {}),
         ...(workload.trigger["retry"] !== undefined ? { retry: workload.trigger["retry"] } : {}),
       };
     case "socket":
@@ -128,7 +148,12 @@ function trigger(workload: Workload): ManifestWorkload["trigger"] {
     case "stream":
       return { kind: "stream", method: workload.trigger["method"], path: workload.trigger["path"] };
     case "service":
-      return { kind: "service", ...(workload.trigger["restart"] !== undefined ? { restart: workload.trigger["restart"] } : {}) };
+      return {
+        kind: "service",
+        ...(workload.trigger["restart"] !== undefined
+          ? { restart: workload.trigger["restart"] }
+          : {}),
+      };
     default:
       return { kind: workload.kind };
   }
@@ -142,10 +167,18 @@ function trigger(workload: Workload): ManifestWorkload["trigger"] {
  * @category Build */
 export function describe(app: AppDeclaration): Manifest {
   const { workloads, resources } = flatten(app);
-  const authByName = new Map<string, { name: string; scheme: string; header?: string; description?: string }>();
+  const authByName = new Map<
+    string,
+    { name: string; scheme: string; header?: string; description?: string }
+  >();
   const manifestWorkloads: ManifestWorkload[] = workloads.map(({ workload, module }) => {
     if (workload.auth && !authByName.has(workload.auth.name)) {
-      authByName.set(workload.auth.name, { name: workload.auth.name, scheme: workload.auth.scheme, ...(workload.auth.header ? { header: workload.auth.header } : {}), ...(workload.auth.description ? { description: workload.auth.description } : {}) });
+      authByName.set(workload.auth.name, {
+        name: workload.auth.name,
+        scheme: workload.auth.scheme,
+        ...(workload.auth.header ? { header: workload.auth.header } : {}),
+        ...(workload.auth.description ? { description: workload.auth.description } : {}),
+      });
     }
     const timeoutMs = parseDuration(workload.policies.timeout);
     const entry: ManifestWorkload = {
@@ -162,18 +195,28 @@ export function describe(app: AppDeclaration): Manifest {
     if (workload.summary !== undefined) entry.summary = workload.summary;
     if (workload.description !== undefined) entry.description = workload.description;
     if (workload.auth) entry.auth = workload.auth.name;
-    if (workload.policies.concurrency !== undefined) entry.maxConcurrency = workload.policies.concurrency;
+    if (workload.policies.concurrency !== undefined)
+      entry.maxConcurrency = workload.policies.concurrency;
     if (timeoutMs !== undefined) entry.timeoutMs = timeoutMs;
     return entry;
   });
   const env = app.env
-    ? Object.entries(app.env.fields).map(([name, f]) => ({ name, kind: f.kind, required: f.required, values: [...(f.values ?? [])] }))
+    ? Object.entries(app.env.fields).map(([name, f]) => ({
+        name,
+        kind: f.kind,
+        required: f.required,
+        values: [...(f.values ?? [])],
+      }))
     : [];
   return {
     manifestVersion: MANIFEST_VERSION,
     name: app.name,
     ...(app.description !== undefined ? { description: app.description } : {}),
-    modules: app.modules.map((m) => ({ name: m.name, migrations: [...m.migrations], seeders: [...m.seeders] })),
+    modules: app.modules.map((m) => ({
+      name: m.name,
+      migrations: [...m.migrations],
+      seeders: [...m.seeders],
+    })),
     workloads: manifestWorkloads,
     resources: resources.map(({ resource, module }) => ({
       name: resource.name,

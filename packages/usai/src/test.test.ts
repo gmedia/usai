@@ -5,10 +5,13 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
-const binary = process.env["USAI_BIN"] ?? resolve(import.meta.dirname, "../../../target/debug/usai");
+const binary =
+  process.env["USAI_BIN"] ?? resolve(import.meta.dirname, "../../../target/debug/usai");
 const root = resolve(import.meta.dirname, "../../../examples/hello");
 
-test("usai/test drives the application through the real runtime", { skip: !existsSync(binary) ? "usai binary not built" : false }, async () => {
+test("usai/test drives the application through the real runtime", {
+  skip: !existsSync(binary) ? "usai binary not built" : false,
+}, async () => {
   const { testApp } = await import("./test.ts");
   const app = await testApp({ root, binary });
   try {

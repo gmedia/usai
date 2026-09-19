@@ -14,7 +14,16 @@
 // SDK is guaranteed to load.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -62,7 +71,10 @@ function onPath(env = process.env) {
       continue;
     }
     if (real === self || real.split("/").includes("node_modules")) continue;
-    const r = spawnSync(candidate, ["--version"], { encoding: "utf8", env: { ...env, USAI_PROBE: "1" } });
+    const r = spawnSync(candidate, ["--version"], {
+      encoding: "utf8",
+      env: { ...env, USAI_PROBE: "1" },
+    });
     if (r.status === 0 && r.stdout.trim() === `usai ${version}`) return candidate;
   }
   return null;
@@ -80,10 +92,14 @@ async function download(triple) {
   if (existsSync(bin)) return bin;
   const name = `usai-v${version}-${triple}`;
   process.stderr.write(`usai: fetching ${name} (once per version) …\n`);
-  const [tarball, sums] = await Promise.all([fetchBytes(releaseUrl(`${name}.tar.gz`)), fetchBytes(releaseUrl(`${name}.tar.gz.sha256`))]);
+  const [tarball, sums] = await Promise.all([
+    fetchBytes(releaseUrl(`${name}.tar.gz`)),
+    fetchBytes(releaseUrl(`${name}.tar.gz.sha256`)),
+  ]);
   const expected = sums.toString("utf8").trim().split(/\s+/)[0];
   const actual = createHash("sha256").update(tarball).digest("hex");
-  if (expected !== actual) throw new Error(`${name}.tar.gz: SHA-256 mismatch (expected ${expected}, got ${actual})`);
+  if (expected !== actual)
+    throw new Error(`${name}.tar.gz: SHA-256 mismatch (expected ${expected}, got ${actual})`);
   mkdirSync(dir, { recursive: true });
   const work = mkdtempSync(join(tmpdir(), "usai-"));
   try {
@@ -121,7 +137,10 @@ async function main() {
   }
   // The runtime watches this pid: if the wrapper is killed (an IDE task, a
   // supervisor), the server drains and leaves instead of orphaning the port.
-  const child = spawn(bin, process.argv.slice(2), { stdio: "inherit", env: { ...process.env, USAI_PARENT_PID: String(process.pid) } });
+  const child = spawn(bin, process.argv.slice(2), {
+    stdio: "inherit",
+    env: { ...process.env, USAI_PARENT_PID: String(process.pid) },
+  });
   // Ctrl-C reaches the child through the process group already; forwarding
   // it too would be the "second signal" that forces the exit. SIGTERM/SIGHUP
   // sent to this wrapper (docker stop, a supervisor) are forwarded once.

@@ -5,12 +5,6 @@
     "outDir": "dist",
     "types": []
   },
-  "include": [
-    "src",
-    "globals.d.ts"
-  ],
-  "exclude": [
-    "src/**/*.test.ts",
-    "src/test.ts"
-  ]
+  "include": ["src", "globals.d.ts"],
+  "exclude": ["src/**/*.test.ts", "src/test.ts"]
 }

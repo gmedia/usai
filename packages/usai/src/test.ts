@@ -70,7 +70,11 @@ export interface WorkOutcome<T = unknown> {
   /** The handler returned (no throw, no violation). */
   ok: boolean;
   value: T;
-  error: { name: string; message: string; usai?: { code: string; status: number; details?: unknown } } | null;
+  error: {
+    name: string;
+    message: string;
+    usai?: { code: string; status: number; details?: unknown };
+  } | null;
   termination: unknown;
   durationMs: number;
   violations: Array<{ code: string; message: string }>;
@@ -128,11 +132,22 @@ export class UsaiTestError extends Error {
 
 function runCli(binary: string, args: string[], env: Record<string, string>): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(binary, args, { env: { ...process.env, ...env }, stdio: ["ignore", "ignore", "pipe"] });
+    const child = spawn(binary, args, {
+      env: { ...process.env, ...env },
+      stdio: ["ignore", "ignore", "pipe"],
+    });
     let stderr = "";
-    child.stderr!.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
-    child.once("error", (error) => reject(new UsaiTestError(`could not spawn ${binary}: ${error.message}`)));
-    child.once("exit", (code) => (code === 0 ? resolve() : reject(new UsaiTestError(`usai ${args.join(" ")} exited with code ${code}\n${stderr}`))));
+    child.stderr!.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.once("error", (error) =>
+      reject(new UsaiTestError(`could not spawn ${binary}: ${error.message}`)),
+    );
+    child.once("exit", (code) =>
+      code === 0
+        ? resolve()
+        : reject(new UsaiTestError(`usai ${args.join(" ")} exited with code ${code}\n${stderr}`)),
+    );
   });
 }
 
@@ -177,53 +192,105 @@ export async function testApp(options: TestAppOptions = {}): Promise<TestApp> {
     const env = { RUST_LOG: process.env["RUST_LOG"] ?? "warn", ...(options.env ?? {}) };
     await runCli(binary, ["--root", root, "db", "migrate"], env);
     const seed = typeof options.migrate === "object" ? options.migrate.seed : undefined;
-    if (seed) await runCli(binary, ["--root", root, "db", "seed", ...(typeof seed === "string" ? [seed] : [])], env);
+    if (seed)
+      await runCli(
+        binary,
+        ["--root", root, "db", "seed", ...(typeof seed === "string" ? [seed] : [])],
+        env,
+      );
   }
   const token = `test-${Math.random().toString(36).slice(2)}`;
   // --diagnostics: the runtime reports lifecycle violations and error details
   // to the client, which is what a test wants to assert on.
-  const args = ["--root", root, "run", "--port", "0", "--control", "127.0.0.1:0", "--announce", "--diagnostics", ...(options.args ?? [])];
+  const args = [
+    "--root",
+    root,
+    "run",
+    "--port",
+    "0",
+    "--control",
+    "127.0.0.1:0",
+    "--announce",
+    "--diagnostics",
+    ...(options.args ?? []),
+  ];
   const child: ChildProcess = spawn(binary, args, {
-    env: { ...process.env, USAI_CONTROL_TOKEN: token, RUST_LOG: process.env["RUST_LOG"] ?? "warn", ...(options.env ?? {}) },
+    env: {
+      ...process.env,
+      USAI_CONTROL_TOKEN: token,
+      RUST_LOG: process.env["RUST_LOG"] ?? "warn",
+      ...(options.env ?? {}),
+    },
     stdio: ["ignore", "pipe", "inherit"],
   });
   const announced = new Promise<{ app: string; control: string }>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new UsaiTestError(`usai did not start within ${options.startTimeoutMs ?? 60000} ms`)), options.startTimeoutMs ?? 60000);
-    child.once("error", (error) => { clearTimeout(timer); reject(new UsaiTestError(`could not spawn ${binary}: ${error.message}`)); });
+    const timer = setTimeout(
+      () =>
+        reject(
+          new UsaiTestError(`usai did not start within ${options.startTimeoutMs ?? 60000} ms`),
+        ),
+      options.startTimeoutMs ?? 60000,
+    );
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(new UsaiTestError(`could not spawn ${binary}: ${error.message}`));
+    });
     child.once("exit", (code) => {
       clearTimeout(timer);
       // The runtime's own error is on stderr just above; add what a test author can do about the common one.
-      reject(new UsaiTestError(`usai exited with code ${code} before announcing — if it reported a missing environment variable: testApp starts the runtime with the process environment plus \`env: {...}\`; \`usai test\` also loads .env, a plain \`node --test\` does not`));
+      reject(
+        new UsaiTestError(
+          `usai exited with code ${code} before announcing — if it reported a missing environment variable: testApp starts the runtime with the process environment plus \`env: {...}\`; \`usai test\` also loads .env, a plain \`node --test\` does not`,
+        ),
+      );
     });
     const lines = createInterface({ input: child.stdout! });
     lines.on("line", (line) => {
       if (!line.startsWith("{")) return;
       try {
         const parsed = JSON.parse(line) as { app?: string; control?: string | null };
-        if (parsed.app && parsed.control) { clearTimeout(timer); resolve({ app: parsed.app, control: parsed.control }); }
-      } catch { /* not ours */ }
+        if (parsed.app && parsed.control) {
+          clearTimeout(timer);
+          resolve({ app: parsed.app, control: parsed.control });
+        }
+      } catch {
+        /* not ours */
+      }
     });
   });
   const { app: url, control: controlUrl } = await announced;
 
   const control = async (path: string, body?: unknown): Promise<unknown> => {
-    const init: RequestInit = { method: body === undefined ? "GET" : "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" } };
+    const init: RequestInit = {
+      method: body === undefined ? "GET" : "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    };
     if (body !== undefined) init.body = JSON.stringify(body);
     const res = await fetch(`${controlUrl}${path}`, init);
     const json = (await res.json()) as unknown;
     if (!res.ok) throw new UsaiTestError(`control ${path}: ${res.status} ${JSON.stringify(json)}`);
     return json;
   };
-  const invoke = async <T,>(payload: Record<string, unknown>): Promise<WorkOutcome<T>> => (await control("/invoke", payload)) as WorkOutcome<T>;
+  const invoke = async <T>(payload: Record<string, unknown>): Promise<WorkOutcome<T>> =>
+    (await control("/invoke", payload)) as WorkOutcome<T>;
 
-  const request = async (method: string, path: string, options: RequestOptions = {}): Promise<TestResponse> => {
+  const request = async (
+    method: string,
+    path: string,
+    options: RequestOptions = {},
+  ): Promise<TestResponse> => {
     const target = new URL(path, url);
-    for (const [k, v] of Object.entries(options.query ?? {})) target.searchParams.append(k, String(v));
+    for (const [k, v] of Object.entries(options.query ?? {}))
+      target.searchParams.append(k, String(v));
     const headers: Record<string, string> = { ...(options.headers ?? {}) };
     let body: string | undefined;
     if (options.body !== undefined) {
       body = typeof options.body === "string" ? options.body : JSON.stringify(options.body);
-      if (typeof options.body !== "string" && !Object.keys(headers).some((h) => h.toLowerCase() === "content-type")) headers["content-type"] = "application/json";
+      if (
+        typeof options.body !== "string" &&
+        !Object.keys(headers).some((h) => h.toLowerCase() === "content-type")
+      )
+        headers["content-type"] = "application/json";
     }
     const init: RequestInit = { method, headers };
     if (body !== undefined) init.body = body;
@@ -232,11 +299,20 @@ export async function testApp(options: TestAppOptions = {}): Promise<TestApp> {
     let parsed: unknown = text;
     const type = res.headers.get("content-type") ?? "";
     if (type.includes("json") && text.length > 0) {
-      try { parsed = JSON.parse(text); } catch { parsed = text; }
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        parsed = text;
+      }
     }
     const out: Record<string, string> = {};
-    res.headers.forEach((v, k) => { out[k] = v; });
-    const violations = (out["x-usai-lifecycle"] ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    res.headers.forEach((v, k) => {
+      out[k] = v;
+    });
+    const violations = (out["x-usai-lifecycle"] ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
     return { status: res.status, headers: out, body: parsed, text, violations };
   };
 
@@ -255,13 +331,19 @@ export async function testApp(options: TestAppOptions = {}): Promise<TestApp> {
     task: (name) => ({ invoke: (input) => invoke({ kind: "task", name, input: input ?? null }) }),
     cron: (name) => ({ run: () => invoke({ kind: "cron", name }) }),
     command: (name) => ({ run: (args) => invoke({ kind: "command", name, args: args ?? [] }) }),
-    queue: (topic) => ({ deliver: (message) => invoke({ kind: "queue", name: topic, input: message ?? null }) }),
+    queue: (topic) => ({
+      deliver: (message) => invoke({ kind: "queue", name: topic, input: message ?? null }),
+    }),
     status: async () => (await control("/status")) as Record<string, unknown>,
     close: async () => {
       if (closed) return;
       closed = true;
       const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
-      try { await control("/stop", {}); } catch { child.kill("SIGINT"); }
+      try {
+        await control("/stop", {});
+      } catch {
+        child.kill("SIGINT");
+      }
       const timer = setTimeout(() => child.kill("SIGKILL"), 15000);
       await exited;
       clearTimeout(timer);

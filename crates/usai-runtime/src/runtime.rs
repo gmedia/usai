@@ -45,6 +45,11 @@ pub struct RuntimeConfig {
     pub cron_scheduler: bool,
     /// Whether this instance runs queue consumers.
     pub queue_consumers: bool,
+    /// Whether this instance runs the application's services (persistent
+    /// workloads). A one-shot command, a migration job or a test runner
+    /// asks for one finite world and nothing else; N replicas mean N
+    /// instances of every service unless the others start without them.
+    pub services: bool,
     /// When non-empty, every artifact this runtime loads (`--artifact`, a
     /// control-surface install) must carry a valid signature by one of
     /// these keys; otherwise it is refused before serving (`signing.rs`).
@@ -68,6 +73,7 @@ impl Default for RuntimeConfig {
             task_queue_capacity: 10_000,
             cron_scheduler: true,
             queue_consumers: true,
+            services: true,
             trusted_signers: Vec::new(),
             max_revisions: 8,
         }
@@ -253,6 +259,8 @@ pub struct SchedulerStatus {
     pub cron: bool,
     /// This instance runs the application's queue consumers.
     pub queue: bool,
+    /// This instance runs the application's services.
+    pub services: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -488,10 +496,12 @@ impl Runtime {
             );
             *revision.cron_stop.lock().expect("cron poisoned") = Some(stop);
         }
-        let supervisor =
-            services::Supervisor::start(self.self_ref.clone(), &revision, &self.shutdown);
-        if !supervisor.is_empty() {
-            *revision.services.lock().expect("services poisoned") = Some(supervisor);
+        if self.config.services {
+            let supervisor =
+                services::Supervisor::start(self.self_ref.clone(), &revision, &self.shutdown);
+            if !supervisor.is_empty() {
+                *revision.services.lock().expect("services poisoned") = Some(supervisor);
+            }
         }
         if self.config.queue_consumers {
             let stop = queue::start(
@@ -951,6 +961,7 @@ impl Runtime {
             scheduler: SchedulerStatus {
                 cron: self.config.cron_scheduler,
                 queue: self.config.queue_consumers,
+                services: self.config.services,
             },
             compiled_images_live: crate::engine::wasm::IMAGES_LIVE
                 .load(std::sync::atomic::Ordering::Relaxed),

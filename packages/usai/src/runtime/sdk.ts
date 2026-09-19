@@ -28,14 +28,51 @@ interface HttpInput {
   };
 }
 
-interface TaskInput { kind: "task"; env: Record<string, string | number | boolean | undefined>; input: unknown }
-interface CronInput { kind: "cron"; env: Record<string, string | number | boolean | undefined>; scheduledAt: string }
-interface CommandInput { kind: "command"; env: Record<string, string | number | boolean | undefined>; args: string[] }
-interface ServiceInput { kind: "service"; env: Record<string, string | number | boolean | undefined> }
-interface QueueInput { kind: "queue"; env: Record<string, string | number | boolean | undefined>; message: unknown; id: string; attempt: number }
-interface StreamInput { kind: "stream"; env: Record<string, string | number | boolean | undefined>; request: HttpInput["request"] }
-interface SocketInput { kind: "socket"; env: Record<string, string | number | boolean | undefined>; request: Omit<HttpInput["request"], "body"> }
-type Input = HttpInput | TaskInput | CronInput | CommandInput | ServiceInput | QueueInput | StreamInput | SocketInput;
+interface TaskInput {
+  kind: "task";
+  env: Record<string, string | number | boolean | undefined>;
+  input: unknown;
+}
+interface CronInput {
+  kind: "cron";
+  env: Record<string, string | number | boolean | undefined>;
+  scheduledAt: string;
+}
+interface CommandInput {
+  kind: "command";
+  env: Record<string, string | number | boolean | undefined>;
+  args: string[];
+}
+interface ServiceInput {
+  kind: "service";
+  env: Record<string, string | number | boolean | undefined>;
+}
+interface QueueInput {
+  kind: "queue";
+  env: Record<string, string | number | boolean | undefined>;
+  message: unknown;
+  id: string;
+  attempt: number;
+}
+interface StreamInput {
+  kind: "stream";
+  env: Record<string, string | number | boolean | undefined>;
+  request: HttpInput["request"];
+}
+interface SocketInput {
+  kind: "socket";
+  env: Record<string, string | number | boolean | undefined>;
+  request: Omit<HttpInput["request"], "body">;
+}
+type Input =
+  | HttpInput
+  | TaskInput
+  | CronInput
+  | CommandInput
+  | ServiceInput
+  | QueueInput
+  | StreamInput
+  | SocketInput;
 
 interface HttpOutput {
   status: number;
@@ -75,7 +112,10 @@ function parse<S extends AnySchema>(slot: string, schema: S | undefined, value: 
   const result = validateWith(schema, value);
   mark(`validate.${slot}`, t);
   if (!result.ok) {
-    throw new UsaiError("validation_failed", 400, `${slot} failed validation`, { slot, issues: result.issues });
+    throw new UsaiError("validation_failed", 400, `${slot} failed validation`, {
+      slot,
+      issues: result.issues,
+    });
   }
   return result.value;
 }
@@ -94,7 +134,12 @@ function finalizerOf(schema: AnySchema): Finalizer | null {
   }
   return f;
 }
-function parseValidated<S extends AnySchema>(slot: string, schema: S | undefined, value: unknown, validated: string[] | undefined): unknown {
+function parseValidated<S extends AnySchema>(
+  slot: string,
+  schema: S | undefined,
+  value: unknown,
+  validated: string[] | undefined,
+): unknown {
   if (!schema || !validated || !validated.includes(slot)) return parse(slot, schema, value);
   const finalize = finalizerOf(schema);
   if (finalize === null) return parse(slot, schema, value);
@@ -126,14 +171,27 @@ function decodeBody(body: HttpInput["request"]["body"]): unknown {
   return undefined;
 }
 
-async function authenticate(workload: Workload, base: BaseContext, request: HttpInput["request"]): Promise<unknown> {
+async function authenticate(
+  workload: Workload,
+  base: BaseContext,
+  request: HttpInput["request"],
+): Promise<unknown> {
   const declaration = workload.auth;
   if (!declaration) return undefined;
-  const ctx = { ...base, request: { method: request.method, path: request.path, headers: request.headers, query: request.query } };
+  const ctx = {
+    ...base,
+    request: {
+      method: request.method,
+      path: request.path,
+      headers: request.headers,
+      query: request.query,
+    },
+  };
   if (declaration.scheme === "custom") return declaration.resolve(ctx, undefined);
   const header = declaration.header ?? "authorization";
   const raw = request.headers[header];
-  if (raw === undefined || raw === "") throw new UsaiError("unauthorized", 401, `missing ${header} header`);
+  if (raw === undefined || raw === "")
+    throw new UsaiError("unauthorized", 401, `missing ${header} header`);
   let credential = raw;
   if (declaration.scheme === "bearer") {
     const match = /^Bearer\s+(.+)$/i.exec(raw);
@@ -144,7 +202,10 @@ async function authenticate(workload: Workload, base: BaseContext, request: Http
 }
 
 function defaultStatus(workload: Workload): number {
-  const declared = Object.keys(workload.contracts.response ?? {}).map(Number).filter((s) => s >= 200 && s < 300).sort();
+  const declared = Object.keys(workload.contracts.response ?? {})
+    .map(Number)
+    .filter((s) => s >= 200 && s < 300)
+    .sort();
   return declared[0] ?? 200;
 }
 
@@ -161,7 +222,12 @@ function encodeHttp(workload: Workload, result: unknown): HttpOutput {
   if (isHttpResponse(result)) {
     ({ status, headers, body } = result);
   } else {
-    status = result === undefined || result === null ? (workload.contracts.response ? defaultStatus(workload) : 204) : defaultStatus(workload);
+    status =
+      result === undefined || result === null
+        ? workload.contracts.response
+          ? defaultStatus(workload)
+          : 204
+        : defaultStatus(workload);
     headers = {};
     body = result;
   }
@@ -177,7 +243,12 @@ function encodeHttp(workload: Workload, result: unknown): HttpOutput {
     } else {
       const checked = validateWith(schema, body);
       if (!checked.ok) {
-        throw new UsaiError("response_contract_violation", 500, `response for status ${status} does not match its contract`, { issues: checked.issues });
+        throw new UsaiError(
+          "response_contract_violation",
+          500,
+          `response for status ${status} does not match its contract`,
+          { issues: checked.issues },
+        );
       }
       body = checked.value;
     }
@@ -197,7 +268,8 @@ async function runHttp(workload: Workload, input: HttpInput): Promise<HttpOutput
   const auth = workload.auth ? await authenticate(workload, base, request) : undefined;
   if (workload.auth) mark("auth", t);
   if (raw) {
-    const bytes = request.body?.base64 !== undefined ? bytesFromBase64(request.body.base64) : new Uint8Array(0);
+    const bytes =
+      request.body?.base64 !== undefined ? bytesFromBase64(request.body.base64) : new Uint8Array(0);
     const text = () => new TextDecoder().decode(bytes);
     const ctx = {
       ...base,
@@ -225,12 +297,18 @@ async function runHttp(workload: Workload, input: HttpInput): Promise<HttpOutput
     url: request.url,
     params: parseValidated("params", workload.contracts.params, request.params, request.validated),
     query: parseValidated("query", workload.contracts.query, request.query, request.validated),
-    headers: parseValidated("headers", workload.contracts.headers, request.headers, request.validated),
+    headers: parseValidated(
+      "headers",
+      workload.contracts.headers,
+      request.headers,
+      request.validated,
+    ),
     // The host validated `body.json` (or null when there was none); only
     // that exact value may skip the guest parse.
-    body: request.body?.json !== undefined
-      ? parseValidated("body", workload.contracts.body, request.body.json, request.validated)
-      : parse("body", workload.contracts.body, decodeBody(request.body)),
+    body:
+      request.body?.json !== undefined
+        ? parseValidated("body", workload.contracts.body, request.body.json, request.validated)
+        : parse("body", workload.contracts.body, decodeBody(request.body)),
   };
   t = ledger !== null ? now() : 0;
   const result = await (workload.handler as (ctx: unknown) => unknown)(ctx);
@@ -249,7 +327,10 @@ async function runTask(workload: Workload, input: TaskInput): Promise<unknown> {
 
 async function runCron(workload: Workload, input: CronInput): Promise<unknown> {
   const base = makeBase(workload.resources, input.env);
-  return (workload.handler as (ctx: unknown) => unknown)({ ...base, scheduledAt: input.scheduledAt });
+  return (workload.handler as (ctx: unknown) => unknown)({
+    ...base,
+    scheduledAt: input.scheduledAt,
+  });
 }
 
 async function runCommand(workload: Workload, input: CommandInput): Promise<unknown> {
@@ -260,7 +341,12 @@ async function runCommand(workload: Workload, input: CommandInput): Promise<unkn
 async function runQueue(workload: Workload, input: QueueInput): Promise<unknown> {
   const base = makeBase(workload.resources, input.env);
   const message = parse("message", workload.contracts.message, input.message);
-  return (workload.handler as (ctx: unknown) => unknown)({ ...base, message, id: input.id, attempt: input.attempt });
+  return (workload.handler as (ctx: unknown) => unknown)({
+    ...base,
+    message,
+    id: input.id,
+    attempt: input.attempt,
+  });
 }
 
 async function runStream(workload: Workload, input: StreamInput): Promise<unknown> {
@@ -278,7 +364,9 @@ async function runStream(workload: Workload, input: StreamInput): Promise<unknow
     headers: request.headers,
   };
   const stream = {
-    start: async (options?: { status?: number; headers?: Record<string, string> }) => { await op("stream.start", { status: options?.status ?? 200, headers: options?.headers ?? {} }); },
+    start: async (options?: { status?: number; headers?: Record<string, string> }) => {
+      await op("stream.start", { status: options?.status ?? 200, headers: options?.headers ?? {} });
+    },
     send: async (chunk: string | Uint8Array) => {
       if (typeof chunk === "string") await op("stream.send", { text: chunk });
       else await op("stream.send", { base64: base64FromBytes(chunk) });
@@ -289,16 +377,29 @@ async function runStream(workload: Workload, input: StreamInput): Promise<unknow
     },
   };
   // If nothing was streamed, the return value is an ordinary response.
-  const result = await (workload.handler as (ctx: unknown, stream: unknown) => unknown)(ctx, stream);
+  const result = await (workload.handler as (ctx: unknown, stream: unknown) => unknown)(
+    ctx,
+    stream,
+  );
   return encodeHttp(workload, result);
 }
 
-interface SocketEvent { type: "text" | "binary" | "close"; data?: string; base64?: string; code?: number | null; reason?: string }
+interface SocketEvent {
+  type: "text" | "binary" | "close";
+  data?: string;
+  base64?: string;
+  code?: number | null;
+  reason?: string;
+}
 
 async function runSocket(workload: Workload, input: SocketInput): Promise<unknown> {
   const base = makeBase(workload.resources, input.env);
   const { request } = input;
-  const handlers = workload.handler as unknown as { open?: (ctx: unknown) => unknown; message?: (ctx: unknown) => unknown; close?: (ctx: unknown) => unknown };
+  const handlers = workload.handler as unknown as {
+    open?: (ctx: unknown) => unknown;
+    message?: (ctx: unknown) => unknown;
+    close?: (ctx: unknown) => unknown;
+  };
   const auth = await authenticate(workload, base, { ...request, body: null });
   const outgoing = workload.contracts.response?.[200];
   const state: Record<string, unknown> = {};
@@ -315,9 +416,13 @@ async function runSocket(workload: Workload, input: SocketInput): Promise<unknow
     closeInfo: null as { code: number | null; reason: string } | null,
     send: async (message: unknown) => {
       const checked = outgoing ? parse("outgoing", outgoing, message) : message;
-      await op("socket.send", { text: typeof checked === "string" ? checked : JSON.stringify(checked) });
+      await op("socket.send", {
+        text: typeof checked === "string" ? checked : JSON.stringify(checked),
+      });
     },
-    close: async (reason?: string) => { await op("socket.close", { reason: reason ?? "" }); },
+    close: async (reason?: string) => {
+      await op("socket.close", { reason: reason ?? "" });
+    },
   };
   if (handlers.open) await handlers.open(ctx);
   for (;;) {
@@ -328,16 +433,30 @@ async function runSocket(workload: Workload, input: SocketInput): Promise<unknow
     }
     let raw: unknown = event.type === "text" ? event.data : bytesFromBase64(event.base64 ?? "");
     if (workload.contracts.message && typeof raw === "string") {
-      try { raw = JSON.parse(raw); } catch { /* validated below as a string */ }
+      try {
+        raw = JSON.parse(raw);
+      } catch {
+        /* validated below as a string */
+      }
     }
     try {
-      ctx.message = workload.contracts.message ? parse("message", workload.contracts.message, raw) : raw;
+      ctx.message = workload.contracts.message
+        ? parse("message", workload.contracts.message, raw)
+        : raw;
     } catch (error) {
       // A message that fails its contract is reported to the client and
       // dropped; the connection stays open. The error envelope is not
       // subject to the outgoing contract.
       const detail = (error as { usai?: { details?: unknown } }).usai?.details;
-      await op("socket.send", { text: JSON.stringify({ error: { code: "validation_failed", message: (error as Error).message, details: detail ?? null } }) }).catch(() => {});
+      await op("socket.send", {
+        text: JSON.stringify({
+          error: {
+            code: "validation_failed",
+            message: (error as Error).message,
+            details: detail ?? null,
+          },
+        }),
+      }).catch(() => {});
       continue;
     }
     if (handlers.message) await handlers.message(ctx);
@@ -364,7 +483,11 @@ function workloadsOf(app: AppDeclaration): ReturnType<typeof flatten> {
   return f;
 }
 
-export async function invoke(app: AppDeclaration, index: number, inputJson: string): Promise<unknown> {
+export async function invoke(
+  app: AppDeclaration,
+  index: number,
+  inputJson: string,
+): Promise<unknown> {
   ledger = profiling() ? [] : null;
   const t0 = ledger !== null ? now() : 0;
   const entry = workloadsOf(app).workloads[index];
@@ -375,21 +498,37 @@ export async function invoke(app: AppDeclaration, index: number, inputJson: stri
   // the host already validated presence and shape at activation.
   if (app.env) {
     const t = ledger !== null ? now() : 0;
-    input.env = resolveEnv(app.env, input.env as Record<string, string | undefined>) as unknown as Record<string, string | number | boolean | undefined>;
+    input.env = resolveEnv(
+      app.env,
+      input.env as Record<string, string | undefined>,
+    ) as unknown as Record<string, string | number | boolean | undefined>;
     mark("env", t);
   }
   const { workload } = entry;
   try {
     switch (input.kind) {
-      case "http": return await runHttp(workload, input);
-      case "task": return { value: await runTask(workload, input) ?? null };
-      case "cron": return { value: await runCron(workload, input) ?? null };
-      case "command": return { value: await runCommand(workload, input) ?? null };
-      case "service": return { value: await runService(workload, input) ?? null };
-      case "queue": return { value: await runQueue(workload, input) ?? null };
-      case "stream": return await runStream(workload, input);
-      case "socket": return { value: await runSocket(workload, input) ?? null };
-      default: throw new UsaiError("unknown_input_kind", 500, `unsupported input kind ${(input as { kind: string }).kind}`);
+      case "http":
+        return await runHttp(workload, input);
+      case "task":
+        return { value: (await runTask(workload, input)) ?? null };
+      case "cron":
+        return { value: (await runCron(workload, input)) ?? null };
+      case "command":
+        return { value: (await runCommand(workload, input)) ?? null };
+      case "service":
+        return { value: (await runService(workload, input)) ?? null };
+      case "queue":
+        return { value: (await runQueue(workload, input)) ?? null };
+      case "stream":
+        return await runStream(workload, input);
+      case "socket":
+        return { value: (await runSocket(workload, input)) ?? null };
+      default:
+        throw new UsaiError(
+          "unknown_input_kind",
+          500,
+          `unsupported input kind ${(input as { kind: string }).kind}`,
+        );
     }
   } catch (error) {
     if (isUsaiError(error)) throw error;

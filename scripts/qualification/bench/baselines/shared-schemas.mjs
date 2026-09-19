@@ -5,7 +5,11 @@ import { z } from "zod";
 
 export const Name = z.object({ name: z.string().min(1).max(40) });
 export const Hello = z.object({ hello: z.string() });
-export const Item = z.object({ sku: z.string().min(1).max(32), quantity: z.number().int().min(1).max(1000), unitCents: z.number().int().min(0).max(10_000_000) });
+export const Item = z.object({
+  sku: z.string().min(1).max(32),
+  quantity: z.number().int().min(1).max(1000),
+  unitCents: z.number().int().min(0).max(10_000_000),
+});
 export const Quote = z.object({
   customer: z.string().min(1).max(200),
   email: z.string().email(),
@@ -20,11 +24,24 @@ export const Quote = z.object({
   tags: z.array(z.string().max(16)).max(10),
   items: z.array(Item).min(1).max(50),
 });
-export const Quoted = z.object({ reference: z.string(), currency: z.string(), subtotalCents: z.number().int(), taxCents: z.number().int(), totalCents: z.number().int(), lines: z.number().int(), priority: z.string() });
+export const Quoted = z.object({
+  reference: z.string(),
+  currency: z.string(),
+  subtotalCents: z.number().int(),
+  taxCents: z.number().int(),
+  totalCents: z.number().int(),
+  lines: z.number().int(),
+  priority: z.string(),
+});
 export const Id = z.object({ id: z.coerce.number().int().min(1).max(2_147_483_647) });
 export const User = z.object({ id: z.number().int(), name: z.string(), email: z.string() });
 export const NewUser = z.object({ name: z.string().min(1).max(200), email: z.string().email() });
-export const Paid = z.object({ orderId: z.number().int(), paymentId: z.number().int(), amountCents: z.number().int(), paid: z.boolean() });
+export const Paid = z.object({
+  orderId: z.number().int(),
+  paymentId: z.number().int(),
+  amountCents: z.number().int(),
+  paid: z.boolean(),
+});
 export const Counter = z.object({ count: z.number().int() });
 export const SlowQuery = z.object({ ms: z.coerce.number().int().min(0).max(30_000).default(1000) });
 export const Slept = z.object({ slept: z.number().int() });
@@ -34,9 +51,20 @@ export function quote(body) {
   const subtotal = body.items.reduce((sum, item) => sum + item.quantity * item.unitCents, 0);
   const rate = body.country === "ID" ? 11 : body.country === "DE" ? 19 : 0;
   const tax = Math.round((subtotal * rate) / 100);
-  return { reference: body.reference, currency: body.currency, subtotalCents: subtotal, taxCents: tax, totalCents: subtotal + tax, lines: body.items.length, priority: body.priority };
+  return {
+    reference: body.reference,
+    currency: body.currency,
+    subtotalCents: subtotal,
+    taxCents: tax,
+    totalCents: subtotal + tax,
+    lines: body.items.length,
+    priority: body.priority,
+  };
 }
 
 /** The error envelope every comparator answers with (Usai's shape). */
-export const err = (code, message, details) => ({ error: details === undefined ? { code, message } : { code, message, details } });
-export const issues = (zodError) => zodError.issues.map((i) => ({ message: i.message, path: "/" + i.path.join("/") }));
+export const err = (code, message, details) => ({
+  error: details === undefined ? { code, message } : { code, message, details },
+});
+export const issues = (zodError) =>
+  zodError.issues.map((i) => ({ message: i.message, path: "/" + i.path.join("/") }));

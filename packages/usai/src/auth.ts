@@ -116,7 +116,8 @@ export const auth = {
       name: options.name,
       ...(options.description ? { description: options.description } : {}),
       scheme: "custom",
-      resolve: ((ctx: BaseContext & { request: AuthRequest }) => options.resolve(ctx)) as AuthDeclaration<P>["resolve"],
+      resolve: ((ctx: BaseContext & { request: AuthRequest }) =>
+        options.resolve(ctx)) as AuthDeclaration<P>["resolve"],
     };
   },
 };

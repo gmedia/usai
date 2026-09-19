@@ -7,7 +7,11 @@ import { z } from "zod";
 import { db } from "../resources.ts";
 import { session } from "../auth/module.ts";
 
-const Counts = z.object({ count: z.number().int(), overdue: z.number().int(), issuedTotalCents: z.number().int() });
+const Counts = z.object({
+  count: z.number().int(),
+  overdue: z.number().int(),
+  issuedTotalCents: z.number().int(),
+});
 type CountsRow = z.infer<typeof Counts>;
 
 const countsSql = `select count(*)::int as count,
@@ -21,7 +25,8 @@ export const live = http.stream(
   "/invoices/live",
   {
     summary: "Live counts as server-sent events",
-    description: "Sends a `counts` event immediately and then every `everyMs` milliseconds until the client disconnects; the world lives as long as the connection.",
+    description:
+      "Sends a `counts` event immediately and then every `everyMs` milliseconds until the client disconnects; the world lives as long as the connection.",
     auth: session,
     query: z.object({ everyMs: z.coerce.number().int().min(200).max(30_000).default(1000) }),
     resources: [db],
@@ -47,7 +52,8 @@ export const feed = socket(
   "/invoices/socket",
   {
     summary: "Ask for counts over a WebSocket",
-    description: "On open the server sends `hello`; each `{ \"type\": \"counts\" }` message is answered with the tenant's counts. One world per connection; `ctx.state` counts the questions.",
+    description:
+      'On open the server sends `hello`; each `{ "type": "counts" }` message is answered with the tenant\'s counts. One world per connection; `ctx.state` counts the questions.',
     auth: session,
     incoming: Ask,
     outgoing: Answer,

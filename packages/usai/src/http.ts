@@ -1,7 +1,16 @@
 // HTTP workload declarations (`GOAL.md` §10–§15, ADR-0003, ADR-0004).
 
 import type { AnySchema, Output } from "./schema.ts";
-import type { AuthDeclaration, DeclaredError, HttpOptions, Method, ResourceDeclaration, ResourcesOf, Workload, WorkloadPolicies } from "./declarations.ts";
+import type {
+  AuthDeclaration,
+  DeclaredError,
+  HttpOptions,
+  Method,
+  ResourceDeclaration,
+  ResourcesOf,
+  Workload,
+  WorkloadPolicies,
+} from "./declarations.ts";
 import type { BaseContext } from "./runtime/context.ts";
 
 /** Explicit response: status, headers, and a body the runtime encodes.
@@ -34,7 +43,11 @@ export interface RawResponse {
  *
  * @category HTTP
  */
-export type HttpHandlerResult<T> = T | HttpResponse<T> | RawResponse | Promise<T | HttpResponse<T> | RawResponse>;
+export type HttpHandlerResult<T> =
+  | T
+  | HttpResponse<T>
+  | RawResponse
+  | Promise<T | HttpResponse<T> | RawResponse>;
 
 type OutputOf<S, Fallback> = S extends AnySchema ? Output<S> : Fallback;
 type ResponseOf<O extends HttpOptions> = O["response"] extends AnySchema
@@ -102,13 +115,20 @@ export interface RawRequestBody {
   json(): Promise<unknown>;
 }
 
-function normalizeResponse(response: HttpOptions["response"]): Record<number, AnySchema> | undefined {
+function normalizeResponse(
+  response: HttpOptions["response"],
+): Record<number, AnySchema> | undefined {
   if (response === undefined) return undefined;
   if ("~standard" in response) return { 200: response as AnySchema };
   return response as Record<number, AnySchema>;
 }
 
-function declare<O extends HttpOptions>(method: Method, path: string, options: O, handler: (ctx: HttpContext<O>) => HttpHandlerResult<ResponseOf<O>>): Workload {
+function declare<O extends HttpOptions>(
+  method: Method,
+  path: string,
+  options: O,
+  handler: (ctx: HttpContext<O>) => HttpHandlerResult<ResponseOf<O>>,
+): Workload {
   const contracts: Workload["contracts"] = {};
   if (options.params) contracts.params = options.params;
   if (options.query) contracts.query = options.query;
@@ -138,7 +158,11 @@ function declare<O extends HttpOptions>(method: Method, path: string, options: O
 }
 
 /** The signature of `http.get`/`post`/…. */
-export type Declare = <O extends HttpOptions>(path: string, options: O, handler: (ctx: HttpContext<O>) => HttpHandlerResult<ResponseOf<O>>) => Workload;
+export type Declare = <O extends HttpOptions>(
+  path: string,
+  options: O,
+  handler: (ctx: HttpContext<O>) => HttpHandlerResult<ResponseOf<O>>,
+) => Workload;
 
 function method(m: Method): Declare {
   return (path, options, handler) => declare(m, path, options, handler);
@@ -148,7 +172,8 @@ function method(m: Method): Declare {
  *
  * @category HTTP
  */
-export interface RawOptions<R extends ResourceDeclaration[] = ResourceDeclaration[]> extends WorkloadPolicies {
+export interface RawOptions<R extends ResourceDeclaration[] = ResourceDeclaration[]>
+  extends WorkloadPolicies {
   /** HTTP method. Default `POST`. */
   method?: Method;
   summary?: string;
@@ -163,9 +188,15 @@ export interface RawOptions<R extends ResourceDeclaration[] = ResourceDeclaratio
 }
 
 /** The handler of `http.raw`. */
-export type RawHandler<R extends ResourceDeclaration[] = ResourceDeclaration[]> = (ctx: RawContext<R>) => RawResponse | HttpResponse | Promise<RawResponse | HttpResponse>;
+export type RawHandler<R extends ResourceDeclaration[] = ResourceDeclaration[]> = (
+  ctx: RawContext<R>,
+) => RawResponse | HttpResponse | Promise<RawResponse | HttpResponse>;
 
-function raw<R extends ResourceDeclaration[]>(path: string, options: RawOptions<R>, handler: RawHandler<R>): Workload;
+function raw<R extends ResourceDeclaration[]>(
+  path: string,
+  options: RawOptions<R>,
+  handler: RawHandler<R>,
+): Workload;
 function raw(path: string, handler: RawHandler): Workload;
 function raw(path: string, a: RawOptions | RawHandler, b?: RawHandler): Workload {
   const options: RawOptions = typeof a === "function" ? {} : a;
@@ -180,7 +211,12 @@ function raw(path: string, a: RawOptions | RawHandler, b?: RawHandler): Workload
     name: `${m} ${path}`,
     ...(options.summary ? { summary: options.summary } : {}),
     ...(options.description ? { description: options.description } : {}),
-    trigger: { method: m, path, raw: true, ...(options.responses ? { responses: options.responses } : {}) },
+    trigger: {
+      method: m,
+      path,
+      raw: true,
+      ...(options.responses ? { responses: options.responses } : {}),
+    },
     contracts: {},
     errors: options.errors ?? [],
     ...(options.auth ? { auth: options.auth } : {}),
@@ -275,7 +311,11 @@ export const http = {
     return { __usai: "response", status: 204, headers, body: null };
   },
   /** Raw text or bytes with an explicit status, for `http.raw` handlers. */
-  rawResponse(status: number, body: string | Uint8Array, headers: Record<string, string> = {}): RawResponse {
+  rawResponse(
+    status: number,
+    body: string | Uint8Array,
+    headers: Record<string, string> = {},
+  ): RawResponse {
     return typeof body === "string"
       ? { __usai: "raw-response", status, headers, text: body }
       : { __usai: "raw-response", status, headers, bytes: body };
@@ -287,7 +327,9 @@ export const http = {
  * @category HTTP
  */
 export function isHttpResponse(value: unknown): value is HttpResponse {
-  return typeof value === "object" && value !== null && (value as HttpResponse).__usai === "response";
+  return (
+    typeof value === "object" && value !== null && (value as HttpResponse).__usai === "response"
+  );
 }
 
 /** Whether a handler result is a {@link RawResponse}.
@@ -295,5 +337,7 @@ export function isHttpResponse(value: unknown): value is HttpResponse {
  * @category HTTP
  */
 export function isRawResponse(value: unknown): value is RawResponse {
-  return typeof value === "object" && value !== null && (value as RawResponse).__usai === "raw-response";
+  return (
+    typeof value === "object" && value !== null && (value as RawResponse).__usai === "raw-response"
+  );
 }

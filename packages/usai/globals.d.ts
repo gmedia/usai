@@ -4,9 +4,17 @@
 // (fetch, fs, process, …) that do not exist inside a world. Outbound HTTP
 // is the `httpClient` resource; `crypto` below is the subset a world has.
 
-declare function setTimeout(fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]): number;
+declare function setTimeout(
+  fn: (...args: unknown[]) => void,
+  ms?: number,
+  ...args: unknown[]
+): number;
 declare function clearTimeout(id: number | undefined): void;
-declare function setInterval(fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]): unknown;
+declare function setInterval(
+  fn: (...args: unknown[]) => void,
+  ms?: number,
+  ...args: unknown[]
+): unknown;
 declare function clearInterval(handle: unknown): void;
 declare function queueMicrotask(fn: () => void): void;
 declare function structuredClone<T>(value: T): T;
@@ -29,10 +37,28 @@ declare const crypto: {
   getRandomValues<T extends ArrayBufferView>(array: T): T;
   randomUUID(): `${string}-${string}-${string}-${string}-${string}`;
   readonly subtle: {
-    digest(algorithm: UsaiDigest | { name: UsaiDigest }, data: ArrayBuffer | ArrayBufferView): Promise<ArrayBuffer>;
-    importKey(format: "raw", keyData: ArrayBuffer | ArrayBufferView, algorithm: { name: "HMAC"; hash: UsaiDigest | { name: UsaiDigest } }, extractable: boolean, usages: ReadonlyArray<"sign" | "verify">): Promise<UsaiCryptoKey>;
-    sign(algorithm: "HMAC" | { name: "HMAC" }, key: UsaiCryptoKey, data: ArrayBuffer | ArrayBufferView): Promise<ArrayBuffer>;
-    verify(algorithm: "HMAC" | { name: "HMAC" }, key: UsaiCryptoKey, signature: ArrayBuffer | ArrayBufferView, data: ArrayBuffer | ArrayBufferView): Promise<boolean>;
+    digest(
+      algorithm: UsaiDigest | { name: UsaiDigest },
+      data: ArrayBuffer | ArrayBufferView,
+    ): Promise<ArrayBuffer>;
+    importKey(
+      format: "raw",
+      keyData: ArrayBuffer | ArrayBufferView,
+      algorithm: { name: "HMAC"; hash: UsaiDigest | { name: UsaiDigest } },
+      extractable: boolean,
+      usages: ReadonlyArray<"sign" | "verify">,
+    ): Promise<UsaiCryptoKey>;
+    sign(
+      algorithm: "HMAC" | { name: "HMAC" },
+      key: UsaiCryptoKey,
+      data: ArrayBuffer | ArrayBufferView,
+    ): Promise<ArrayBuffer>;
+    verify(
+      algorithm: "HMAC" | { name: "HMAC" },
+      key: UsaiCryptoKey,
+      signature: ArrayBuffer | ArrayBufferView,
+      data: ArrayBuffer | ArrayBufferView,
+    ): Promise<boolean>;
   };
 };
 
@@ -47,7 +73,9 @@ declare class TextDecoder {
 }
 
 declare class URLSearchParams {
-  constructor(init?: string | Record<string, string> | Iterable<[string, string]> | URLSearchParams);
+  constructor(
+    init?: string | Record<string, string> | Iterable<[string, string]> | URLSearchParams,
+  );
   readonly size: number;
   append(name: string, value: string): void;
   delete(name: string, value?: string): void;
@@ -56,7 +84,10 @@ declare class URLSearchParams {
   has(name: string, value?: string): boolean;
   set(name: string, value: string): void;
   sort(): void;
-  forEach(callback: (value: string, name: string, params: URLSearchParams) => void, thisArg?: unknown): void;
+  forEach(
+    callback: (value: string, name: string, params: URLSearchParams) => void,
+    thisArg?: unknown,
+  ): void;
   keys(): IterableIterator<string>;
   values(): IterableIterator<string>;
   entries(): IterableIterator<[string, string]>;

@@ -3,7 +3,14 @@
 // and ends with it.
 
 import type { AnySchema, Output } from "./schema.ts";
-import type { AuthDeclaration, Method, ResourceDeclaration, ResourcesOf, Workload, WorkloadPolicies } from "./declarations.ts";
+import type {
+  AuthDeclaration,
+  Method,
+  ResourceDeclaration,
+  ResourcesOf,
+  Workload,
+  WorkloadPolicies,
+} from "./declarations.ts";
 import type { BaseContext } from "./runtime/context.ts";
 import type { HttpContracts } from "./declarations.ts";
 
@@ -49,7 +56,8 @@ type OutputOf<S, Fallback> = S extends AnySchema ? Output<S> : Fallback;
  *
  * @category Streams and WebSockets
  */
-export interface StreamOptions<R extends ResourceDeclaration[] = ResourceDeclaration[]> extends WorkloadPolicies {
+export interface StreamOptions<R extends ResourceDeclaration[] = ResourceDeclaration[]>
+  extends WorkloadPolicies {
   /** Default `GET`. */
   method?: Method;
   summary?: string;
@@ -78,7 +86,11 @@ export interface StreamOptions<R extends ResourceDeclaration[] = ResourceDeclara
  * });
  * ```
  */
-function stream<O extends StreamOptions>(path: string, options: O, handler: (ctx: StreamContext<O>, stream: StreamHandle) => unknown): Workload {
+function stream<O extends StreamOptions>(
+  path: string,
+  options: O,
+  handler: (ctx: StreamContext<O>, stream: StreamHandle) => unknown,
+): Workload {
   const method = options.method ?? "GET";
   const contracts: Workload["contracts"] = {};
   if (options.params) contracts.params = options.params;
@@ -113,7 +125,8 @@ export const streams = { stream };
  *
  * @category Streams and WebSockets
  */
-export interface SocketContext<Incoming, Outgoing, R = ResourceDeclaration[], A = unknown> extends BaseContext {
+export interface SocketContext<Incoming, Outgoing, R = ResourceDeclaration[], A = unknown>
+  extends BaseContext {
   readonly resources: ResourcesOf<R>;
   readonly path: string;
   readonly url: string;
@@ -138,7 +151,12 @@ export interface SocketContext<Incoming, Outgoing, R = ResourceDeclaration[], A 
  *
  * @category Streams and WebSockets
  */
-export interface SocketOptions<I extends AnySchema | undefined, O extends AnySchema | undefined, R extends ResourceDeclaration[] = ResourceDeclaration[], A extends AuthDeclaration | undefined = AuthDeclaration | undefined> extends WorkloadPolicies {
+export interface SocketOptions<
+  I extends AnySchema | undefined,
+  O extends AnySchema | undefined,
+  R extends ResourceDeclaration[] = ResourceDeclaration[],
+  A extends AuthDeclaration | undefined = AuthDeclaration | undefined,
+> extends WorkloadPolicies {
   summary?: string;
   description?: string;
   /** Schema for messages from the client. An invalid message is answered
@@ -185,7 +203,12 @@ export interface SocketHandlers<I, O, R = ResourceDeclaration[], A = unknown> {
  *
  * @category Streams and WebSockets
  */
-export function socket<I extends AnySchema | undefined = undefined, O extends AnySchema | undefined = undefined, R extends ResourceDeclaration[] = ResourceDeclaration[], A extends AuthDeclaration | undefined = undefined>(
+export function socket<
+  I extends AnySchema | undefined = undefined,
+  O extends AnySchema | undefined = undefined,
+  R extends ResourceDeclaration[] = ResourceDeclaration[],
+  A extends AuthDeclaration | undefined = undefined,
+>(
   path: string,
   options: SocketOptions<I, O, R, A>,
   handlers: SocketHandlers<Out<I>, Out<O>, R, A extends AuthDeclaration<infer P> ? P : undefined>,

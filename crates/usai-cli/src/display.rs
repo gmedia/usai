@@ -86,7 +86,14 @@ pub fn banner(
             .filter(|w| w.trigger.kind_name() == kind)
             .collect();
         if !items.is_empty() {
-            let _ = writeln!(out, "\n{title}");
+            let note = match (kind, status.map(|s| &s.scheduler)) {
+                ("service", Some(s)) if !s.services => {
+                    "   (not running on this instance: --no-services)"
+                }
+                ("queue", Some(s)) if !s.queue => "   (not consuming on this instance: --no-queue)",
+                _ => "",
+            };
+            let _ = writeln!(out, "\n{title}{note}");
             for w in items {
                 let _ = writeln!(out, "  {}", w.name);
             }

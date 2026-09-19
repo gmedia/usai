@@ -21,7 +21,7 @@ make lint         # cargo clippy --workspace --all-targets -- -D warnings; pnpm 
 make docs         # regenerate docs/sdk (TypeDoc → markdown) from the SDK's doc comments; docs-check fails CI when stale
 make test         # cargo test --workspace; pnpm -r run test
 make build        # release build + tsc for packages
-make fmt          # cargo fmt --all
+make fmt          # cargo fmt --all + biome format --write (TypeScript/JSON, 100 columns; biome.json)
 ```
 
 Developer loop on an example:

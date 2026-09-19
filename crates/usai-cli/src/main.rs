@@ -93,6 +93,12 @@ enum Command {
         /// for dedicating replicas, not for correctness
         #[arg(long, env = "USAI_NO_QUEUE")]
         no_queue: bool,
+        /// Do not run the application's services on this instance
+        /// (USAI_NO_SERVICES=1). Every instance that runs them has its own
+        /// copy of each service; with several replicas, keep them where
+        /// you mean them. One-shot commands never run services
+        #[arg(long, env = "USAI_NO_SERVICES")]
+        no_services: bool,
         /// Expose diagnostics to clients as `usai dev` does: error details in
         /// 500 bodies and the x-usai-lifecycle / x-usai-server-ms headers.
         /// For tests and trusted networks only (USAI_DIAGNOSTICS=1)
@@ -379,6 +385,7 @@ async fn async_main() {
             max_worlds,
             no_cron,
             no_queue,
+            no_services,
             diagnostics,
         } => {
             commands::run(
@@ -394,6 +401,7 @@ async fn async_main() {
                 max_worlds,
                 no_cron,
                 no_queue,
+                no_services,
                 diagnostics,
             )
             .await

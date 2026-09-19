@@ -3,14 +3,23 @@
 // D4 (task), D5 (cron, command), D9 (service).
 
 import type { AnySchema, Output } from "./schema.ts";
-import type { DeclaredError, ResourceDeclaration, ResourcesOf, Workload, WorkloadPolicies } from "./declarations.ts";
+import type {
+  DeclaredError,
+  ResourceDeclaration,
+  ResourcesOf,
+  Workload,
+  WorkloadPolicies,
+} from "./declarations.ts";
 import type { BaseContext } from "./runtime/context.ts";
 
 /** Options for {@link task}.
  *
  * @category Tasks, cron, commands, services
  */
-export interface TaskOptions<I extends AnySchema | undefined, R extends ResourceDeclaration[] = ResourceDeclaration[]> extends WorkloadPolicies {
+export interface TaskOptions<
+  I extends AnySchema | undefined,
+  R extends ResourceDeclaration[] = ResourceDeclaration[],
+> extends WorkloadPolicies {
   /** Schema for the input; validated before the task's world exists. */
   input?: I;
   /** A paragraph for the reference. */
@@ -73,7 +82,10 @@ export interface TaskContext<I, R = ResourceDeclaration[]> extends BaseContext {
  *
  * @category Tasks, cron, commands, services
  */
-export function task<I extends AnySchema | undefined = undefined, R extends ResourceDeclaration[] = ResourceDeclaration[]>(
+export function task<
+  I extends AnySchema | undefined = undefined,
+  R extends ResourceDeclaration[] = ResourceDeclaration[],
+>(
   name: string,
   options: TaskOptions<I, R>,
   handler: (ctx: TaskContext<I extends AnySchema ? Output<I> : unknown, R>) => unknown,
@@ -101,7 +113,8 @@ export function task<I extends AnySchema | undefined = undefined, R extends Reso
  *
  * @category Tasks, cron, commands, services
  */
-export interface CronOptions<R extends ResourceDeclaration[] = ResourceDeclaration[]> extends WorkloadPolicies {
+export interface CronOptions<R extends ResourceDeclaration[] = ResourceDeclaration[]>
+  extends WorkloadPolicies {
   /** A paragraph for the reference. */
   description?: string;
   /** Cron expression, UTC: five fields (`minute hour day-of-month month
@@ -149,7 +162,11 @@ export interface CronContext<R = ResourceDeclaration[]> extends BaseContext {
  *
  * @category Tasks, cron, commands, services
  */
-export function cron<R extends ResourceDeclaration[] = ResourceDeclaration[]>(name: string, options: CronOptions<R>, handler: (ctx: CronContext<R>) => unknown): Workload {
+export function cron<R extends ResourceDeclaration[] = ResourceDeclaration[]>(
+  name: string,
+  options: CronOptions<R>,
+  handler: (ctx: CronContext<R>) => unknown,
+): Workload {
   const policies: WorkloadPolicies = {};
   if (options.timeout !== undefined) policies.timeout = options.timeout;
   if (options.concurrency !== undefined) policies.concurrency = options.concurrency;
@@ -182,7 +199,8 @@ export interface CommandContext<R = ResourceDeclaration[]> extends BaseContext {
 /** Options for {@link command}.
  *
  * @category Tasks, cron, commands, services */
-export interface CommandOptions<R extends ResourceDeclaration[] = ResourceDeclaration[]> extends WorkloadPolicies {
+export interface CommandOptions<R extends ResourceDeclaration[] = ResourceDeclaration[]>
+  extends WorkloadPolicies {
   /** A paragraph for the reference. */
   description?: string;
   /** Resources the command leases; `ctx.resources` is typed from this list. */
@@ -206,7 +224,11 @@ export interface CommandOptions<R extends ResourceDeclaration[] = ResourceDeclar
  * @category Tasks, cron, commands, services
  */
 export function command(name: string, handler: (ctx: CommandContext) => unknown): Workload;
-export function command<R extends ResourceDeclaration[] = ResourceDeclaration[]>(name: string, options: CommandOptions<R>, handler: (ctx: CommandContext<R>) => unknown): Workload;
+export function command<R extends ResourceDeclaration[] = ResourceDeclaration[]>(
+  name: string,
+  options: CommandOptions<R>,
+  handler: (ctx: CommandContext<R>) => unknown,
+): Workload;
 export function command(name: string, a: unknown, b?: unknown): Workload {
   const options = (typeof a === "function" ? {} : a) as CommandOptions;
   const handler = (typeof a === "function" ? a : b) as Workload["handler"];
@@ -277,11 +299,21 @@ export interface ServiceOptions<R extends ResourceDeclaration[] = ResourceDeclar
  * @category Tasks, cron, commands, services
  */
 export function service(name: string, handler: (ctx: ServiceContext) => unknown): Workload;
-export function service<R extends ResourceDeclaration[] = ResourceDeclaration[]>(name: string, options: ServiceOptions<R>, handler: (ctx: ServiceContext<R>) => unknown): Workload;
+export function service<R extends ResourceDeclaration[] = ResourceDeclaration[]>(
+  name: string,
+  options: ServiceOptions<R>,
+  handler: (ctx: ServiceContext<R>) => unknown,
+): Workload;
 export function service(name: string, a: unknown, b?: unknown): Workload {
   const options = (typeof a === "function" ? {} : a) as ServiceOptions;
   const handler = (typeof a === "function" ? a : b) as Workload["handler"];
-  const restart = options.restart ? { mode: options.restart.mode, backoffMs: options.restart.backoffMs ?? 1000, maxRestarts: options.restart.maxRestarts ?? 10 } : undefined;
+  const restart = options.restart
+    ? {
+        mode: options.restart.mode,
+        backoffMs: options.restart.backoffMs ?? 1000,
+        maxRestarts: options.restart.maxRestarts ?? 10,
+      }
+    : undefined;
   return {
     __usai: "workload",
     kind: "service",
@@ -352,7 +384,10 @@ export interface SeederDeclaration {
  *
  * @category Tasks, cron, commands, services
  */
-export function seeder<R extends ResourceDeclaration[] = ResourceDeclaration[]>(options: { resources?: R }, run: (ctx: SeederContext<R>) => unknown): SeederDeclaration;
+export function seeder<R extends ResourceDeclaration[] = ResourceDeclaration[]>(
+  options: { resources?: R },
+  run: (ctx: SeederContext<R>) => unknown,
+): SeederDeclaration;
 export function seeder(run: (ctx: SeederContext) => unknown): SeederDeclaration;
 export function seeder(a: unknown, b?: unknown): SeederDeclaration {
   const options = (typeof a === "function" ? {} : a) as { resources?: ResourceDeclaration[] };

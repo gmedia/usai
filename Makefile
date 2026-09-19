@@ -9,11 +9,15 @@ setup:
 
 check: fmt-check lint docs-check test
 
+# Rust by rustfmt, TypeScript/JavaScript/JSON by Biome (biome.json: 100
+# columns, formatter only); both run in CI.
 fmt:
 	cargo fmt --all
+	pnpm run fmt
 
 fmt-check:
 	cargo fmt --all --check
+	pnpm run fmt:check
 
 lint:
 	cargo clippy --workspace --all-targets -- -D warnings

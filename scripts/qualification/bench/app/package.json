@@ -4,7 +4,14 @@
   "version": "0.0.0",
   "type": "module",
   "description": "The workload classes the benchmark suite measures (docs/measurements/BENCHMARKS.md); every comparator implements the same routes.",
-  "scripts": { "typecheck": "tsc -p tsconfig.json --noEmit" },
-  "dependencies": { "@sakaladev/usai": "workspace:*", "zod": "^4.0.0" },
-  "devDependencies": { "typescript": "^5.9.0" }
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@sakaladev/usai": "workspace:*",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
 }

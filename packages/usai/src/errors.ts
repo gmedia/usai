@@ -43,11 +43,16 @@ export class UsaiError extends Error {
  * @category Errors
  */
 export function isUsaiError(value: unknown): value is UsaiError {
-  return value instanceof Error && typeof (value as UsaiError).usai === "object" && (value as UsaiError).usai !== null;
+  return (
+    value instanceof Error &&
+    typeof (value as UsaiError).usai === "object" &&
+    (value as UsaiError).usai !== null
+  );
 }
 
 function make(code: string, status: number) {
-  return (message?: string, details?: unknown): UsaiError => new UsaiError(code, status, message ?? code.replace(/_/g, " "), details);
+  return (message?: string, details?: unknown): UsaiError =>
+    new UsaiError(code, status, message ?? code.replace(/_/g, " "), details);
 }
 
 /**

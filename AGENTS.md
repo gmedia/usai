@@ -144,6 +144,7 @@ Production readiness requires production-shaped evidence: soak, overload, crash/
 
 - Code, identifiers, commit messages, and repository docs are in **English**. Explanations to the user are in **Indonesian**.
 - Comments explain *why* — a constraint, invariant, or surprising lifetime/ownership choice — not what the line already says. Match the density and idiom of the surrounding module.
+- Formatting is the formatters' job, and the formatters run in CI: `cargo fmt` for Rust, Biome (`biome.json`: 100 columns, formatter only) for TypeScript, JavaScript and JSON — `make fmt` runs both, `make fmt-check` fails on either. Do not hand-wrap or hand-compact code around them; a declaration, an object literal or an argument list that does not fit on one line is written one element per line, which is what Biome produces.
 - Failure-path tests matter most around cancellation, resource ownership, reuse, shutdown, and delivery after world death. A happy-path-only test for ownership code is incomplete.
 - Commit messages: concise and factual; state the behavior/invariant changed and the tests run.
 - Do not expose engine internals (Wasmtime options, pooling slots, COW, pagemap, memory reservation) as application configuration. They are runtime internals or operator/debug surfaces.

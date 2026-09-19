@@ -34,7 +34,10 @@ export interface AuthDeclaration<Principal = unknown> {
   readonly description?: string;
   readonly scheme: "bearer" | "header" | "custom";
   readonly header?: string;
-  readonly resolve: (ctx: unknown, credential: string | undefined) => Principal | Promise<Principal>;
+  readonly resolve: (
+    ctx: unknown,
+    credential: string | undefined,
+  ) => Principal | Promise<Principal>;
 }
 
 /** What `postgres(...)`, `cache.local(...)` and `httpClient(...)` return.
@@ -66,7 +69,11 @@ export interface ResourceDeclaration<Name extends string = string, Handle = unkn
  *
  * @category Application */
 export type ResourcesOf<R> = R extends readonly ResourceDeclaration[]
-  ? { readonly [D in R[number] as D["name"]]: D extends ResourceDeclaration<string, infer H> ? H : unknown }
+  ? {
+      readonly [D in R[number] as D["name"]]: D extends ResourceDeclaration<string, infer H>
+        ? H
+        : unknown;
+    }
   : Record<string, unknown>;
 
 /** Bounds every workload can declare.
@@ -302,7 +309,10 @@ function toList(value: string | string[] | undefined): string[] {
 
 /** Deterministic flattening used by both the manifest and the in-world
  * dispatcher, so workload ordinals agree (`docs/GUEST-ABI.md`). */
-export function flatten(app: AppDeclaration): { workloads: Array<{ workload: Workload; module?: string }>; resources: Array<{ resource: ResourceDeclaration; module?: string }> } {
+export function flatten(app: AppDeclaration): {
+  workloads: Array<{ workload: Workload; module?: string }>;
+  resources: Array<{ resource: ResourceDeclaration; module?: string }>;
+} {
   const workloads: Array<{ workload: Workload; module?: string }> = [];
   const resources: Array<{ resource: ResourceDeclaration; module?: string }> = [];
   // One logical resource may be declared by several modules (a shared
@@ -314,9 +324,14 @@ export function flatten(app: AppDeclaration): { workloads: Array<{ workload: Wor
       resources.push(module === undefined ? { resource } : { resource, module });
       return;
     }
-    const same = existing.resource.kind === resource.kind && JSON.stringify(existing.resource.config) === JSON.stringify(resource.config) && JSON.stringify(existing.resource.env) === JSON.stringify(resource.env);
+    const same =
+      existing.resource.kind === resource.kind &&
+      JSON.stringify(existing.resource.config) === JSON.stringify(resource.config) &&
+      JSON.stringify(existing.resource.env) === JSON.stringify(resource.env);
     if (!same) {
-      throw new Error(`resource "${resource.name}" is declared twice with different configuration (${existing.module ?? "app"} and ${where})`);
+      throw new Error(
+        `resource "${resource.name}" is declared twice with different configuration (${existing.module ?? "app"} and ${where})`,
+      );
     }
   };
   // A hole in a declaration list is almost always a value used before its
@@ -333,7 +348,10 @@ export function flatten(app: AppDeclaration): { workloads: Array<{ workload: Wor
     });
   };
   for (const module of app.modules ?? []) {
-    if (!module || typeof module !== "object") throw new Error(`defineApp: modules contains ${module === undefined ? "undefined" : typeof module} — declared after use or a circular import?`);
+    if (!module || typeof module !== "object")
+      throw new Error(
+        `defineApp: modules contains ${module === undefined ? "undefined" : typeof module} — declared after use or a circular import?`,
+      );
     check(module.workloads, "workloads", `module "${module.name}"`);
     check(module.resources, "resources", `module "${module.name}"`);
     for (const workload of module.workloads) workloads.push({ workload, module: module.name });
@@ -346,7 +364,12 @@ export function flatten(app: AppDeclaration): { workloads: Array<{ workload: Wor
   // Resources referenced by workloads but declared nowhere are implicitly
   // application-level, so a developer can declare once and reference.
   for (const { workload, module } of workloads) {
-    for (const resource of workload.resources) add(resource, undefined, module ? `workload ${workload.name} in ${module}` : `workload ${workload.name}`);
+    for (const resource of workload.resources)
+      add(
+        resource,
+        undefined,
+        module ? `workload ${workload.name} in ${module}` : `workload ${workload.name}`,
+      );
   }
   return { workloads, resources };
 }
@@ -365,10 +388,15 @@ export function parseDuration(value: string | number | undefined): number | unde
   if (!match) throw new Error(`invalid duration ${JSON.stringify(value)}`);
   const n = Number(match[1]);
   switch (match[2] ?? "ms") {
-    case "ms": return n;
-    case "s": return n * 1000;
-    case "m": return n * 60_000;
-    case "h": return n * 3_600_000;
-    default: return n;
+    case "ms":
+      return n;
+    case "s":
+      return n * 1000;
+    case "m":
+      return n * 60_000;
+    case "h":
+      return n * 3_600_000;
+    default:
+      return n;
   }
 }

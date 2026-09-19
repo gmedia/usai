@@ -37,8 +37,12 @@ export declare namespace StandardSchemaV1 {
     readonly input: Input;
     readonly output: Output;
   }
-  export type InferInput<S extends StandardSchemaV1> = NonNullable<S["~standard"]["types"]>["input"];
-  export type InferOutput<S extends StandardSchemaV1> = NonNullable<S["~standard"]["types"]>["output"];
+  export type InferInput<S extends StandardSchemaV1> = NonNullable<
+    S["~standard"]["types"]
+  >["input"];
+  export type InferOutput<S extends StandardSchemaV1> = NonNullable<
+    S["~standard"]["types"]
+  >["output"];
   export interface JsonSchemaProps {
     readonly input: (options: JsonSchemaOptions) => Record<string, unknown>;
     readonly output: (options: JsonSchemaOptions) => Record<string, unknown>;
@@ -72,7 +76,10 @@ export interface ValidationIssue {
 function pointer(segments: readonly unknown[]): string {
   return segments
     .map((segment) => {
-      const key = typeof segment === "object" && segment !== null && "key" in segment ? (segment as { key: unknown }).key : segment;
+      const key =
+        typeof segment === "object" && segment !== null && "key" in segment
+          ? (segment as { key: unknown }).key
+          : segment;
       return "/" + String(key).replaceAll("~", "~0").replaceAll("/", "~1");
     })
     .join("");
@@ -82,10 +89,16 @@ export type Validation<T> = { ok: true; value: T } | { ok: false; issues: Valida
 
 /** Runs the provider's validator. Async providers are not supported inside a
  * world in v0; they surface as a single issue rather than a hang. */
-export function validateWith<S extends StandardSchemaV1>(schema: S, value: unknown): Validation<Output<S>> {
+export function validateWith<S extends StandardSchemaV1>(
+  schema: S,
+  value: unknown,
+): Validation<Output<S>> {
   const result = schema["~standard"].validate(value);
   if (result instanceof Promise) {
-    return { ok: false, issues: [{ message: "asynchronous schema validation is not supported", path: "" }] };
+    return {
+      ok: false,
+      issues: [{ message: "asynchronous schema validation is not supported", path: "" }],
+    };
   }
   if (result.issues) {
     return {
@@ -102,7 +115,10 @@ export function validateWith<S extends StandardSchemaV1>(schema: S, value: unkno
 /** JSON Schema for the schema's *input* side, or `undefined` when the
  * provider cannot describe itself. Never throws: a provider that fails to
  * describe one schema degrades that contract to in-world validation. */
-export function jsonSchemaOf(schema: StandardSchemaV1, side: "input" | "output" = "input"): Record<string, unknown> | undefined {
+export function jsonSchemaOf(
+  schema: StandardSchemaV1,
+  side: "input" | "output" = "input",
+): Record<string, unknown> | undefined {
   const describe = schema["~standard"].jsonSchema;
   if (!describe) return undefined;
   try {

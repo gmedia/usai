@@ -3,5 +3,11 @@
   "private": true,
   "type": "module",
   "description": "The benchmark suite's tooling (load client, conformance) and the JavaScript comparators' dependencies. npm, not pnpm: this is not part of the workspace.",
-  "dependencies": { "fastify": "^5.6.0", "hono": "^4.9.0", "pg": "^8.16.0", "undici": "^7.0.0", "zod": "^4.0.0" }
+  "dependencies": {
+    "fastify": "^5.6.0",
+    "hono": "^4.9.0",
+    "pg": "^8.16.0",
+    "undici": "^7.0.0",
+    "zod": "^4.0.0"
+  }
 }

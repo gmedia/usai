@@ -10,7 +10,17 @@ test("structural schemas get an accepted sample", () => {
   const schemas = [
     z.object({ name: z.string().min(1).max(40) }),
     z.object({ id: z.coerce.number().int().min(1).max(2_147_483_647) }),
-    z.object({ email: z.string().email(), when: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), ref: z.string().uuid(), kind: z.enum(["a", "b"]), n: z.number().int().min(5).max(9), flag: z.boolean().default(false), tags: z.array(z.string().max(3)).min(2), opt: z.string().optional(), nested: z.object({ x: z.literal("x") }) }),
+    z.object({
+      email: z.string().email(),
+      when: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      ref: z.string().uuid(),
+      kind: z.enum(["a", "b"]),
+      n: z.number().int().min(5).max(9),
+      flag: z.boolean().default(false),
+      tags: z.array(z.string().max(3)).min(2),
+      opt: z.string().optional(),
+      nested: z.object({ x: z.literal("x") }),
+    }),
     z.array(z.object({ q: z.number().min(0.5) })).min(1),
   ];
   for (const s of schemas) {
@@ -41,19 +51,44 @@ test("hostFinal reproduces zod's output for structural schemas", () => {
     [z.looseObject({ id: z.number().int() }), { id: 4, more: "kept" }],
     [
       z.object({
-        email: z.string().email(), kind: z.enum(["a", "b"]), n: z.number().int().min(5).max(9), tags: z.array(z.string().max(3)).min(2),
-        opt: z.string().optional(), maybe: z.number().nullable(), nested: z.object({ x: z.literal("x"), deep: z.array(z.object({ k: z.string() })) }),
-        pair: z.tuple([z.string(), z.number()]), rec: z.record(z.string(), z.object({ v: z.boolean() })), either: z.union([z.string(), z.number()]),
+        email: z.string().email(),
+        kind: z.enum(["a", "b"]),
+        n: z.number().int().min(5).max(9),
+        tags: z.array(z.string().max(3)).min(2),
+        opt: z.string().optional(),
+        maybe: z.number().nullable(),
+        nested: z.object({ x: z.literal("x"), deep: z.array(z.object({ k: z.string() })) }),
+        pair: z.tuple([z.string(), z.number()]),
+        rec: z.record(z.string(), z.object({ v: z.boolean() })),
+        either: z.union([z.string(), z.number()]),
       }),
       {
-        email: "a@b.co", kind: "a", n: 7, tags: ["ab", "cd"], maybe: null, nested: { x: "x", junk: true, deep: [{ k: "1", z: 2 }] }, pair: ["p", 1],
-        rec: { one: { v: true, w: 0 } }, either: 3, undeclared: "gone",
+        email: "a@b.co",
+        kind: "a",
+        n: 7,
+        tags: ["ab", "cd"],
+        maybe: null,
+        nested: { x: "x", junk: true, deep: [{ k: "1", z: 2 }] },
+        pair: ["p", 1],
+        rec: { one: { v: true, w: 0 } },
+        either: 3,
+        undeclared: "gone",
       },
     ],
     [z.array(z.object({ q: z.number().min(0.5) })), [{ q: 1, r: 2 }]],
     // Defaults: absent is the default (unparsed, as Zod 4 does), present is the value.
-    [z.object({ p: z.enum(["a", "b"]).default("a"), f: z.string().default(() => "gen"), o: z.object({ x: z.string() }).default({ x: "d", extra: 1 } as never) }), {}],
-    [z.object({ p: z.enum(["a", "b"]).default("a"), f: z.string().default(() => "gen") }), { p: "b", f: "x" }],
+    [
+      z.object({
+        p: z.enum(["a", "b"]).default("a"),
+        f: z.string().default(() => "gen"),
+        o: z.object({ x: z.string() }).default({ x: "d", extra: 1 } as never),
+      }),
+      {},
+    ],
+    [
+      z.object({ p: z.enum(["a", "b"]).default("a"), f: z.string().default(() => "gen") }),
+      { p: "b", f: "x" },
+    ],
     // Coercion on a value that already has the type is the identity.
     [z.object({ id: z.coerce.number().int().min(1) }), { id: 42 }],
     // A union of objects: the first accepting option decides what is stripped.

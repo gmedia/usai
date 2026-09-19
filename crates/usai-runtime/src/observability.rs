@@ -379,6 +379,10 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
         &[
             ("kind=\"cron\"".into(), f64::from(status.scheduler.cron)),
             ("kind=\"queue\"".into(), f64::from(status.scheduler.queue)),
+            (
+                "kind=\"services\"".into(),
+                f64::from(status.scheduler.services),
+            ),
         ],
     );
     metric(
@@ -765,6 +769,7 @@ mod tests {
             scheduler: crate::runtime::SchedulerStatus {
                 cron: true,
                 queue: true,
+                services: true,
             },
             compiled_images_live: 1,
             gauges: crate::ownership::GaugeSnapshot {

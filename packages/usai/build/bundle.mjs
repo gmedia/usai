@@ -7,7 +7,9 @@ import { build } from "esbuild";
 import { readFileSync } from "node:fs";
 
 // Stamped into the bundle so the manifest records which SDK described it.
-const sdkVersion = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+const sdkVersion = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+).version;
 
 const [entry, outfile] = process.argv.slice(2);
 if (!entry || !outfile) {
@@ -38,11 +40,17 @@ try {
     legalComments: "none",
     logLevel: "silent",
     metafile: true,
-    define: { "process.env.NODE_ENV": '"production"', __USAI_SDK_VERSION__: JSON.stringify(sdkVersion) },
+    define: {
+      "process.env.NODE_ENV": '"production"',
+      __USAI_SDK_VERSION__: JSON.stringify(sdkVersion),
+    },
   });
   process.stdout.write(JSON.stringify({ ok: true, inputs: Object.keys(result.metafile.inputs) }));
 } catch (error) {
-  const messages = (error && error.errors) ? error.errors.map((e) => ({ text: e.text, location: e.location })) : [{ text: String(error) }];
+  const messages =
+    error && error.errors
+      ? error.errors.map((e) => ({ text: e.text, location: e.location }))
+      : [{ text: String(error) }];
   process.stdout.write(JSON.stringify({ ok: false, errors: messages }));
   process.exit(1);
 }

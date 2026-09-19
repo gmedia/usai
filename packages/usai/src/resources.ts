@@ -18,7 +18,8 @@ export interface CacheLocalOptions {
  *
  * @category Resources
  */
-export interface CacheLocalDeclaration<Name extends string = string> extends ResourceDeclaration<Name, CacheLocalHandle> {
+export interface CacheLocalDeclaration<Name extends string = string>
+  extends ResourceDeclaration<Name, CacheLocalHandle> {
   readonly kind: "cache.local";
 }
 
@@ -40,7 +41,10 @@ export const cache = {
    * revisions too), never persisted, gone on restart, not shared between
    * replicas. Each call is one leased operation. The in-world handle is
    * {@link CacheLocalHandle}. */
-  local<const N extends string>(name: N, options: CacheLocalOptions = {}): CacheLocalDeclaration<N> {
+  local<const N extends string>(
+    name: N,
+    options: CacheLocalOptions = {},
+  ): CacheLocalDeclaration<N> {
     return {
       __usai: "resource",
       name,
@@ -98,7 +102,8 @@ export interface PostgresOptions {
  *
  * @category Resources
  */
-export interface PostgresDeclaration<Name extends string = string> extends ResourceDeclaration<Name, PostgresHandle> {
+export interface PostgresDeclaration<Name extends string = string>
+  extends ResourceDeclaration<Name, PostgresHandle> {
   readonly kind: "postgres";
 }
 
@@ -132,7 +137,10 @@ export interface PostgresDeclaration<Name extends string = string> extends Resou
  *
  * @category Resources
  */
-export function postgres<const N extends string>(name: N, options: PostgresOptions = {}): PostgresDeclaration<N> {
+export function postgres<const N extends string>(
+  name: N,
+  options: PostgresOptions = {},
+): PostgresDeclaration<N> {
   const urlEnv = options.urlEnv ?? "DATABASE_URL";
   const config: Record<string, unknown> = { urlEnv };
   const pool: Record<string, unknown> = {};
@@ -219,7 +227,8 @@ export interface HttpClientOptions {
  *
  * @category Resources
  */
-export interface HttpClientDeclaration<Name extends string = string> extends ResourceDeclaration<Name, HttpClientHandle> {
+export interface HttpClientDeclaration<Name extends string = string>
+  extends ResourceDeclaration<Name, HttpClientHandle> {
   readonly kind: "http.client";
 }
 
@@ -245,7 +254,10 @@ export interface HttpClientDeclaration<Name extends string = string> extends Res
  *
  * @category Resources
  */
-export function httpClient<const N extends string>(name: N, options: HttpClientOptions = {}): HttpClientDeclaration<N> {
+export function httpClient<const N extends string>(
+  name: N,
+  options: HttpClientOptions = {},
+): HttpClientDeclaration<N> {
   const config: Record<string, unknown> = {};
   if (options.baseUrl !== undefined) config["baseUrl"] = options.baseUrl;
   if (options.baseUrlEnv !== undefined) config["baseUrlEnv"] = options.baseUrlEnv;
