@@ -161,16 +161,17 @@ capabilities (design), latency histogram in metrics, an API reference page.
 
 ## Next
 
-1. ~~Propose the Wasmtime pagemap-reset patch upstream~~ — **PR open: bytecodealliance/wasmtime#14357** (complete traversal from `walk_end`; paged-out dirty pages must be reset). The eval-based invoke/outcome/pending floor is gone (ADR-0018, direct calls); P8 continues with C2b and the bookkeeping audit.
-2. Acceptance audit done (`docs/ACCEPTANCE-AUDIT.md`); remaining ◐: crash/restart recovery is the orchestrator's, tutorial application, first tag.
-3. Per-world CPU accounting (threat model "Open").
+1. ~~Propose the Wasmtime pagemap-reset patch upstream~~ — **PR open: bytecodealliance/wasmtime#14357**, CI green, awaiting review; the vendor stays until a release carries it. ~~The eval-based invoke/outcome/pending floor~~ — gone (ADR-0018; P8 c=1 phase done, `docs/measurements/2026-09-19-p8-parity.md`).
+2. Waiting on wall clock: the 24 h soak (ends ≈2026-09-19 22:18 UTC) → `conn-churn` → 72 h soak (≈2026-09-23), chained on VM 47; then append results to `2026-09-18-p5-p6-qualification.md`, flip the wording to "alpha, production qualification in progress", release v0.0.6 (user's decision: after the 24 h soak + churn), run `suite.sh sweep` / `leak` / PHP on the idle VM.
+3. Waiting on humans: P7 external developers (the internal fresh-eyes rounds — docs-only, bookmarks app, shelf app on the P8 main — are the rehearsal, not the evidence).
+4. Acceptance audit done (`docs/ACCEPTANCE-AUDIT.md`); remaining ◐: crash/restart recovery is the orchestrator's, tutorial application, first tag. ~~Per-world CPU accounting~~ — done (`WorkResult.cpu`, `usai_guest_cpu_seconds_total`; fairness/budgets stay a D13 follow-up, `docs/THREAT-MODEL.md`).
 5. Released: `v0.0.1`–`v0.0.4` (2026-09-18) — `release.yml` publishes binaries, npm `@sakaladev/usai` + `@sakaladev/create-usai` (Trusted Publishing/OIDC; `workflow_dispatch` for scaffolder-only fixes) and Docker images (Docker Hub `sakaladev/usai`, the canonical address, and GHCR `ghcr.io/gmedia/usai` as a public mirror). v0.0.4 verified from the registries: `docker pull` on amd64 and arm64, the container smoke against Docker Hub, and the pure-npm path (`pnpm dlx @sakaladev/create-usai` → `pnpm install` → `pnpm dev` fetching the release binary → `pnpm test`). The unscoped `usai` name is refused by npm as too similar to existing packages. Open: artifact signing (ADR-0005 follow-up).
 
 ## Known gaps / debt
 
 - `usai dev` compiles each rebuilt image once (the build's compiled form is installed directly); the compile itself still takes every core for seconds on a small host.
 
-- The Wasm substrate is the research representation (ADR-0016); its per-world cost is now attributed on the research VM but not yet reduced, and no soak has run. Do not cite EXP-012B numbers for this codebase. The native QuickJS engine stays as reference; do not use it for economics.
+- The Wasm substrate is the research representation (ADR-0016); its per-request cost is attributed and, after P8, halved on the VM (`2026-09-19-p8-parity.md`): what remains is the interpreter running the developer surface, the boundary JSON and the fresh world itself. Do not cite the research programme's numbers for this codebase; cite the suite's. The native QuickJS engine stays as reference; do not use it for economics.
 - Boundary contracts were validated twice when a JSON Schema exists (host before the world, provider inside it to obtain parsed values). Since P8/C2b the SDK proves per slot whether the provider's output is its input (`hostFinal`: structural types, library checks, defaults; no transforms/catch/prefault/readonly; recorded as `contracts.boundaryFinal`); the host tells the world which slots it validated (`request.validated`) and the world replaces the second parse with an exact finalizer (runs the same library checks, strips undeclared keys, falls back to the full parse whenever a check disagrees). Slots that change the value keep the double pass by design (`GOAL.md` §12).
 - Auth resolvers run inside the world (after structural validation); `inspect` says so.
 - Module-level `migrations:`/`seeders:` globs are root-relative, not module-relative (the bundle has no source locations); documented on `defineModule`.
