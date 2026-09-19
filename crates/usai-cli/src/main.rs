@@ -86,18 +86,18 @@ enum Command {
         /// Do not run the cron scheduler on this instance. Every instance
         /// that runs it ticks every schedule; with several replicas, keep it
         /// on exactly one (USAI_NO_CRON=1 on the others)
-        #[arg(long, env = "USAI_NO_CRON")]
+        #[arg(long, env = "USAI_NO_CRON", value_parser = clap::builder::FalseyValueParser::new())]
         no_cron: bool,
         /// Do not run queue consumers on this instance (USAI_NO_QUEUE=1);
         /// consumers on several replicas share the work safely, so this is
         /// for dedicating replicas, not for correctness
-        #[arg(long, env = "USAI_NO_QUEUE")]
+        #[arg(long, env = "USAI_NO_QUEUE", value_parser = clap::builder::FalseyValueParser::new())]
         no_queue: bool,
         /// Do not run the application's services on this instance
         /// (USAI_NO_SERVICES=1). Every instance that runs them has its own
         /// copy of each service; with several replicas, keep them where
         /// you mean them. One-shot commands never run services
-        #[arg(long, env = "USAI_NO_SERVICES")]
+        #[arg(long, env = "USAI_NO_SERVICES", value_parser = clap::builder::FalseyValueParser::new())]
         no_services: bool,
         /// How long a shutdown or a revision replacement waits for in-flight
         /// work before cancelling it, in seconds (USAI_DRAIN_TIMEOUT). Set the
@@ -107,7 +107,7 @@ enum Command {
         /// Expose diagnostics to clients as `usai dev` does: error details in
         /// 500 bodies and the x-usai-lifecycle / x-usai-server-ms headers.
         /// For tests and trusted networks only (USAI_DIAGNOSTICS=1)
-        #[arg(long, env = "USAI_DIAGNOSTICS")]
+        #[arg(long, env = "USAI_DIAGNOSTICS", value_parser = clap::builder::FalseyValueParser::new())]
         diagnostics: bool,
     },
     /// Build, serve, and rebuild on change as a new revision
