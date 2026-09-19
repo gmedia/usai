@@ -34,6 +34,7 @@ traffic yet. The gates in `docs/ROADMAP.md`, with where each stands:
 | Frozen contracts, `SUPPORTED.md`, upgrade matrix (RC) | ◐ | `SUPPORTED.md` written; runtime × artifact (N, N−1) matrix tested in CI against the last release; contracts still move within 0.0.x (they must, until P7 says the API is right) |
 | Supply chain | ✓ | artifact signing (`usai keygen` / `build --sign` / `run --require-signature`, native image covered, control installs verified); RustSec + npm audit in CI; binaries with SHA-256, npm via Trusted Publishing, images by digest |
 | Security qualification | ◐ | threat model, `SECURITY.md`; robustness tests (600 mutated artifacts, 600 garbage control/HTTP requests: no panic, no leaked work); worlds are semantic isolation, not a hostile sandbox (ADR-0008); no coverage-guided fuzzing yet |
+| Comparative benchmarks | ✓ (first run) | hello endpoint vs Node/Bun/Deno on the VM: `docs/measurements/2026-09-19-comparative-hello.md` — ≈1 ms per request is the model's price (2× below Node, 5× below Bun/Deno at c=64); reported as it came out |
 | Vendored Wasmtime patch | ◐ | provenance in `vendor/README.md`, PR text and upstream status in `docs/upstream/wasmtime-pagemap-reset.md` (upstream `main` unchanged as of 2026-09-18); the freshness tests are the rebase tests; the PR itself is a maintainer's public action |
 
 Next gates: **P6** long soaks (24 h running, then 72 h) and **P7** outside
