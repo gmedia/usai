@@ -84,12 +84,30 @@ async fn sql(
         .map_err(|e| e.to_string())
 }
 
-/// Prepares the queue table on the backing database. Idempotent.
+/// Prepares the queue table on the backing database. Idempotent, and safe
+/// to run from several workers at once: `CREATE TABLE IF NOT EXISTS` is not
+/// race-free in PostgreSQL (two sessions can both pass the existence check
+/// and the loser gets 42P07 or a 23505 on `pg_type`), so a loser simply
+/// runs the statements again, by which time the winner's objects exist.
 pub async fn ensure_schema(manager: &dyn ResourceManager) -> Result<(), String> {
-    for statement in SCHEMA.split(';').map(str::trim).filter(|s| !s.is_empty()) {
-        sql(manager, "execute", statement, vec![]).await?;
+    let mut attempts = 0;
+    loop {
+        attempts += 1;
+        let mut result = Ok(());
+        for statement in SCHEMA.split(';').map(str::trim).filter(|s| !s.is_empty()) {
+            result = sql(manager, "execute", statement, vec![]).await.map(|_| ());
+            if result.is_err() {
+                break;
+            }
+        }
+        match result {
+            Ok(()) => return Ok(()),
+            Err(e) if attempts < 3 && (e.contains("sql_42p07") || e.contains("sql_23505")) => {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            Err(e) => return Err(e),
+        }
     }
-    Ok(())
 }
 
 #[derive(Deserialize)]

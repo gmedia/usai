@@ -658,3 +658,33 @@ async fn queue_messages_run_in_fresh_worlds_with_explicit_retry() {
     tokio::time::sleep(Duration::from_millis(100)).await;
     f.baseline();
 }
+
+/// `CREATE TABLE IF NOT EXISTS` is not race-free in PostgreSQL: with the
+/// consumers off (fresh database, no table), eight workers preparing the
+/// queue schema at once used to lose three of them to 42P07. Every worker
+/// must end up with the schema, without an error.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn queue_schema_survives_concurrent_preparation() {
+    let Some(f) = fixture_with(false).await else {
+        return;
+    };
+    let rev = f.runtime.active().unwrap();
+    let manager = rev.resources().get("main").cloned().unwrap();
+    let mut handles = Vec::new();
+    for _ in 0..8 {
+        let m = Arc::clone(&manager);
+        handles.push(tokio::spawn(async move {
+            usai_runtime::workloads::queue::ensure_schema(m.as_ref()).await
+        }));
+    }
+    for h in handles {
+        h.await.unwrap().expect("schema prepared");
+    }
+    let depth = usai_runtime::workloads::queue::depth(manager.as_ref(), "orders")
+        .await
+        .unwrap();
+    assert_eq!(depth["ready"], 0);
+    f.runtime.shutdown().await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    f.baseline();
+}
