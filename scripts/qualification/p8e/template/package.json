@@ -1,0 +1,17 @@
+{
+  "name": "@usai-qualification/p8e-template",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "One 'tenant' of the P8E efficiency fleet: the bench app's hello and PostgreSQL routes with a small pool, a task and a cron, so N copies show what a mostly-idle application holds.",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@sakaladev/usai": "workspace:*",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}
