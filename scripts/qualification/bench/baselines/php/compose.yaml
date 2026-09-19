@@ -1,0 +1,14 @@
+# PHP-FPM + nginx comparator. DATABASE_URL must be reachable from the
+# containers (the suite passes host.docker.internal or the docker gateway).
+services:
+  php:
+    build: .
+    volumes: ["./public:/var/www/public:ro"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    extra_hosts: ["host.docker.internal:host-gateway"]
+  nginx:
+    image: nginx:1.27-alpine
+    ports: ["3005:3005"]
+    volumes: ["./nginx.conf:/etc/nginx/nginx.conf:ro", "./public:/var/www/public:ro"]
+    depends_on: [php]

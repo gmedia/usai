@@ -27,12 +27,20 @@ one run.
 ## Reading it
 
 A hello endpoint measures per-request overhead and nothing else. Usai pays
-about **1 ms per request** for what the others do not do: a fresh execution
-world (reset memory image, no state from the previous request), boundary
-validation before the world exists, and an ownership ledger for every
-asynchronous operation. That is the price of the model, and it is where the
-throughput gap comes from (≈2× below Node, ≈5× below Bun/Deno at c=64 on
-this host). On the same VM without the soak running, the attribution
+about **1 ms per request** here for what the others do not do: a fresh
+execution world (reset memory image, no state from the previous request),
+boundary validation before the world exists, and an ownership ledger for
+every asynchronous operation. That is the **measured fixed cost of the
+current v0.0.5 implementation on this host and workload** — not a proven
+price of the model. The research representation of the same semantics (R3)
+reached +51 µs p50 over Node/Fastify at c=1 on an HTTP + PostgreSQL
+endpoint, and the whole-request invoice (`USAI_PROFILE=1`, P8) attributes
+most of today's millisecond to implementation choices: three `eval`-based
+guest calls per request, boundary contracts validated twice (host JSON
+Schema, then Zod's first-parse path inside every fresh world), the slot
+reset. It is where the throughput gap comes from (≈2× below Node, ≈5× below
+Bun/Deno at c=64 on this host); P8 (`docs/ROADMAP.md`) is the audit that
+removes what the semantics never asked for. On the same VM without the soak running, the attribution
 campaign measured 9.8k req/s at c=16 (`2026-09-18-execution-path-attribution.md`),
 so roughly a third of the gap here is the background load.
 
