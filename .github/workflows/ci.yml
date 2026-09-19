@@ -57,6 +57,7 @@ jobs:
       - run: make setup
       - run: make fmt-check
       - run: make lint
+      - run: make docs-check
       - name: Previous release binary (upgrade/downgrade matrix)
         env:
           GH_TOKEN: ${{ github.token }}

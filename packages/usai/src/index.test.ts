@@ -35,9 +35,11 @@ test("describe flattens modules deterministically and extracts JSON Schema", () 
     migrations: "./migrations/*.sql",
   });
   const cleanup = task("cleanup", { input: stringSchema, resources: [hits] }, async () => {});
-  const app = defineApp({ name: "shop", modules: [users], workloads: [cleanup], env: env({ APP_ENV: env.enum(["dev", "prod"]) }) });
+  const app = defineApp({ name: "shop", description: "A shop.", modules: [users], workloads: [cleanup], env: env({ APP_ENV: env.enum(["dev", "prod"]) }) });
   const m = describe(app);
   assert.equal(m.name, "shop");
+  assert.equal(m.description, "A shop.");
+  assert.equal("description" in describe(defineApp({ name: "bare" })), false, "no description key when none is declared");
   assert.deepEqual(m.modules, [{ name: "users", migrations: ["./migrations/*.sql"], seeders: [] }]);
   assert.equal(m.workloads.length, 2);
   assert.equal(m.workloads[0]!.id, "http:GET /users/:id");

@@ -15,6 +15,8 @@ import { webhookDelivery } from "./webhooks/module.ts";
 
 export default defineApp({
   name: "invoicing",
+  description:
+    "Multi-tenant invoicing: API keys per tenant, invoices with line items and payments, webhook delivery through a durable queue with retries and dead-lettering, a nightly overdue sweep.",
   modules: [authModule, invoices, webhookDelivery],
   env: env({
     DATABASE_URL: env.url(),

@@ -1,0 +1,173 @@
+[@sakaladev/usai](../README.md) / index
+
+# index
+
+`@sakaladev/usai` — declare work and resources; the runtime gives each
+its natural lifetime. Public surface for v0 (breaking changes allowed
+before alpha). Start with [defineApp](functions/defineApp.md), then [http](variables/http.md),
+[task](functions/task.md), [cron](functions/cron.md), [queue](variables/queue.md), [postgres](functions/postgres.md); every
+handler receives a [BaseContext](interfaces/BaseContext.md).
+
+## Application
+
+| Name | Description |
+| ------ | ------ |
+| [Method](type-aliases/Method.md) | HTTP methods an endpoint can declare. |
+| [DeclaredError](interfaces/DeclaredError.md) | An error a workload declares it may answer with (`errors: [...]`), so the reference and the OpenAPI document list it. |
+| [AuthDeclaration](interfaces/AuthDeclaration.md) | What `auth.bearer`/`auth.header`/`auth.custom` return: a named boundary reused by reference. `Principal` is the type of `ctx.auth`. |
+| [ResourceDeclaration](interfaces/ResourceDeclaration.md) | What `postgres(...)`, `cache.local(...)` and `httpClient(...)` return. A plain object: the build reads it into the manifest, the runtime owns the resource it names, and a workload lists it under `resources`. |
+| [WorkloadPolicies](interfaces/WorkloadPolicies.md) | Bounds every workload can declare. |
+| [HttpContracts](interfaces/HttpContracts.md) | The schema slots of an HTTP endpoint. Any Standard Schema (`zod`, `valibot`, `arktype`, …) works; slots whose schema can describe itself as JSON Schema are validated before a world exists, the others inside it. |
+| [HttpOptions](interfaces/HttpOptions.md) | Options of `http.get`/`post`/…: contracts, policies, errors, auth, resources. |
+| [Workload](interfaces/Workload.md) | A declared unit of work, whatever its kind — what every `http.*`, `task`, `cron`, `command`, `service`, `queue.consume`, `socket` and `http.stream` call returns and what `defineApp`/`defineModule` list. Plain data: the build phase reads it into the manifest, the runtime routes to it, `inspect`/`graph`/the reference page render it. |
+| [ModuleDeclaration](interfaces/ModuleDeclaration.md) | What [defineModule](functions/defineModule.md) returns. |
+| [AppDeclaration](interfaces/AppDeclaration.md) | What [defineApp](functions/defineApp.md) returns: the application's default export. |
+| [DefineModuleOptions](interfaces/DefineModuleOptions.md) | Options for [defineModule](functions/defineModule.md). |
+| [defineModule](functions/defineModule.md) | Group workloads, resources, migrations and seeders under a name. A module is organisation, not isolation: its workloads run like any other, and a resource it declares is shared with every module that declares the same one. Modules are the unit that owns SQL migrations. |
+| [DefineAppOptions](interfaces/DefineAppOptions.md) | Options for [defineApp](functions/defineApp.md). |
+| [defineApp](functions/defineApp.md) | The application root: the default export of the entry file. Everything the runtime will ever run is reachable from here — modules, top-level workloads, resources and the environment contract — which is why `usai inspect`, `usai graph`, the OpenAPI document and the reference page all read this one object. Declaring a workload twice, or leaving a hole in a list (a `const` used before it ran), is a build error that names the slot. |
+
+## HTTP
+
+| Name | Description |
+| ------ | ------ |
+| [HttpResponse](interfaces/HttpResponse.md) | Explicit response: status, headers, and a body the runtime encodes. |
+| [RawResponse](interfaces/RawResponse.md) | Raw response for the escape hatch: bytes or text, no contract. |
+| [HttpHandlerResult](type-aliases/HttpHandlerResult.md) | What an HTTP handler may return: the body (encoded as JSON with status 200, or the single declared `response` status), an explicit [HttpResponse](interfaces/HttpResponse.md) from `http.response`/`http.created`/…, or a [RawResponse](interfaces/RawResponse.md). Promises of any of these are awaited. |
+| [HttpContext](interfaces/HttpContext.md) | The context of one HTTP request, typed from the declared contracts: `params`, `query`, `headers` and `body` carry the schemas' output types (already validated at the boundary, before this world existed), `auth` carries the principal the auth declaration resolved. Everything on [BaseContext](interfaces/BaseContext.md) is available too. The world lives for this request only; nothing here survives the response. |
+| [RawContext](interfaces/RawContext.md) | The context of a raw request (`http.raw`): no contracts, the exact bytes on `request`. Read the body once. |
+| [RawOptions](interfaces/RawOptions.md) | Options for `http.raw`. |
+| [http](variables/http.md) | Declare HTTP endpoints. Each `http.<method>(path, options, handler)` returns a [Workload](interfaces/Workload.md) to list in `defineApp`/`defineModule`. |
+
+## Streams and WebSockets
+
+| Name | Description |
+| ------ | ------ |
+| [StreamHandle](interfaces/StreamHandle.md) | The second argument of an `http.stream` handler: the response, chunk by chunk. The first `send`/`event`/`start` **commits** the status and headers; after that the world is bound to the connection and ends when the handler returns, the client disconnects (the world is cancelled), or the revision drains. |
+| [StreamContext](interfaces/StreamContext.md) | The context of a streaming request: request facts plus [BaseContext](interfaces/BaseContext.md). |
+| [StreamOptions](interfaces/StreamOptions.md) | Options for `http.stream`. |
+| [SocketContext](interfaces/SocketContext.md) | The context of a WebSocket connection, shared by `open`, `message` and `close`: request facts, `send`/`close`, connection-local `state`, and in `message` the validated incoming `message`. |
+| [SocketOptions](interfaces/SocketOptions.md) | Options for [socket](functions/socket.md). |
+| [SocketHandlers](interfaces/SocketHandlers.md) | The three moments of a connection. |
+| [socket](functions/socket.md) | Declare a WebSocket endpoint: one **connection-bound** world per connection, from the upgrade to the close. `ctx.state` is the connection's mutable memory and ends with it; nothing is shared between connections except through resources. A client disconnect cancels the world; a draining revision closes the socket with 1012 (service restart) and `close` runs. `concurrency` bounds open connections. |
+
+## Tasks, cron, commands, services
+
+| Name | Description |
+| ------ | ------ |
+| [TaskOptions](interfaces/TaskOptions.md) | Options for [task](functions/task.md). |
+| [TaskContext](interfaces/TaskContext.md) | The context of one task invocation: the validated `input` plus [BaseContext](interfaces/BaseContext.md). |
+| [task](functions/task.md) | Declare a task: a named unit of finite work that other workloads invoke or dispatch, and that `usai task run <name>` runs by hand. |
+| [CronOptions](interfaces/CronOptions.md) | Options for [cron](functions/cron.md). |
+| [CronContext](interfaces/CronContext.md) | The context of one cron tick: `scheduledAt` (ISO 8601, the tick's nominal time) plus [BaseContext](interfaces/BaseContext.md). |
+| [cron](functions/cron.md) | Declare a scheduled job. Each due tick runs in a **fresh world**, finite, bounded by `timeout`. The scheduler belongs to the revision: it starts when the revision activates and stops when it drains, so two revisions never tick the same job at once. A missed tick (the process was down) is not replayed. `usai cron run <name>` runs one tick without the clock, and `app.cron(name).run()` does the same in tests. |
+| [CommandContext](interfaces/CommandContext.md) | The context of one command run: the command-line `args` plus [BaseContext](interfaces/BaseContext.md). |
+| [command](functions/command.md) | Declare a command: finite work run on demand from the command line (`usai app <name> [args]`), in a fresh world with the declared resources. The return value is printed as JSON; a thrown error exits non-zero. Commands are for operators (a stats report, a one-off repair), not for startup: nothing runs a command unless someone asks. |
+| [ServiceContext](interfaces/ServiceContext.md) | The context of a service: [BaseContext](interfaces/BaseContext.md) plus `sleep`. Watch `ctx.signal` — it aborts when the revision drains, and `sleep` resolves early then. |
+| [ServiceOptions](interfaces/ServiceOptions.md) | Options for [service](functions/service.md). |
+| [service](functions/service.md) | Declare a service: the one **persistent** lifetime. One world starts when the revision activates, runs the handler, and is asked to stop (`ctx.signal` aborts) when the revision drains; a handler that ignores the signal is cancelled at the drain bound. The handler returning or throwing ends the service; `restart` decides what happens next. A service is supervised per revision, so a replacement revision gets its own instance and the old one stops with its revision. |
+| [dispatches](functions/dispatches.md) | Record that `from` invokes or dispatches the tasks `to`, so that `usai graph`, `inspect` and the reference page show the edge (the runtime refuses a dispatch to a task that does not exist either way). Returns `from`, so it wraps a declaration in place. |
+| [publishes](functions/publishes.md) | Record that `from` publishes to queue topics (names, or the consuming `queue.consume` workloads), for `usai graph` and the reference page. Returns `from`, so it wraps a declaration in place. |
+| [SeederContext](interfaces/SeederContext.md) | The context a seeder runs with: [BaseContext](interfaces/BaseContext.md). |
+| [SeederDeclaration](interfaces/SeederDeclaration.md) | A seeder file's default export. Discovered by `usai db seed`, run as finite work with access to the declared resources; never part of startup. |
+| [seeder](functions/seeder.md) | Declare a seeder (the default export of a file matched by the module's `seeders` globs). `usai db seed [name]` runs it as finite work with the declared resources. |
+
+## Queues
+
+| Name | Description |
+| ------ | ------ |
+| [RetryOptions](interfaces/RetryOptions.md) | Retry policy of a queue consumer. |
+| [ConsumeOptions](interfaces/ConsumeOptions.md) | Options for `queue.consume`. |
+| [QueueContext](interfaces/QueueContext.md) | The context of one message delivery: the validated `message`, the `attempt` number and the message `id`, plus [BaseContext](interfaces/BaseContext.md). |
+| [queue](variables/queue.md) | Queue workloads: `queue.consume(topic, options, handler)`. |
+| [QueueHandle](interfaces/QueueHandle.md) | `ctx.queue` in every world. |
+
+## Resources
+
+| Name | Description |
+| ------ | ------ |
+| [CacheLocalOptions](interfaces/CacheLocalOptions.md) | Options for `cache.local`. |
+| [CacheLocalDeclaration](interfaces/CacheLocalDeclaration.md) | Shared across worlds, local to the runtime, not durable, may disappear on restart. |
+| [cache](variables/cache.md) | Cache resources. |
+| [CacheLocalHandle](interfaces/CacheLocalHandle.md) | The in-world handle for a `cache.local` resource (`ctx.resources.<name>`). |
+| [PostgresOptions](interfaces/PostgresOptions.md) | Options for [postgres](functions/postgres.md). The URL itself is never in the declaration: it comes from the environment at activation. |
+| [PostgresDeclaration](interfaces/PostgresDeclaration.md) | A PostgreSQL pool owned by the runtime. Each operation leases one connection; reuse follows terminal proof (contract C5). |
+| [postgres](functions/postgres.md) | Declare a PostgreSQL resource. The runtime owns the pool for its whole lifetime; a workload that lists the resource gets a [PostgresHandle](interfaces/PostgresHandle.md) at `ctx.resources.<name>`, and every statement leases one connection for exactly that operation. The connection returns to the pool only after a **terminal outcome** (the result or the error arrived); a world that dies mid-statement proves nothing about the connection, so it is quarantined, then removed and replaced, never reused. Connection loss and pool exhaustion surface to HTTP callers as 503, not 500. |
+| [SqlParam](type-aliases/SqlParam.md) | A statement parameter (`$1`, `$2`, …): scalars bind to their SQL type, objects and arrays bind as JSON (`jsonb`); cast in SQL when a column needs something else (`$1::uuid[]`). |
+| [SqlExecutor](interfaces/SqlExecutor.md) | The statements available on a connection. Rows are plain objects keyed by column name; values arrive as JSON (uuid, timestamptz and numeric as strings, integers and floats as numbers, json/jsonb as values). |
+| [PostgresHandle](interfaces/PostgresHandle.md) | The in-world handle for a `postgres` resource. Rows are plain objects keyed by column name; values are JSON (uuid/timestamps as strings). Each statement leases its own connection; `transaction` pins one for the callback and commits when it returns, rolls back when it throws. A world that ends with the transaction still open is a lifecycle error, and the runtime rolls back on its behalf. |
+| [HttpClientOptions](interfaces/HttpClientOptions.md) | Options for [httpClient](functions/httpClient.md). Secrets never go in the declaration: name the environment variables that hold them. |
+| [HttpClientDeclaration](interfaces/HttpClientDeclaration.md) | Outbound HTTP, declared: the runtime owns the client (pool, TLS roots, timeouts), every request is an operation owned by the world, and the destination is visible in `usai graph` and the API docs. There is no global `fetch` inside a world. |
+| [httpClient](functions/httpClient.md) | Declare an outbound HTTP client. There is no global `fetch` in a world; this is how an application calls another service, and the destination is part of the application's declared shape. Each `fetch` is one leased operation: cancelled with the world, bounded by the smaller of the world's deadline and `timeoutMs`, counted against `maxConcurrent` (the next request is refused, not queued). With `baseUrl`/`baseUrlEnv` the origin is pinned and any other origin is `origin_refused` before the request leaves. A non-2xx status is data (`ok: false`), not an exception; connection failures and timeouts throw and map to 503 for HTTP callers. |
+| [FetchInit](interfaces/FetchInit.md) | Options for [HttpClientHandle.fetch](interfaces/HttpClientHandle.md#fetch). |
+| [FetchResponse](interfaces/FetchResponse.md) | A completed response: the body has already arrived, so the accessors are synchronous. |
+| [HttpClientHandle](interfaces/HttpClientHandle.md) | The in-world handle for an `http.client` resource (`ctx.resources.<name>`). |
+
+## Authentication
+
+| Name | Description |
+| ------ | ------ |
+| [AuthRequest](interfaces/AuthRequest.md) | What an auth resolver sees of the request: no body, no world yet. |
+| [BearerOptions](interfaces/BearerOptions.md) | Options for `auth.bearer`. |
+| [HeaderOptions](interfaces/HeaderOptions.md) | Options for `auth.header`. |
+| [CustomOptions](interfaces/CustomOptions.md) | Options for `auth.custom`. |
+| [auth](variables/auth.md) | Declare an authentication boundary. Attach it to a workload with `auth: <declaration>`; `resolve` runs before the handler, with the workload's `ctx` (its declared resources) plus `ctx.request`, and the principal it returns is `ctx.auth`, typed. A missing credential or a thrown `errors.unauthorized()` answers 401 and the handler never runs. Authentication (who) lives here; authorization (may they) is business logic in the handler. One declaration is reused by reference across endpoints; its `name` is the OpenAPI security scheme. In v0 the resolver is application code and runs inside the request's world (ADR-0004); the rest of the boundary — routing, decoding, schema validation — runs before any world exists. |
+
+## Errors
+
+| Name | Description |
+| ------ | ------ |
+| [UsaiErrorShape](interfaces/UsaiErrorShape.md) | The wire shape of an application error: `{ "error": { code, message, details? } }`. |
+| [UsaiError](classes/UsaiError.md) | An error with a `code` and an HTTP `status`. Thrown from a handler it becomes the response `{ "error": { code, message, details? } }` with that status; from a task or queue message it is the outcome's error. Any other thrown value is a 500 `internal` with a sanitized message. |
+| [isUsaiError](functions/isUsaiError.md) | Whether a caught value is a [UsaiError](classes/UsaiError.md) (also across module copies). |
+| [errors](variables/errors.md) | Constructors for the common [UsaiError](classes/UsaiError.md)s. Each takes an optional message (default: the code, spaced) and `details` (any JSON, echoed to the client — keep it safe to show). List the codes a workload throws in its `errors` option so the reference and the OpenAPI document say so. |
+
+## Environment
+
+| Name | Description |
+| ------ | ------ |
+| [EnvKind](type-aliases/EnvKind.md) | The kinds an environment field can have; `secret` is never printed by `inspect`. |
+| [EnvField](interfaces/EnvField.md) | One declared variable: kind, whether it is required, and its parser. |
+| [EnvDeclaration](interfaces/EnvDeclaration.md) | The application's environment contract (`defineApp({ env })`). |
+| [EnvValues](type-aliases/EnvValues.md) | The typed values of a declaration: `EnvValues<typeof spec>`. |
+| [env](functions/env.md) | Declare what the application needs from its environment. Values are read by the host when a revision **activates** — a missing required variable or an unparsable value fails activation, never the first request — and reach handlers as `ctx.env`, parsed. Variables a resource names (`DATABASE_URL`, `baseUrlEnv`) are required by that resource and need no declaration here. `usai run` never reads `.env`; `usai dev` does. |
+| [resolveEnv](functions/resolveEnv.md) | Resolve declared values from a raw map (what the host does at activation). Throws on the first violation, naming the variable. |
+
+## Passwords
+
+| Variable | Description |
+| ------ | ------ |
+| [password](variables/password.md) | Password hashing as a host operation. Argon2id is meant to be expensive, so it runs on the runtime's blocking pool, never on a world's thread; each call is one owned operation, cancelled with the world. The hash is a PHC string (`$argon2id$v=19$m=19456,t=2,p=1$…`) to store as text. |
+
+## Context
+
+| Interface | Description |
+| ------ | ------ |
+| [ConsoleLike](interfaces/ConsoleLike.md) | What `ctx.log` and `console` offer inside a world. |
+| [UsaiAbortSignal](interfaces/UsaiAbortSignal.md) | `ctx.signal`: aborts when this world is cancelled — the client went away, the deadline passed, the revision drained, or the owner of an `invoke` was cancelled. Pending host operations reject with `cancelled` at the same moment; the signal is for the handler's own loops and cleanup. |
+| [TaskHandle](interfaces/TaskHandle.md) | `ctx.tasks`: the two ways to start a task, and the whole difference between them is who owns the child world. |
+| [BaseContext](interfaces/BaseContext.md) | What every handler receives, whatever the workload kind. Everything asynchronous here is a host operation **owned by this world**: it is cancelled when the world is, and a finite world may not end while one is still pending (that is a lifecycle error with a diagnostic, not a leak). Nothing on the context survives the world. |
+
+## Schemas
+
+| Name | Description |
+| ------ | ------ |
+| [StandardSchemaV1](interfaces/StandardSchemaV1.md) | The Standard Schema v1 interface, inlined (no dependency). |
+| [AnySchema](type-aliases/AnySchema.md) | Any Standard Schema (`zod`, `valibot`, `arktype`, …): what every contract slot accepts. |
+| [Output](type-aliases/Output.md) | The output type of a schema, as handlers see it. |
+
+## Build
+
+| Name | Description |
+| ------ | ------ |
+| [MANIFEST\_VERSION](variables/MANIFEST_VERSION.md) | The manifest format this SDK writes; the runtime states which formats it understands and refuses the others with a rebuild hint. |
+| [Manifest](interfaces/Manifest.md) | What `usai build` writes to `manifest.json`: the application as data — every workload with its trigger, contracts (JSON Schema) and policies, every resource with its secret-free configuration, the auth schemes, the environment contract. Mirrors the runtime's `Manifest` exactly. |
+| [describe](functions/describe.md) | Turn an [AppDeclaration](interfaces/AppDeclaration.md) into its [Manifest](interfaces/Manifest.md). The build phase calls it inside a capability-less world; call it yourself to assert on an application's shape in a unit test. Throws on a duplicate workload, a conflicting resource redeclaration, or a hole in a list. |
+
+## Other
+
+| Name | Description |
+| ------ | ------ |
+| [Declare](type-aliases/Declare.md) | The signature of `http.get`/`post`/…. |
+| [RawHandler](type-aliases/RawHandler.md) | The handler of `http.raw`. |
+| [StandardSchemaV1](namespaces/StandardSchemaV1/README.md) | - |

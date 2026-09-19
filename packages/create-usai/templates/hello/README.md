@@ -30,3 +30,4 @@ docker build -t my-app . && docker run --rm -p 3000:3000 my-app
 - The `usai` binary: `pnpm usai …` runs it through the SDK (cache `~/.cache/usai/<version>`); or install it from https://github.com/gmedia/usai/releases (or `cargo build --release -p usai-cli` from the repository) and call `usai` directly.
 - `pnpm usai keygen` → `pnpm usai build --sign usai-signing.key` → run with `--require-signature <public key>`; `*.key` is git-ignored.
 - `pnpm usai inspect` — what the runtime understood. `pnpm usai config` — effective configuration. `pnpm test` — the project's tests.
+- While `pnpm dev` runs, http://localhost:3000/_usai/docs is the application reference: every operation and workload, what it does to the system, and a request panel. `pnpm usai generate openapi --public --out openapi.json` writes the consumer contract (no runtime facts) for API consumers.

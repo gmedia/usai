@@ -348,6 +348,10 @@ pub struct AuthSpec {
 pub struct Manifest {
     pub manifest_version: u32,
     pub name: String,
+    /// One paragraph about the application, for the reference page and
+    /// `info.description` of the OpenAPI document. Not part of the identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     #[serde(default)]
     pub modules: Vec<ModuleSpec>,
     pub workloads: Vec<WorkloadSpec>,
@@ -612,6 +616,7 @@ mod tests {
         Manifest {
             manifest_version: MANIFEST_VERSION,
             built_with: None,
+            description: None,
             name: "t".into(),
             modules: vec![],
             workloads: vec![WorkloadSpec {

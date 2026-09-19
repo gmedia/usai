@@ -3,116 +3,162 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>API reference</title>
-<meta name="description" content="Generated from the application definition the runtime executes.">
+<title>Application reference</title>
+<meta name="description" content="What this application is and what happens when work enters it. Generated from the definition the runtime executes.">
 <style>
-  /* Served by the runtime itself, offline: no external fonts or scripts. */
+  /* Served by the runtime itself, offline: no external fonts, scripts or styles. */
   :root {
     color-scheme: light dark;
-    --bg: #f4f5f7; --surface: #ffffff; --ink: #1b1f27; --muted: #5f6773; --line: #e1e4ea; --line-strong: #c9cfd8;
-    --code-bg: #f0f2f5; --focus: #1b1f27;
-    --get: #2456c9; --post: #1e7b3a; --put: #9a5b00; --patch: #9a5b00; --delete: #b42323; --other: #5f6773;
-    --boundary: #5b3fbf; --world: #0e7c7b; --handoff: #b4530a; --lease: #3b4e9e;
-    --ok: #1e7b3a; --bad: #b42323;
-    --sidebar: 300px; --measure: 76ch; --radius: 6px;
-    --text-xs: 0.8125rem; --text-sm: 0.875rem; --text-base: 0.9375rem; --text-lg: 1.125rem; --text-xl: 1.375rem; --text-2xl: 1.75rem;
+    --bg: #eef0f3; --surface: #ffffff; --raised: #f7f8fa; --ink: #171a20; --muted: #5a6270; --line: #dde1e7; --line-strong: #c3c9d2;
+    --code-bg: #f3f4f7; --focus: #171a20; --shadow: 0 12px 32px rgba(23, 26, 32, 0.14);
+    --get: #1f4fc4; --post: #1a7439; --put: #8f5400; --patch: #8f5400; --delete: #b02121; --other: #5a6270;
+    --boundary: #5b3fbf; --world: #0c7472; --lease: #35479a; --handoff: #a84c08; --publish: #8a2a6c;
+    --ok: #1a7439; --bad: #b02121; --warn: #8f5400;
+    --nav-w: 272px; --panel-w: 380px; --measure: 76ch; --radius: 6px;
+    --text-xs: 0.8125rem; --text-sm: 0.875rem; --text-base: 0.9375rem; --text-lg: 1.125rem; --text-xl: 1.375rem; --text-2xl: 1.875rem;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --bg: #121417; --surface: #1a1d22; --ink: #e8eaee; --muted: #9aa3af; --line: #2a2f37; --line-strong: #3a414b;
-      --code-bg: #14171b; --focus: #e8eaee;
-      --get: #7ea2ff; --post: #6ccf8a; --put: #e2a95a; --patch: #e2a95a; --delete: #ff8a8a; --other: #9aa3af;
-      --boundary: #b7a4ff; --world: #5fd3cf; --handoff: #ffb073; --lease: #a3b3ff;
-      --ok: #6ccf8a; --bad: #ff8a8a;
+      --bg: #15181d; --surface: #1c2027; --raised: #222730; --ink: #e6e8ec; --muted: #98a1ad; --line: #2b313b; --line-strong: #3d4552;
+      --code-bg: #12151a; --focus: #e6e8ec; --shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+      --get: #86a8ff; --post: #72d093; --put: #e6ad62; --patch: #e6ad62; --delete: #ff8f8f; --other: #98a1ad;
+      --boundary: #bba9ff; --world: #62d6d1; --lease: #a9b7ff; --handoff: #ffb27a; --publish: #f095d3;
+      --ok: #72d093; --bad: #ff8f8f; --warn: #e6ad62;
     }
+  }
+  :root[data-theme="dark"] {
+    --bg: #15181d; --surface: #1c2027; --raised: #222730; --ink: #e6e8ec; --muted: #98a1ad; --line: #2b313b; --line-strong: #3d4552;
+    --code-bg: #12151a; --focus: #e6e8ec; --shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+    --get: #86a8ff; --post: #72d093; --put: #e6ad62; --patch: #e6ad62; --delete: #ff8f8f; --other: #98a1ad;
+    --boundary: #bba9ff; --world: #62d6d1; --lease: #a9b7ff; --handoff: #ffb27a; --publish: #f095d3;
+    --ok: #72d093; --bad: #ff8f8f; --warn: #e6ad62;
   }
   *, *::before, *::after { box-sizing: border-box; }
   html { scroll-padding-top: 16px; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
-    font: var(--text-base)/1.55 "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font: var(--text-base)/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
     -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
   }
   code, pre, kbd, .mono { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 0.92em; }
   a { color: inherit; }
   :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
-  .skip { position: absolute; left: -999px; top: 8px; background: var(--surface); padding: 8px 12px; border: 1px solid var(--line-strong); z-index: 10; }
-  .skip:focus { left: 8px; }
   button { font: inherit; color: inherit; }
+  h1, h2, h3, h4 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+  p { margin: 0; }
+  [hidden] { display: none !important; }
+  .skip { position: absolute; left: -999px; top: 8px; background: var(--surface); padding: 8px 12px; border: 1px solid var(--line-strong); z-index: 40; }
+  .skip:focus { left: 8px; }
+  .vh { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
-  /* ---- layout ---------------------------------------------------------- */
-  .app { display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); min-height: 100vh; }
-  .side { border-right: 1px solid var(--line); background: var(--surface); position: sticky; top: 0; height: 100vh; overflow: auto; padding: 20px 16px 32px; }
-  .main { padding: 32px clamp(16px, 4vw, 56px) 96px; max-width: calc(var(--measure) + 240px); min-width: 0; }
-  .side { min-width: 0; }
-  @media (max-width: 880px) {
-    .app { grid-template-columns: 1fr; }
-    .side { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 12px 16px; }
-    .side > details > summary { cursor: pointer; font-weight: 600; padding: 8px 0; min-height: 44px; display: flex; align-items: center; }
-    .main { padding: 24px 16px 96px; }
-    table.props td.type, table.props td.name { white-space: normal; overflow-wrap: anywhere; }
+  /* ---- shell --------------------------------------------------------------- */
+  .shell { display: grid; grid-template-columns: var(--nav-w) minmax(0, 1fr); min-height: 100vh; }
+  .topbar { display: none; }
+  .nav { position: sticky; top: 0; height: 100vh; overflow: auto; border-right: 1px solid var(--line); background: var(--surface); padding: 16px 12px 40px; min-width: 0; }
+  .doc { min-width: 0; padding: 40px clamp(16px, 4vw, 56px) 120px; }
+  .doc > * { max-width: calc(var(--measure) + 120px); }
+  .panel { position: fixed; inset: 0 0 0 auto; width: min(var(--panel-w), 100vw); background: var(--surface); border-left: 1px solid var(--line); overflow: auto; transform: translateX(100%); visibility: hidden; z-index: 30; padding: 16px 16px 40px; box-shadow: var(--shadow); }
+  .panel.open { transform: none; visibility: visible; }
+  .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 20; }
+  @media (prefers-reduced-motion: no-preference) { .panel { transition: transform 200ms ease, visibility 200ms; } }
+  @media (min-width: 1280px) {
+    .shell { grid-template-columns: var(--nav-w) minmax(0, 1fr) var(--panel-w); }
+    .shell.no-panel { grid-template-columns: var(--nav-w) minmax(0, 1fr); }
+    .panel { position: sticky; top: 0; height: 100vh; transform: none; visibility: visible; box-shadow: none; width: auto; }
+    .panel.closed-wide { display: none; }
+    .doc .try-here { display: none; }
+    .panel .close { display: none; }
   }
-  @media (min-width: 881px) { .side > details > summary { display: none; } .side > details { display: contents; } }
+  @media (max-width: 1023px) {
+    .shell { grid-template-columns: 1fr; }
+    .topbar { display: flex; position: sticky; top: 0; z-index: 15; align-items: center; gap: 8px; padding: 8px 12px; background: var(--surface); border-bottom: 1px solid var(--line); }
+    .topbar .brand-title { flex: 1; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .nav { position: fixed; inset: 0 auto 0 0; width: min(320px, 90vw); z-index: 30; transform: translateX(-100%); visibility: hidden; box-shadow: var(--shadow); }
+    .nav.open { transform: none; visibility: visible; }
+    @media (prefers-reduced-motion: no-preference) { .nav { transition: transform 200ms ease, visibility 200ms; } }
+    .doc { padding: 24px 16px 120px; }
+    .nav .nav-head .brand, .nav .nav-head .tools { display: none; }
+  }
 
-  /* ---- sidebar --------------------------------------------------------- */
-  .brand { display: flex; align-items: baseline; gap: 8px; margin: 0 0 4px; font-size: var(--text-lg); font-weight: 650; letter-spacing: -0.01em; }
-  .brand small { font-size: var(--text-xs); font-weight: 500; color: var(--muted); }
-  .identity { color: var(--muted); font-size: var(--text-xs); margin: 0 0 16px; }
-  .identity code { user-select: all; }
-  .search { position: relative; margin: 0 0 16px; }
-  .search input { width: 100%; padding: 9px 36px 9px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--bg); color: inherit; font: inherit; min-height: 40px; }
-  .search kbd { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; background: var(--surface); }
-  .nav .group { font-size: var(--text-xs); font-weight: 600; color: var(--muted); margin: 18px 0 6px; letter-spacing: 0.01em; }
+  /* ---- nav ------------------------------------------------------------------- */
+  .nav-head { padding: 0 8px 12px; }
+  .brand { font-size: var(--text-lg); font-weight: 650; line-height: 1.2; overflow-wrap: anywhere; }
+  .brand small { display: block; font-size: var(--text-xs); font-weight: 500; color: var(--muted); margin-top: 2px; }
+  .tools { display: flex; gap: 6px; margin-top: 12px; }
+  .search-btn { flex: 1; display: flex; align-items: center; gap: 8px; padding: 0 10px; min-height: 36px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--bg); color: var(--muted); cursor: pointer; text-align: left; font-size: var(--text-sm); }
+  .search-btn:hover { border-color: var(--ink); }
+  .search-btn kbd { margin-left: auto; font-size: 11px; border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; background: var(--surface); }
+  .icon-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 36px; min-height: 36px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); cursor: pointer; }
+  .icon-btn:hover { background: var(--bg); }
+  .icon-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .nav details { margin-top: 10px; }
+  .nav summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 6px; padding: 6px 8px; min-height: 32px; font-size: var(--text-xs); font-weight: 600; color: var(--muted); border-radius: var(--radius); }
+  .nav summary::-webkit-details-marker { display: none; }
+  .nav summary::before { content: ""; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); transition: transform 120ms; flex: none; }
+  .nav details[open] summary::before { transform: rotate(45deg); }
+  .nav summary:hover { background: var(--bg); }
+  .nav summary .count { margin-left: auto; font-weight: 500; font-variant-numeric: tabular-nums; }
   .nav ul { list-style: none; margin: 0; padding: 0; }
-  .nav li a { display: grid; grid-template-columns: 52px 1fr; gap: 8px; align-items: baseline; padding: 6px 8px; margin: 0 -8px; border-radius: var(--radius); text-decoration: none; min-height: 36px; }
+  .nav .sub { padding: 6px 8px 2px 20px; font-size: 11px; color: var(--muted); }
+  .nav li a { display: grid; grid-template-columns: 48px 1fr; gap: 8px; align-items: baseline; padding: 6px 8px 6px 20px; border-radius: var(--radius); text-decoration: none; min-height: 34px; font-size: var(--text-sm); }
   .nav li a:hover { background: var(--bg); }
-  .nav li a[aria-current="true"] { background: var(--bg); box-shadow: inset 3px 0 0 var(--ink); }
+  .nav li a[aria-current="page"] { background: var(--bg); box-shadow: inset 3px 0 0 var(--ink); }
   .nav li a .path { font-family: ui-monospace, Menlo, monospace; font-size: var(--text-xs); overflow-wrap: anywhere; }
-  .nav .other li a { grid-template-columns: 1fr; }
-  .nav .other li a .path { font-family: inherit; }
-  .nav .kind { color: var(--muted); font-size: var(--text-xs); margin-left: 6px; }
-  .nav li.hidden { display: none; }
-  .nav .empty { color: var(--muted); font-size: var(--text-sm); padding: 6px 0; }
+  .nav li a.plain { grid-template-columns: 1fr; }
+  .nav li a.plain .path { font-family: inherit; font-size: var(--text-sm); }
+  .nav li a.top { padding-left: 8px; grid-template-columns: 1fr; font-weight: 500; }
+  .nav .empty { color: var(--muted); font-size: var(--text-xs); padding: 4px 8px 4px 20px; }
+  .nav .foot { margin-top: 24px; padding: 12px 8px 0; border-top: 1px solid var(--line); color: var(--muted); font-size: var(--text-xs); }
+  .nav .foot a { text-decoration: underline; text-underline-offset: 2px; }
 
-  .m { font-family: ui-monospace, Menlo, monospace; font-size: 11px; font-weight: 700; letter-spacing: 0.02em; text-align: right; }
+  .m { font-family: ui-monospace, Menlo, monospace; font-size: 11px; font-weight: 700; letter-spacing: 0.02em; }
   .m-get { color: var(--get); } .m-post { color: var(--post); } .m-put, .m-patch { color: var(--put); } .m-delete { color: var(--delete); } .m-other { color: var(--other); }
 
-  /* ---- header ----------------------------------------------------------- */
-  .head h1 { font-size: var(--text-2xl); letter-spacing: -0.02em; margin: 0 0 6px; font-weight: 650; }
-  .head p { margin: 0; color: var(--muted); max-width: var(--measure); }
-  .head .truth { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 14px; font-size: var(--text-sm); color: var(--muted); }
-  .head .truth b { color: var(--ink); font-weight: 600; }
+  /* ---- document ---------------------------------------------------------------- */
+  .crumbs { display: flex; flex-wrap: wrap; gap: 4px 8px; color: var(--muted); font-size: var(--text-xs); margin-bottom: 10px; }
+  .crumbs a { text-decoration: none; } .crumbs a:hover { text-decoration: underline; }
+  .page-title { font-size: var(--text-2xl); line-height: 1.15; letter-spacing: -0.02em; display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 14px; }
+  .page-title .m { font-size: 14px; }
+  .page-title code { font-size: 0.9em; font-weight: 600; overflow-wrap: anywhere; }
+  .lede { margin-top: 10px; color: var(--muted); max-width: var(--measure); }
+  .lede code { color: var(--ink); }
+  .facts { display: flex; flex-wrap: wrap; gap: 6px 8px; margin-top: 14px; }
+  .fact { display: inline-flex; align-items: baseline; gap: 5px; padding: 3px 9px; border: 1px solid var(--line-strong); border-radius: 999px; font-size: var(--text-xs); color: var(--muted); text-decoration: none; }
+  .fact b { color: var(--ink); font-weight: 600; }
+  a.fact:hover { border-color: var(--ink); }
+  .actions-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
 
-  /* ---- operation --------------------------------------------------------- */
-  .op { margin-top: 56px; padding-top: 32px; border-top: 1px solid var(--line); scroll-margin-top: 16px; }
-  .op:first-of-type { margin-top: 40px; }
-  .op h2 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 14px; margin: 0; font-size: var(--text-xl); font-weight: 600; letter-spacing: -0.01em; }
-  .op h2 .m { font-size: 13px; text-align: left; }
-  .op h2 code { font-size: 0.95em; font-weight: 600; overflow-wrap: anywhere; }
-  .op h2 a.anchor { color: var(--muted); text-decoration: none; font-weight: 400; font-size: var(--text-sm); }
-  .op h2 a.anchor:hover { color: var(--ink); }
-  .op .summary { margin: 6px 0 0; color: var(--muted); max-width: var(--measure); }
-  .op .summary .id { font-family: ui-monospace, Menlo, monospace; font-size: var(--text-xs); }
-  .op .desc { margin: 10px 0 0; max-width: var(--measure); }
-
-  /* The one bold element: what a request does, as connected steps. */
-  .life { margin: 20px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; align-items: stretch; gap: 0; border: 1px solid var(--line-strong); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
-  .life li { position: relative; flex: 1 1 160px; padding: 10px 14px 10px 18px; border-left: 1px solid var(--line); min-width: 0; }
+  /* The one bold element: what a unit of work does, as connected steps. */
+  .life { margin: 24px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; border: 1px solid var(--line-strong); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
+  .life li { position: relative; flex: 1 1 170px; padding: 10px 14px 10px 18px; border-left: 1px solid var(--line); min-width: 0; }
   .life li:first-child { border-left: 0; }
   .life li::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--step); }
   .life .step { display: block; font-size: var(--text-xs); color: var(--step); font-weight: 650; margin-bottom: 2px; }
   .life .what { display: block; font-size: var(--text-sm); }
   .life .what code { font-size: 0.9em; }
+  .life .what a { text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--line-strong); }
+  .life .what a:hover { text-decoration-color: currentColor; }
   .life .quiet { color: var(--muted); }
-  .life .boundary { --step: var(--boundary); } .life .world { --step: var(--world); } .life .lease { --step: var(--lease); } .life .handoff { --step: var(--handoff); }
+  .life .boundary { --step: var(--boundary); } .life .world { --step: var(--world); } .life .lease { --step: var(--lease); } .life .handoff { --step: var(--handoff); } .life .publish { --step: var(--publish); }
   .life-note { margin: 8px 0 0; font-size: var(--text-xs); color: var(--muted); max-width: var(--measure); }
+  @media (max-width: 720px) {
+    .life li { flex: 1 1 100%; border-left: 0; border-top: 1px solid var(--line); }
+    .life li:first-child { border-top: 0; }
+  }
 
-  .op h3 { font-size: var(--text-sm); font-weight: 650; margin: 28px 0 8px; }
-  .op h3 .n { color: var(--muted); font-weight: 500; }
-  .slot { margin-top: 16px; }
-  .slot h4 { font-size: var(--text-sm); font-weight: 600; margin: 0 0 6px; display: flex; gap: 10px; align-items: baseline; }
-  .slot h4 .where { font-size: var(--text-xs); font-weight: 500; }
-  .where.b { color: var(--boundary); } .where.w { color: var(--world); }
+  .sec { margin-top: 40px; }
+  .sec > h2 { font-size: var(--text-lg); display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .sec > h2 .n { color: var(--muted); font-weight: 500; font-size: var(--text-sm); }
+  .sec > p { color: var(--muted); margin-top: 6px; max-width: var(--measure); }
+  .slot { margin-top: 18px; }
+  .slot-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .slot-head h3 { font-size: var(--text-sm); font-weight: 600; }
+  .where { font-size: var(--text-xs); }
+  .where.b { color: var(--boundary); } .where.w { color: var(--world); } .where.q { color: var(--muted); }
+  .seg { margin-left: auto; display: inline-flex; border: 1px solid var(--line-strong); border-radius: var(--radius); overflow: hidden; }
+  .seg button { border: 0; background: var(--surface); padding: 3px 10px; font-size: var(--text-xs); cursor: pointer; min-height: 26px; color: var(--muted); }
+  .seg button + button { border-left: 1px solid var(--line-strong); }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
 
   table.props { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
   table.props th { text-align: left; font-weight: 600; color: var(--muted); font-size: var(--text-xs); padding: 4px 10px 6px 0; border-bottom: 1px solid var(--line); }
@@ -122,213 +168,357 @@
   table.props td.name code { font-weight: 600; }
   table.props .req { color: var(--delete); font-size: 11px; margin-left: 4px; vertical-align: super; }
   table.props td.type { color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: var(--text-xs); white-space: nowrap; }
+  table.props td.type a { text-decoration: underline; text-underline-offset: 2px; }
   table.props td.desc { color: var(--muted); }
   table.props td.desc code { color: var(--ink); }
   table.props .nested { margin: 8px 0 0 12px; padding-left: 12px; border-left: 2px solid var(--line); }
-  .schema-note { color: var(--muted); font-size: var(--text-sm); }
+  table.props caption { caption-side: bottom; text-align: left; color: var(--muted); font-size: var(--text-xs); padding-top: 6px; }
+  @media (max-width: 720px) {
+    /* Stacked rows: name and type on one line, notes below, nothing hyphenated. */
+    table.props, table.props tbody { display: block; }
+    table.props thead { display: none; }
+    table.props tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+    table.props tr:last-child { border-bottom: 0; }
+    table.props td { display: block; padding: 0; border: 0; }
+    table.props td.name, table.props td.type { white-space: normal; overflow-wrap: anywhere; }
+    table.props td.type { text-align: right; }
+    table.props td.desc { grid-column: 1 / -1; }
+    table.props caption { display: block; }
+  }
+  .note { color: var(--muted); font-size: var(--text-sm); }
+  .note code { color: var(--ink); }
 
-  .responses { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; padding: 0; list-style: none; }
-  .responses button { border: 1px solid var(--line-strong); background: var(--surface); border-radius: 999px; padding: 4px 12px; cursor: pointer; font-size: var(--text-sm); font-variant-numeric: tabular-nums; min-height: 32px; }
-  .responses button[aria-selected="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
-  .responses .st-2 { border-left: 3px solid var(--ok); } .responses .st-4 { border-left: 3px solid var(--put); } .responses .st-5 { border-left: 3px solid var(--bad); }
+  .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; padding: 0; list-style: none; }
+  .tabs button { border: 1px solid var(--line-strong); background: var(--surface); border-radius: 999px; padding: 4px 12px; cursor: pointer; font-size: var(--text-sm); font-variant-numeric: tabular-nums; min-height: 32px; }
+  .tabs button[aria-selected="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .tabs .st-2 { border-left: 3px solid var(--ok); } .tabs .st-4 { border-left: 3px solid var(--warn); } .tabs .st-5 { border-left: 3px solid var(--bad); }
+  .tabs button[aria-selected="true"].st-2, .tabs button[aria-selected="true"].st-4, .tabs button[aria-selected="true"].st-5 { border-left-color: var(--ink); }
   .resp-desc { color: var(--muted); font-size: var(--text-sm); margin: 0 0 10px; }
 
-  pre.code { margin: 0; padding: 12px 14px; background: var(--code-bg); border: 1px solid var(--line); border-radius: var(--radius); overflow: auto; font-size: var(--text-xs); line-height: 1.5; }
+  pre.code { margin: 0; padding: 12px 14px; background: var(--code-bg); border: 1px solid var(--line); border-radius: var(--radius); overflow: auto; font-size: var(--text-xs); line-height: 1.5; tab-size: 2; }
   .codebar { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 0 0 6px; }
-  .codebar span { font-size: var(--text-xs); color: var(--muted); }
-  .btn { border: 1px solid var(--line-strong); background: var(--surface); border-radius: var(--radius); padding: 6px 12px; cursor: pointer; font-size: var(--text-sm); min-height: 32px; }
+  .codebar .note { font-size: var(--text-xs); }
+  .btn { border: 1px solid var(--line-strong); background: var(--surface); border-radius: var(--radius); padding: 6px 12px; cursor: pointer; font-size: var(--text-sm); min-height: 32px; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
   .btn:hover { background: var(--bg); }
   .btn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
   .btn.primary:hover { opacity: 0.92; }
+  .btn:disabled { opacity: 0.6; cursor: default; }
 
-  /* try it */
-  .try { margin-top: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
-  .try summary { cursor: pointer; padding: 10px 14px; font-weight: 600; font-size: var(--text-sm); min-height: 44px; display: flex; align-items: center; justify-content: space-between; }
-  .try summary .hint { color: var(--muted); font-weight: 400; }
-  .try .body { padding: 4px 14px 14px; display: grid; gap: 12px; }
-  .try label { display: grid; gap: 4px; font-size: var(--text-xs); color: var(--muted); }
-  .try input, .try textarea { font: inherit; padding: 7px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--bg); color: inherit; width: 100%; min-height: 36px; }
-  .try textarea { font-family: ui-monospace, Menlo, monospace; font-size: var(--text-xs); min-height: 96px; resize: vertical; }
-  .try .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
-  .try .actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-  .try .result { display: grid; gap: 6px; }
-  .try .status { font-size: var(--text-sm); display: flex; gap: 14px; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
-  .try .status .ok { color: var(--ok); font-weight: 600; } .try .status .bad { color: var(--bad); font-weight: 600; }
-  .try .status .ms { color: var(--muted); }
+  .rows { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; font-size: var(--text-sm); margin-top: 10px; }
+  .rows dt { color: var(--muted); }
+  .rows dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+  .rows dd a { text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--line-strong); }
+  .rows dd a:hover { text-decoration-color: currentColor; }
+  @media (max-width: 480px) { .rows { grid-template-columns: 1fr; gap: 2px; } .rows dd { margin-bottom: 8px; } }
 
-  /* other workloads / resources */
-  .section { margin-top: 64px; padding-top: 32px; border-top: 1px solid var(--line); scroll-margin-top: 16px; }
-  .section h2 { font-size: var(--text-xl); margin: 0 0 4px; font-weight: 600; letter-spacing: -0.01em; }
-  .section > p { color: var(--muted); margin: 0 0 16px; max-width: var(--measure); }
-  .card { padding: 14px 0; border-top: 1px solid var(--line); scroll-margin-top: 16px; }
-  .card h3 { margin: 0; font-size: var(--text-base); font-weight: 600; display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
-  .card h3 .kind { color: var(--muted); font-weight: 500; font-size: var(--text-xs); }
-  .card .meta { margin: 4px 0 0; color: var(--muted); font-size: var(--text-sm); display: flex; flex-wrap: wrap; gap: 4px 16px; }
-  .card .meta b { color: var(--ink); font-weight: 600; }
-  .card .life { margin-top: 10px; }
-  .card .slot { margin-top: 10px; }
+  .list { list-style: none; margin: 8px 0 0; padding: 0; }
+  .list li { display: grid; grid-template-columns: 52px 1fr; gap: 10px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); }
+  .list li:first-child { border-top: 0; }
+  .list li.plain { grid-template-columns: 1fr; }
+  .list a { text-decoration: none; }
+  .list a:hover { text-decoration: underline; text-underline-offset: 2px; }
+  .list .sub { color: var(--muted); font-size: var(--text-xs); margin-left: 8px; }
+  .list code { font-weight: 600; overflow-wrap: anywhere; }
 
-  .empty-state { color: var(--muted); }
-  .footer { margin-top: 64px; color: var(--muted); font-size: var(--text-xs); }
-  @media (max-width: 880px) {
-    .life li { flex: 1 1 100%; border-left: 0; border-top: 1px solid var(--line); }
-    .life li:first-child { border-top: 0; }
-  }
-  @media (prefers-reduced-motion: no-preference) { details .body { animation: open 120ms ease-out; } @keyframes open { from { opacity: 0; } to { opacity: 1; } } }
+  .pager { margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 16px; font-size: var(--text-sm); }
+  .pager a { text-decoration: none; display: grid; gap: 2px; max-width: 48%; }
+  .pager a span { color: var(--muted); font-size: var(--text-xs); }
+  .pager a b { font-weight: 600; overflow-wrap: anywhere; }
+  .pager a:hover b { text-decoration: underline; text-underline-offset: 2px; }
+  .pager .next { text-align: right; margin-left: auto; }
+  .colophon { margin-top: 40px; color: var(--muted); font-size: var(--text-xs); max-width: var(--measure); }
+
+  /* overview */
+  .overview-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px 24px; margin-top: 20px; }
+  .overview-grid a { text-decoration: none; display: grid; gap: 2px; padding: 10px 0; border-top: 2px solid var(--line-strong); }
+  .overview-grid a b { font-size: var(--text-xl); font-variant-numeric: tabular-nums; font-weight: 600; }
+  .overview-grid a span { color: var(--muted); font-size: var(--text-sm); }
+  .overview-grid a:hover { border-top-color: var(--ink); }
+  .contract { margin-top: 12px; padding: 0; list-style: none; display: grid; gap: 8px; max-width: var(--measure); }
+  .contract li { padding-left: 16px; position: relative; font-size: var(--text-sm); }
+  .contract li::before { content: ""; position: absolute; left: 0; top: 9px; width: 8px; height: 3px; background: var(--dot); }
+  .contract .c-boundary { --dot: var(--boundary); } .contract .c-world { --dot: var(--world); } .contract .c-lease { --dot: var(--lease); } .contract .c-handoff { --dot: var(--handoff); }
+
+  /* ---- request panel ------------------------------------------------------------- */
+  .panel h2 { font-size: var(--text-base); display: flex; align-items: center; gap: 8px; }
+  .panel h2 .close { margin-left: auto; }
+  .panel .target { margin-top: 10px; font-family: ui-monospace, Menlo, monospace; font-size: var(--text-xs); overflow-wrap: anywhere; color: var(--muted); }
+  .panel .target .m { font-size: 11px; }
+  .panel .target b { color: var(--ink); font-weight: 600; }
+  .panel form { display: grid; gap: 14px; margin-top: 14px; min-width: 0; }
+  .panel fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; min-width: 0; }
+  .panel form > *, .panel .result > * { min-width: 0; max-width: 100%; }
+  .panel legend { font-size: var(--text-xs); font-weight: 600; color: var(--muted); padding: 0; margin-bottom: 6px; }
+  .panel label { display: grid; gap: 4px; font-size: var(--text-xs); color: var(--muted); }
+  .panel label span code { color: var(--ink); }
+  .panel input, .panel textarea { font: inherit; padding: 7px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--bg); color: inherit; width: 100%; min-height: 36px; font-size: var(--text-sm); }
+  .panel textarea { font-family: ui-monospace, Menlo, monospace; font-size: var(--text-xs); min-height: 110px; resize: vertical; }
+  .panel .hint { font-size: var(--text-xs); color: var(--muted); }
+  .panel .send-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .panel .status { font-size: var(--text-sm); display: flex; gap: 12px; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
+  .panel .status .ok { color: var(--ok); font-weight: 600; } .panel .status .bad { color: var(--bad); font-weight: 600; }
+  .panel .status .ms { color: var(--muted); }
+  .panel .result { display: grid; gap: 8px; }
+  .panel .result .tabs { margin: 0; }
+  .panel .result pre { max-height: 50vh; }
+  .panel .idle { color: var(--muted); font-size: var(--text-sm); margin-top: 24px; max-width: 40ch; }
+
+  /* ---- search dialog ---------------------------------------------------------------- */
+  dialog.search { border: 1px solid var(--line-strong); border-radius: 10px; padding: 0; background: var(--surface); color: inherit; width: min(640px, calc(100vw - 32px)); margin: 10vh auto; box-shadow: var(--shadow); }
+  dialog.search::backdrop { background: rgba(0,0,0,0.4); }
+  dialog.search input { width: 100%; border: 0; border-bottom: 1px solid var(--line); background: transparent; padding: 14px 16px; font: inherit; font-size: var(--text-lg); color: inherit; min-height: 52px; }
+  dialog.search input:focus { outline: none; }
+  dialog.search ul { list-style: none; margin: 0; padding: 6px; max-height: 56vh; overflow: auto; }
+  dialog.search li.group { padding: 10px 10px 4px; font-size: 11px; color: var(--muted); font-weight: 600; }
+  dialog.search li a { display: grid; grid-template-columns: 52px 1fr; gap: 10px; align-items: baseline; padding: 8px 10px; border-radius: var(--radius); text-decoration: none; min-height: 40px; }
+  dialog.search li a.plain { grid-template-columns: 1fr; }
+  dialog.search li a[aria-selected="true"], dialog.search li a:hover { background: var(--bg); }
+  dialog.search li a .t { overflow-wrap: anywhere; }
+  dialog.search li a .t code { font-weight: 600; }
+  dialog.search li a .s { display: block; color: var(--muted); font-size: var(--text-xs); }
+  dialog.search .foot { display: flex; gap: 14px; padding: 8px 16px 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+  dialog.search kbd { border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; background: var(--raised); }
+  dialog.search .none { padding: 18px 16px; color: var(--muted); font-size: var(--text-sm); }
+
+  .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: var(--radius); font-size: var(--text-sm); z-index: 50; }
+  .error-page { max-width: var(--measure); }
+  .error-page pre { margin-top: 12px; }
 </style>
 </head>
 <body>
-<a class="skip" href="#main">Skip to content</a>
-<div class="app">
-  <aside class="side" aria-label="Operations">
-    <details id="side-details">
-      <summary>Operations</summary>
-      <p class="brand"><span id="brand-title">API</span><small>reference</small></p>
-      <p class="identity">revision <code id="identity"></code></p>
-      <div class="search">
-        <label for="filter" style="position:absolute;left:-999px">Filter operations</label>
-        <input id="filter" type="search" placeholder="Filter by path, method or name" autocomplete="off">
-        <kbd aria-hidden="true">/</kbd>
+<a class="skip" href="#doc">Skip to content</a>
+<div class="shell" id="shell">
+  <header class="topbar">
+    <button class="icon-btn" type="button" id="menu-btn" aria-label="Open navigation" aria-controls="nav" aria-expanded="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+    <span class="brand-title" id="topbar-title">Application reference</span>
+    <button class="icon-btn" type="button" id="search-btn-small" aria-label="Search">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    </button>
+    <button class="icon-btn theme-btn" type="button" aria-label="Theme: system" data-theme-toggle>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4v16" /><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none"/></svg>
+    </button>
+  </header>
+  <nav class="nav" id="nav" aria-label="Application">
+    <div class="nav-head">
+      <p class="brand"><span id="brand-title">Application</span><small>reference</small></p>
+      <div class="tools">
+        <button class="search-btn" type="button" id="search-btn">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" style="fill:none;stroke:currentColor;stroke-width:1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <span>Search</span><kbd aria-hidden="true">⌘K</kbd>
+        </button>
+        <button class="icon-btn theme-btn" type="button" aria-label="Theme: system" data-theme-toggle>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none"/></svg>
+        </button>
       </div>
-      <nav class="nav" id="nav" aria-label="Operations by module"></nav>
-    </details>
-  </aside>
-  <main class="main" id="main">
-    <header class="head">
-      <h1 id="title">API</h1>
-      <p id="subtitle">Generated from the application definition this runtime is executing — the same one <code>usai inspect</code> and the router read.</p>
-      <div class="truth" id="truth"></div>
-    </header>
-    <div id="ops"></div>
-    <section class="section" id="workloads" hidden>
-      <h2>Also in this application</h2>
-      <p>Work that is not an HTTP operation but that these endpoints hand off to or that runs beside them — each in a fresh world of its own kind.</p>
-      <div id="workload-list"></div>
-    </section>
-    <section class="section" id="resources" hidden>
-      <h2>Resources and environment</h2>
-      <p>Owned by the runtime for its whole lifetime; a world leases one connection per operation and gets it back only after a terminal outcome.</p>
-      <div id="resource-list"></div>
-    </section>
-    <p class="footer">Served by the Usai runtime at <code>/_usai/docs</code> from <code>/_usai/openapi.json</code>. Nothing on this page is written by hand; when the application changes, this page changes with its next revision.</p>
-  </main>
+    </div>
+    <div id="nav-tree"></div>
+    <p class="foot">Generated from the definition this runtime executes. <a href="openapi.json">OpenAPI document</a>, <a href="openapi.json?profile=public">public profile</a>.</p>
+  </nav>
+  <main class="doc" id="doc" tabindex="-1"></main>
+  <aside class="panel closed-wide" id="panel" aria-label="Try it"></aside>
 </div>
+<dialog class="search" id="search" aria-label="Search this application">
+  <input id="search-input" type="search" aria-label="Search this application" placeholder="Search operations, tasks, resources, schemas" autocomplete="off" aria-controls="search-results" aria-activedescendant="">
+  <ul id="search-results" role="listbox"></ul>
+  <p class="foot"><span><kbd>↑</kbd> <kbd>↓</kbd> move</span><span><kbd>↵</kbd> open</span><span><kbd>esc</kbd> close</span></p>
+</dialog>
 
 <script>
 (async () => {
+  "use strict";
   const $ = (sel, root = document) => root.querySelector(sel);
   const el = (tag, attrs = {}, ...children) => {
     const node = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs)) {
       if (v === undefined || v === null || v === false) continue;
       if (k === "class") node.className = v;
-      else if (k === "html") node.innerHTML = v;
       else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
       else node.setAttribute(k, v === true ? "" : String(v));
     }
-    for (const c of children.flat()) if (c !== null && c !== undefined && c !== false) node.append(c instanceof Node ? c : document.createTextNode(String(c)));
+    for (const c of children.flat(Infinity)) if (c !== null && c !== undefined && c !== false) node.append(c instanceof Node ? c : document.createTextNode(String(c)));
     return node;
   };
-  const esc = (s) => String(s);
-  const methodClass = (m) => ["get", "post", "put", "patch", "delete"].includes(m) ? `m-${m}` : "m-other";
   const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+  const methodClass = (m) => ["get", "post", "put", "patch", "delete"].includes(m) ? `m-${m}` : "m-other";
   const humanMs = (ms) => ms >= 1000 ? `${ms / 1000} s` : `${ms} ms`;
+  const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+  const joinNodes = (nodes, sep = ", ") => nodes.flatMap((n, i) => (i ? [sep, n] : [n]));
+  const store = {
+    get(k, fallback = null) { try { const v = localStorage.getItem(k); return v === null ? fallback : v; } catch { return fallback; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch { /* private window, blocked storage */ } },
+    sget(k, fallback = null) { try { const v = sessionStorage.getItem(k); return v === null ? fallback : v; } catch { return fallback; } },
+    sset(k, v) { try { if (v === "" || v === null) sessionStorage.removeItem(k); else sessionStorage.setItem(k, v); } catch { /* same */ } },
+  };
+  const toast = (text) => {
+    const t = el("div", { class: "toast", role: "status" }, text);
+    document.body.append(t);
+    setTimeout(() => t.remove(), 1600);
+  };
+  const copyButton = (getText, label = "Copy") => {
+    const b = el("button", { class: "btn", type: "button" }, label);
+    b.addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(getText()); toast("Copied"); } catch { toast("Select the text and copy it"); }
+    });
+    return b;
+  };
 
+  // ---- theme: light / dark / system, a per-viewer convenience ------------------------
+  const THEME_KEY = "usai-docs-theme";
+  const themeOrder = ["system", "light", "dark"];
+  const applyTheme = (mode) => {
+    if (mode === "system") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", mode);
+    for (const b of document.querySelectorAll("[data-theme-toggle]")) b.setAttribute("aria-label", `Theme: ${mode}. Click to change`);
+  };
+  let theme = store.get(THEME_KEY, "system");
+  if (!themeOrder.includes(theme)) theme = "system";
+  applyTheme(theme);
+  for (const b of document.querySelectorAll("[data-theme-toggle]")) b.addEventListener("click", () => {
+    theme = themeOrder[(themeOrder.indexOf(theme) + 1) % themeOrder.length];
+    store.set(THEME_KEY, theme); applyTheme(theme); toast(`Theme: ${theme}`);
+  });
+
+  // ---- load the document -----------------------------------------------------------------
+  const doc$ = $("#doc");
   let doc;
   try {
-    doc = await (await fetch("openapi.json", { headers: { accept: "application/json" } })).json();
+    const res = await fetch("openapi.json", { headers: { accept: "application/json" } });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    doc = await res.json();
   } catch (e) {
-    $("#ops").append(el("p", { class: "empty-state" }, "Could not load openapi.json from this server: ", String(e)));
+    doc$.replaceChildren(el("div", { class: "error-page" },
+      el("h1", { class: "page-title" }, "The reference could not load"),
+      el("p", { class: "lede" }, "This page reads ", el("code", {}, "openapi.json"), " next to itself; the request failed. Is the runtime serving with ", el("code", {}, "--status"), " or on its ", el("code", {}, "--status-addr"), " listener?"),
+      el("pre", { class: "code" }, String(e))));
     return;
   }
-  const info = doc.info || {};
-  const title = info.title || "API";
-  document.title = `${title} — API reference`;
-  $("#title").textContent = `${title}`;
-  $("#brand-title").textContent = title;
-  $("#identity").textContent = info["x-usai-identity"] || info.version || "";
 
-  // ---- collect operations ----------------------------------------------------
+  // ---- model ---------------------------------------------------------------------------------
+  const info = doc.info || {};
+  const title = info.title || "Application";
+  const identity = info["x-usai-identity"] || info.version || "";
+  const components = (doc.components && doc.components.schemas) || {};
+  const securitySchemes = (doc.components && doc.components.securitySchemes) || {};
+  const modules = info["x-usai-modules"] || [];
+  const resources = (doc["x-usai-resources"] || []).map((r) => ({ ...r, pageId: `resources/${slug(r.name)}`, leasedBy: [] }));
+  const resourceByName = new Map(resources.map((r) => [r.name, r]));
+  const envReqs = doc["x-usai-env"] || [];
+
   const ops = [];
   for (const [path, methods] of Object.entries(doc.paths || {})) {
     for (const [method, op] of Object.entries(methods)) {
       if (!op || typeof op !== "object") continue;
-      ops.push({ path, method, op, id: `op-${slug(method + " " + path)}`, module: (op.tags || [])[0] });
+      const family = op["x-usai-socket"] ? "websockets" : op["x-usai-stream"] ? "streams" : "http";
+      ops.push({ kind: family, path, method, op, pageId: `${family}/${slug(method + " " + path)}`, legacyId: `op-${slug(method + " " + path)}`, module: (op.tags || [])[0], name: op.summary || `${method.toUpperCase()} ${path}` });
     }
   }
-  const workloads = doc["x-usai-workloads"] || [];
-  const resources = doc["x-usai-resources"] || [];
-  const envReqs = doc["x-usai-env"] || [];
-
-  const truth = $("#truth");
-  const counts = [];
-  counts.push(el("span", {}, el("b", {}, String(ops.length)), ` ${ops.length === 1 ? "operation" : "operations"}`));
-  if (workloads.length) counts.push(el("span", {}, el("b", {}, String(workloads.length)), ` other ${workloads.length === 1 ? "workload" : "workloads"}`));
-  if (resources.length) counts.push(el("span", {}, el("b", {}, String(resources.length)), ` ${resources.length === 1 ? "resource" : "resources"}`));
-  const modules = info["x-usai-modules"] || [];
-  if (modules.length) counts.push(el("span", {}, el("b", {}, String(modules.length)), ` ${modules.length === 1 ? "module" : "modules"}`));
-  truth.append(...counts);
-
-  // ---- sidebar ----------------------------------------------------------------
-  const nav = $("#nav");
-  const groups = new Map();
+  const KINDS = [
+    ["task", "tasks", "Tasks"], ["cron", "cron", "Cron"], ["queue", "queues", "Queues"],
+    ["service", "services", "Services"], ["command", "commands", "Commands"],
+  ];
+  const familyOf = (kind) => (KINDS.find(([k]) => k === kind) || [kind, `${kind}s`])[1];
+  const workloads = (doc["x-usai-workloads"] || []).map((w) => ({ ...w, pageId: `${familyOf(w.kind)}/${slug(w.name)}`, legacyId: `wl-${slug(w.id)}`, invokedBy: [], publishedBy: [] }));
+  const workloadById = new Map(workloads.map((w) => [w.id, w]));
+  const consumersOf = (topic) => workloads.filter((w) => w.kind === "queue" && w.detail && w.detail.topic === topic);
+  // Reverse links: who leases a resource, who hands off to a task, who publishes to a topic.
+  const link = (from) => ({ pageId: from.pageId, label: from.kind === "http" || from.kind === "streams" || from.kind === "websockets" ? `${from.method.toUpperCase()} ${from.path}` : from.name, sub: from.kind });
   for (const o of ops) {
+    for (const r of o.op["x-usai-resources"] || []) resourceByName.get(r.name)?.leasedBy.push(link(o));
+    for (const d of o.op["x-usai-dispatches"] || []) workloadById.get(d)?.invokedBy.push(link(o));
+    for (const t of o.op["x-usai-publishes"] || []) for (const c of consumersOf(t)) c.publishedBy.push({ ...link(o), topic: t });
+  }
+  for (const w of workloads) {
+    for (const name of w.resources || []) resourceByName.get(name)?.leasedBy.push(link(w));
+    for (const d of w.dispatches || []) workloadById.get(d)?.invokedBy.push(link(w));
+    for (const t of w.publishes || []) for (const c of consumersOf(t)) c.publishedBy.push({ ...link(w), topic: t });
+  }
+  const schemaNames = Object.keys(components).filter((n) => n !== "UsaiError").sort();
+
+  document.title = `${title} reference`;
+  $("#brand-title").textContent = title;
+  $("#topbar-title").textContent = `${title} reference`;
+
+  // ---- pages in nav order (also the search index and the prev/next order) ----------------------
+  const pages = [];
+  const addPage = (p) => { pages.push(p); return p; };
+  addPage({ id: "overview", group: "Overview", title: "Overview", search: `overview ${title} ${info.description || ""}` });
+  const opsByModule = new Map();
+  for (const o of ops.filter((o) => o.kind === "http")) {
     const key = o.module || "";
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(o);
+    if (!opsByModule.has(key)) opsByModule.set(key, []);
+    opsByModule.get(key).push(o);
   }
-  const navLinks = [];
-  const groupOrder = [...groups.keys()].sort((a, b) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)));
-  for (const key of groupOrder) {
-    const gid = `group-${slug(key || "app")}`;
-    nav.append(el("p", { class: "group", id: gid }, key || (groups.size > 1 ? "Application" : "Endpoints")));
-    const ul = el("ul", { "aria-labelledby": gid });
-    for (const o of groups.get(key)) {
-      const a = el("a", { href: `#${o.id}` }, el("span", { class: `m ${methodClass(o.method)}` }, o.method.toUpperCase()), el("span", { class: "path" }, o.path));
-      a.dataset.search = `${o.method} ${o.path} ${o.op.operationId || ""} ${o.op.summary || ""}`.toLowerCase();
-      navLinks.push(a);
-      ul.append(el("li", {}, a));
-    }
-    nav.append(ul);
-  }
-  if (!ops.length) nav.append(el("p", { class: "empty" }, "No HTTP operations are declared. Add an http.* workload and this list fills itself."));
-  if (workloads.length) {
-    nav.append(el("p", { class: "group", id: "group-other" }, "Also in this application"));
-    const ul = el("ul", { class: "other", "aria-labelledby": "group-other" });
-    for (const w of workloads) {
-      const a = el("a", { href: `#wl-${slug(w.id)}` }, el("span", { class: "path" }, w.name, el("span", { class: "kind" }, w.kind)));
-      a.dataset.search = `${w.kind} ${w.name}`.toLowerCase();
-      navLinks.push(a);
-      ul.append(el("li", {}, a));
-    }
-    nav.append(ul);
-  }
-  if (resources.length || envReqs.length) {
-    nav.append(el("p", { class: "group", id: "group-runtime" }, "Runtime"));
-    nav.append(el("ul", { class: "other", "aria-labelledby": "group-runtime" }, el("li", {}, el("a", { href: "#resources" }, el("span", { class: "path" }, "Resources and environment")))));
-  }
+  const moduleOrder = [...opsByModule.keys()].sort((a, b) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)));
+  for (const key of moduleOrder) for (const o of opsByModule.get(key)) addPage({ id: o.pageId, group: "HTTP", sub: key, title: `${o.method.toUpperCase()} ${o.path}`, op: o, search: `${o.method} ${o.path} ${o.op.operationId || ""} ${o.op.summary || ""} ${key}` });
+  for (const [family, label] of [["streams", "Streams"], ["websockets", "WebSockets"]]) for (const o of ops.filter((o) => o.kind === family)) addPage({ id: o.pageId, group: label, title: `${o.method.toUpperCase()} ${o.path}`, op: o, search: `${family} ${o.method} ${o.path} ${o.op.operationId || ""} ${o.module || ""}` });
+  for (const [kind, , label] of KINDS) for (const w of workloads.filter((w) => w.kind === kind)) addPage({ id: w.pageId, group: label, title: w.name, workload: w, search: `${kind} ${w.name} ${w.module || ""} ${(w.detail || {}).topic || ""} ${(w.detail || {}).schedule || ""}` });
+  for (const w of workloads.filter((w) => !KINDS.some(([k]) => k === w.kind))) addPage({ id: w.pageId, group: "Other workloads", title: w.name, workload: w, search: `${w.kind} ${w.name}` });
+  for (const r of resources) addPage({ id: r.pageId, group: "Resources", title: r.name, resource: r, search: `resource ${r.kind} ${r.name} ${r.module || ""}` });
+  if (envReqs.length) addPage({ id: "env", group: "Environment", title: "Environment", search: `environment ${envReqs.map((e) => e.name).join(" ")}` });
+  for (const n of schemaNames) addPage({ id: `schemas/${slug(n)}`, group: "Schemas", title: n, schema: n, search: `schema ${n} ${Object.keys((components[n] || {}).properties || {}).join(" ")}` });
+  const pageById = new Map(pages.map((p) => [p.id, p]));
+  const href = (id) => `#${id}`;
 
-  // The sidebar is a collapsible sheet on narrow screens and always open
-  // on wide ones (where the summary is hidden).
-  const sideDetails = $("#side-details");
-  const wide = matchMedia("(min-width: 881px)");
-  const syncSide = () => { sideDetails.open = wide.matches; };
-  syncSide(); wide.addEventListener("change", syncSide);
-  for (const a of navLinks) a.addEventListener("click", () => { if (!wide.matches) sideDetails.open = false; });
-
-  const filter = $("#filter");
-  const applyFilter = () => {
-    const q = filter.value.trim().toLowerCase();
-    for (const a of navLinks) a.parentElement.classList.toggle("hidden", q !== "" && !a.dataset.search.includes(q));
+  // ---- nav ---------------------------------------------------------------------------------------
+  const navTree = $("#nav-tree");
+  const navLinks = new Map();
+  const navLink = (p) => {
+    const a = p.op
+      ? el("a", { href: href(p.id) }, el("span", { class: `m ${methodClass(p.op.method)}` }, p.op.method.toUpperCase()), el("span", { class: "path" }, p.op.path))
+      : el("a", { href: href(p.id), class: "plain" }, el("span", { class: "path" }, p.title));
+    navLinks.set(p.id, a);
+    return el("li", {}, a);
   };
-  filter.addEventListener("input", applyFilter);
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "/" && !/input|textarea/i.test(document.activeElement?.tagName || "")) { e.preventDefault(); filter.focus(); filter.select(); }
-    if (e.key === "Escape" && document.activeElement === filter) { filter.value = ""; applyFilter(); filter.blur(); }
-  });
+  const navGroup = (label, items, render) => {
+    if (!items.length) return document.createDocumentFragment();
+    const key = `usai-docs-nav:${slug(label)}`;
+    const d = el("details", { open: store.get(key, "open") !== "closed" });
+    d.append(el("summary", {}, label, el("span", { class: "count" }, String(items.length))));
+    d.addEventListener("toggle", () => store.set(key, d.open ? "open" : "closed"));
+    d.append(render(items));
+    return d;
+  };
+  const top = el("ul", {}, el("li", {}, (() => { const a = el("a", { href: "#overview", class: "top plain" }, el("span", { class: "path" }, "Overview")); navLinks.set("overview", a); return a; })()));
+  navTree.append(top);
+  navTree.append(navGroup("HTTP", pages.filter((p) => p.group === "HTTP"), (items) => {
+    const ul = el("ul");
+    for (const key of moduleOrder) {
+      const these = items.filter((p) => (p.sub || "") === key);
+      if (!these.length) continue;
+      if (moduleOrder.length > 1 || key) ul.append(el("li", { class: "sub" }, key || "application"));
+      for (const p of these) ul.append(navLink(p));
+    }
+    return ul;
+  }));
+  for (const label of ["Streams", "WebSockets", ...KINDS.map(([, , l]) => l), "Other workloads", "Resources"]) {
+    navTree.append(navGroup(label, pages.filter((p) => p.group === label), (items) => el("ul", {}, items.map(navLink))));
+  }
+  if (envReqs.length) navTree.append(el("ul", { style: "margin-top:10px" }, navLink(pageById.get("env"))));
+  navTree.append(navGroup("Schemas", pages.filter((p) => p.group === "Schemas"), (items) => el("ul", {}, items.map(navLink))));
+  if (!ops.length && !workloads.length) navTree.append(el("p", { class: "empty" }, "Nothing declared yet. Declare an http.get(...) or a task and it appears here on the next revision."));
 
-  // ---- schema rendering -------------------------------------------------------
-  const components = (doc.components && doc.components.schemas) || {};
+  // Drawer behaviour under 1024 px.
+  const nav = $("#nav");
+  const menuBtn = $("#menu-btn");
+  const narrow = matchMedia("(max-width: 1023px)");
+  const wide3 = matchMedia("(min-width: 1280px)");
+  let backdrop = null;
+  const closeOverlays = () => {
+    nav.classList.remove("open"); menuBtn.setAttribute("aria-expanded", "false");
+    if (!wide3.matches) panel.classList.remove("open");
+    if (backdrop) { backdrop.remove(); backdrop = null; }
+  };
+  const showBackdrop = () => { if (!backdrop) { backdrop = el("div", { class: "backdrop", onclick: closeOverlays }); document.body.append(backdrop); } };
+  menuBtn.addEventListener("click", () => {
+    const open = !nav.classList.contains("open");
+    closeOverlays();
+    if (open) { nav.classList.add("open"); menuBtn.setAttribute("aria-expanded", "true"); showBackdrop(); nav.querySelector("a")?.focus(); }
+  });
+  nav.addEventListener("click", (e) => { if (e.target.closest("a") && narrow.matches) closeOverlays(); });
+
+  // ---- schema rendering --------------------------------------------------------------------------------
   const deref = (schema) => {
     if (schema && schema.$ref) {
       const name = schema.$ref.split("/").pop();
@@ -338,7 +528,7 @@
   };
   const typeOf = (s) => {
     s = deref(s);
-    if (s.enum) return `enum`;
+    if (s.enum) return "enum";
     if (s.const !== undefined) return `const ${JSON.stringify(s.const)}`;
     if (Array.isArray(s.type)) return s.type.join(" | ");
     if (s.anyOf || s.oneOf) return (s.anyOf || s.oneOf).map(typeOf).join(" | ");
@@ -346,6 +536,12 @@
     if (s.type) return s.format ? `${s.type} (${s.format})` : s.type;
     if (s.properties) return "object";
     return "any";
+  };
+  const typeCell = (s) => {
+    const name = s && s.$ref ? s.$ref.split("/").pop() : null;
+    const text = typeOf(s);
+    if (name && name !== "UsaiError" && components[name]) return el("a", { href: href(`schemas/${slug(name)}`) }, name);
+    return text;
   };
   const constraints = (s) => {
     s = deref(s);
@@ -360,37 +556,37 @@
     if (s.maxLength !== undefined) out.push(`max length ${s.maxLength}`);
     if (s.minItems !== undefined) out.push(`min items ${s.minItems}`);
     if (s.maxItems !== undefined) out.push(`max items ${s.maxItems}`);
-    if (s.pattern) out.push(`matches /${s.pattern}/`);
+    if (s.pattern && !s.format) out.push(`matches /${s.pattern}/`);
     if (s.default !== undefined) out.push(`default ${JSON.stringify(s.default)}`);
     if (s.description) out.unshift(s.description);
     return out;
   };
   const propsTable = (schema, depth = 0, opts = { markRequired: true }) => {
+    const raw = schema;
     schema = deref(schema);
     if (schema.type === "array" && schema.items) {
       const inner = deref(schema.items);
-      if (inner.properties) return el("div", {}, el("p", { class: "schema-note" }, `Array of objects, each:`), propsTable(inner, depth, opts));
-      return el("p", { class: "schema-note" }, `Array of ${typeOf(inner)}${constraints(inner).length ? " — " + constraints(inner).join("; ") : ""}.`);
+      if (inner.properties) return el("div", {}, el("p", { class: "note" }, "Array of objects, each:"), propsTable(schema.items, depth, opts));
+      return el("p", { class: "note" }, `Array of ${typeOf(inner)}${constraints(inner).length ? " — " + constraints(inner).join("; ") : ""}.`);
     }
     if (!schema.properties) {
       const c = constraints(schema);
-      return el("p", { class: "schema-note" }, `${typeOf(schema)}${c.length ? " — " + c.join("; ") : ""}.`);
+      return el("p", { class: "note" }, `${typeOf(raw)}${c.length ? " — " + c.join("; ") : ""}.`);
     }
     const required = new Set(schema.required || []);
-    const table = el("table", { class: "props" },
-      el("thead", {}, el("tr", {}, el("th", {}, "Field"), el("th", {}, "Type"), el("th", {}, "Notes"))));
+    const table = el("table", { class: "props" }, el("thead", {}, el("tr", {}, el("th", {}, "Field"), el("th", {}, "Type"), el("th", {}, "Notes"))));
     const tbody = el("tbody");
     for (const [name, sub] of Object.entries(schema.properties)) {
       const s = deref(sub);
-      const nested = (s.properties || (s.type === "array" && deref(s.items || {}).properties)) && depth < 4;
-      const notes = constraints(s).filter((c) => !(s.enum && c.startsWith("one of")) || true);
+      const nested = !(sub && sub.$ref) && (s.properties || (s.type === "array" && deref(s.items || {}).properties)) && depth < 4;
+      const notes = constraints(s);
       tbody.append(el("tr", {},
         el("td", { class: "name" }, el("code", {}, name), opts.markRequired && required.has(name) ? el("span", { class: "req", title: "required" }, "required") : null),
-        el("td", { class: "type" }, typeOf(s) + (!opts.markRequired && !required.has(name) ? "?" : "")),
+        el("td", { class: "type" }, typeCell(sub), !opts.markRequired && !required.has(name) ? "?" : ""),
         el("td", { class: "desc" }, notes.join("; ") || (opts.markRequired && !required.has(name) ? "optional" : ""), nested ? el("div", { class: "nested" }, propsTable(s, depth + 1, opts)) : null)));
     }
     table.append(tbody);
-    if (schema.additionalProperties === false) table.append(el("caption", { style: "caption-side:bottom;text-align:left;color:var(--muted);font-size:var(--text-xs);padding-top:6px" }, "Unknown fields are rejected."));
+    if (schema.additionalProperties === false) table.append(el("caption", {}, "Unknown fields are rejected."));
     return table;
   };
   const sample = (schema, depth = 0) => {
@@ -413,259 +609,616 @@
       if (schema.format === "uuid") return "6f1a2b3c-4d5e-4f60-8a71-92b3c4d5e6f7";
       if (schema.format === "email") return "ayu@example.com";
       if (schema.format === "date-time") return "2026-01-01T00:00:00Z";
+      if (schema.format === "date") return "2026-01-01";
       if (schema.format === "uri" || schema.format === "url") return "https://example.com/";
+      if (schema.pattern && /\\d\{4\}-\\d\{2\}-\\d\{2\}/.test(schema.pattern)) return "2026-01-01";
+      if (schema.pattern && /^\^?\[?[a-z0-9]/i.test(schema.pattern) && schema.pattern.includes("-")) return "example-slug";
+      if (schema.minLength && schema.minLength > 6) return "string".padEnd(schema.minLength, "x");
       return "string";
     }
     return null;
   };
+  // A contract slot: table by default, the JSON Schema on demand.
+  const slotBlock = (label, schema, whereNode, opts) => {
+    const wrap = el("div", { class: "slot" });
+    const table = propsTable(schema, 0, opts);
+    const json = el("pre", { class: "code", hidden: true }, el("code", {}, JSON.stringify(schema, null, 2)));
+    const seg = el("div", { class: "seg", role: "group", "aria-label": `${label} view` });
+    const bTable = el("button", { type: "button", "aria-pressed": "true" }, "Table");
+    const bJson = el("button", { type: "button", "aria-pressed": "false" }, "JSON Schema");
+    const pick = (showJson) => { table.hidden = showJson; json.hidden = !showJson; bTable.setAttribute("aria-pressed", String(!showJson)); bJson.setAttribute("aria-pressed", String(showJson)); };
+    bTable.addEventListener("click", () => pick(false)); bJson.addEventListener("click", () => pick(true));
+    seg.append(bTable, bJson);
+    wrap.append(el("div", { class: "slot-head" }, el("h3", {}, label), whereNode, seg), table, json);
+    return wrap;
+  };
 
-  // ---- lifecycle strip ---------------------------------------------------------
-  const lifecycle = (op, kindLabel) => {
-    const list = el("ol", { class: "life", "aria-label": "What this request does" });
-    const validated = op["x-usai-validated"] || {};
-    const before = Object.entries(validated).filter(([, w]) => w === "before-world").map(([s]) => s);
-    const inWorld = Object.entries(validated).filter(([, w]) => w === "in-world").map(([s]) => s);
-    const auth = op["x-usai-auth"];
-    if (op["x-usai-raw"]) {
-      list.append(el("li", { class: "boundary" }, el("span", { class: "step" }, "boundary"), el("span", { class: "what" }, "raw: exact bytes, no contracts")));
-    } else {
-      list.append(el("li", { class: "boundary" }, el("span", { class: "step" }, "boundary"),
-        el("span", { class: "what" },
-          before.length ? [`refused before a world exists: `, ...before.flatMap((s, i) => [i ? ", " : "", el("code", {}, s)])] : el("span", { class: "quiet" }, "no contracts declared"),
-          auth ? [" · auth ", el("code", {}, auth)] : null)));
-    }
-    const lifetime = op["x-usai-lifetime"] || kindLabel || "request";
-    const timeout = op["x-usai-timeout-ms"];
-    const conc = op["x-usai-max-concurrency"];
+  // ---- lifecycle strip: the centerpiece, every item a link ------------------------------------------
+  const workloadLink = (id) => {
+    const w = workloadById.get(id);
+    const [kind, ...rest] = String(id).split(":");
+    const name = rest.length ? rest.join(":") : id;
+    return w ? [el("a", { href: href(w.pageId) }, el("code", {}, name)), el("span", { class: "quiet" }, ` (${kind})`)] : [el("code", {}, name)];
+  };
+  const resourceLink = (name, kind) => {
+    const r = resourceByName.get(name);
+    const label = el("code", {}, `${kind || (r && r.kind) || "resource"}/${name}`);
+    return r ? el("a", { href: href(r.pageId) }, label) : label;
+  };
+  const topicLink = (topic) => {
+    const consumers = consumersOf(topic);
+    return consumers.length
+      ? [el("span", { class: "quiet" }, "topic "), el("code", {}, topic), el("span", { class: "quiet" }, ", consumed by "), ...joinNodes(consumers.map((c) => el("a", { href: href(c.pageId) }, el("code", {}, c.name))))]
+      : [el("span", { class: "quiet" }, "topic "), el("code", {}, topic), el("span", { class: "quiet" }, " (no consumer in this application)")];
+  };
+  const lifecycle = ({ validatedBefore = [], validatedInWorld = [], auth, raw, lifetime, timeoutMs, timeoutSource, concurrency, resources: res = [], dispatches = [], publishes = [], boundaryText, worldText }) => {
+    const list = el("ol", { class: "life", "aria-label": "What this unit of work does" });
+    list.append(el("li", { class: "boundary" }, el("span", { class: "step" }, "boundary"),
+      el("span", { class: "what" },
+        raw ? "raw: exact bytes, no contracts" : boundaryText ? boundaryText
+          : validatedBefore.length ? ["refused before a world exists: ", ...joinNodes(validatedBefore.map((s) => el("code", {}, s)))]
+          : el("span", { class: "quiet" }, "no contracts declared"),
+        auth ? [el("span", { class: "quiet" }, "; auth "), el("code", {}, auth)] : null)));
     list.append(el("li", { class: "world" }, el("span", { class: "step" }, "fresh world"),
-      el("span", { class: "what" }, `${lifetime} lifetime`, timeout ? [` · deadline ${humanMs(timeout)}`, op["x-usai-timeout-source"] === "default" ? el("span", { class: "quiet" }, " (runtime default)") : null] : "", conc ? ` · at most ${conc} at once` : "",
-        inWorld.length ? [" · validates in-world: ", ...inWorld.flatMap((s, i) => [i ? ", " : "", el("code", {}, s)])] : null)));
-    const res = op["x-usai-resources"] || [];
+      el("span", { class: "what" }, worldText || `${lifetime} lifetime`,
+        timeoutMs ? [`; deadline ${humanMs(timeoutMs)}`, timeoutSource === "default" ? el("span", { class: "quiet" }, " (runtime default)") : null] : null,
+        concurrency ? `; at most ${concurrency} at once` : null,
+        validatedInWorld.length ? ["; validates in-world: ", ...joinNodes(validatedInWorld.map((s) => el("code", {}, s)))] : null)));
     if (res.length) list.append(el("li", { class: "lease" }, el("span", { class: "step" }, "leases"),
-      el("span", { class: "what" }, ...res.flatMap((r, i) => [i ? ", " : "", el("code", {}, `${r.kind}/${r.name}`)]), el("span", { class: "quiet" }, " per operation"))));
-    const dispatches = op["x-usai-dispatches"] || [];
+      el("span", { class: "what" }, ...joinNodes(res.map((r) => resourceLink(r.name, r.kind))), el("span", { class: "quiet" }, " per operation"))));
     if (dispatches.length) list.append(el("li", { class: "handoff" }, el("span", { class: "step" }, "hands off"),
-      el("span", { class: "what" }, ...dispatches.flatMap((d, i) => {
-        const [kind, ...rest] = String(d).split(":");
-        const name = rest.length ? rest.join(":") : d;
-        return [i ? ", " : "", el("a", { href: `#wl-${slug(d)}` }, el("code", {}, name)), rest.length ? el("span", { class: "quiet" }, ` (${kind})`) : null];
-      }), el("span", { class: "quiet" }, " — in its own world, after this one answers"))));
+      el("span", { class: "what" }, ...joinNodes(dispatches.map(workloadLink)), el("span", { class: "quiet" }, "; in its own world, after this one answers"))));
+    if (publishes.length) list.append(el("li", { class: "publish" }, el("span", { class: "step" }, "publishes"),
+      el("span", { class: "what" }, ...joinNodes(publishes.map(topicLink), "; "), el("span", { class: "quiet" }, "; durable once this world commits"))));
     return list;
   };
-
-  // ---- operations --------------------------------------------------------------
-  const opsRoot = $("#ops");
-  const curlFor = (o) => {
-    const base = location.origin;
-    let path = o.path;
-    const params = o.op.parameters || [];
-    for (const p of params) if (p.in === "path") path = path.replace(`{${p.name}}`, encodeURIComponent(String(sample(p.schema || {}))));
-    const query = params.filter((p) => p.in === "query").map((p) => `${encodeURIComponent(p.name)}=${encodeURIComponent(String(sample(p.schema || {})))}`);
-    const url = `${base}${path}${query.length ? "?" + query.join("&") : ""}`;
-    const lines = [`curl -X ${o.method.toUpperCase()} '${url}'`];
-    for (const p of params.filter((p) => p.in === "header")) lines.push(`  -H '${p.name}: ${sample(p.schema || {})}'`);
-    if (o.op["x-usai-auth"]) lines.push(`  -H 'authorization: Bearer <token>'`);
-    const body = o.op.requestBody && o.op.requestBody.content && o.op.requestBody.content["application/json"];
-    if (body && body.schema) lines.push(`  -H 'content-type: application/json'`, `  -d '${JSON.stringify(sample(body.schema))}'`);
-    return lines.join(" \\\n");
-  };
-  const copyButton = (getText) => {
-    const b = el("button", { class: "btn", type: "button" }, "Copy");
-    b.addEventListener("click", async () => {
-      try { await navigator.clipboard.writeText(getText()); b.textContent = "Copied"; } catch { b.textContent = "Select and copy"; }
-      setTimeout(() => { b.textContent = "Copy"; }, 1500);
+  const lifecycleForOp = (op) => {
+    const validated = op["x-usai-validated"] || {};
+    return lifecycle({
+      validatedBefore: Object.entries(validated).filter(([, w]) => w === "before-world").map(([s]) => s),
+      validatedInWorld: Object.entries(validated).filter(([, w]) => w === "in-world").map(([s]) => s),
+      auth: op["x-usai-auth"], raw: op["x-usai-raw"], lifetime: op["x-usai-lifetime"] || "request",
+      timeoutMs: op["x-usai-timeout-ms"], timeoutSource: op["x-usai-timeout-source"], concurrency: op["x-usai-max-concurrency"],
+      resources: op["x-usai-resources"] || [], dispatches: op["x-usai-dispatches"] || [], publishes: op["x-usai-publishes"] || [],
     });
-    return b;
   };
 
-  for (const o of ops) {
+  // ---- snippets --------------------------------------------------------------------------------------
+  const requestPlan = (o, values) => {
+    // values: { path: {name: v}, query: {name: v}, header: {name: v}, body: string|null, base }
+    const params = o.op.parameters || [];
+    let path = o.path;
+    for (const p of params.filter((p) => p.in === "path")) path = path.replace(`{${p.name}}`, encodeURIComponent(values.path[p.name] ?? String(sample(p.schema || {}))));
+    const query = params.filter((p) => p.in === "query").map((p) => [p.name, values.query[p.name] ?? String(sample(p.schema || {}))]).filter(([, v]) => v !== "");
+    const headers = {};
+    for (const p of params.filter((p) => p.in === "header")) { const v = values.header[p.name] ?? String(sample(p.schema || {})); if (v !== "") headers[p.name] = v; }
+    const scheme = o.op["x-usai-auth"] && securitySchemes[o.op["x-usai-auth"]];
+    if (scheme) {
+      const stored = authValue(o.op["x-usai-auth"]);
+      if (scheme.type === "http") headers.authorization = stored ? `Bearer ${stored}` : "Bearer <token>";
+      else headers[scheme.name || "authorization"] = stored || "<value>";
+    }
+    const bodySchema = o.op.requestBody && o.op.requestBody.content && o.op.requestBody.content["application/json"] && o.op.requestBody.content["application/json"].schema;
+    let body = null;
+    if (values.body !== undefined && values.body !== null) body = values.body;
+    else if (bodySchema) body = JSON.stringify(sample(bodySchema));
+    if (body !== null) headers["content-type"] = "application/json";
+    const url = `${values.base}${path}${query.length ? "?" + query.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&") : ""}`;
+    return { method: o.method.toUpperCase(), url, path, query, headers, body };
+  };
+  const sh = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+  const snippets = {
+    curl(r) {
+      const lines = [`curl -X ${r.method} ${sh(r.url)}`];
+      for (const [k, v] of Object.entries(r.headers)) lines.push(`  -H ${sh(`${k}: ${v}`)}`);
+      if (r.body !== null) lines.push(`  -d ${sh(r.body)}`);
+      return lines.join(" \\\n");
+    },
+    javascript(r) {
+      const init = [`method: ${JSON.stringify(r.method)}`];
+      if (Object.keys(r.headers).length) init.push(`headers: ${JSON.stringify(r.headers, null, 2).replace(/\n/g, "\n  ")}`);
+      if (r.body !== null) init.push(`body: JSON.stringify(${prettyOrRaw(r.body).replace(/\n/g, "\n  ")})`);
+      return `const res = await fetch(${JSON.stringify(r.url)}, {\n  ${init.join(",\n  ")},\n});\nif (!res.ok) throw new Error(\`\${res.status}: \${await res.text()}\`);\nconst data = await res.json();`;
+    },
+    python(r) {
+      const args = [`${JSON.stringify(r.url)}`];
+      if (Object.keys(r.headers).length) args.push(`headers=${py(r.headers)}`);
+      if (r.body !== null) { let parsed; try { parsed = JSON.parse(r.body); } catch { parsed = null; } args.push(parsed !== null ? `json=${py(parsed)}` : `data=${JSON.stringify(r.body)}`); }
+      return `import requests\n\nres = requests.${r.method.toLowerCase()}(\n    ${args.join(",\n    ")},\n)\nres.raise_for_status()\ndata = res.json()`;
+    },
+  };
+  function prettyOrRaw(text) { try { return JSON.stringify(JSON.parse(text), null, 2); } catch { return JSON.stringify(text); } }
+  function py(v, indent = "    ") {
+    if (v === null) return "None"; if (v === true) return "True"; if (v === false) return "False";
+    if (Array.isArray(v)) return `[${v.map((x) => py(x, indent)).join(", ")}]`;
+    if (typeof v === "object") {
+      const entries = Object.entries(v);
+      if (!entries.length) return "{}";
+      return `{\n${entries.map(([k, x]) => `${indent}    ${JSON.stringify(k)}: ${py(x, indent + "    ")}`).join(",\n")}\n${indent}}`;
+    }
+    return JSON.stringify(v);
+  }
+  const snippetBlock = (o) => {
+    const wrap = el("div", { class: "sec" });
+    const tabs = el("ul", { class: "tabs", role: "tablist" });
+    const pre = el("pre", { class: "code" }, el("code", {}));
+    const langs = [["curl", "cURL"], ["javascript", "JavaScript"], ["python", "Python"]];
+    const LANG_KEY = "usai-docs-snippet";
+    let current = store.get(LANG_KEY, "curl");
+    if (!snippets[current]) current = "curl";
+    const render = () => { pre.firstChild.textContent = snippets[current](requestPlan(o, { path: {}, query: {}, header: {}, base: baseUrl() })); for (const b of tabs.querySelectorAll("button")) b.setAttribute("aria-selected", String(b.dataset.lang === current)); };
+    for (const [lang, label] of langs) tabs.append(el("li", {}, el("button", { type: "button", role: "tab", "data-lang": lang, "aria-selected": "false", onclick: () => { current = lang; store.set(LANG_KEY, lang); render(); } }, label)));
+    render();
+    wrap.append(el("h2", {}, "Example request"), el("p", {}, "Values are samples from the contracts; the token is the one remembered by Try it, when there is one."), el("div", { class: "codebar", style: "margin-top:12px" }, tabs, copyButton(() => pre.textContent)), pre);
+    return wrap;
+  };
+
+  // ---- auth once: per security scheme, remembered for this tab -----------------------------------------
+  const authKey = (scheme) => `usai-docs-auth:${scheme}`;
+  function authValue(scheme) { return store.sget(authKey(scheme), "") || ""; }
+  const baseKey = "usai-docs-base";
+  const baseUrl = () => store.sget(baseKey, "") || location.origin;
+
+  // ---- request panel ------------------------------------------------------------------------------------
+  const panel = $("#panel");
+  const shell = $("#shell");
+  let panelOp = null;
+  const openPanel = () => { if (wide3.matches) { panel.classList.remove("closed-wide"); shell.classList.remove("no-panel"); } else { closeOverlays(); panel.classList.add("open"); showBackdrop(); } panel.querySelector("input, textarea, button.primary")?.focus(); };
+  const renderPanel = (o) => {
+    panelOp = o;
+    panel.replaceChildren();
+    if (!o) {
+      panel.classList.add("closed-wide"); shell.classList.add("no-panel");
+      return;
+    }
+    panel.classList.remove("closed-wide"); shell.classList.remove("no-panel");
+    const params = o.op.parameters || [];
+    const bodySchema = o.op.requestBody && o.op.requestBody.content && o.op.requestBody.content["application/json"] && o.op.requestBody.content["application/json"].schema;
+    const form = el("form", { novalidate: true });
+    panel.append(el("h2", {}, "Try it", el("button", { type: "button", class: "icon-btn close", "aria-label": "Close", onclick: closeOverlays }, "×")),
+      el("p", { class: "target" }, el("span", { class: `m ${methodClass(o.method)}` }, o.method.toUpperCase()), " ", el("b", {}, o.path)), form);
+    // Server
+    const base = el("input", { type: "url", value: baseUrl(), "aria-describedby": "base-hint" });
+    base.addEventListener("change", () => { store.sset(baseKey, base.value === location.origin ? "" : base.value.replace(/\/$/, "")); refreshSnippets(); });
+    form.append(el("fieldset", {}, el("legend", {}, "Server"), el("label", {}, el("span", {}, "Base URL"), base), el("p", { class: "hint", id: "base-hint" }, "This page's own server unless you change it; another origin needs CORS.")));
+    // Auth
+    const schemeName = o.op["x-usai-auth"];
+    const scheme = schemeName && securitySchemes[schemeName];
+    if (schemeName) {
+      const input = el("input", { type: "password", value: authValue(schemeName), autocomplete: "off", spellcheck: "false" });
+      input.addEventListener("change", () => { store.sset(authKey(schemeName), input.value.trim()); refreshSnippets(); });
+      const what = scheme && scheme.type === "http" ? ["Bearer token (sent as ", el("code", {}, "authorization: Bearer …"), ")"] : [el("code", {}, (scheme && scheme.name) || "authorization"), " header value"];
+      form.append(el("fieldset", {}, el("legend", {}, `Auth: ${schemeName}`), el("label", {}, el("span", {}, ...what), input),
+        el("p", { class: "hint" }, "Remembered for this browser tab and applied to every operation that uses ", el("code", {}, schemeName), ". Closing the tab forgets it.")));
+    }
+    // Parameters
+    const inputs = [];
+    for (const loc of ["path", "query", "header"]) {
+      const these = params.filter((p) => p.in === loc);
+      if (!these.length) continue;
+      const fs = el("fieldset", {}, el("legend", {}, loc === "path" ? "Path" : loc === "query" ? "Query" : "Headers"));
+      for (const p of these) {
+        const input = el("input", { type: "text", value: p.schema && p.schema.default !== undefined ? String(p.schema.default) : p.in === "path" ? String(sample(p.schema || {})) : "", placeholder: typeOf(p.schema || {}) });
+        input.addEventListener("input", refreshSnippets);
+        inputs.push({ p, input });
+        fs.append(el("label", {}, el("span", {}, el("code", {}, p.name), p.required ? " (required)" : ""), input));
+      }
+      form.append(fs);
+    }
+    let bodyArea = null;
+    if (bodySchema) {
+      bodyArea = el("textarea", { spellcheck: "false" });
+      bodyArea.value = JSON.stringify(sample(bodySchema), null, 2);
+      bodyArea.rows = Math.min(bodyArea.value.split("\n").length + 1, 20);
+      bodyArea.addEventListener("input", refreshSnippets);
+      form.append(el("fieldset", {}, el("legend", {}, "Body"), el("label", {}, el("span", {}, "application/json"), bodyArea)));
+    } else if (o.op["x-usai-raw"] && !["GET", "HEAD"].includes(o.method.toUpperCase())) {
+      bodyArea = el("textarea", { spellcheck: "false", placeholder: "raw body (sent as text/plain)" });
+      form.append(el("fieldset", {}, el("legend", {}, "Body"), el("label", {}, el("span", {}, "raw"), bodyArea)));
+    }
+    const send = el("button", { class: "btn primary", type: "submit" }, "Send request");
+    const status = el("div", { class: "status", role: "status" });
+    const result = el("div", { class: "result", hidden: true });
+    const asCurl = el("button", { class: "btn", type: "button" }, "Copy as cURL");
+    asCurl.addEventListener("click", async () => { try { await navigator.clipboard.writeText(snippets.curl(currentPlan())); toast("Copied"); } catch { toast("Select the text and copy it"); } });
+    form.append(el("div", { class: "send-row" }, send, asCurl), status, result);
+    const values = () => {
+      const v = { path: {}, query: {}, header: {}, base: base.value.replace(/\/$/, "") || location.origin, body: bodyArea ? bodyArea.value : null };
+      for (const { p, input } of inputs) v[p.in][p.name] = input.value;
+      return v;
+    };
+    const currentPlan = () => requestPlan(o, values());
+    if (o.kind === "websockets") {
+      send.disabled = true;
+      form.append(el("p", { class: "hint" }, "A WebSocket is not sent from here; connect with ", el("code", {}, `new WebSocket(${JSON.stringify(baseUrl().replace(/^http/, "ws") + o.path)})`), "."));
+    }
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const plan = currentPlan();
+      const init = { method: plan.method, headers: { ...plan.headers } };
+      if (plan.body !== null) { init.body = plan.body; if (!bodySchema) init.headers["content-type"] = "text/plain"; }
+      send.disabled = true; status.replaceChildren(); result.hidden = true;
+      const t0 = performance.now();
+      try {
+        const res = await fetch(plan.url, init);
+        const isStream = o.kind === "streams";
+        const text = isStream ? await readSome(res) : await res.text();
+        const ms = Math.round(performance.now() - t0);
+        const serverMs = res.headers.get("x-usai-server-ms");
+        status.append(el("span", { class: res.ok ? "ok" : "bad" }, `${res.status} ${res.statusText}`.trim()), el("span", { class: "ms" }, `${ms} ms round trip${serverMs ? `, ${Number(serverMs).toFixed(2)} ms in the runtime` : ""}${isStream ? " (first chunks)" : ""}`));
+        let pretty = text;
+        try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch { /* not JSON */ }
+        const headersText = [...res.headers.entries()].map(([k, v]) => `${k}: ${v}`).join("\n");
+        result.replaceChildren(...tabbed([["Body", el("pre", { class: "code" }, pretty || "(empty body)")], ["Headers", el("pre", { class: "code" }, headersText)]]));
+        result.hidden = false;
+      } catch (err) {
+        status.append(el("span", { class: "bad" }, "Request failed"), el("span", { class: "ms" }, String(err && err.message || err)));
+      } finally { send.disabled = false; }
+    });
+  };
+  async function readSome(res) {
+    // Streams do not end on their own; show what arrives in the first second.
+    if (!res.body) return await res.text();
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let out = "";
+    const deadline = Date.now() + 1000;
+    while (Date.now() < deadline && out.length < 64 * 1024) {
+      const next = await Promise.race([reader.read(), new Promise((r) => setTimeout(() => r({ done: true }), Math.max(0, deadline - Date.now())))]);
+      if (next.done) break;
+      out += decoder.decode(next.value, { stream: true });
+    }
+    try { await reader.cancel(); } catch { /* closed */ }
+    return out;
+  }
+  const tabbed = (items) => {
+    const tabs = el("ul", { class: "tabs", role: "tablist" });
+    const panels = el("div");
+    items.forEach(([label, node], i) => {
+      const b = el("button", { type: "button", role: "tab", "aria-selected": String(i === 0) }, label);
+      node.hidden = i !== 0;
+      b.addEventListener("click", () => { for (const t of tabs.querySelectorAll("button")) t.setAttribute("aria-selected", String(t === b)); for (const p of panels.children) p.hidden = p !== node; });
+      tabs.append(el("li", {}, b)); panels.append(node);
+    });
+    return [tabs, panels];
+  };
+  let refreshSnippets = () => {};
+
+  // ---- pages -----------------------------------------------------------------------------------------------
+  const crumbs = (...parts) => el("p", { class: "crumbs" }, ...joinNodes(parts.map((p) => typeof p === "string" ? el("span", {}, p) : el("a", { href: href(p.id) }, p.title)), el("span", { "aria-hidden": "true" }, "/")));
+  const errorCodes = (op, status) => {
+    const declared = (op["x-usai-errors"] || []).filter((e) => String(e.status) === String(status)).map((e) => e.code);
+    if (String(status) === "400") return ["code ", el("code", {}, "validation_failed"), " with ", el("code", {}, "details.slot"), " and ", el("code", {}, "details.issues[].path"), " (JSON pointer). No world was created."];
+    if (String(status) === "401") return ["code ", el("code", {}, "unauthorized"), " from the auth boundary; the handler did not run."];
+    if (String(status) === "500") return ["code ", el("code", {}, "internal"), " (message sanitized), or the runtime's own codes such as ", el("code", {}, "detached_work"), "."];
+    if (declared.length) return [`declared code${declared.length > 1 ? "s" : ""}: `, ...joinNodes(declared.map((c) => el("code", {}, c)))];
+    return [];
+  };
+  const responsesBlock = (op) => {
+    const responses = Object.entries(op.responses || {});
+    const sec = el("div", { class: "sec" }, el("h2", {}, "Responses", el("span", { class: "n" }, String(responses.length))));
+    const items = responses.map(([status, r]) => {
+      const schema = r.content && r.content["application/json"] && r.content["application/json"].schema;
+      const isEnvelope = schema && deref(schema).__name === "UsaiError";
+      const node = el("div", {}, el("p", { class: "resp-desc" }, r.description || ""),
+        isEnvelope ? el("p", { class: "note" }, "Error envelope ", el("code", {}, `{ "error": { "code", "message", "details?" } }`), "; ", ...errorCodes(op, status))
+          : schema ? propsTable(schema, 0, { markRequired: false })
+          : el("p", { class: "note" }, status === "default" ? "Opaque response: the handler writes it." : "No body contract declared; the handler's return value is encoded as JSON."));
+      return [status, node, `st-${String(status)[0]}`];
+    });
+    const tabs = el("ul", { class: "tabs", role: "tablist" });
+    const panels = el("div");
+    items.forEach(([label, node, cls], i) => {
+      const b = el("button", { type: "button", role: "tab", class: cls, "aria-selected": String(i === 0) }, label);
+      node.hidden = i !== 0;
+      b.addEventListener("click", () => { for (const t of tabs.querySelectorAll("button")) t.setAttribute("aria-selected", String(t === b)); for (const p of panels.children) p.hidden = p !== node; });
+      tabs.append(el("li", {}, b)); panels.append(node);
+    });
+    sec.append(el("div", { style: "margin-top:12px" }, tabs), panels);
+    return sec;
+  };
+  const relatedList = (title, links, emptyText) => {
+    const sec = el("div", { class: "sec" }, el("h2", {}, title, el("span", { class: "n" }, String(links.length))));
+    if (!links.length) { sec.append(el("p", {}, emptyText)); return sec; }
+    const ul = el("ul", { class: "list" });
+    for (const l of links) {
+      const isHttp = l.label.includes(" /") && /^[A-Z]+ /.test(l.label);
+      const [m, ...rest] = l.label.split(" ");
+      ul.append(isHttp
+        ? el("li", {}, el("span", { class: `m ${methodClass(m.toLowerCase())}` }, m), el("a", { href: href(l.pageId) }, el("code", {}, rest.join(" ")), l.topic ? el("span", { class: "sub" }, `topic ${l.topic}`) : null))
+        : el("li", { class: "plain" }, el("a", { href: href(l.pageId) }, el("code", {}, l.label), el("span", { class: "sub" }, l.sub), l.topic ? el("span", { class: "sub" }, `topic ${l.topic}`) : null)));
+    }
+    sec.append(ul);
+    return sec;
+  };
+
+  const pageOp = (o) => {
     const op = o.op;
-    const section = el("section", { class: "op", id: o.id, "aria-labelledby": `${o.id}-h` });
-    section.append(el("h2", { id: `${o.id}-h` },
-      el("span", { class: `m ${methodClass(o.method)}` }, o.method.toUpperCase()),
-      el("code", {}, o.path),
-      el("a", { class: "anchor", href: `#${o.id}`, "aria-label": "Link to this operation" }, "#")));
+    const frag = document.createDocumentFragment();
+    const groupPage = { id: o.kind === "http" ? (pages.find((p) => p.group === "HTTP") || {}).id : (pages.find((p) => p.group === (o.kind === "streams" ? "Streams" : "WebSockets")) || {}).id, title: o.kind === "http" ? "HTTP" : o.kind === "streams" ? "Streams" : "WebSockets" };
+    frag.append(crumbs({ id: "overview", title }, o.module ? `${groupPage.title}: ${o.module}` : groupPage.title));
+    frag.append(el("h1", { class: "page-title", id: "page-h1" }, el("span", { class: `m ${methodClass(o.method)}` }, o.method.toUpperCase()), el("code", {}, o.path)));
     const norm = (t) => String(t).trim().toLowerCase().replace(/:([a-z0-9_]+)/gi, "{$1}");
-    const repeatsHeading = !op.summary || norm(op.summary) === norm(`${o.method} ${o.path}`);
-    section.append(el("p", { class: "summary" }, repeatsHeading ? null : [op.summary, " · "], el("span", { class: "id" }, op.operationId || ""), o.module ? [" · module ", el("b", {}, o.module)] : null));
-    if (op.description) section.append(el("p", { class: "desc" }, op.description));
-    section.append(lifecycle(op));
+    const summaryRepeats = !op.summary || norm(op.summary) === norm(`${o.method} ${o.path}`);
+    const lede = [];
+    if (!summaryRepeats) lede.push(op.summary + ". ");
+    if (op.description) lede.push(op.description);
+    if (o.kind === "streams" && !op.description) lede.push("Streaming response: the connection stays open until the handler returns.");
+    if (lede.length) frag.append(el("p", { class: "lede" }, ...lede));
+    const facts = el("div", { class: "facts" });
+    if (op.operationId) facts.append(el("span", { class: "fact" }, "operation", el("b", {}, el("code", {}, op.operationId))));
+    if (o.module) facts.append(el("span", { class: "fact" }, "module", el("b", {}, o.module)));
+    if (op["x-usai-auth"]) facts.append(el("span", { class: "fact" }, "auth", el("b", {}, op["x-usai-auth"])));
+    facts.append(el("span", { class: "fact" }, "lifetime", el("b", {}, op["x-usai-lifetime"] || "request")));
+    if (op["x-usai-timeout-ms"]) facts.append(el("span", { class: "fact" }, "deadline", el("b", {}, humanMs(op["x-usai-timeout-ms"]))));
+    frag.append(facts);
+    frag.append(el("div", { class: "actions-row" }, el("button", { type: "button", class: "btn primary try-here", onclick: openPanel }, "Try it")));
+    frag.append(lifecycleForOp(op));
+    if (o.kind === "streams") frag.append(el("p", { class: "life-note" }, "Connection-bound: the world commits at the first chunk sent, a client disconnect cancels it, and a draining revision closes it when the handler yields."));
+    if (o.kind === "websockets") frag.append(el("p", { class: "life-note" }, "Connection-bound: one world per connection for as long as it lives. A client disconnect cancels it; a draining revision closes the socket with 1012 (service restart). Messages follow the declared incoming/outgoing contracts, not HTTP bodies; an invalid incoming message is answered with an error envelope and dropped."));
+    else if (op["x-usai-dispatches"] && op["x-usai-dispatches"].length) frag.append(el("p", { class: "life-note" }, "Hand-off is ownership transfer: the task runs after this response is committed, and this world may not end with un-awaited work of its own."));
 
     // Request
     const params = op.parameters || [];
     const bodySchema = op.requestBody && op.requestBody.content && op.requestBody.content["application/json"] && op.requestBody.content["application/json"].schema;
     const validated = op["x-usai-validated"] || {};
     const where = (slot) => validated[slot] === "in-world" ? el("span", { class: "where w" }, "validated in the world") : validated[slot] === "before-world" ? el("span", { class: "where b" }, "validated before a world exists") : null;
+    const req = el("div", { class: "sec" }, el("h2", {}, "Request"));
     const slots = [["path", "params", "Path parameters"], ["query", "query", "Query"], ["header", "headers", "Headers"]];
-    const hasRequest = params.length || bodySchema || op["x-usai-raw"];
-    if (hasRequest) {
-      section.append(el("h3", {}, "Request"));
-      for (const [loc, slot, label] of slots) {
-        const these = params.filter((p) => p.in === loc);
-        if (!these.length) continue;
-        const pseudo = { type: "object", properties: Object.fromEntries(these.map((p) => [p.name, p.schema || {}])), required: these.filter((p) => p.required).map((p) => p.name) };
-        section.append(el("div", { class: "slot" }, el("h4", {}, label, where(slot)), propsTable(pseudo)));
-      }
-      if (bodySchema) section.append(el("div", { class: "slot" }, el("h4", {}, "Body ", el("span", { class: "where", style: "color:var(--muted)" }, "application/json"), where("body")), propsTable(bodySchema)));
-      if (op["x-usai-raw"]) section.append(el("p", { class: "schema-note" }, "Raw endpoint: the handler reads the exact bytes; no request contract is declared."));
+    let any = false;
+    for (const [loc, slot, label] of slots) {
+      const these = params.filter((p) => p.in === loc);
+      if (!these.length) continue;
+      any = true;
+      const pseudo = { type: "object", properties: Object.fromEntries(these.map((p) => [p.name, p.schema || {}])), required: these.filter((p) => p.required).map((p) => p.name) };
+      req.append(slotBlock(label, pseudo, where(slot)));
+    }
+    if (bodySchema) { any = true; req.append(slotBlock("Body", bodySchema, [el("span", { class: "where q" }, "application/json"), where("body")])); }
+    if (op["x-usai-raw"]) { any = true; req.append(el("p", { style: "margin-top:10px" }, "Raw endpoint: the handler reads the exact bytes; no request contract is declared.")); }
+    if (!any) req.append(el("p", {}, "No parameters or body."));
+    frag.append(req);
+    if (o.kind !== "websockets") frag.append(responsesBlock(op));
+    if (o.kind !== "websockets") {
+      const block = snippetBlock(o);
+      frag.append(block);
+      refreshSnippets = () => { const pre = block.querySelector("pre code"); const lang = [...block.querySelectorAll("[role=tab]")].find((b) => b.getAttribute("aria-selected") === "true"); if (pre && lang) pre.textContent = snippets[lang.dataset.lang](requestPlan(o, panelValuesFor(o))); };
     } else {
-      section.append(el("h3", {}, "Request"), el("p", { class: "schema-note" }, "No parameters or body."));
+      refreshSnippets = () => {};
     }
-
-    // Responses
-    const responses = Object.entries(op.responses || {});
-    section.append(el("h3", {}, "Responses ", el("span", { class: "n" }, `(${responses.length})`)));
-    const tabs = el("ul", { class: "responses", role: "tablist" });
-    const panels = el("div");
-    responses.forEach(([status, r], i) => {
-      const panelId = `${o.id}-r-${status}`;
-      const b = el("button", { type: "button", role: "tab", class: `st-${String(status)[0]}`, "aria-selected": i === 0 ? "true" : "false", "aria-controls": panelId }, status);
-      const schema = r.content && r.content["application/json"] && r.content["application/json"].schema;
-      const panel = el("div", { id: panelId, role: "tabpanel", hidden: i !== 0 },
-        el("p", { class: "resp-desc" }, r.description || ""),
-        schema ? (deref(schema).__name === "UsaiError" ? el("p", { class: "schema-note" }, "Error envelope: ", el("code", {}, `{ "error": { "code", "message", "details?" } }`), " — ", errorCodes(op, status)) : propsTable(schema, 0, { markRequired: false })) : el("p", { class: "schema-note" }, "No body contract declared; the handler's return value is encoded as JSON."));
-      b.addEventListener("click", () => {
-        for (const t of tabs.querySelectorAll("[role=tab]")) t.setAttribute("aria-selected", t === b ? "true" : "false");
-        for (const p of panels.children) p.hidden = p !== panel;
-      });
-      tabs.append(el("li", {}, b));
-      panels.append(panel);
-    });
-    section.append(tabs, panels);
-
-    // Example + try it
-    section.append(el("h3", {}, "Example"));
-    const curl = curlFor(o);
-    const pre = el("pre", { class: "code" }, el("code", {}, curl));
-    section.append(el("div", { class: "codebar" }, el("span", {}, "curl · values are samples from the contracts"), copyButton(() => pre.textContent)), pre);
-    section.append(tryIt(o, bodySchema));
-    opsRoot.append(section);
-  }
-  if (!ops.length) opsRoot.append(el("p", { class: "empty-state", style: "margin-top:40px" }, "This application declares no HTTP operations yet. Declare one with ", el("code", {}, "http.get(...)"), " and it appears here on the next revision."));
-
-  function errorCodes(op, status) {
-    const declared = (op["x-usai-errors"] || []).filter((e) => String(e.status) === String(status)).map((e) => e.code);
-    if (String(status) === "400") return "code validation_failed with details.slot and details.issues[].path (JSON pointer).";
-    if (String(status) === "401") return "code unauthorized from the auth boundary.";
-    if (String(status) === "500") return "code internal (message sanitized), or the runtime's own codes.";
-    if (declared.length) return `declared code${declared.length > 1 ? "s" : ""}: ${declared.join(", ")}.`;
-    return "";
-  }
-
-  function tryIt(o, bodySchema) {
-    const params = o.op.parameters || [];
-    const details = el("details", { class: "try" });
-    details.append(el("summary", {}, "Try it", el("span", { class: "hint" }, "sends a real request to this server")));
-    const body = el("div", { class: "body" });
-    const fields = el("div", { class: "fields" });
-    const inputs = [];
-    for (const p of params) {
-      const input = el("input", { type: "text", value: p.schema && (p.schema.default !== undefined) ? String(p.schema.default) : (p.in === "path" ? String(sample(p.schema || {})) : ""), "aria-label": `${p.in} ${p.name}` });
-      inputs.push({ p, input });
-      fields.append(el("label", {}, `${p.in} · ${p.name}${p.required ? " (required)" : ""}`, input));
+    return frag;
+  };
+  // Snippets follow what is typed in the panel, when the panel shows this operation.
+  const panelValuesFor = (o) => {
+    if (panelOp !== o) return { path: {}, query: {}, header: {}, base: baseUrl() };
+    const v = { path: {}, query: {}, header: {}, base: (panel.querySelector("input[type=url]") || {}).value || baseUrl(), body: null };
+    for (const fs of panel.querySelectorAll("fieldset")) {
+      const legend = fs.querySelector("legend").textContent;
+      const loc = legend === "Path" ? "path" : legend === "Query" ? "query" : legend === "Headers" ? "header" : null;
+      if (loc) for (const label of fs.querySelectorAll("label")) v[loc][label.querySelector("code").textContent] = label.querySelector("input").value;
+      if (legend === "Body") v.body = fs.querySelector("textarea").value;
     }
-    if (o.op["x-usai-auth"]) {
-      const input = el("input", { type: "text", placeholder: "Bearer <token>", "aria-label": "authorization header" });
-      inputs.push({ p: { in: "header", name: "authorization" }, input });
-      fields.append(el("label", {}, "header · authorization", input));
-    }
-    if (fields.children.length) body.append(fields);
-    let bodyArea = null;
-    if (bodySchema) {
-      bodyArea = el("textarea", { "aria-label": "request body (JSON)" });
-      bodyArea.value = JSON.stringify(sample(bodySchema), null, 2);
-      body.append(el("label", {}, "body · application/json", bodyArea));
-    }
-    const send = el("button", { class: "btn primary", type: "button" }, "Send request");
-    const status = el("div", { class: "status" });
-    const out = el("pre", { class: "code", hidden: true });
-    body.append(el("div", { class: "actions" }, send, status), el("div", { class: "result" }, out));
-    send.addEventListener("click", async () => {
-      let path = o.path;
-      const query = [];
-      const headers = {};
-      for (const { p, input } of inputs) {
-        const v = input.value;
-        if (p.in === "path") path = path.replace(`{${p.name}}`, encodeURIComponent(v));
-        else if (p.in === "query" && v !== "") query.push(`${encodeURIComponent(p.name)}=${encodeURIComponent(v)}`);
-        else if (p.in === "header" && v !== "") headers[p.name] = v;
+    v.base = v.base.replace(/\/$/, "");
+    return v;
+  };
+
+  const kindWord = { task: "task", cron: "cron job", command: "command", service: "service", queue: "queue consumer" };
+  const pageWorkload = (w) => {
+    const frag = document.createDocumentFragment();
+    const d = w.detail || {};
+    const groupLabel = (KINDS.find(([k]) => k === w.kind) || [, , "Other workloads"])[2];
+    frag.append(crumbs({ id: "overview", title }, groupLabel));
+    frag.append(el("h1", { class: "page-title", id: "page-h1" }, el("code", {}, w.name)));
+    const lede = {
+      task: ["A task runs in a fresh world when an endpoint or another workload hands it off (", el("code", {}, "ctx.tasks.dispatch"), ", ownership transferred) or awaits it (", el("code", {}, "ctx.tasks.invoke"), ", owned by the caller)."],
+      cron: ["Runs on the schedule ", el("code", {}, d.schedule || "?"), " in a fresh world per tick. ", d.overlap === "skip" ? "A tick that would overlap a running one is skipped." : d.overlap ? `Overlapping ticks: ${d.overlap}.` : ""],
+      command: ["Runs on demand from the command line, in a fresh world, with the runtime's resources available."],
+      service: ["Persistent: one world starts with the revision and stops when the revision drains.", d.restart ? ` Restart policy: ${d.restart}.` : ""],
+      queue: ["Consumes topic ", el("code", {}, d.topic || "?"), ", one fresh world per message", d.concurrency ? `, up to ${d.concurrency} at once` : "", ". A message is acknowledged when its world commits; a failure retries with backoff and dead-letters after the last attempt."],
+    }[w.kind] || [`A ${w.kind} workload.`];
+    frag.append(el("p", { class: "lede" }, ...lede));
+    const facts = el("div", { class: "facts" }, el("span", { class: "fact" }, "kind", el("b", {}, kindWord[w.kind] || w.kind)), el("span", { class: "fact" }, "lifetime", el("b", {}, w.lifetime)));
+    if (w.module) facts.append(el("span", { class: "fact" }, "module", el("b", {}, w.module)));
+    if (w.id) facts.append(el("span", { class: "fact" }, "id", el("b", {}, el("code", {}, w.id))));
+    frag.append(facts);
+    frag.append(lifecycle({
+      boundaryText: w.input ? ["input refused before a world exists"] : w.message ? ["message refused before a world exists"] : w.kind === "cron" ? [el("span", { class: "quiet" }, "the clock; nothing to validate")] : w.kind === "service" ? [el("span", { class: "quiet" }, "revision activation")] : w.kind === "command" ? [el("span", { class: "quiet" }, "arguments from the command line")] : undefined,
+      lifetime: w.lifetime === "persistent" ? "persistent" : w.lifetime === "connection" ? "connection" : `finite (${w.kind})`,
+      resources: (w.resources || []).map((name) => ({ name, kind: (resourceByName.get(name) || {}).kind })),
+      dispatches: w.dispatches || [], publishes: w.publishes || [],
+    }));
+    if (w.input) frag.append(el("div", { class: "sec" }, el("h2", {}, "Input"), slotBlock("Input", w.input, el("span", { class: "where b" }, "validated before a world exists"))));
+    if (w.message) frag.append(el("div", { class: "sec" }, el("h2", {}, "Message"), slotBlock("Message", w.message, el("span", { class: "where b" }, "validated before a world exists"))));
+    if (w.kind === "task" || w.kind === "queue") frag.append(relatedList(w.kind === "task" ? "Invoked or dispatched by" : "Published by", w.kind === "task" ? w.invokedBy : w.publishedBy, w.kind === "task" ? "Nothing in this application hands off to this task; it can still be run by hand." : "Nothing in this application publishes to this topic; messages arrive from outside or from another revision."));
+    const run = el("div", { class: "sec" }, el("h2", {}, "Run it by hand"));
+    const cmd = { task: `usai task run ${w.name} --input '${w.input ? JSON.stringify(sample(w.input)) : "{}"}'`, cron: `usai cron run ${w.name}`, command: `usai app ${w.name} [args]`, service: null, queue: null }[w.kind];
+    if (cmd) { const pre = el("pre", { class: "code" }, el("code", {}, cmd)); run.append(el("p", {}, w.kind === "cron" ? "One tick, without the wall clock, in a fresh world." : "One invocation in a fresh world, from the project root."), el("div", { class: "codebar", style: "margin-top:10px" }, el("span", { class: "note" }, "shell"), copyButton(() => pre.textContent)), pre); }
+    else run.append(el("p", {}, w.kind === "service" ? "Services are not run by hand: the runtime starts one with the revision. Watch it in /_usai/status." : "Queue consumers are driven by messages: publish one from an endpoint or a task and it runs."));
+    frag.append(run);
+    return frag;
+  };
+
+  const resourceText = {
+    postgres: "A connection pool owned by the runtime for its whole lifetime. A world leases one connection per operation and returns it only after a terminal outcome; a lease whose outcome is unknown is quarantined, then removed and replaced, never reused.",
+    "cache.local": "A runtime-local cache. It survives worlds and revisions in this process; it is not shared across processes or replicas.",
+    "http.client": "Outbound HTTP to one declared origin. Every request is a leased operation with a deadline and a concurrency bound; requests to another origin are refused before they leave.",
+  };
+  const pageResource = (r) => {
+    const frag = document.createDocumentFragment();
+    frag.append(crumbs({ id: "overview", title }, "Resources"));
+    frag.append(el("h1", { class: "page-title", id: "page-h1" }, el("code", {}, r.name)));
+    frag.append(el("p", { class: "lede" }, resourceText[r.kind] || "Owned by the runtime for its lifetime; worlds lease it per operation."));
+    const facts = el("div", { class: "facts" }, el("span", { class: "fact" }, "kind", el("b", {}, r.kind)));
+    if (r.module) facts.append(el("span", { class: "fact" }, "declared by", el("b", {}, r.module)));
+    frag.append(facts);
+    frag.append(relatedList("Leased by", r.leasedBy, "No workload leases this resource yet."));
+    return frag;
+  };
+  const pageEnv = () => {
+    const frag = document.createDocumentFragment();
+    frag.append(crumbs({ id: "overview", title }));
+    frag.append(el("h1", { class: "page-title", id: "page-h1" }, "Environment"));
+    frag.append(el("p", { class: "lede" }, "Checked when a revision activates, not at the first request: a missing required variable keeps the revision from ever serving."));
+    const t = el("table", { class: "props", style: "margin-top:20px" }, el("thead", {}, el("tr", {}, el("th", {}, "Variable"), el("th", {}, "Type"), el("th", {}, "Notes"))));
+    const tb = el("tbody");
+    for (const e of envReqs) tb.append(el("tr", {}, el("td", { class: "name" }, el("code", {}, e.name), e.required ? el("span", { class: "req" }, "required") : null), el("td", { class: "type" }, e.kind), el("td", { class: "desc" }, e.values && e.values.length ? `one of ${e.values.join(", ")}` : e.required ? "required" : "optional")));
+    t.append(tb); frag.append(t);
+    return frag;
+  };
+  const pageSchema = (name) => {
+    const frag = document.createDocumentFragment();
+    frag.append(crumbs({ id: "overview", title }, "Schemas"));
+    frag.append(el("h1", { class: "page-title", id: "page-h1" }, el("code", {}, name)));
+    const schema = components[name] || {};
+    if (schema.description) frag.append(el("p", { class: "lede" }, schema.description));
+    frag.append(slotBlock("Fields", schema, null));
+    const users = [];
+    for (const o of ops) if (JSON.stringify(o.op).includes(`"#/components/schemas/${name}"`)) users.push(link(o));
+    for (const w of workloads) if (JSON.stringify([w.input, w.message]).includes(`"#/components/schemas/${name}"`)) users.push(link(w));
+    frag.append(relatedList("Used by", users, "Not referenced by an operation directly."));
+    return frag;
+  };
+  const pageOverview = () => {
+    const frag = document.createDocumentFragment();
+    frag.append(el("h1", { class: "page-title", id: "page-h1" }, title));
+    frag.append(el("p", { class: "lede" }, info.description || ["Everything below is read from the application definition this runtime is executing, the same one ", el("code", {}, "usai inspect"), " and the router read. When the application changes, this page changes with its next revision."]));
+    const facts = el("div", { class: "facts" });
+    if (identity) facts.append(el("span", { class: "fact" }, "revision", el("b", {}, el("code", {}, identity))));
+    if (modules.length) facts.append(el("span", { class: "fact" }, plural(modules.length, "module"), el("b", {}, modules.join(", "))));
+    frag.append(facts);
+    const grid = el("div", { class: "overview-grid" });
+    const count = (label, n, id) => { if (n) grid.append(el("a", { href: href(id) }, el("b", {}, String(n)), el("span", {}, label))); };
+    const first = (group) => (pages.find((p) => p.group === group) || {}).id;
+    count(plural(ops.filter((o) => o.kind === "http").length, "HTTP operation").replace(/^\d+ /, ""), ops.filter((o) => o.kind === "http").length, first("HTTP"));
+    count("streams", ops.filter((o) => o.kind === "streams").length, first("Streams"));
+    count("WebSockets", ops.filter((o) => o.kind === "websockets").length, first("WebSockets"));
+    for (const [kind, , label] of KINDS) count(label.toLowerCase(), workloads.filter((w) => w.kind === kind).length, first(label));
+    count("resources", resources.length, first("Resources"));
+    count(plural(envReqs.length, "environment variable").replace(/^\d+ /, ""), envReqs.length, "env");
+    count("schemas", schemaNames.length, first("Schemas"));
+    frag.append(grid);
+    if (!ops.length && !workloads.length) frag.append(el("p", { class: "note", style: "margin-top:24px" }, "This application declares nothing yet. Declare an ", el("code", {}, "http.get(...)"), " or a ", el("code", {}, "task(...)"), " and it appears here on the next revision."));
+    // Modules with their operations.
+    if (opsByModule.size) {
+      const sec = el("div", { class: "sec" }, el("h2", {}, "HTTP operations"));
+      for (const key of moduleOrder) {
+        const these = opsByModule.get(key);
+        const ul = el("ul", { class: "list" });
+        for (const o of these) ul.append(el("li", {}, el("span", { class: `m ${methodClass(o.method)}` }, o.method.toUpperCase()), el("a", { href: href(o.pageId) }, el("code", {}, o.path), o.op.summary && slug(o.op.summary) !== slug(`${o.method} ${o.path}`) ? el("span", { class: "sub" }, o.op.summary) : null)));
+        if (moduleOrder.length > 1 || key) sec.append(el("h3", { style: "margin-top:18px;font-size:var(--text-sm)" }, key || "Application"));
+        sec.append(ul);
       }
-      const init = { method: o.method.toUpperCase(), headers };
-      if (bodyArea) { headers["content-type"] = "application/json"; init.body = bodyArea.value; }
-      send.disabled = true; status.textContent = ""; out.hidden = true;
-      const t0 = performance.now();
-      try {
-        const res = await fetch(`${path}${query.length ? "?" + query.join("&") : ""}`, init);
-        const text = await res.text();
-        const ms = Math.round(performance.now() - t0);
-        const serverMs = res.headers.get("x-usai-server-ms");
-        status.append(el("span", { class: res.ok ? "ok" : "bad" }, `${res.status} ${res.statusText}`), el("span", { class: "ms" }, `${ms} ms round trip${serverMs ? ` · ${Number(serverMs).toFixed(2)} ms in the runtime` : ""}`));
-        let pretty = text;
-        try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch { /* not JSON */ }
-        out.textContent = pretty || "(empty body)"; out.hidden = false;
-      } catch (e) {
-        status.append(el("span", { class: "bad" }, "request failed"), el("span", { class: "ms" }, String(e)));
-      } finally { send.disabled = false; }
+      frag.append(sec);
+    }
+    if (Object.keys(securitySchemes).length) {
+      const sec = el("div", { class: "sec" }, el("h2", {}, "Authentication"), el("p", {}, "Resolved before the handler runs; a rejected credential is a 401 and the handler never runs. Try it remembers one value per scheme for this browser tab."));
+      const dl = el("dl", { class: "rows" });
+      for (const [name, s] of Object.entries(securitySchemes)) dl.append(el("dt", {}, el("code", {}, name)), el("dd", {}, s.type === "http" ? [el("code", {}, "authorization: Bearer <token>")] : [el("code", {}, `${s.name || "authorization"}: <value>`), s.description ? ` (${s.description})` : ""]));
+      sec.append(dl); frag.append(sec);
+    }
+    const contract = el("div", { class: "sec" }, el("h2", {}, "How work enters this application"),
+      el("ul", { class: "contract" },
+        el("li", { class: "c-boundary" }, el("b", {}, "Boundary."), " Routing, decoding and schema rejections happen before any world exists; a 400 costs the application nothing. An auth rejection (401) stops before the handler."),
+        el("li", { class: "c-world" }, el("b", {}, "Fresh world."), " Every unit of work (a request, a task, a cron tick, a queue message) runs in a world of its own with a deadline; nothing leaks between two of them."),
+        el("li", { class: "c-lease" }, el("b", {}, "Leases."), " Resources are owned by the runtime and leased per operation; a connection comes back to the pool only after a terminal outcome."),
+        el("li", { class: "c-handoff" }, el("b", {}, "Hand-off."), " Work that outlives a response is dispatched to a task or published to a queue, explicitly; a world that ends with un-awaited work is a runtime error, not a silent drop.")));
+    frag.append(contract);
+    frag.append(el("p", { class: "colophon" }, "Served by the Usai runtime at ", el("code", {}, "/_usai/docs"), " from ", el("a", { href: "openapi.json" }, el("code", {}, "/_usai/openapi.json")), ". The ", el("a", { href: "openapi.json?profile=public" }, "public profile"), " of that document is the consumer contract without the runtime facts, the same file ", el("code", {}, "usai generate openapi --public"), " writes."));
+    return frag;
+  };
+
+  // ---- router --------------------------------------------------------------------------------------------------
+  const legacy = new Map();
+  for (const o of ops) legacy.set(o.legacyId, o.pageId);
+  for (const w of workloads) legacy.set(w.legacyId, w.pageId);
+  legacy.set("resources", resources.length ? resources[0].pageId : "overview");
+  const resolve = () => {
+    let id = decodeURIComponent(location.hash.slice(1)) || "overview";
+    if (legacy.has(id)) id = legacy.get(id);
+    return pageById.get(id) || null;
+  };
+  let currentPage = null;
+  const render = () => {
+    const page = resolve();
+    closeOverlays();
+    doc$.replaceChildren();
+    if (!page) {
+      doc$.append(el("div", { class: "error-page" }, el("h1", { class: "page-title", id: "page-h1" }, "Not in this application"),
+        el("p", { class: "lede" }, "Nothing is declared at ", el("code", {}, location.hash), " in this revision. Search for it, or start from the ", el("a", { href: "#overview" }, "overview"), "."),
+        el("div", { class: "actions-row" }, el("button", { type: "button", class: "btn", onclick: openSearch }, "Search"))));
+      renderPanel(null);
+    } else {
+      currentPage = page;
+      if (page.op) { doc$.append(pageOp(page.op)); renderPanel(page.op); }
+      else { refreshSnippets = () => {}; renderPanel(null); doc$.append(page.workload ? pageWorkload(page.workload) : page.resource ? pageResource(page.resource) : page.schema ? pageSchema(page.schema) : page.id === "env" ? pageEnv() : pageOverview()); }
+      const i = pages.indexOf(page);
+      const prev = pages[i - 1], next = pages[i + 1];
+      if (prev || next) doc$.append(el("nav", { class: "pager", "aria-label": "Previous and next" },
+        prev ? el("a", { href: href(prev.id), class: "prev" }, el("span", {}, "Previous"), el("b", {}, prev.title)) : el("span"),
+        next ? el("a", { href: href(next.id), class: "next" }, el("span", {}, "Next"), el("b", {}, next.title)) : null));
+      document.title = page.id === "overview" ? `${title} reference` : `${page.title}: ${title} reference`;
+    }
+    for (const [id, a] of navLinks) { if (page && id === page.id) { a.setAttribute("aria-current", "page"); const d = a.closest("details"); if (d) d.open = true; } else a.removeAttribute("aria-current"); }
+    const current = page && navLinks.get(page.id);
+    if (current && typeof current.scrollIntoView === "function") current.scrollIntoView({ block: "nearest" });
+    window.scrollTo({ top: 0 });
+    $("#page-h1")?.focus?.();
+  };
+  window.addEventListener("hashchange", render);
+
+  // ---- search ------------------------------------------------------------------------------------------------------------
+  const dialog = $("#search");
+  const input = $("#search-input");
+  const results = $("#search-results");
+  const openSearch = () => { if (typeof dialog.showModal !== "function") { location.hash = "#overview"; return; } dialog.showModal(); input.value = ""; runSearch(); input.focus(); };
+  $("#search-btn").addEventListener("click", openSearch);
+  $("#search-btn-small").addEventListener("click", openSearch);
+  let selected = 0;
+  const runSearch = () => {
+    const q = input.value.trim().toLowerCase();
+    const terms = q.split(/\s+/).filter(Boolean);
+    const score = (p) => terms.reduce((n, t) => n + (p.title.toLowerCase().includes(t) ? 2 : p.search.toLowerCase().includes(t) ? 1 : 0), 0);
+    const hits = pages.map((p, i) => ({ p, s: score(p), i })).filter((h) => h.s >= terms.length).sort((a, b) => b.s - a.s || a.i - b.i).map((h) => h.p).slice(0, 40);
+    results.replaceChildren();
+    if (!hits.length) { results.append(el("li", { class: "none" }, `Nothing matches “${input.value.trim()}” in this application.`)); return; }
+    let lastGroup = null;
+    hits.forEach((p, i) => {
+      if (p.group !== lastGroup) { results.append(el("li", { class: "group", role: "presentation" }, p.group)); lastGroup = p.group; }
+      const a = p.op
+        ? el("a", { href: href(p.id), role: "option", id: `sr-${i}`, "aria-selected": String(i === selected) }, el("span", { class: `m ${methodClass(p.op.method)}` }, p.op.method.toUpperCase()), el("span", { class: "t" }, el("code", {}, p.op.path), p.op.op.summary && slug(p.op.op.summary) !== slug(p.title) ? el("span", { class: "s" }, p.op.op.summary) : p.sub ? el("span", { class: "s" }, p.sub) : null))
+        : el("a", { href: href(p.id), role: "option", id: `sr-${i}`, class: "plain", "aria-selected": String(i === selected) }, el("span", { class: "t" }, el("code", {}, p.title), el("span", { class: "s" }, p.workload ? kindWord[p.workload.kind] || p.workload.kind : p.resource ? p.resource.kind : p.group.toLowerCase())));
+      a.addEventListener("click", () => dialog.close());
+      results.append(el("li", {}, a));
     });
-    details.append(body);
-    return details;
-  }
+    input.setAttribute("aria-activedescendant", `sr-${selected}`);
+  };
+  input.addEventListener("input", () => { selected = 0; runSearch(); });
+  input.addEventListener("keydown", (e) => {
+    const options = [...results.querySelectorAll("[role=option]")];
+    if (!options.length) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      selected = (selected + (e.key === "ArrowDown" ? 1 : options.length - 1)) % options.length;
+      options.forEach((o, i) => o.setAttribute("aria-selected", String(i === selected)));
+      options[selected].scrollIntoView({ block: "nearest" });
+      input.setAttribute("aria-activedescendant", `sr-${selected}`);
+    } else if (e.key === "Enter") { e.preventDefault(); options[selected]?.click(); }
+  });
+  dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
 
-  // ---- other workloads -----------------------------------------------------------
-  if (workloads.length) {
-    const sec = $("#workloads"); sec.hidden = false;
-    const list = $("#workload-list");
-    const kindWord = { task: "task", cron: "cron", command: "command", service: "service", queue: "queue consumer" };
-    for (const w of workloads) {
-      const card = el("article", { class: "card", id: `wl-${slug(w.id)}` });
-      card.append(el("h3", {}, w.name, el("span", { class: "kind" }, kindWord[w.kind] || w.kind), w.module ? el("span", { class: "kind" }, `· module ${w.module}`) : null));
-      const meta = el("p", { class: "meta" });
-      const d = w.detail || {};
-      if (w.kind === "task") meta.append(el("span", {}, "Runs when an endpoint hands it off (", el("code", {}, "ctx.tasks.dispatch"), ") or awaits it (", el("code", {}, "ctx.tasks.invoke"), "); ", el("code", {}, `usai task run ${w.name}`), " runs it by hand."));
-      if (w.kind === "cron") meta.append(el("span", {}, "Schedule ", el("b", {}, d.schedule || "?"), d.overlap ? ` · overlapping ticks: ${d.overlap}` : "", " · ", el("code", {}, `usai cron run ${w.name}`), " runs one tick without the clock."));
-      if (w.kind === "command") meta.append(el("span", {}, "Runs on demand: ", el("code", {}, `usai app ${w.name} [args]`), "."));
-      if (w.kind === "service") meta.append(el("span", {}, "Persistent: starts with the revision, stops when it drains", d.restart ? ` · restart: ${d.restart}` : "", "."));
-      if (w.kind === "queue") meta.append(el("span", {}, "Consumes topic ", el("b", {}, d.topic || "?"), d.concurrency ? ` · up to ${d.concurrency} message${d.concurrency > 1 ? "s" : ""} at once` : "", "; one fresh world per message."));
-      card.append(meta);
-      card.append(lifecycle({ "x-usai-validated": w.input ? { input: "before-world" } : (w.message ? { message: "before-world" } : {}), "x-usai-resources": (w.resources || []).map((name) => ({ name, kind: (resources.find((r) => r.name === name) || {}).kind || "resource" })), "x-usai-dispatches": w.dispatches || [] }, w.lifetime === "persistent" ? "persistent" : w.lifetime === "connection" ? "connection" : w.kind));
-      if (w.input) card.append(el("div", { class: "slot" }, el("h4", {}, "Input", el("span", { class: "where b" }, "validated before a world exists")), propsTable(w.input)));
-      if (w.message) card.append(el("div", { class: "slot" }, el("h4", {}, "Message", el("span", { class: "where b" }, "validated before a world exists")), propsTable(w.message)));
-      list.append(card);
+  // ---- keyboard ----------------------------------------------------------------------------------------------------------
+  document.addEventListener("keydown", (e) => {
+    const typing = /input|textarea|select/i.test(document.activeElement?.tagName || "") || document.activeElement?.isContentEditable;
+    if ((e.key === "k" || e.key === "K") && (e.metaKey || e.ctrlKey)) { e.preventDefault(); if (dialog.open) dialog.close(); else openSearch(); return; }
+    if (typing || dialog.open) return;
+    if (e.key === "/") { e.preventDefault(); openSearch(); }
+    else if (e.key === "Escape") closeOverlays();
+    else if ((e.key === "[" || e.key === "]") && currentPage) {
+      const i = pages.indexOf(currentPage) + (e.key === "]" ? 1 : -1);
+      if (pages[i]) location.hash = href(pages[i].id);
     }
-  }
+  });
 
-  // ---- resources + env ----------------------------------------------------------------
-  if (resources.length || envReqs.length) {
-    const sec = $("#resources"); sec.hidden = false;
-    const list = $("#resource-list");
-    if (resources.length) {
-      const t = el("table", { class: "props" }, el("thead", {}, el("tr", {}, el("th", {}, "Resource"), el("th", {}, "Kind"), el("th", {}, "Ownership"))));
-      const tb = el("tbody");
-      for (const r of resources) tb.append(el("tr", {}, el("td", { class: "name" }, el("code", {}, r.name)), el("td", { class: "type" }, r.kind), el("td", { class: "desc" }, r.kind === "postgres" ? "Pool owned by the runtime; one connection leased per operation, reused only after terminal proof, quarantined otherwise." : r.kind === "cache.local" ? "Runtime-local, survives worlds, not shared across processes." : "Owned by the runtime for its lifetime.")));
-      t.append(tb); list.append(el("div", { class: "slot" }, el("h4", {}, "Resources"), t));
-    }
-    if (envReqs.length) {
-      const t = el("table", { class: "props" }, el("thead", {}, el("tr", {}, el("th", {}, "Variable"), el("th", {}, "Type"), el("th", {}, "Notes"))));
-      const tb = el("tbody");
-      for (const e of envReqs) tb.append(el("tr", {}, el("td", { class: "name" }, el("code", {}, e.name), e.required ? el("span", { class: "req" }, "required") : null), el("td", { class: "type" }, e.kind), el("td", { class: "desc" }, e.values && e.values.length ? `one of ${e.values.join(", ")}` : (e.required ? "checked at activation, not at the first request" : "optional"))));
-      t.append(tb); list.append(el("div", { class: "slot" }, el("h4", {}, "Environment"), t));
-    }
-  }
-
-  // ---- current section in the sidebar -------------------------------------------------
-  const targets = [...document.querySelectorAll(".op, .card, #resources")];
-  const byId = new Map(navLinks.map((a) => [a.getAttribute("href").slice(1), a]));
-  const setCurrent = (id) => { for (const [k, a] of byId) a.toggleAttribute("aria-current", k === id) || a.removeAttribute("aria-current"); const a = byId.get(id); if (a) a.setAttribute("aria-current", "true"); };
-  if ("IntersectionObserver" in window) {
-    const visible = new Map();
-    const io = new IntersectionObserver((entries) => {
-      for (const e of entries) visible.set(e.target.id, e.isIntersecting ? e.boundingClientRect.top : Infinity);
-      const top = [...visible.entries()].filter(([, t]) => t !== Infinity).sort((a, b) => a[1] - b[1])[0];
-      if (top) setCurrent(top[0]);
-    }, { rootMargin: "-10% 0px -70% 0px" });
-    for (const t of targets) io.observe(t);
-  }
-  if (location.hash) { const t = document.getElementById(location.hash.slice(1)); if (t) t.scrollIntoView(); }
+  render();
 })();
 </script>
 </body>

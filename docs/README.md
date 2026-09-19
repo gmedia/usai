@@ -8,6 +8,7 @@
 |---|---|
 | [`STATUS.md`](STATUS.md) | every session — current milestone and next steps |
 | [`GUIDE.md`](GUIDE.md) | to build an application on the runtime as it is today |
+| [`sdk/`](sdk/README.md) | the SDK reference: every export of `@sakaladev/usai`, `/test` and `/config` with its signature, semantics and an example (generated from the source; `make docs`) |
 | [`../GOAL.md`](../GOAL.md) | before proposing structure, API, or scope |
 | [`LIFECYCLE-CONTRACTS.md`](LIFECYCLE-CONTRACTS.md) | before writing or reviewing runtime code |
 | [`GLOSSARY.md`](GLOSSARY.md) | when a term is unclear, or before reading research evidence |
@@ -33,6 +34,7 @@ docs/
   ACCEPTANCE-AUDIT.md       living: GOAL.md §53 items vs evidence
   measurements/             dated measurement reports (engineering evidence)
   GUIDE.md                  developer guide (v0 preview)
+  sdk/                      generated SDK reference (TypeDoc → markdown; never edit by hand)
   LIFECYCLE-CONTRACTS.md    binding invariants C1–C13
   GLOSSARY.md               vocabulary (production + research-era)
   RESEARCH-REFERENCE.md     map to the (private) research evidence
@@ -42,4 +44,4 @@ docs/
   adr/                      architecture decision records
 ```
 
-Developer-facing documentation (guides, API reference) will be added under `docs/` as milestones D3+ make it real. Do not write tutorials for features that do not exist.
+Developer-facing documentation is split three ways: the guide (`GUIDE.md`, how to build), the SDK reference (`sdk/`, what each export takes and promises, generated), and the application reference (`/_usai/docs` on a running application, what *this* application is and what happens when work enters it, generated from the definition the runtime executes). Do not write tutorials for features that do not exist.

@@ -62,10 +62,13 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.test.json",
-    "test": "node --test src/**/*.test.ts"
+    "test": "node --test src/**/*.test.ts",
+    "docs": "typedoc"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "typedoc": "0.28.20",
+    "typedoc-plugin-markdown": "4.13.0",
     "typescript": "^5.9.0"
   },
   "sideEffects": [

@@ -999,9 +999,15 @@ pub async fn db_seed(root: &Path, name: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-pub async fn generate_openapi(root: &Path, out: Option<PathBuf>) -> Result<()> {
+pub async fn generate_openapi(root: &Path, out: Option<PathBuf>, public: bool) -> Result<()> {
     let (definition, _) = definition_for(root, None).await?;
-    let document = usai_runtime::openapi::generate(&definition);
+    let config = RuntimeConfig::default();
+    let profile = if public {
+        usai_runtime::openapi::Profile::Public
+    } else {
+        usai_runtime::openapi::Profile::Internal
+    };
+    let document = usai_runtime::openapi::generate_with(&definition, &config, profile);
     let text = serde_json::to_string_pretty(&document)?;
     match out {
         Some(path) => {

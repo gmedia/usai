@@ -156,6 +156,10 @@ enum GenerateAction {
         /// Write to a file instead of stdout
         #[arg(long)]
         out: Option<PathBuf>,
+        /// The consumer contract only: no x-usai-* extensions, no workload,
+        /// resource or environment inventory (what ships to API consumers)
+        #[arg(long)]
+        public: bool,
     },
 }
 
@@ -385,8 +389,8 @@ async fn async_main() {
             duration,
         } => commands::bench(&root, &path, concurrency, Duration::from_secs(duration)).await,
         Command::Generate {
-            action: GenerateAction::Openapi { out },
-        } => commands::generate_openapi(&root, out).await,
+            action: GenerateAction::Openapi { out, public },
+        } => commands::generate_openapi(&root, out, public).await,
     };
     if let Err(error) = result {
         eprintln!("error: {error:#}");

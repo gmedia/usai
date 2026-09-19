@@ -7,6 +7,14 @@ import type { AuthDeclaration, Method, ResourceDeclaration, Workload, WorkloadPo
 import type { BaseContext } from "./runtime/context.ts";
 import type { HttpContracts } from "./declarations.ts";
 
+/** The second argument of an `http.stream` handler: the response, chunk
+ * by chunk. The first `send`/`event`/`start` **commits** the status and
+ * headers; after that the world is bound to the connection and ends when
+ * the handler returns, the client disconnects (the world is cancelled), or
+ * the revision drains.
+ *
+ * @category Streams and WebSockets
+ */
 export interface StreamHandle {
   /** Commit status/headers before the first chunk (optional). */
   start(options?: { status?: number; headers?: Record<string, string> }): Promise<void>;
@@ -16,6 +24,10 @@ export interface StreamHandle {
   event(name: string, data: unknown): Promise<void>;
 }
 
+/** The context of a streaming request: request facts plus {@link BaseContext}.
+ *
+ * @category Streams and WebSockets
+ */
 export interface StreamContext extends BaseContext {
   readonly method: Method;
   readonly path: string;
@@ -25,7 +37,12 @@ export interface StreamContext extends BaseContext {
   readonly headers: Record<string, string>;
 }
 
+/** Options for `http.stream`.
+ *
+ * @category Streams and WebSockets
+ */
 export interface StreamOptions extends WorkloadPolicies {
+  /** Default `GET`. */
   method?: Method;
   auth?: AuthDeclaration;
   resources?: ResourceDeclaration[];
@@ -33,6 +50,24 @@ export interface StreamOptions extends WorkloadPolicies {
   query?: HttpContracts["query"];
 }
 
+/**
+ * Declare a streaming endpoint (`http.stream`): a **connection-bound**
+ * world that lives until the handler returns. `params` and `query` are
+ * validated before the world exists; `timeout` bounds the whole stream.
+ * Chunks are `text/event-stream` by default (`stream.event(name, data)`
+ * writes one server-sent event); set `content-type` in `start` for
+ * anything else.
+ *
+ * @example
+ * ```ts
+ * export const events = http.stream("/events", { resources: [cache] }, async (ctx, stream) => {
+ *   while (!ctx.signal.aborted) {
+ *     await stream.event("tick", { total: await ctx.resources.cache.get("total") });
+ *     await ctx.sleep("1s");
+ *   }
+ * });
+ * ```
+ */
 function stream(path: string, options: StreamOptions, handler: (ctx: StreamContext, stream: StreamHandle) => unknown): Workload {
   const method = options.method ?? "GET";
   const contracts: Workload["contracts"] = {};
@@ -57,8 +92,15 @@ function stream(path: string, options: StreamOptions, handler: (ctx: StreamConte
   };
 }
 
+/** @internal Reached as `http.stream`. */
 export const streams = { stream };
 
+/** The context of a WebSocket connection, shared by `open`, `message` and
+ * `close`: request facts, `send`/`close`, connection-local `state`, and
+ * in `message` the validated incoming `message`.
+ *
+ * @category Streams and WebSockets
+ */
 export interface SocketContext<Incoming, Outgoing> extends BaseContext {
   readonly path: string;
   readonly url: string;
@@ -67,14 +109,26 @@ export interface SocketContext<Incoming, Outgoing> extends BaseContext {
   readonly headers: Record<string, string>;
   /** Connection-local mutable state: survives messages, ends with the connection. */
   readonly state: Record<string, unknown>;
+  /** Send one message (validated against `outgoing` when declared). */
   send(message: Outgoing): Promise<void>;
+  /** Close the connection; the world ends after `close` ran. */
   close(reason?: string): Promise<void>;
+  /** The current message (in the `message` handler). */
   readonly message: Incoming;
+  /** Why the connection closed (in the `close` handler). */
   readonly closeInfo: { code: number | null; reason: string } | null;
 }
 
+/** Options for {@link socket}.
+ *
+ * @category Streams and WebSockets
+ */
 export interface SocketOptions<I extends AnySchema | undefined, O extends AnySchema | undefined> extends WorkloadPolicies {
+  /** Schema for messages from the client. An invalid message is answered
+   * with a `validation_failed` error envelope and dropped; the connection
+   * stays open. */
   incoming?: I;
+  /** Schema for messages to the client. */
   outgoing?: O;
   auth?: AuthDeclaration;
   resources?: ResourceDeclaration[];
@@ -82,12 +136,38 @@ export interface SocketOptions<I extends AnySchema | undefined, O extends AnySch
 
 type Out<S> = S extends AnySchema ? Output<S> : unknown;
 
+/** The three moments of a connection.
+ *
+ * @category Streams and WebSockets
+ */
 export interface SocketHandlers<I, O> {
+  /** After the upgrade. */
   open?(ctx: SocketContext<I, O>): unknown;
+  /** Once per incoming message, in order. */
   message?(ctx: SocketContext<I, O>): unknown;
+  /** After the connection closed, whoever closed it. */
   close?(ctx: SocketContext<I, O>): unknown;
 }
 
+/**
+ * Declare a WebSocket endpoint: one **connection-bound** world per
+ * connection, from the upgrade to the close. `ctx.state` is the
+ * connection's mutable memory and ends with it; nothing is shared between
+ * connections except through resources. A client disconnect cancels the
+ * world; a draining revision closes the socket with 1012 (service
+ * restart) and `close` runs. `concurrency` bounds open connections.
+ *
+ * @example
+ * ```ts
+ * export const chat = socket("/chat", { incoming: ChatMessage, outgoing: ChatMessage, resources: [cache] }, {
+ *   open: async (ctx) => { ctx.state.joined = Date.now(); },
+ *   message: async (ctx) => { await ctx.send({ ...ctx.message, echoed: true }); },
+ *   close: async (ctx) => { await ctx.resources.cache.increment("closed"); },
+ * });
+ * ```
+ *
+ * @category Streams and WebSockets
+ */
 export function socket<I extends AnySchema | undefined = undefined, O extends AnySchema | undefined = undefined>(
   path: string,
   options: SocketOptions<I, O>,

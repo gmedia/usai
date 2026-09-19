@@ -106,7 +106,7 @@ pub async fn serve_internal(
                         async move {
                             let (parts, _) = request.into_parts();
                             let response = if parts.method == hyper::Method::GET {
-                                host.internal(parts.uri.path(), &parts.headers, true, true).await
+                                host.internal(&parts.uri, &parts.headers, true, true).await
                             } else {
                                 None
                             };

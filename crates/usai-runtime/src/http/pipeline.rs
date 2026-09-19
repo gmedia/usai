@@ -359,11 +359,12 @@ impl HttpHost {
     /// `--status-addr` (`serve_internal`), where they belong in production.
     pub async fn internal(
         &self,
-        path: &str,
+        uri: &http::Uri,
         headers: &http::HeaderMap,
         status: bool,
         docs: bool,
     ) -> Option<HttpResponse> {
+        let path = uri.path();
         if status {
             match path {
                 "/_usai/status" => {
@@ -433,6 +434,24 @@ impl HttpHost {
         }
         if docs {
             let compiled = self.compiled().ok()?;
+            // `?profile=public` is the consumer contract (what
+            // `usai generate openapi --public` writes); the page and the
+            // default are the internal profile.
+            let profile = form_urlencoded::parse(uri.query().unwrap_or("").as_bytes())
+                .find(|(key, _)| key == "profile")
+                .map(|(_, value)| {
+                    crate::openapi::Profile::parse(&value).ok_or_else(|| value.into_owned())
+                })
+                .unwrap_or(Ok(crate::openapi::Profile::Internal));
+            let profile = match profile {
+                Ok(profile) => profile,
+                Err(other) => {
+                    return Some(json_response(
+                        StatusCode::BAD_REQUEST,
+                        &json!({ "error": { "code": "unknown_profile", "message": format!("unknown OpenAPI profile {other:?}; use internal or public") } }),
+                    ));
+                }
+            };
             match path {
                 "/_usai/openapi.json" => {
                     return Some(json_response(
@@ -440,6 +459,7 @@ impl HttpHost {
                         &crate::openapi::generate_with(
                             &compiled.revision.definition,
                             self.runtime.config(),
+                            profile,
                         ),
                     ));
                 }
@@ -459,6 +479,7 @@ impl HttpHost {
                             &crate::openapi::generate_with(
                                 &compiled.revision.definition,
                                 self.runtime.config(),
+                                profile,
                             ),
                         ));
                     }
@@ -488,7 +509,7 @@ impl HttpHost {
         if parts.method == Method::GET
             && let Some(response) = self
                 .internal(
-                    &path,
+                    &parts.uri,
                     &parts.headers,
                     self.config.serve_status,
                     self.config.serve_docs,

@@ -5,13 +5,27 @@
 import type { AnySchema } from "./schema.ts";
 import type { EnvDeclaration, EnvField } from "./env.ts";
 
+/** HTTP methods an endpoint can declare.
+ *
+ * @category Application
+ */
 export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
 
+/** An error a workload declares it may answer with (`errors: [...]`), so
+ * the reference and the OpenAPI document list it.
+ *
+ * @category Application
+ */
 export interface DeclaredError {
   code: string;
   status: number;
 }
 
+/** What `auth.bearer`/`auth.header`/`auth.custom` return: a named
+ * boundary reused by reference. `Principal` is the type of `ctx.auth`.
+ *
+ * @category Application
+ */
 export interface AuthDeclaration<Principal = unknown> {
   readonly __usai: "auth";
   readonly name: string;
@@ -20,6 +34,12 @@ export interface AuthDeclaration<Principal = unknown> {
   readonly resolve: (ctx: unknown, credential: string | undefined) => Principal | Promise<Principal>;
 }
 
+/** What `postgres(...)`, `cache.local(...)` and `httpClient(...)` return.
+ * A plain object: the build reads it into the manifest, the runtime owns
+ * the resource it names, and a workload lists it under `resources`.
+ *
+ * @category Application
+ */
 export interface ResourceDeclaration {
   readonly __usai: "resource";
   readonly name: string;
@@ -32,13 +52,27 @@ export interface ResourceDeclaration {
   readonly methods: readonly string[];
 }
 
+/** Bounds every workload can declare.
+ *
+ * @category Application
+ */
 export interface WorkloadPolicies {
-  /** Per-invocation deadline, e.g. "5s", "500ms", or milliseconds. */
+  /** Per-invocation deadline (`"5s"`, `"500ms"`, or milliseconds). The
+   * world is cancelled when it passes; HTTP callers get 504. Undeclared:
+   * the runtime default (30 s) for requests, none for the other kinds. */
   timeout?: string | number;
-  /** Per-workload world budget (ADR-0012). */
+  /** How many worlds of this workload may run at once; the next request
+   * is refused with 503 `capacity_exhausted`, not queued (ADR-0012). */
   concurrency?: number;
 }
 
+/** The schema slots of an HTTP endpoint. Any Standard Schema
+ * (`zod`, `valibot`, `arktype`, …) works; slots whose schema can describe
+ * itself as JSON Schema are validated before a world exists, the others
+ * inside it.
+ *
+ * @category Application
+ */
 export interface HttpContracts {
   params?: AnySchema;
   query?: AnySchema;
@@ -47,12 +81,27 @@ export interface HttpContracts {
   response?: AnySchema | Record<number, AnySchema>;
 }
 
+/** Options of `http.get`/`post`/…: contracts, policies, errors, auth, resources.
+ *
+ * @category Application
+ */
 export interface HttpOptions extends HttpContracts, WorkloadPolicies {
+  /** Errors the handler throws, for the reference and the OpenAPI document. */
   errors?: DeclaredError[];
+  /** The authentication boundary; its principal is `ctx.auth`. */
   auth?: AuthDeclaration;
+  /** Resources this endpoint leases; only these are on `ctx.resources`. */
   resources?: ResourceDeclaration[];
 }
 
+/** A declared unit of work, whatever its kind — what every `http.*`,
+ * `task`, `cron`, `command`, `service`, `queue.consume`, `socket` and
+ * `http.stream` call returns and what `defineApp`/`defineModule` list.
+ * Plain data: the build phase reads it into the manifest, the runtime
+ * routes to it, `inspect`/`graph`/the reference page render it.
+ *
+ * @category Application
+ */
 export interface Workload {
   readonly __usai: "workload";
   readonly kind: "http" | "task" | "cron" | "command" | "service" | "queue" | "socket" | "stream";
@@ -77,6 +126,10 @@ export interface Workload {
   readonly handler: (...args: never[]) => unknown;
 }
 
+/** What {@link defineModule} returns.
+ *
+ * @category Application
+ */
 export interface ModuleDeclaration {
   readonly __usai: "module";
   readonly name: string;
@@ -86,18 +139,30 @@ export interface ModuleDeclaration {
   readonly seeders: readonly string[];
 }
 
+/** What {@link defineApp} returns: the application's default export.
+ *
+ * @category Application
+ */
 export interface AppDeclaration {
   readonly __usai: "app";
   readonly name: string;
+  readonly description?: string;
   readonly modules: readonly ModuleDeclaration[];
   readonly workloads: readonly Workload[];
   readonly resources: readonly ResourceDeclaration[];
   readonly env?: EnvDeclaration<Record<string, EnvField<unknown>>>;
 }
 
+/** Options for {@link defineModule}.
+ *
+ * @category Application
+ */
 export interface DefineModuleOptions {
+  /** Module name: groups operations in the reference and OpenAPI tags. */
   name: string;
   workloads?: Workload[];
+  /** Resources this module declares; the same resource may be declared by
+   * several modules with identical configuration. */
   resources?: ResourceDeclaration[];
   /** Glob(s) for this module's SQL migrations, relative to the project root
    * (e.g. `./src/billing/migrations/*.sql`). The bundle carries no source
@@ -107,6 +172,24 @@ export interface DefineModuleOptions {
   seeders?: string | string[];
 }
 
+/**
+ * Group workloads, resources, migrations and seeders under a name. A
+ * module is organisation, not isolation: its workloads run like any other,
+ * and a resource it declares is shared with every module that declares the
+ * same one. Modules are the unit that owns SQL migrations.
+ *
+ * @example
+ * ```ts
+ * export const invoices = defineModule({
+ *   name: "invoices",
+ *   workloads: [list, get, create, issue, pay, markOverdue],
+ *   resources: [db],
+ *   migrations: "./src/invoices/migrations/*.sql",
+ * });
+ * ```
+ *
+ * @category Application
+ */
 export function defineModule(options: DefineModuleOptions): ModuleDeclaration {
   return {
     __usai: "module",
@@ -118,18 +201,48 @@ export function defineModule(options: DefineModuleOptions): ModuleDeclaration {
   };
 }
 
+/** Options for {@link defineApp}.
+ *
+ * @category Application */
 export interface DefineAppOptions {
+  /** Application name: the OpenAPI title and the reference page's heading. */
   name?: string;
+  /** One paragraph about the application, shown on the reference page's
+   * overview and as `info.description` of the generated OpenAPI document.
+   * Plain text (no markup). Not part of the application identity. */
+  description?: string;
   modules?: ModuleDeclaration[];
   workloads?: Workload[];
   resources?: ResourceDeclaration[];
   env?: EnvDeclaration<Record<string, EnvField<unknown>>>;
 }
 
+/**
+ * The application root: the default export of the entry file. Everything
+ * the runtime will ever run is reachable from here — modules, top-level
+ * workloads, resources and the environment contract — which is why
+ * `usai inspect`, `usai graph`, the OpenAPI document and the reference
+ * page all read this one object. Declaring a workload twice, or leaving
+ * a hole in a list (a `const` used before it ran), is a build error that
+ * names the slot.
+ *
+ * @example
+ * ```ts
+ * export default defineApp({
+ *   name: "invoicing",
+ *   description: "Multi-tenant invoicing with webhook delivery.",
+ *   modules: [authModule, invoices, webhooks],
+ *   env: env({ DATABASE_URL: env.url(), SESSION_TTL_HOURS: env.optional(env.int()) }),
+ * });
+ * ```
+ *
+ * @category Application
+ */
 export function defineApp(options: DefineAppOptions = {}): AppDeclaration {
   const app: AppDeclaration = {
     __usai: "app",
     name: options.name ?? "app",
+    ...(options.description ? { description: options.description } : {}),
     modules: options.modules ?? [],
     workloads: options.workloads ?? [],
     resources: options.resources ?? [],

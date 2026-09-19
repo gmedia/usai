@@ -178,10 +178,16 @@ export default defineApp({ name: "hello", workloads: [hello] });
 
 Each request runs in a fresh execution world; invalid params are rejected
 before a world exists; `usai inspect` shows exactly what the runtime
-understood. `docs/GUIDE.md` walks through every workload kind (HTTP, tasks,
-cron, commands, PostgreSQL, queue, streams, WebSockets, services);
-`docs/STATUS.md` says what is implemented, what is measured, and what is
-not.
+understood. `docs/STATUS.md` says what is implemented, what is measured,
+and what is not.
+
+Three references, one per question:
+
+| Question | Where |
+|---|---|
+| How do I build with this? | [`docs/GUIDE.md`](docs/GUIDE.md) — every workload kind (HTTP, tasks, cron, commands, PostgreSQL, queue, streams, WebSockets, services), configuration, operations, testing |
+| What does `http.get` / `ctx.tasks.dispatch` / `postgres` take and promise? | [`docs/sdk/`](docs/sdk/README.md) — the SDK reference, generated from the source's doc comments |
+| What is *my* application and what happens when a request enters it? | `/_usai/docs` on a running application — the application reference, generated from the definition the runtime executes; `/_usai/openapi.json?profile=public` and `usai generate openapi --public` for the consumer contract |
 
 The developer surface is TypeScript and will change before the first
 developer preview.

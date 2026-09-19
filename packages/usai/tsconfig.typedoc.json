@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "noEmit": true,
+    "types": ["node"],
+    "lib": ["ES2022", "DOM"]
+  },
+  "include": ["src/index.ts", "src/test.ts", "src/config.ts", "globals.d.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}

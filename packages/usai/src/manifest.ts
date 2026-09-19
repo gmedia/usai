@@ -5,6 +5,10 @@
 import { type AppDeclaration, type Workload, flatten, parseDuration, workloadId } from "./declarations.ts";
 import { jsonSchemaOf } from "./schema.ts";
 
+/** The manifest format this SDK writes; the runtime states which formats
+ * it understands and refuses the others with a rebuild hint.
+ *
+ * @category Build */
 export const MANIFEST_VERSION = 1 as const;
 /** The version of this SDK, stamped into manifests it describes (provenance
  * for compatibility diagnostics; not part of the application's identity).
@@ -38,9 +42,16 @@ export interface ManifestWorkload {
   timeoutMs?: number;
 }
 
+/** What `usai build` writes to `manifest.json`: the application as data —
+ * every workload with its trigger, contracts (JSON Schema) and policies,
+ * every resource with its secret-free configuration, the auth schemes,
+ * the environment contract. Mirrors the runtime's `Manifest` exactly.
+ *
+ * @category Build */
 export interface Manifest {
   manifestVersion: 1;
   name: string;
+  description?: string;
   modules: Array<{ name: string; migrations: string[]; seeders: string[] }>;
   workloads: ManifestWorkload[];
   resources: Array<{ name: string; kind: string; module?: string; config: Record<string, unknown>; env: string[] }>;
@@ -100,6 +111,12 @@ function trigger(workload: Workload): ManifestWorkload["trigger"] {
   }
 }
 
+/** Turn an {@link AppDeclaration} into its {@link Manifest}. The build
+ * phase calls it inside a capability-less world; call it yourself to
+ * assert on an application's shape in a unit test. Throws on a duplicate
+ * workload, a conflicting resource redeclaration, or a hole in a list.
+ *
+ * @category Build */
 export function describe(app: AppDeclaration): Manifest {
   const { workloads, resources } = flatten(app);
   const authByName = new Map<string, { name: string; scheme: string; header?: string }>();
@@ -130,6 +147,7 @@ export function describe(app: AppDeclaration): Manifest {
   return {
     manifestVersion: MANIFEST_VERSION,
     name: app.name,
+    ...(app.description !== undefined ? { description: app.description } : {}),
     modules: app.modules.map((m) => ({ name: m.name, migrations: [...m.migrations], seeders: [...m.seeders] })),
     workloads: manifestWorkloads,
     resources: resources.map(({ resource, module }) => ({

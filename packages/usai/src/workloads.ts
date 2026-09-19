@@ -6,16 +6,66 @@ import type { AnySchema, Output } from "./schema.ts";
 import type { DeclaredError, ResourceDeclaration, Workload, WorkloadPolicies } from "./declarations.ts";
 import type { BaseContext } from "./runtime/context.ts";
 
+/** Options for {@link task}.
+ *
+ * @category Tasks, cron, commands, services
+ */
 export interface TaskOptions<I extends AnySchema | undefined> extends WorkloadPolicies {
+  /** Schema for the input; validated before the task's world exists. */
   input?: I;
+  /** Errors the handler throws, for the reference. */
   errors?: DeclaredError[];
+  /** Resources this task leases. */
   resources?: ResourceDeclaration[];
 }
 
+/** The context of one task invocation: the validated `input` plus
+ * {@link BaseContext}.
+ *
+ * @category Tasks, cron, commands, services
+ */
 export interface TaskContext<I> extends BaseContext {
   readonly input: I;
 }
 
+/**
+ * Declare a task: a named unit of finite work that other workloads invoke
+ * or dispatch, and that `usai task run <name>` runs by hand.
+ *
+ * A task always runs in a **fresh world of its own**, never inside the
+ * caller's. Who owns that world is the caller's choice at the call site:
+ * `ctx.tasks.invoke(task, input)` is **owned** — the caller waits for the
+ * result and the child is cancelled with the caller; `ctx.tasks.dispatch(task,
+ * input)` is **ownership transfer** — the task runtime owns the child, the
+ * caller's world may end, and the returned `{ id }` is the only handle.
+ * There is no third option: a finite world that ends with live async work
+ * is a runtime error. Dispatch is in-process and not durable across a
+ * restart; for durable hand-off publish to a queue.
+ *
+ * @param name Unique within the application; the id is `task:<name>`.
+ * @param options Input schema, errors, resources, `timeout`, `concurrency`.
+ * @param handler Runs in the task's world; its return value is the
+ * `invoke` result.
+ *
+ * @example
+ * ```ts
+ * export const sendReceipt = task("send-receipt", { input: Receipt, resources: [db, mailer] }, async (ctx) => {
+ *   const order = await ctx.resources.db.one("select … where id = $1", [ctx.input.orderId]);
+ *   await ctx.resources.mailer.fetch("/send", { json: order });
+ * });
+ * // From an endpoint: hand it off, then answer.
+ * export const pay = dispatches(
+ *   http.post("/orders/:id/pay", { params: Id, resources: [db] }, async (ctx) => {
+ *     await ctx.resources.db.execute("update orders set paid = true where id = $1", [ctx.params.id]);
+ *     await ctx.tasks.dispatch(sendReceipt, { orderId: ctx.params.id });
+ *     return http.accepted({ ok: true });
+ *   }),
+ *   sendReceipt,
+ * );
+ * ```
+ *
+ * @category Tasks, cron, commands, services
+ */
 export function task<I extends AnySchema | undefined = undefined>(
   name: string,
   options: TaskOptions<I>,
@@ -39,16 +89,55 @@ export function task<I extends AnySchema | undefined = undefined>(
   };
 }
 
+/** Options for {@link cron}.
+ *
+ * @category Tasks, cron, commands, services
+ */
 export interface CronOptions extends WorkloadPolicies {
+  /** Cron expression, UTC: five fields (`minute hour day-of-month month
+   * day-of-week`) or six with leading seconds. Validated at install. */
   schedule: string;
+  /** What to do when a tick is due while the previous one still runs.
+   * `skip` (default) drops the tick; `allow` starts another world. */
   overlap?: "allow" | "skip";
+  /** Resources the tick leases. */
   resources?: ResourceDeclaration[];
 }
 
+/** The context of one cron tick: `scheduledAt` (ISO 8601, the tick's
+ * nominal time) plus {@link BaseContext}.
+ *
+ * @category Tasks, cron, commands, services
+ */
 export interface CronContext extends BaseContext {
   readonly scheduledAt: string;
 }
 
+/**
+ * Declare a scheduled job. Each due tick runs in a **fresh world**, finite,
+ * bounded by `timeout`. The scheduler belongs to the revision: it starts
+ * when the revision activates and stops when it drains, so two revisions
+ * never tick the same job at once. A missed tick (the process was down)
+ * is not replayed. `usai cron run <name>` runs one tick without the
+ * clock, and `app.cron(name).run()` does the same in tests.
+ *
+ * @param name Unique within the application; the id is `cron:<name>`.
+ * @param options `schedule` (required), `overlap`, resources, `timeout`.
+ * @param handler Runs once per tick.
+ *
+ * @example
+ * ```ts
+ * export const markOverdue = publishes(
+ *   cron("mark-overdue", { schedule: "15 0 * * *", resources: [db] }, async (ctx) => {
+ *     const rows = await ctx.resources.db.query("update invoices … returning id");
+ *     for (const row of rows) await ctx.queue.publish("webhook.deliver", { event: "invoice.overdue", id: row.id });
+ *   }),
+ *   "webhook.deliver",
+ * );
+ * ```
+ *
+ * @category Tasks, cron, commands, services
+ */
 export function cron(name: string, options: CronOptions, handler: (ctx: CronContext) => unknown): Workload {
   const policies: WorkloadPolicies = {};
   if (options.timeout !== undefined) policies.timeout = options.timeout;
@@ -68,10 +157,31 @@ export function cron(name: string, options: CronOptions, handler: (ctx: CronCont
   };
 }
 
+/** The context of one command run: the command-line `args` plus
+ * {@link BaseContext}.
+ *
+ * @category Tasks, cron, commands, services
+ */
 export interface CommandContext extends BaseContext {
   readonly args: string[];
 }
 
+/**
+ * Declare a command: finite work run on demand from the command line
+ * (`usai app <name> [args]`), in a fresh world with the declared resources.
+ * The return value is printed as JSON; a thrown error exits non-zero.
+ * Commands are for operators (a stats report, a one-off repair), not for
+ * startup: nothing runs a command unless someone asks.
+ *
+ * @example
+ * ```ts
+ * export const stats = command("invoices:stats", { resources: [db] }, async (ctx) =>
+ *   ctx.resources.db.one("select count(*)::int as invoices from invoices"),
+ * );
+ * ```
+ *
+ * @category Tasks, cron, commands, services
+ */
 export function command(name: string, handler: (ctx: CommandContext) => unknown): Workload;
 export function command(name: string, options: WorkloadPolicies & { resources?: ResourceDeclaration[] }, handler: (ctx: CommandContext) => unknown): Workload;
 export function command(name: string, a: unknown, b?: unknown): Workload {
@@ -94,11 +204,22 @@ export function command(name: string, a: unknown, b?: unknown): Workload {
   };
 }
 
+/** The context of a service: {@link BaseContext} plus `sleep`. Watch
+ * `ctx.signal` — it aborts when the revision drains, and `sleep` resolves
+ * early then.
+ *
+ * @category Tasks, cron, commands, services
+ */
 export interface ServiceContext extends BaseContext {
   sleep(duration: string | number): Promise<void>;
 }
 
+/** Options for {@link service}.
+ *
+ * @category Tasks, cron, commands, services
+ */
 export interface ServiceOptions {
+  /** Resources the service leases (per operation, like every world). */
   resources?: ResourceDeclaration[];
   /** What happens when the service ends. Default `never`: it stays ended
    * until the next revision. `on-failure` restarts after a throw; `always`
@@ -106,6 +227,27 @@ export interface ServiceOptions {
   restart?: { mode: "never" | "on-failure" | "always"; backoffMs?: number; maxRestarts?: number };
 }
 
+/**
+ * Declare a service: the one **persistent** lifetime. One world starts
+ * when the revision activates, runs the handler, and is asked to stop
+ * (`ctx.signal` aborts) when the revision drains; a handler that ignores
+ * the signal is cancelled at the drain bound. The handler returning or
+ * throwing ends the service; `restart` decides what happens next. A
+ * service is supervised per revision, so a replacement revision gets its
+ * own instance and the old one stops with its revision.
+ *
+ * @example
+ * ```ts
+ * export const ticker = service("ticker", { resources: [cache], restart: { mode: "on-failure" } }, async (ctx) => {
+ *   while (!ctx.signal.aborted) {
+ *     await ctx.resources.cache.increment("ticks");
+ *     await ctx.sleep("1s");
+ *   }
+ * });
+ * ```
+ *
+ * @category Tasks, cron, commands, services
+ */
 export function service(name: string, handler: (ctx: ServiceContext) => unknown): Workload;
 export function service(name: string, options: ServiceOptions, handler: (ctx: ServiceContext) => unknown): Workload;
 export function service(name: string, a: unknown, b?: unknown): Workload {
@@ -127,30 +269,53 @@ export function service(name: string, a: unknown, b?: unknown): Workload {
   };
 }
 
-/** Records that `from` dispatches `to`, for `usai graph`. Returns `from`. */
+/** Record that `from` invokes or dispatches the tasks `to`, so that `usai
+ * graph`, `inspect` and the reference page show the edge (the runtime
+ * refuses a dispatch to a task that does not exist either way). Returns
+ * `from`, so it wraps a declaration in place.
+ *
+ * @category Tasks, cron, commands, services
+ */
 export function dispatches(from: Workload, ...to: Workload[]): Workload {
   (from.dispatches as Workload[]).push(...to);
   return from;
 }
 
-/** Records that `from` publishes to queue topics (names, or the consuming
- * `queue.consume` workloads), for `usai graph` and the API docs. Returns `from`. */
+/** Record that `from` publishes to queue topics (names, or the consuming
+ * `queue.consume` workloads), for `usai graph` and the reference page.
+ * Returns `from`, so it wraps a declaration in place.
+ *
+ * @category Tasks, cron, commands, services
+ */
 export function publishes(from: Workload, ...topics: Array<string | Workload>): Workload {
   (from.publishes as string[]).push(...topics.map((t) => (typeof t === "string" ? t : t.name)));
   return from;
 }
 
+/** The context a seeder runs with: {@link BaseContext}.
+ *
+ * @category Tasks, cron, commands, services
+ */
 export interface SeederContext extends BaseContext {}
 
 /** A seeder file's default export. Discovered by `usai db seed`, run as
  * finite work with access to the declared resources; never part of
- * startup. */
+ * startup.
+ *
+ * @category Tasks, cron, commands, services
+ */
 export interface SeederDeclaration {
   readonly __usai: "seeder";
   readonly resources: readonly ResourceDeclaration[];
   readonly run: (ctx: SeederContext) => unknown;
 }
 
+/** Declare a seeder (the default export of a file matched by the
+ * module's `seeders` globs). `usai db seed [name]` runs it as finite work
+ * with the declared resources.
+ *
+ * @category Tasks, cron, commands, services
+ */
 export function seeder(options: { resources?: ResourceDeclaration[] }, run: (ctx: SeederContext) => unknown): SeederDeclaration;
 export function seeder(run: (ctx: SeederContext) => unknown): SeederDeclaration;
 export function seeder(a: unknown, b?: unknown): SeederDeclaration {

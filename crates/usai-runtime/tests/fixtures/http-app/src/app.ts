@@ -18,7 +18,7 @@ const authenticated = auth.bearer({
   },
 });
 
-export const getUser = http.get("/users/:id", { params: Params, query: Query, response: { 200: User } }, async (ctx) => {
+export const getUser = http.get("/users/:id", { params: Params, query: Query, response: { 200: User }, errors: [{ code: "not_found", status: 404 }] }, async (ctx) => {
   if (ctx.params.id === "00000000-0000-0000-0000-000000000000") throw errors.notFound("user not found", { id: ctx.params.id });
   return { id: ctx.params.id, name: `user page ${ctx.query.page}`, email: "a@b.co" };
 });
@@ -245,6 +245,7 @@ export const passwordRoute = http.post("/password", { body: z.object({ password:
 
 export default defineApp({
   name: "http-fixture",
+  description: "The HTTP test fixture: one of everything the pipeline can serve.",
   modules: [defineModule({ name: "users", workloads: [getUser, createUser, noContent] })],
   workloads: [
     counter, persistent, me, boom, badShape, detach, detachWrite, slow, echoQuery, webhook, sendReceipt,

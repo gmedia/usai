@@ -6,7 +6,10 @@ import type { ResourceDeclaration, Workload } from "../declarations.ts";
 import type { CacheLocalHandle, FetchInit, FetchResponse, HttpClientHandle, PostgresHandle, SqlExecutor } from "../resources.ts";
 import { UsaiError } from "../errors.ts";
 
-/** What `ctx.log` and `console` offer inside a world. */
+/** What `ctx.log` and `console` offer inside a world.
+ *
+ * @category Context
+ */
 export interface ConsoleLike {
   debug(...args: unknown[]): void;
   info(...args: unknown[]): void;
@@ -30,30 +33,73 @@ declare global {
   var __usai_app: unknown;
 }
 
+/** `ctx.signal`: aborts when this world is cancelled — the client went
+ * away, the deadline passed, the revision drained, or the owner of an
+ * `invoke` was cancelled. Pending host operations reject with
+ * `cancelled` at the same moment; the signal is for the handler's own
+ * loops and cleanup.
+ *
+ * @category Context
+ */
 export interface UsaiAbortSignal {
   readonly aborted: boolean;
+  /** Why, once aborted (`deadline exceeded`, `cancelled by owner`, …). */
   readonly reason: string | undefined;
+  /** Runs at abort (immediately when already aborted). */
   addEventListener(type: "abort", listener: (reason: string) => void): void;
+  /** Throws a `cancelled` (499) {@link UsaiError} once aborted. */
   throwIfAborted(): void;
 }
 
+/** `ctx.tasks`: the two ways to start a task, and the whole difference
+ * between them is who owns the child world.
+ *
+ * @category Context
+ */
 export interface TaskHandle {
-  /** Owned invocation: the current world waits for the child. */
+  /** **Owned** invocation: the task runs in a fresh world, this world waits
+   * for its result, and cancelling this world cancels the child. The
+   * child's thrown {@link UsaiError} is rethrown here. Use it when the
+   * response depends on the task. */
   invoke<T = unknown>(task: Workload, input?: unknown): Promise<T>;
-  /** Ownership transfer: the task runtime owns the child; the parent may finish. */
+  /** **Ownership transfer**: the task runtime owns the child, which starts
+   * once this world commits; this world may end. Resolves with the child's
+   * id as soon as the hand-off is accepted — not durable across a runtime
+   * restart (publish to a queue for that). Declare the edge with
+   * `dispatches(from, task)`. */
   dispatch(task: Workload, input?: unknown): Promise<{ id: string }>;
 }
 
+/**
+ * What every handler receives, whatever the workload kind. Everything
+ * asynchronous here is a host operation **owned by this world**: it is
+ * cancelled when the world is, and a finite world may not end while one is
+ * still pending (that is a lifecycle error with a diagnostic, not a leak).
+ * Nothing on the context survives the world.
+ *
+ * @category Context
+ */
 export interface BaseContext {
+  /** The declared resources by name, as their in-world handles
+   * ({@link PostgresHandle}, {@link CacheLocalHandle}, {@link HttpClientHandle}).
+   * Reading an undeclared name throws `resource_not_declared` with the fix. */
   readonly resources: Record<string, unknown>;
+  /** Start tasks: owned (`invoke`) or transferred (`dispatch`). */
   readonly tasks: TaskHandle;
+  /** Publish to a queue topic; durable once the insert commits. */
   readonly queue: import("../queue.ts").QueueHandle;
+  /** Aborts when this world is cancelled. */
   readonly signal: UsaiAbortSignal;
   /** The declared environment, typed: `env.int()` gives a number,
    * `env.bool()` a boolean, `env.optional(...)` may be undefined. Narrow
    * per key, or type it once: `const e = ctx.env as EnvValues<typeof spec>`. */
   readonly env: Record<string, string | number | boolean | undefined>;
+  /** Structured logging; lines carry the workload and world ids and reach
+   * the runtime's log (`target: "app"`). `console.*` is the same. */
   readonly log: Pick<ConsoleLike, "debug" | "info" | "warn" | "error">;
+  /** A timer owned by this world (`"500ms"`, `"2s"`, or milliseconds). It
+   * resolves early when the world is asked to stop, so a service loop can
+   * `await ctx.sleep("1s")` and then check `ctx.signal.aborted`. */
   sleep(duration: string | number): Promise<void>;
 }
 

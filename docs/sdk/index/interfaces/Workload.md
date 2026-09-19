@@ -1,0 +1,33 @@
+[@sakaladev/usai](../../README.md) / [index](../README.md) / Workload
+
+# Interface: Workload
+
+A declared unit of work, whatever its kind — what every `http.*`,
+`task`, `cron`, `command`, `service`, `queue.consume`, `socket` and
+`http.stream` call returns and what `defineApp`/`defineModule` list.
+Plain data: the build phase reads it into the manifest, the runtime
+routes to it, `inspect`/`graph`/the reference page render it.
+
+## Properties
+
+| Property | Modifier | Type | Description |
+| ------ | ------ | ------ | ------ |
+| <a id="__usai"></a> `__usai` | `readonly` | `"workload"` | - |
+| <a id="kind"></a> `kind` | `readonly` | \| `"http"` \| `"task"` \| `"cron"` \| `"command"` \| `"service"` \| `"queue"` \| `"socket"` \| `"stream"` | - |
+| <a id="name"></a> `name` | `readonly` | `string` | - |
+| <a id="trigger"></a> `trigger` | `readonly` | `Record`\<`string`, `unknown`\> | - |
+| <a id="contracts"></a> `contracts` | `readonly` | \{ `params?`: [`AnySchema`](../type-aliases/AnySchema.md); `query?`: [`AnySchema`](../type-aliases/AnySchema.md); `headers?`: [`AnySchema`](../type-aliases/AnySchema.md); `body?`: [`AnySchema`](../type-aliases/AnySchema.md); `input?`: [`AnySchema`](../type-aliases/AnySchema.md); `message?`: [`AnySchema`](../type-aliases/AnySchema.md); `response?`: `Record`\<`number`, [`AnySchema`](../type-aliases/AnySchema.md)\>; \} | - |
+| `contracts.params?` | `public` | [`AnySchema`](../type-aliases/AnySchema.md) | - |
+| `contracts.query?` | `public` | [`AnySchema`](../type-aliases/AnySchema.md) | - |
+| `contracts.headers?` | `public` | [`AnySchema`](../type-aliases/AnySchema.md) | - |
+| `contracts.body?` | `public` | [`AnySchema`](../type-aliases/AnySchema.md) | - |
+| `contracts.input?` | `public` | [`AnySchema`](../type-aliases/AnySchema.md) | - |
+| `contracts.message?` | `public` | [`AnySchema`](../type-aliases/AnySchema.md) | - |
+| `contracts.response?` | `public` | `Record`\<`number`, [`AnySchema`](../type-aliases/AnySchema.md)\> | - |
+| <a id="errors"></a> `errors` | `readonly` | [`DeclaredError`](DeclaredError.md)[] | - |
+| <a id="auth"></a> `auth?` | `readonly` | [`AuthDeclaration`](AuthDeclaration.md)\<`unknown`\> | - |
+| <a id="resources"></a> `resources` | `readonly` | [`ResourceDeclaration`](ResourceDeclaration.md)[] | - |
+| <a id="dispatches"></a> `dispatches` | `readonly` | `Workload`[] | - |
+| <a id="publishes"></a> `publishes` | `readonly` | `string`[] | Queue topics this workload publishes to (`publishes(...)`). |
+| <a id="policies"></a> `policies` | `readonly` | [`WorkloadPolicies`](WorkloadPolicies.md) | - |
+| <a id="handler"></a> `handler` | `readonly` | (...`args`: `never`[]) => `unknown` | - |

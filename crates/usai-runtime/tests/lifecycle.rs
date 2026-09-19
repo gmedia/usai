@@ -112,6 +112,7 @@ fn definition(name: &str) -> Arc<ApplicationDefinition> {
     let manifest = Manifest {
         manifest_version: MANIFEST_VERSION,
         built_with: None,
+        description: None,
         name: name.into(),
         modules: vec![],
         workloads,
@@ -464,6 +465,7 @@ async fn failed_activation_leaves_the_active_revision_untouched() {
     let manifest = Manifest {
         manifest_version: MANIFEST_VERSION,
         built_with: None,
+        description: None,
         name: "needs-env".into(),
         modules: vec![],
         workloads: vec![task("task:count")],

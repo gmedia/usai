@@ -1,19 +1,20 @@
-// `usai/test` — run the same application model tests will meet in
-// production (`GOAL.md` §36). The harness spawns the `usai` runtime for the
-// project, talks HTTP to the application, and invokes tasks, cron ticks, and
-// commands deterministically through the control surface: no wall clock, no
-// external server.
-//
-//   import { testApp } from "@sakaladev/usai/test";
-//   const app = await testApp({ root: "." });
-//   const res = await app.http.post("/users", { body: { name: "Ayu" } });
-//   await app.task("send-receipt").invoke({ orderId: "o1" });
-//   await app.cron("cleanup").run();
-//   await app.close();
+/**
+ * `@sakaladev/usai/test` — run the same application model tests will
+ * meet in production. The harness spawns the `usai` runtime for the
+ * project, talks HTTP to the application, and invokes tasks, cron ticks
+ * and commands deterministically through the control surface: no wall
+ * clock, no external server. Start with {@link testApp}.
+ *
+ * @module
+ */
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
 
+/** Options for {@link testApp}.
+ *
+ * @category Testing
+ */
 export interface TestAppOptions {
   /** Project root (directory with usai.config.ts / src/app.ts). Default: cwd. */
   root?: string;
@@ -31,6 +32,11 @@ export interface TestAppOptions {
   migrate?: boolean | { seed?: boolean | string };
 }
 
+/** One HTTP response from the application under test: `body` is the
+ * parsed JSON when the response was JSON, otherwise the text.
+ *
+ * @category Testing
+ */
 export interface TestResponse {
   status: number;
   headers: Record<string, string>;
@@ -38,13 +44,26 @@ export interface TestResponse {
   text: string;
 }
 
+/** Options for `app.http.*`.
+ *
+ * @category Testing
+ */
 export interface RequestOptions {
+  /** A JSON value (serialized, `content-type: application/json`) or a raw string. */
   body?: unknown;
   headers?: Record<string, string>;
   query?: Record<string, string | number | boolean>;
 }
 
+/** The result of a task, cron tick or command run through the control
+ * surface: the handler's value or its error, the world's termination, the
+ * lifecycle `violations` it committed (detached work, an open transaction)
+ * and its log lines. A test asserts on all of it.
+ *
+ * @category Testing
+ */
 export interface WorkOutcome<T = unknown> {
+  /** The handler returned (no throw, no violation). */
   ok: boolean;
   value: T;
   error: { name: string; message: string; usai?: { code: string; status: number; details?: unknown } } | null;
@@ -54,9 +73,16 @@ export interface WorkOutcome<T = unknown> {
   logs: Array<{ level: string; message: string }>;
 }
 
+/** A running application under test; see {@link testApp}.
+ *
+ * @category Testing
+ */
 export interface TestApp {
+  /** Base URL of the application listener. */
   readonly url: string;
+  /** Base URL of the control surface. */
   readonly controlUrl: string;
+  /** HTTP requests to the application, with JSON in and out. */
   readonly http: {
     get(path: string, options?: RequestOptions): Promise<TestResponse>;
     post(path: string, options?: RequestOptions): Promise<TestResponse>;
@@ -65,14 +91,23 @@ export interface TestApp {
     delete(path: string, options?: RequestOptions): Promise<TestResponse>;
     request(method: string, path: string, options?: RequestOptions): Promise<TestResponse>;
   };
+  /** Run a task once in a fresh world and get its {@link WorkOutcome}. */
   task(name: string): { invoke<T = unknown>(input?: unknown): Promise<WorkOutcome<T>> };
+  /** Run one cron tick, without the clock. */
   cron(name: string): { run<T = unknown>(): Promise<WorkOutcome<T>> };
+  /** Run a command with arguments. */
   command(name: string): { run<T = unknown>(args?: string[]): Promise<WorkOutcome<T>> };
   /** Runtime status JSON (`/status` on the control surface). */
   status(): Promise<Record<string, unknown>>;
+  /** Stop the runtime (drains, then exits). Always call it, in `after`. */
   close(): Promise<void>;
 }
 
+/** Thrown when the harness itself fails: the binary is missing, the
+ * runtime did not start, a control request was refused.
+ *
+ * @category Testing
+ */
 export class UsaiTestError extends Error {
   readonly outcome: WorkOutcome | undefined;
   constructor(message: string, outcome?: WorkOutcome) {
@@ -92,6 +127,40 @@ function runCli(binary: string, args: string[], env: Record<string, string>): Pr
   });
 }
 
+/**
+ * Start the application under the real runtime for a test: the same
+ * artifact, the same boundaries, the same worlds production will run.
+ * The harness spawns the `usai` binary (`USAI_BIN`, `binary`, or `usai` on
+ * PATH) on random ports with a control token, waits for it to announce
+ * itself, and talks HTTP to the application and to the control surface.
+ * Tasks, cron ticks and commands run deterministically through the
+ * control surface — no wall clock, no external server — and answer with a
+ * {@link WorkOutcome} that includes the world's lifecycle violations, so a
+ * test can fail on detached work the way production would.
+ *
+ * `usai test` sets `USAI_BIN` and runs `node --test` over the project.
+ *
+ * @example
+ * ```ts
+ * import { test, before, after } from "node:test";
+ * import assert from "node:assert/strict";
+ * import { testApp, type TestApp } from "@sakaladev/usai/test";
+ *
+ * let app: TestApp;
+ * before(async () => { app = await testApp({ root: ".", migrate: true }); });
+ * after(() => app.close());
+ *
+ * test("creates a user and hands off the welcome mail", async () => {
+ *   const res = await app.http.post("/users", { body: { name: "Ayu" } });
+ *   assert.equal(res.status, 201);
+ *   const mail = await app.task("send-welcome").invoke({ userId: (res.body as { id: string }).id });
+ *   assert.ok(mail.ok, mail.error?.message);
+ *   assert.deepEqual(mail.violations, []);
+ * });
+ * ```
+ *
+ * @category Testing
+ */
 export async function testApp(options: TestAppOptions = {}): Promise<TestApp> {
   const binary = options.binary ?? process.env["USAI_BIN"] ?? "usai";
   const root = options.root ?? process.cwd();

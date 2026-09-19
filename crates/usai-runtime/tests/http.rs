@@ -734,9 +734,18 @@ async fn openapi_is_generated_from_the_definition() {
     let rev = s.runtime.active().unwrap();
     // The document carries the runtime's effective defaults (deadline), so
     // the served one is generated with this runtime's configuration.
-    let doc = usai_runtime::openapi::generate_with(&rev.definition, s.runtime.config());
+    let doc = usai_runtime::openapi::generate_with(
+        &rev.definition,
+        s.runtime.config(),
+        usai_runtime::openapi::Profile::Internal,
+    );
     assert_eq!(doc["openapi"], "3.1.0");
     assert_eq!(doc["info"]["title"], "http-fixture");
+    assert_eq!(
+        doc["info"]["description"],
+        "The HTTP test fixture: one of everything the pipeline can serve.",
+        "defineApp({{ description }}) reaches the document"
+    );
     assert_eq!(doc["info"]["version"], rev.definition.identity());
     let get_user = &doc["paths"]["/users/{id}"]["get"];
     assert_eq!(get_user["tags"], json!(["users"]));
@@ -812,6 +821,45 @@ async fn openapi_is_generated_from_the_definition() {
         doc.to_string().find("$schema").is_none_or(|_| false)
             || !doc["paths"].to_string().contains("\"$schema\"")
     );
+    // The public profile is the consumer contract: same paths, parameters,
+    // bodies, responses and security; no runtime facts, no inventory. The
+    // declared error codes survive in the response descriptions, where a
+    // standard reader looks.
+    let public = usai_runtime::openapi::generate_with(
+        &rev.definition,
+        s.runtime.config(),
+        usai_runtime::openapi::Profile::Public,
+    );
+    assert_eq!(
+        public["paths"]["/users/{id}"]["get"]["parameters"],
+        get_user["parameters"]
+    );
+    assert_eq!(
+        public["paths"]["/users"]["post"]["requestBody"],
+        doc["paths"]["/users"]["post"]["requestBody"]
+    );
+    assert_eq!(
+        public["paths"]["/me"]["get"]["security"],
+        json!([{ "token": [] }])
+    );
+    assert_eq!(
+        public["components"]["securitySchemes"],
+        doc["components"]["securitySchemes"]
+    );
+    assert_eq!(public["info"]["title"], "http-fixture");
+    assert_eq!(
+        public["paths"]["/users/{id}"]["get"]["responses"]["404"]["description"],
+        "Error code: not_found"
+    );
+    let text = public.to_string();
+    assert!(
+        !text.contains("x-usai-"),
+        "public profile leaks an extension: {text}"
+    );
+    for key in ["x-usai-workloads", "x-usai-resources", "x-usai-env"] {
+        assert!(public.get(key).is_none(), "public profile carries {key}");
+    }
+    assert!(public["info"].get("x-usai-identity").is_none());
     // The dev server serves the same document.
     let host = HttpHost::new(
         Arc::clone(&s.runtime),
@@ -842,6 +890,23 @@ async fn openapi_is_generated_from_the_definition() {
         .await
         .unwrap();
     assert_eq!(served, doc);
+    let served_public: Value = s
+        .client
+        .get(format!("http://{addr}/_usai/openapi.json?profile=public"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(served_public, public);
+    let unknown = s
+        .client
+        .get(format!("http://{addr}/_usai/openapi.json?profile=secret"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unknown.status(), 400);
     // A client that asks for JSON gets the OpenAPI document from the docs
     // URL; everyone else (browsers, curl) gets the page.
     let raw = s

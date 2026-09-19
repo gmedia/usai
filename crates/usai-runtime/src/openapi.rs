@@ -99,12 +99,116 @@ fn to_openapi_path(path: &str) -> String {
 }
 
 pub fn generate(definition: &ApplicationDefinition) -> Value {
-    generate_with(definition, &crate::RuntimeConfig::default())
+    generate_with(
+        definition,
+        &crate::RuntimeConfig::default(),
+        Profile::Internal,
+    )
+}
+
+/// Who the document is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Profile {
+    /// Everything the runtime knows: the `x-usai-*` extensions (lifetime,
+    /// deadline, resources leased, tasks handed off, boundary validation),
+    /// the non-HTTP workloads, resources and environment. What `/_usai/docs`
+    /// renders and what a team's own tooling reads.
+    Internal,
+    /// The consumer contract only: paths, parameters, bodies, responses,
+    /// security schemes and the declared error codes (folded into the
+    /// response descriptions). No `x-usai-*` extension, no workload,
+    /// resource or environment inventory. What ships to API consumers.
+    Public,
+}
+
+impl Profile {
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "internal" => Some(Self::Internal),
+            "public" => Some(Self::Public),
+            _ => None,
+        }
+    }
 }
 
 /// Same, with the runtime's effective defaults (the deadline a workload
-/// inherits when it declares none) so the document says what will happen.
-pub fn generate_with(definition: &ApplicationDefinition, config: &crate::RuntimeConfig) -> Value {
+/// inherits when it declares none) so the document says what will happen,
+/// and for one audience.
+pub fn generate_with(
+    definition: &ApplicationDefinition,
+    config: &crate::RuntimeConfig,
+    profile: Profile,
+) -> Value {
+    let mut document = generate_internal(definition, config);
+    if profile == Profile::Public {
+        publish(&mut document);
+    }
+    document
+}
+
+/// Reduce the internal document to the consumer contract, in place.
+fn publish(document: &mut Value) {
+    fn strip_extensions(value: &mut Value) {
+        match value {
+            Value::Object(map) => {
+                map.retain(|key, _| !key.starts_with("x-usai-"));
+                for child in map.values_mut() {
+                    strip_extensions(child);
+                }
+            }
+            Value::Array(items) => items.iter_mut().for_each(strip_extensions),
+            _ => {}
+        }
+    }
+    if let Some(paths) = document.get_mut("paths").and_then(Value::as_object_mut) {
+        for item in paths.values_mut() {
+            let Some(operations) = item.as_object_mut() else {
+                continue;
+            };
+            for operation in operations.values_mut() {
+                // Declared error codes are part of the contract; keep them
+                // where a standard reader looks — the response description.
+                let codes: Vec<(u16, String)> = operation
+                    .get("x-usai-errors")
+                    .and_then(Value::as_array)
+                    .map(|errors| {
+                        errors
+                            .iter()
+                            .filter_map(|e| {
+                                Some((
+                                    e.get("status")?.as_u64()? as u16,
+                                    e.get("code")?.as_str()?.to_owned(),
+                                ))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if let Some(responses) = operation
+                    .get_mut("responses")
+                    .and_then(Value::as_object_mut)
+                {
+                    for (status, response) in responses.iter_mut() {
+                        let mine: Vec<&str> = codes
+                            .iter()
+                            .filter(|(s, _)| s.to_string() == *status)
+                            .map(|(_, c)| c.as_str())
+                            .collect();
+                        if !mine.is_empty() {
+                            response["description"] = json!(format!(
+                                "Error code{}: {}",
+                                if mine.len() == 1 { "" } else { "s" },
+                                mine.join(", ")
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    strip_extensions(document);
+}
+
+fn generate_internal(definition: &ApplicationDefinition, config: &crate::RuntimeConfig) -> Value {
     let manifest = definition.manifest();
     let mut paths: Map<String, Value> = Map::new();
     let mut security_schemes: Map<String, Value> = Map::new();
@@ -368,15 +472,19 @@ pub fn generate_with(definition: &ApplicationDefinition, config: &crate::Runtime
         .iter()
         .map(|e| serde_json::to_value(e).unwrap_or(Value::Null))
         .collect();
+    let mut info = json!({
+        "title": manifest.name,
+        "version": definition.identity(),
+        "x-usai-identity": definition.identity(),
+        "x-usai-modules": manifest.modules.iter().map(|m| m.name.clone()).collect::<Vec<_>>(),
+    });
+    if let Some(description) = &manifest.description {
+        info["description"] = json!(description);
+    }
     json!({
         "openapi": "3.1.0",
         "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
-        "info": {
-            "title": manifest.name,
-            "version": definition.identity(),
-            "x-usai-identity": definition.identity(),
-            "x-usai-modules": manifest.modules.iter().map(|m| m.name.clone()).collect::<Vec<_>>(),
-        },
+        "info": info,
         "paths": Value::Object(paths),
         "components": components,
         "x-usai-workloads": workloads,

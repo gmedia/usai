@@ -2,6 +2,9 @@
 // `@standard-schema/spec` v1 surface, inlined so the SDK has no runtime
 // dependency on any schema library.
 
+/** The Standard Schema v1 interface, inlined (no dependency).
+ *
+ * @category Schemas */
 export interface StandardSchemaV1<Input = unknown, Output = Input> {
   readonly "~standard": StandardSchemaV1.Props<Input, Output>;
 }
@@ -46,7 +49,13 @@ export declare namespace StandardSchemaV1 {
   }
 }
 
+/** Any Standard Schema (`zod`, `valibot`, `arktype`, …): what every contract slot accepts.
+ *
+ * @category Schemas */
 export type AnySchema = StandardSchemaV1;
+/** The output type of a schema, as handlers see it.
+ *
+ * @category Schemas */
 export type Output<S> = S extends StandardSchemaV1 ? StandardSchemaV1.InferOutput<S> : never;
 
 export function isSchema(value: unknown): value is StandardSchemaV1 {

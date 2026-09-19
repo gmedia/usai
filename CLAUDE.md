@@ -16,8 +16,9 @@ Session start: `docs/STATUS.md` (where we are) → the `GOAL.md` section relevan
 
 ```bash
 make setup        # pnpm install --frozen-lockfile + cargo fetch
-make check        # fmt-check + lint + test (what CI runs)
+make check        # fmt-check + lint + docs-check + test (what CI runs)
 make lint         # cargo clippy --workspace --all-targets -- -D warnings; pnpm -r run typecheck
+make docs         # regenerate docs/sdk (TypeDoc → markdown) from the SDK's doc comments; docs-check fails CI when stale
 make test         # cargo test --workspace; pnpm -r run test
 make build        # release build + tsc for packages
 make fmt          # cargo fmt --all
