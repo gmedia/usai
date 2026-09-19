@@ -68,6 +68,18 @@ enum Command {
         /// interface: 127.0.0.1:9090, a pod-local address); USAI_STATUS_ADDR is the environment form
         #[arg(long, env = "USAI_STATUS_ADDR")]
         status_addr: Option<String>,
+        /// Require `Authorization: Bearer <token>` on /_usai/status, /_usai/metrics
+        /// and /_usai/openapi.json (both listeners; /_usai/live and /_usai/ready stay
+        /// open for probes, the /_usai/docs shell asks for the token itself).
+        /// USAI_STATUS_TOKEN is the environment form — prefer it: a flag shows in `ps`
+        #[arg(long, env = "USAI_STATUS_TOKEN", hide_env_values = true)]
+        status_token: Option<String>,
+        /// Switch operator surfaces off by name, comma-separated: status, metrics,
+        /// docs (the reference and /_usai/openapi.json), live, ready — on both
+        /// listeners; a switched-off surface is a 404. USAI_SURFACES_OFF is the
+        /// environment form (e.g. `docs,metrics` when neither is consumed)
+        #[arg(long, env = "USAI_SURFACES_OFF", value_delimiter = ',')]
+        surfaces_off: Vec<String>,
         /// Bind the local control surface (install/activate/drain/stop), e.g. 127.0.0.1:3900.
         /// Token from USAI_CONTROL_TOKEN (required off loopback).
         #[arg(long)]
@@ -394,6 +406,8 @@ async fn async_main() {
             artifact,
             status,
             status_addr,
+            status_token,
+            surfaces_off,
             control,
             announce,
             require_signature,
@@ -404,6 +418,24 @@ async fn async_main() {
             drain_timeout,
             diagnostics,
         } => {
+            // The flag and the environment variable are the same setting;
+            // `run` reads it from the environment where the listener is built.
+            if let Some(token) = status_token {
+                // SAFETY: single-threaded at this point (before the runtime starts).
+                unsafe { std::env::set_var("USAI_STATUS_TOKEN", token) };
+            }
+            if !surfaces_off.is_empty() {
+                for name in &surfaces_off {
+                    if !["status", "metrics", "docs", "live", "ready"].contains(&name.as_str()) {
+                        eprintln!(
+                            "error: --surfaces-off {name}: expected status, metrics, docs, live or ready"
+                        );
+                        std::process::exit(2);
+                    }
+                }
+                // SAFETY: as above.
+                unsafe { std::env::set_var("USAI_SURFACES_OFF", surfaces_off.join(",")) };
+            }
             commands::run(
                 &root,
                 &host,

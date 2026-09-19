@@ -370,6 +370,20 @@ async fn serve_until_signal(
                 .and_then(|v| v.parse::<u64>().ok())
                 .map(Duration::from_secs)
                 .unwrap_or(HttpConfig::default().socket_idle_timeout),
+            // Operator surfaces (status, metrics, docs) take a bearer token
+            // when one is configured; the probes stay open.
+            status_token: std::env::var("USAI_STATUS_TOKEN")
+                .ok()
+                .filter(|t| !t.is_empty()),
+            surfaces_off: std::env::var("USAI_SURFACES_OFF")
+                .ok()
+                .map(|v| {
+                    v.split(',')
+                        .map(|s| s.trim().to_ascii_lowercase())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default(),
             ..HttpConfig::default()
         },
     );

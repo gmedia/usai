@@ -41,6 +41,20 @@ pub struct HttpConfig {
     /// A WebSocket with no frames in either direction for this long is
     /// closed (1008) so a silent client cannot hold a world forever.
     pub socket_idle_timeout: std::time::Duration,
+    /// When set, `/_usai/status`, `/_usai/metrics` and `/_usai/openapi.json`
+    /// require `Authorization: Bearer <token>` on either listener;
+    /// `/_usai/live` and `/_usai/ready` stay open (probes rarely carry
+    /// headers, and they reveal little), and the reference's HTML shell
+    /// stays open (it is static and asks the operator for the token before
+    /// fetching the document). What these surfaces show — memory, per-route
+    /// counters, the revision identity, the full OpenAPI profile with
+    /// environment names and schedules — is operator information.
+    pub status_token: Option<String>,
+    /// Surfaces switched off by name — `status`, `metrics`, `docs` (the
+    /// reference and its OpenAPI document), `live`, `ready` — on both
+    /// listeners; a switched-off surface answers 404 like any unknown
+    /// `/_usai/` path. Production rarely wants all of them.
+    pub surfaces_off: Vec<String>,
 }
 
 impl Default for HttpConfig {
@@ -52,6 +66,8 @@ impl Default for HttpConfig {
             serve_docs: false,
             serve_status: false,
             socket_idle_timeout: std::time::Duration::from_secs(300),
+            status_token: None,
+            surfaces_off: Vec::new(),
         }
     }
 }
@@ -300,6 +316,14 @@ fn readable_issue(error: &jsonschema::ValidationError<'_>) -> String {
     text
 }
 
+/// Equal without an early exit on the first differing byte.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
 fn validate(slot: &str, validator: &jsonschema::Validator, value: &Value) -> Result<(), Reply> {
     let issues: Vec<Value> = validator
         .iter_errors(value)
@@ -423,6 +447,47 @@ impl HttpHost {
         docs: bool,
     ) -> Option<HttpResponse> {
         let path = uri.path();
+        if !path.starts_with("/_usai/") {
+            return None;
+        }
+        let surface = match path {
+            "/_usai/status" => "status",
+            "/_usai/metrics" => "metrics",
+            "/_usai/live" => "live",
+            "/_usai/ready" => "ready",
+            "/_usai/docs" | "/_usai/docs/" | "/_usai/openapi.json" => "docs",
+            _ => "",
+        };
+        if !surface.is_empty() && self.config.surfaces_off.iter().any(|s| s == surface) {
+            return Some(json_response(
+                StatusCode::NOT_FOUND,
+                &json!({ "error": { "code": "route_not_found", "message": format!("no route matches GET {path}") } }),
+            ));
+        }
+        // The probes stay open, and so does the reference's HTML shell (a
+        // static page that reveals nothing and cannot carry a header from a
+        // browser — it asks for the token and fetches the document with it);
+        // everything else on this surface is the operator's and takes the
+        // status token when one is configured.
+        if path != "/_usai/live"
+            && path != "/_usai/ready"
+            && path != "/_usai/docs"
+            && path != "/_usai/docs/"
+            && let Some(token) = &self.config.status_token
+        {
+            let presented = headers
+                .get(header::AUTHORIZATION)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.strip_prefix("Bearer "))
+                .map(str::trim)
+                .unwrap_or("");
+            if !constant_time_eq(presented.as_bytes(), token.as_bytes()) {
+                return Some(json_response(
+                    StatusCode::UNAUTHORIZED,
+                    &json!({ "error": { "code": "unauthorized", "message": "this surface requires the status token (Authorization: Bearer …; USAI_STATUS_TOKEN)" } }),
+                ));
+            }
+        }
         if status {
             match path {
                 "/_usai/status" => {

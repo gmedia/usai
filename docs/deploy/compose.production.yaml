@@ -42,6 +42,8 @@ services:
     environment:
       DATABASE_URL: "postgres://app:change-me@postgres:5432/app?sslmode=disable"
       # USAI_REQUIRE_SIGNATURE: <public key hex>   # refuse unsigned/tampered artifacts
+      # USAI_STATUS_TOKEN: <random>              # status/metrics/openapi answer 401 without `Authorization: Bearer`; probes stay open
+      # USAI_SURFACES_OFF: docs                   # switch off what nobody consumes here (status, metrics, docs, live, ready)
     depends_on: { postgres: { condition: service_healthy } }
     read_only: true
     tmpfs: [/tmp]

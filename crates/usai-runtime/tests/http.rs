@@ -1208,3 +1208,78 @@ async fn status_and_metrics_derive_from_runtime_truth() {
     token.cancel();
     s.shutdown.cancel();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_status_token_guards_the_operator_surfaces_but_not_the_probes() {
+    let Some(s) = start().await else { return };
+    let host = HttpHost::new(
+        Arc::clone(&s.runtime),
+        HttpConfig {
+            addr: ([127, 0, 0, 1], 0).into(),
+            serve_status: true,
+            serve_docs: true,
+            status_token: Some("s3cret".into()),
+            surfaces_off: vec!["metrics".into()],
+            ..HttpConfig::default()
+        },
+    );
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let token = CancellationToken::new();
+    let t = token.clone();
+    tokio::spawn(async move {
+        serve(host, t, |addr| {
+            let _ = tx.send(addr);
+        })
+        .await
+        .unwrap()
+    });
+    let addr = rx.await.unwrap();
+    let base = format!("http://{addr}");
+    // A surface switched off is a 404 like any unknown path, token or not.
+    for auth in [None, Some("Bearer s3cret")] {
+        let mut r = s.client.get(format!("{base}/_usai/metrics"));
+        if let Some(a) = auth {
+            r = r.header("authorization", a);
+        }
+        assert_eq!(r.send().await.unwrap().status(), 404, "metrics off");
+    }
+    for path in ["/_usai/status", "/_usai/openapi.json"] {
+        let r = s.client.get(format!("{base}{path}")).send().await.unwrap();
+        assert_eq!(r.status(), 401, "{path} without the token");
+        let r = s
+            .client
+            .get(format!("{base}{path}"))
+            .header("authorization", "Bearer wrong")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 401, "{path} with a wrong token");
+        let r = s
+            .client
+            .get(format!("{base}{path}"))
+            .header("authorization", "Bearer s3cret")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 200, "{path} with the token");
+    }
+    // Probes stay open (an orchestrator's healthcheck carries no header), and
+    // so does the reference's shell, which asks for the token itself.
+    for path in ["/_usai/live", "/_usai/ready", "/_usai/docs"] {
+        let r = s.client.get(format!("{base}{path}")).send().await.unwrap();
+        assert_eq!(r.status(), 200, "{path}");
+    }
+    // The application itself is untouched.
+    let (status, _) = {
+        let r = s
+            .client
+            .get(format!("{base}/counter"))
+            .send()
+            .await
+            .unwrap();
+        (r.status().as_u16(), r.text().await.unwrap())
+    };
+    assert_eq!(status, 200);
+    token.cancel();
+    s.shutdown.cancel();
+}

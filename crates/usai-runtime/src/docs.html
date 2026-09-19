@@ -388,10 +388,27 @@
   // ---- load the document -----------------------------------------------------------------
   const doc$ = $("#doc");
   let doc;
-  try {
-    const res = await fetch("openapi.json", { headers: { accept: "application/json" } });
+  // The runtime may guard the document with a status token (USAI_STATUS_TOKEN);
+  // the shell itself is open, so it asks once per tab and retries with the header.
+  const tokenKey = "usai.docs.statusToken";
+  const loadDoc = async () => {
+    let token = "";
+    try { token = sessionStorage.getItem(tokenKey) || ""; } catch {}
+    const headers = { accept: "application/json" };
+    if (token) headers.authorization = `Bearer ${token}`;
+    const res = await fetch("openapi.json", { headers });
+    if (res.status === 401) {
+      const entered = window.prompt("This runtime guards its reference with a status token (USAI_STATUS_TOKEN). Enter it:");
+      if (entered) {
+        try { sessionStorage.setItem(tokenKey, entered.trim()); } catch {}
+        return loadDoc();
+      }
+    }
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-    doc = await res.json();
+    return res.json();
+  };
+  try {
+    doc = await loadDoc();
   } catch (e) {
     doc$.replaceChildren(el("div", { class: "error-page" },
       el("h1", { class: "page-title" }, "The reference could not load"),
