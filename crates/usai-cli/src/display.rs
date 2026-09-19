@@ -196,17 +196,28 @@ pub fn inspect(definition: &ApplicationDefinition) -> String {
         }
         match &w.trigger {
             Trigger::Http {
-                method, path, raw, ..
+                method,
+                path,
+                raw,
+                responses,
+                ..
             } => {
                 let _ = writeln!(
                     out,
                     "  {method} {path}{}",
                     if *raw {
-                        "  (raw: contracts and docs unavailable)"
+                        "  (raw: exact bytes in and out; no input contract)"
                     } else {
                         ""
                     }
                 );
+                if *raw && !responses.is_empty() {
+                    let listed: Vec<String> = responses
+                        .iter()
+                        .map(|(status, text)| format!("{status} {text}"))
+                        .collect();
+                    let _ = writeln!(out, "    responses (declared): {}", listed.join(", "));
+                }
             }
             Trigger::Cron {
                 schedule, overlap, ..
@@ -260,7 +271,15 @@ pub fn inspect(definition: &ApplicationDefinition) -> String {
         }
         if !c.response.is_empty() {
             let statuses: Vec<String> = c.response.keys().map(|s| s.to_string()).collect();
-            let _ = writeln!(out, "    response: {}", statuses.join(", "));
+            if matches!(w.trigger, Trigger::Socket { .. }) {
+                // A socket's "response" contract is its outgoing message shape.
+                let _ = writeln!(
+                    out,
+                    "    outgoing messages: validated against the declared contract"
+                );
+            } else {
+                let _ = writeln!(out, "    response: {}", statuses.join(", "));
+            }
         }
         if let Some(auth) = &w.auth {
             let _ = writeln!(out, "    auth: {auth} (resolved in world)");
@@ -288,7 +307,19 @@ pub fn inspect(definition: &ApplicationDefinition) -> String {
         if !w.publishes.is_empty() {
             let _ = writeln!(out, "    publishes:");
             for topic in &w.publishes {
-                let _ = writeln!(out, "      {topic}");
+                let consumed = m
+                    .workloads
+                    .iter()
+                    .any(|c| matches!(&c.trigger, Trigger::Queue { topic: t, .. } if t == topic));
+                let _ = writeln!(
+                    out,
+                    "      {topic}{}",
+                    if consumed {
+                        ""
+                    } else {
+                        "  (no consumer in this application)"
+                    }
+                );
             }
         }
         if let Some(ms) = w.timeout_ms {

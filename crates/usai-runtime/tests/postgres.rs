@@ -241,6 +241,35 @@ async fn no_connection_state_leaks_across_worlds() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_message_can_be_delivered_to_a_consumer_directly() {
+    let Some(f) = fixture().await else { return };
+    // One delivery, attempt 1, a fresh world each time, no queue row: the
+    // consumer's own logic under test (here: the second delivery sees the
+    // first through the shared resource — the idempotency question).
+    let r = f
+        .runtime
+        .run_queue_message("orders", json!({ "orderId": "direct-1" }))
+        .await
+        .unwrap();
+    let v = r.outcome.unwrap().unwrap();
+    assert_eq!(v["value"]["attempt"], 1);
+    assert_eq!(v["value"]["seen"], 1);
+    assert_eq!(v["value"]["worldCounter"], 1, "a fresh world");
+    let r = f
+        .runtime
+        .run_queue_message("orders", json!({ "orderId": "direct-1" }))
+        .await
+        .unwrap();
+    let v = r.outcome.unwrap().unwrap();
+    assert_eq!(v["value"]["seen"], 2);
+    assert_eq!(v["value"]["worldCounter"], 1, "still a fresh world");
+    assert!(matches!(
+        f.runtime.run_queue_message("nope", json!({})).await,
+        Err(usai_runtime::RuntimeError::UnknownWorkload(_))
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn parameter_and_column_types_round_trip() {
     let Some(f) = fixture().await else { return };
     let r = f.runtime.run_task("types", json!(null)).await.unwrap();

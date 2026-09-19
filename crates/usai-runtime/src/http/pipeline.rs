@@ -842,6 +842,7 @@ impl HttpHost {
                         }
                     }
                     builder = builder.header("x-usai-lifetime", "stream");
+                    self.stats.streams.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     let body = WorldBody { receiver: body_rx, _guard: cancel.drop_guard() };
                     // The world keeps running; its result is observed by the task.
                     let workload = workload.to_owned();

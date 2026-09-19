@@ -69,6 +69,7 @@ async fn start() -> Option<Server> {
         HttpConfig {
             addr: ([127, 0, 0, 1], 0).into(),
             expose_diagnostics: true,
+            serve_status: true,
             ..HttpConfig::default()
         },
     );
@@ -178,6 +179,19 @@ async fn stream_lives_until_the_handler_returns() {
         .await
         .unwrap();
     assert_eq!(r.status(), 400);
+    // Accounting: a committed stream counts as a stream and a 2xx, never
+    // as a server error.
+    let status: Value = s
+        .client
+        .get(format!("{}/_usai/status", s.base))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(status["http"]["streams"], json!(1), "{status}");
+    assert_eq!(status["http"]["responses_5xx"], json!(0), "{status}");
     finish(s).await;
 }
 
@@ -352,6 +366,28 @@ async fn socket_state_is_connection_local_and_ends_with_the_connection() {
         .await
         .unwrap();
     assert_eq!(r.status(), 426);
+    // Accounting: two upgrades, counted as upgrades and successes — a
+    // WebSocket connection is not a 5xx (it was, through 0.0.5).
+    let status: Value = s
+        .client
+        .get(format!("{}/_usai/status", s.base))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(status["http"]["upgrades"], json!(2), "{status}");
+    assert_eq!(
+        status["http"]["by_workload"]["socket:/chat"]["5xx"],
+        json!(0),
+        "{status}"
+    );
+    assert_eq!(
+        status["http"]["by_workload"]["socket:/chat"]["2xx"],
+        json!(2),
+        "{status}"
+    );
     finish(s).await;
 }
 

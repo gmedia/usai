@@ -190,6 +190,7 @@ Vocabulary used throughout:
 
 | Name | Description |
 | ------ | ------ |
+| [RawRequestBody](interfaces/RawRequestBody.md) | The exact bytes of a raw request, decoded on demand: `await ctx.request.bytes()`, `await ctx.request.text()`, or `await ctx.request.json()`. Each is a method (the body is not read until asked for). |
 | [Declare](type-aliases/Declare.md) | The signature of `http.get`/`post`/…. |
 | [RawHandler](type-aliases/RawHandler.md) | The handler of `http.raw`. |
 | [StandardSchemaV1](namespaces/StandardSchemaV1/README.md) | - |

@@ -473,6 +473,13 @@ impl Runtime {
             previous
         };
         tracing::info!(revision = %id, "revision active");
+        for (workload, topic) in revision.definition.unconsumed_topics() {
+            tracing::warn!(
+                workload,
+                topic,
+                "publishes to a topic no consumer in this application consumes; messages will wait in the queue table until something consumes them (a typo? another application's consumer?)"
+            );
+        }
         if self.config.cron_scheduler {
             let stop = cron::start(
                 self.self_ref.clone(),
@@ -762,6 +769,27 @@ impl Runtime {
         let admission = self.admit(&revision, &format!("task:{name}"))?;
         let input =
             crate::workloads::input(&revision, "task", serde_json::json!({ "input": input }));
+        self.execute(admission, input, CancellationToken::new())
+            .await
+    }
+
+    /// Delivers one message to a topic's consumer directly, in a fresh
+    /// world, without the queue table (tests, `usai queue run`): the
+    /// handler sees `ctx.message`, `ctx.attempt` = 1 and a synthetic id.
+    /// Retries and dead-lettering are the scheduler's; this is one delivery.
+    pub async fn run_queue_message(
+        &self,
+        topic: &str,
+        message: serde_json::Value,
+    ) -> Result<WorkResult, RuntimeError> {
+        let revision = self.active()?;
+        let id = format!("queue:{topic}");
+        let admission = self.admit(&revision, &id)?;
+        let input = crate::workloads::input(
+            &revision,
+            "queue",
+            serde_json::json!({ "message": message, "id": "direct", "attempt": 1 }),
+        );
         self.execute(admission, input, CancellationToken::new())
             .await
     }

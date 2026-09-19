@@ -110,6 +110,39 @@ Run a command with arguments.
 
 ***
 
+### queue()
+
+```ts
+queue(topic: string): {
+  deliver: Promise<WorkOutcome<T>>;
+};
+```
+
+Deliver one message to a topic's consumer directly — a fresh world,
+`ctx.attempt` 1, no row in `usai_queue`, no retry: the way to test a
+consumer's logic (idempotency: deliver the same message twice) without
+publishing through the application or waiting for the scheduler.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `topic` | `string` |
+
+#### Returns
+
+```ts
+{
+  deliver: Promise<WorkOutcome<T>>;
+}
+```
+
+| Name | Type |
+| ------ | ------ |
+| `deliver()` | (`message`: `unknown`) => `Promise`\<[`WorkOutcome`](WorkOutcome.md)\<`T`\>\> |
+
+***
+
 ### status()
 
 ```ts

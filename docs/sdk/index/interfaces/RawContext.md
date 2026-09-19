@@ -26,10 +26,7 @@ bytes on `request`. Read the body once.
 | <a id="query"></a> `query` | `readonly` | `Record`\<`string`, `string` \| `string`[]\> | - | - | - |
 | <a id="headers"></a> `headers` | `readonly` | `Record`\<`string`, `string`\> | - | - | - |
 | <a id="resources"></a> `resources` | `readonly` | [`ResourcesOf`](../type-aliases/ResourcesOf.md)\<`R`\> | The declared resources, typed by name from `resources: [...]`. | [`BaseContext`](BaseContext.md).[`resources`](BaseContext.md#resources) | - |
-| <a id="request"></a> `request` | `readonly` | \{ `bytes`: `Promise`\<`Uint8Array`\<`ArrayBufferLike`\>\>; `text`: `Promise`\<`string`\>; `json`: `Promise`\<`unknown`\>; \} | The request body, once: bytes, text, or parsed JSON. | - | - |
-| `request.bytes` | `public` | `Promise`\<`Uint8Array`\<`ArrayBufferLike`\>\> | - | - | - |
-| `request.text` | `public` | `Promise`\<`string`\> | - | - | - |
-| `request.json` | `public` | `Promise`\<`unknown`\> | - | - | - |
+| <a id="request"></a> `request` | `readonly` | [`RawRequestBody`](RawRequestBody.md) | The request body, read once in one of three forms. | - | - |
 | <a id="tasks"></a> `tasks` | `readonly` | [`TaskHandle`](TaskHandle.md) | Start tasks: owned (`invoke`) or transferred (`dispatch`). | - | [`BaseContext`](BaseContext.md).[`tasks`](BaseContext.md#tasks) |
 | <a id="queue"></a> `queue` | `readonly` | [`QueueHandle`](QueueHandle.md) | Publish to a queue topic; durable once the insert commits. | - | [`BaseContext`](BaseContext.md).[`queue`](BaseContext.md#queue) |
 | <a id="signal"></a> `signal` | `readonly` | [`UsaiAbortSignal`](UsaiAbortSignal.md) | Aborts when this world is cancelled. | - | [`BaseContext`](BaseContext.md).[`signal`](BaseContext.md#signal) |

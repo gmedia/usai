@@ -61,7 +61,7 @@ export const undeclared = http.get("/undeclared", {}, async (ctx) => ({ n: await
 export const busy = http.get("/busy", { timeout: "300ms" }, async () => { const end = Date.now() + 5000; let i = 0; while (Date.now() < end) i++; return { i }; });
 export const echoQuery = http.get("/echo", {}, async (ctx) => ({ query: ctx.query, headers: { "x-a": ctx.headers["x-a"] } }));
 
-export const webhook = http.raw("/webhook", async (ctx) => {
+export const webhook = http.raw("/webhook", { responses: { 200: "echo of the body length", 401: "bad signature" } }, async (ctx) => {
   const bytes = await ctx.request.bytes();
   return http.rawResponse(200, `len=${bytes.length};ct=${ctx.headers["content-type"] ?? ""}`, { "x-raw": "1" });
 });

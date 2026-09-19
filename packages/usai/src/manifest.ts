@@ -104,7 +104,13 @@ function describeContracts(workload: Workload): ManifestContracts {
 function trigger(workload: Workload): ManifestWorkload["trigger"] {
   switch (workload.kind) {
     case "http":
-      return { kind: "http", method: workload.trigger["method"], path: workload.trigger["path"], raw: workload.trigger["raw"] === true };
+      return {
+        kind: "http",
+        method: workload.trigger["method"],
+        path: workload.trigger["path"],
+        raw: workload.trigger["raw"] === true,
+        ...(workload.trigger["responses"] ? { responses: workload.trigger["responses"] } : {}),
+      };
     case "cron": {
       const timeoutMs = parseDuration(workload.policies.timeout);
       return { kind: "cron", schedule: workload.trigger["schedule"], overlap: workload.trigger["overlap"] ?? "skip", ...(timeoutMs !== undefined ? { timeoutMs } : {}) };

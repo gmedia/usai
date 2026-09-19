@@ -237,7 +237,7 @@ pub fn start(
                             if attempt < retry.max_attempts {
                                 stats.retried.fetch_add(1, Ordering::SeqCst);
                                 let delay = retry.delay_ms(attempt);
-                                tracing::warn!(queue = %name, message = claimed.id, attempt, delay_ms = delay, error = %error, "message failed; retrying");
+                                tracing::warn!(queue = %name, id = claimed.id, attempt, delay_ms = delay, error = %error, "message failed; retrying");
                                 let _ = sql(
                                     manager.as_ref(),
                                     "execute",
@@ -247,7 +247,7 @@ pub fn start(
                                 .await;
                             } else {
                                 stats.dead.fetch_add(1, Ordering::SeqCst);
-                                tracing::error!(queue = %name, message = claimed.id, attempt, error = %error, "message dead-lettered");
+                                tracing::error!(queue = %name, id = claimed.id, attempt, error = %error, "message dead-lettered");
                                 let _ = sql(manager.as_ref(), "execute", "UPDATE usai_queue SET state = 'dead', locked_at = NULL, locked_by = NULL, last_error = $2 WHERE id = $1", vec![json!(claimed.id), json!(error)]).await;
                             }
                         }

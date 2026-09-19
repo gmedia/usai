@@ -12,7 +12,7 @@
 //! POST   /revisions/{id}/drain        drain and retire
 //! DELETE /revisions/{id}              remove an installed (never active) revision
 //! POST   /stop                        graceful shutdown of the runtime
-//! POST   /invoke {kind,name,input|args} run a task / cron tick / command now, in a fresh world
+//! POST   /invoke {kind,name,input|args} run a task / cron tick / command / one queue delivery now, in a fresh world
 //! ```
 //!
 //! Authentication: a bearer token from `USAI_CONTROL_TOKEN`. Binding to a
@@ -312,11 +312,18 @@ impl ControlHost {
                     "task" => self.runtime.run_task(&invoke.name, invoke.input).await,
                     "cron" => self.runtime.run_cron(&invoke.name).await,
                     "command" => self.runtime.run_command(&invoke.name, invoke.args).await,
+                    "queue" => {
+                        self.runtime
+                            .run_queue_message(&invoke.name, invoke.input)
+                            .await
+                    }
                     other => {
                         return error(
                             StatusCode::BAD_REQUEST,
                             "invalid_kind",
-                            format!("cannot invoke kind {other}; use task, cron, or command"),
+                            format!(
+                                "cannot invoke kind {other}; use task, cron, command, or queue"
+                            ),
                         );
                     }
                 };

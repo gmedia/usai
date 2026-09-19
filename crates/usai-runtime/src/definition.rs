@@ -23,6 +23,18 @@ pub const MANIFEST_VERSION: u32 = 1;
 /// without touching this).
 pub const GUEST_ABI: u32 = 1;
 
+/// `{"200": "…"}` → `200 → "…"`: status keys arrive as strings.
+fn status_keyed<'de, D: serde::Deserializer<'de>>(d: D) -> Result<BTreeMap<u16, String>, D::Error> {
+    let raw: BTreeMap<String, String> = Deserialize::deserialize(d)?;
+    raw.into_iter()
+        .map(|(k, v)| {
+            k.parse::<u16>().map(|status| (status, v)).map_err(|_| {
+                serde::de::Error::custom(format!("response status {k:?} is not a number"))
+            })
+        })
+        .collect()
+}
+
 /// The three lifetime families of `GOAL.md` §9.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -43,8 +55,14 @@ pub enum Trigger {
         #[serde(default)]
         raw: bool,
         /// Raw endpoints only: the statuses the handler writes, with a
-        /// description each, so the reference can list them.
-        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        /// description each, so the reference can list them. JSON object
+        /// keys are strings, and an internally tagged enum buffers them as
+        /// such, so the status is parsed from the key here.
+        #[serde(
+            default,
+            skip_serializing_if = "BTreeMap::is_empty",
+            deserialize_with = "status_keyed"
+        )]
         responses: BTreeMap<u16, String>,
     },
     Task,
@@ -497,6 +515,30 @@ impl std::fmt::Debug for Precompiled {
 }
 
 impl ApplicationDefinition {
+    /// Topics a workload declares it publishes to (`publishes(...)`) that no
+    /// consumer in this application consumes. Not an error — another
+    /// application on the same database may consume them — but the usual
+    /// cause is a typo, so activation and `inspect` say so.
+    pub fn unconsumed_topics(&self) -> Vec<(String, String)> {
+        let consumed: std::collections::BTreeSet<&str> = self
+            .workloads()
+            .iter()
+            .filter_map(|w| match &w.trigger {
+                Trigger::Queue { topic, .. } => Some(topic.as_str()),
+                _ => None,
+            })
+            .collect();
+        let mut out = Vec::new();
+        for w in self.workloads() {
+            for topic in &w.publishes {
+                if !consumed.contains(topic.as_str()) {
+                    out.push((w.id.clone(), topic.clone()));
+                }
+            }
+        }
+        out
+    }
+
     pub fn new(manifest: Manifest, code: Code) -> Result<Arc<Self>, DefinitionError> {
         if manifest.manifest_version != MANIFEST_VERSION {
             let built = manifest.built_with.clone().unwrap_or(BuiltWith {
@@ -695,6 +737,29 @@ mod tests {
             env: vec![],
             code_sha256: code.sha256.clone(),
         }
+    }
+
+    #[test]
+    fn a_published_topic_without_a_consumer_is_named() {
+        let code = Code::new("export default {}");
+        let mut m = manifest(&code);
+        m.workloads[0].publishes = vec!["orders".into(), "payment-events".into()];
+        let mut consumer = m.workloads[0].clone();
+        consumer.id = "queue:payment-events".into();
+        consumer.name = "payment-events".into();
+        consumer.publishes = vec![];
+        consumer.trigger = Trigger::Queue {
+            topic: "payment-events".into(),
+            concurrency: 1,
+            database: None,
+            retry: Default::default(),
+        };
+        m.workloads.push(consumer);
+        let d = ApplicationDefinition::new(m, code).unwrap();
+        assert_eq!(
+            d.unconsumed_topics(),
+            vec![("http:GET /x".to_string(), "orders".to_string())]
+        );
     }
 
     #[test]

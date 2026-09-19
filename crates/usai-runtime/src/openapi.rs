@@ -352,7 +352,19 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
         }
         let mut responses: Map<String, Value> = Map::new();
 
-        if *raw {
+        if lifetime == "connection" {
+            // A WebSocket is not a raw HTTP exchange: the only HTTP response
+            // is the upgrade (or 426 without one); messages are described by
+            // the incoming/outgoing contracts, not as bodies.
+            responses.insert(
+                "101".into(),
+                json!({ "description": "Switching Protocols: the WebSocket is open; messages follow the declared incoming/outgoing contracts" }),
+            );
+            responses.insert(
+                "426".into(),
+                json!({ "description": "Upgrade Required: the request was not a WebSocket upgrade" }),
+            );
+        } else if *raw {
             note(
                 &mut operation,
                 "Raw endpoint: the handler reads exact bytes and writes the response itself. The request body is not described; the statuses below are the ones the handler declares.",

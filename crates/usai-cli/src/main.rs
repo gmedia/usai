@@ -136,6 +136,11 @@ enum Command {
         #[command(subcommand)]
         action: TaskAction,
     },
+    /// Queue utilities
+    Queue {
+        #[command(subcommand)]
+        action: QueueAction,
+    },
     /// Database: migrations and seeders
     Db {
         #[command(subcommand)]
@@ -216,6 +221,17 @@ enum TaskAction {
         name: String,
         #[arg(long, default_value = "null")]
         input: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum QueueAction {
+    /// Deliver one JSON message to a topic's consumer directly (a fresh
+    /// world, attempt 1, nothing written to the queue table, no retry)
+    Run {
+        topic: String,
+        #[arg(long, default_value = "null")]
+        message: String,
     },
 }
 
@@ -393,6 +409,9 @@ async fn async_main() {
         Command::Task {
             action: TaskAction::Run { name, input },
         } => commands::task_run(&root, &name, &input).await,
+        Command::Queue {
+            action: QueueAction::Run { topic, message },
+        } => commands::queue_run(&root, &topic, &message).await,
         Command::Db {
             action: DbAction::Migrate { resource, artifact },
         } => commands::db_migrate(&root, resource.as_deref(), artifact).await,

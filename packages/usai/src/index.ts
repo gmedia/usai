@@ -30,7 +30,7 @@
 export { defineApp, defineModule } from "./declarations.ts";
 export type { AppDeclaration, ModuleDeclaration, Workload, ResourceDeclaration, AuthDeclaration, DeclaredError, Method, DefineAppOptions, DefineModuleOptions, HttpOptions, HttpContracts, WorkloadPolicies, ResourcesOf } from "./declarations.ts";
 export { http } from "./http.ts";
-export type { HttpContext, RawContext, HttpResponse, RawResponse, RawOptions, HttpHandlerResult, Declare, RawHandler } from "./http.ts";
+export type { HttpContext, RawContext, RawRequestBody, HttpResponse, RawResponse, RawOptions, HttpHandlerResult, Declare, RawHandler } from "./http.ts";
 export type { AnySchema, Output } from "./schema.ts";
 export { auth } from "./auth.ts";
 export type { AuthRequest, BearerOptions, HeaderOptions, CustomOptions } from "./auth.ts";

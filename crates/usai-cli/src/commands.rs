@@ -799,6 +799,7 @@ async fn one_shot(
         engine,
         RuntimeConfig {
             cron_scheduler: false,
+            queue_consumers: false,
             ..RuntimeConfig::default()
         },
     );
@@ -871,6 +872,12 @@ pub async fn task_run(root: &Path, name: &str, input: &str) -> Result<()> {
     one_shot(root, async |rt| rt.run_task(name, input).await).await
 }
 
+pub async fn queue_run(root: &Path, topic: &str, message: &str) -> Result<()> {
+    let message: serde_json::Value =
+        serde_json::from_str(message).context("--message must be JSON")?;
+    one_shot(root, async |rt| rt.run_queue_message(topic, message).await).await
+}
+
 /// Builds, activates (binding resources), runs `f`, and shuts down.
 async fn with_active_runtime<T>(
     root: &Path,
@@ -884,6 +891,7 @@ async fn with_active_runtime<T>(
         engine,
         RuntimeConfig {
             cron_scheduler: false,
+            queue_consumers: false,
             ..RuntimeConfig::default()
         },
     );
@@ -1026,6 +1034,7 @@ pub async fn db_seed(root: &Path, name: Option<&str>) -> Result<()> {
             Arc::clone(&engine),
             RuntimeConfig {
                 cron_scheduler: false,
+                queue_consumers: false,
                 ..RuntimeConfig::default()
             },
         );

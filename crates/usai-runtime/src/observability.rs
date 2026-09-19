@@ -161,8 +161,9 @@ impl HttpStats {
 
     /// Counts a response under the workload that produced (or refused) it.
     pub fn record_workload(&self, workload: &str, status: u16) {
+        // 101 (a WebSocket upgrade) is a success, not a server error.
         let class = match status {
-            200..=299 => 0,
+            100..=299 => 0,
             300..=399 => 1,
             400..=499 => 2,
             _ => 3,
@@ -191,12 +192,15 @@ impl HttpStats {
     ) {
         self.requests.fetch_add(1, Ordering::Relaxed);
         let counter = match status {
-            200..=299 => &self.responses_2xx,
+            100..=299 => &self.responses_2xx,
             300..=399 => &self.responses_3xx,
             400..=499 => &self.responses_4xx,
             _ => &self.responses_5xx,
         };
         counter.fetch_add(1, Ordering::Relaxed);
+        if status == 101 {
+            self.upgrades.fetch_add(1, Ordering::Relaxed);
+        }
         if let Some(latency) = latency {
             let seconds = latency.as_secs_f64();
             let index = LATENCY_BUCKETS.partition_point(|&b| b < seconds);

@@ -6,7 +6,7 @@ then **dead-lettered**: state `dead` in `usai_queue`, `last_error` set.
 
 ## What you see
 
-- Log: `message failed; retrying queue=<topic> message=<id> attempt=<n>
+- Log: `message failed; retrying queue=<topic> id=<id> attempt=<n>
   delay_ms=<d> error=<message>` per attempt, then `message dead-lettered
   … attempt=<last> error=…`.
 - Metrics/status: `usai_queue_messages_total{state="retried"}` per attempt,

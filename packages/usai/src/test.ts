@@ -101,6 +101,11 @@ export interface TestApp {
   cron(name: string): { run<T = unknown>(): Promise<WorkOutcome<T>> };
   /** Run a command with arguments. */
   command(name: string): { run<T = unknown>(args?: string[]): Promise<WorkOutcome<T>> };
+  /** Deliver one message to a topic's consumer directly — a fresh world,
+   * `ctx.attempt` 1, no row in `usai_queue`, no retry: the way to test a
+   * consumer's logic (idempotency: deliver the same message twice) without
+   * publishing through the application or waiting for the scheduler. */
+  queue(topic: string): { deliver<T = unknown>(message: unknown): Promise<WorkOutcome<T>> };
   /** Runtime status JSON (`/status` on the control surface). */
   status(): Promise<Record<string, unknown>>;
   /** Stop the runtime (drains, then exits). Always call it, in `after`. */
@@ -185,7 +190,11 @@ export async function testApp(options: TestAppOptions = {}): Promise<TestApp> {
   const announced = new Promise<{ app: string; control: string }>((resolve, reject) => {
     const timer = setTimeout(() => reject(new UsaiTestError(`usai did not start within ${options.startTimeoutMs ?? 60000} ms`)), options.startTimeoutMs ?? 60000);
     child.once("error", (error) => { clearTimeout(timer); reject(new UsaiTestError(`could not spawn ${binary}: ${error.message}`)); });
-    child.once("exit", (code) => { clearTimeout(timer); reject(new UsaiTestError(`usai exited with code ${code} before announcing`)); });
+    child.once("exit", (code) => {
+      clearTimeout(timer);
+      // The runtime's own error is on stderr just above; add what a test author can do about the common one.
+      reject(new UsaiTestError(`usai exited with code ${code} before announcing — if it reported a missing environment variable: testApp starts the runtime with the process environment plus \`env: {...}\`; \`usai test\` also loads .env, a plain \`node --test\` does not`));
+    });
     const lines = createInterface({ input: child.stdout! });
     lines.on("line", (line) => {
       if (!line.startsWith("{")) return;
@@ -246,6 +255,7 @@ export async function testApp(options: TestAppOptions = {}): Promise<TestApp> {
     task: (name) => ({ invoke: (input) => invoke({ kind: "task", name, input: input ?? null }) }),
     cron: (name) => ({ run: () => invoke({ kind: "cron", name }) }),
     command: (name) => ({ run: (args) => invoke({ kind: "command", name, args: args ?? [] }) }),
+    queue: (topic) => ({ deliver: (message) => invoke({ kind: "queue", name: topic, input: message ?? null }) }),
     status: async () => (await control("/status")) as Record<string, unknown>,
     close: async () => {
       if (closed) return;

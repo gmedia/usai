@@ -86,12 +86,20 @@ export interface RawContext<R = ResourceDeclaration[]> extends BaseContext {
   readonly headers: Record<string, string>;
   /** The declared resources, typed by name from `resources: [...]`. */
   readonly resources: ResourcesOf<R>;
-  /** The request body, once: bytes, text, or parsed JSON. */
-  readonly request: {
-    bytes(): Promise<Uint8Array>;
-    text(): Promise<string>;
-    json(): Promise<unknown>;
-  };
+  /** The request body, read once in one of three forms. */
+  readonly request: RawRequestBody;
+}
+
+/** The exact bytes of a raw request, decoded on demand: `await ctx.request.bytes()`,
+ * `await ctx.request.text()`, or `await ctx.request.json()`. Each is a method
+ * (the body is not read until asked for). */
+export interface RawRequestBody {
+  /** The body bytes, exactly as received. */
+  bytes(): Promise<Uint8Array>;
+  /** The body decoded as UTF-8. */
+  text(): Promise<string>;
+  /** The body parsed as JSON (throws on invalid JSON). */
+  json(): Promise<unknown>;
 }
 
 function normalizeResponse(response: HttpOptions["response"]): Record<number, AnySchema> | undefined {

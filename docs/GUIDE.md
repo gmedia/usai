@@ -201,7 +201,15 @@ export const orders = queue.consume("orders", { message: OrderEvent, concurrency
 await ctx.queue.publish("orders", { orderId });
 ```
 
-The v0 queue lives in PostgreSQL (`usai_queue`, created by the runtime in the consumer's `database` — by default the application's first `postgres` resource, which is also where `publish` writes; the publishing workload need not declare that resource). Delivery is at-least-once; retry is only what you declare; exhausted messages go to the `dead` state. A message must satisfy the consumer's `message` schema or it is dead-lettered on arrival — to add an event to an existing topic, extend the consumer's schema first, then publish it. Wrap the publisher in `publishes(workload, "orders")` so the reference links producer and consumer.
+The v0 queue lives in PostgreSQL (`usai_queue`, created by the runtime in the consumer's `database` — by default the application's first `postgres` resource, which is also where `publish` writes; the publishing workload need not declare that resource). Delivery is at-least-once; retry is only what you declare; exhausted messages go to the `dead` state. A message must satisfy the consumer's `message` schema or it is dead-lettered on arrival — to add an event to an existing topic, extend the consumer's schema first, then publish it. Wrap the publisher in `publishes(workload, "orders")` so the reference links producer and consumer — and so the runtime can tell you at activation (and `usai inspect`) when a declared topic has **no consumer in this application**: a typo there is otherwise a silent sink (the row sits `ready` forever). Publishing to a topic another application consumes on the same database is legitimate; the warning is a warning.
+
+Three things a queue user from another stack should know:
+
+- **Every runtime on the same database is a consumer.** Consumers claim with `SKIP LOCKED`, so a `usai dev` left running against the database your tests use will consume your tests' messages (and hand off *its* tasks with *its* environment). Give tests their own database (`testApp({ env: { DATABASE_URL } })`, `migrate: true`) or stop the dev server first.
+- **`dispatch` is not a queue.** A dispatched task that fails is a `WARN task failed` and the work is gone; nothing retries. If the work must reach a third party (a merchant callback, an e-mail), publish it to a topic and consume it there — retry and dead-lettering are the queue's, not the task's.
+- **Retention is yours.** Rows in `done` and `dead` stay until you delete them (`delete from usai_queue where state = 'done' and created_at < now() - interval '7 days'` from a cron is the usual shape); the runtime never purges.
+
+Idempotency: the same message can arrive twice (at-least-once, or two publishers). An `insert … on conflict do nothing` on an idempotency key, or a unique index and a `sql_23505` check, is simpler than a read-then-write inside the transaction. `usai queue run <topic> --message '{…}'` and `app.queue("<topic>").deliver(message)` in tests deliver one message to the consumer directly — a fresh world, `attempt` 1, no row, no retry — which is how to test that logic (deliver the same message twice).
 
 ## 9. Streams and WebSockets
 
@@ -239,7 +247,7 @@ const payments = httpClient("payments", { baseUrlEnv: "PAYMENTS_URL", bearerToke
 export const charge = http.post("/charge", { body: Charge, resources: [payments] }, async (ctx) => {
   const api = ctx.resources["payments"] as HttpClientHandle;
   const res = await api.fetch("/v1/charges", { method: "POST", json: ctx.body });
-  if (!res.ok) throw errors.badGateway(`payments answered ${res.status}`);
+  if (!res.ok) throw errors.unavailable(`payments answered ${res.status}`);
   return res.json();
 });
 ```
@@ -331,6 +339,7 @@ test("users", async () => {
     const receipt = await app.task("send-receipt").invoke({ orderId: "o1" });   // fresh world, no queue
     assert.ok(receipt.ok);
     await app.cron("cleanup").run();                                            // one tick, no wall clock
+    await app.queue("orders").deliver({ orderId: "o1" });                      // one delivery to the consumer, no queue row
     await app.command("reconcile").run(["--dry-run"]);
   } finally {
     await app.close();

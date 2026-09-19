@@ -881,6 +881,19 @@ async fn openapi_is_generated_from_the_definition() {
         webhook["x-usai-raw"], true,
         "raw endpoints are opaque, not invented"
     );
+    // …but the statuses the handler declares (`responses`) do reach the document.
+    assert_eq!(
+        webhook["responses"]["401"]["description"], "bad signature",
+        "{webhook}"
+    );
+    assert!(webhook["responses"].get("default").is_none(), "{webhook}");
+    // A WebSocket is not a raw HTTP exchange: 101/426, no request body.
+    let chat = &doc["paths"]["/chat"]["get"];
+    assert_eq!(chat["x-usai-socket"], true, "{chat}");
+    assert!(chat["responses"].get("101").is_some(), "{chat}");
+    assert!(chat["responses"].get("426").is_some(), "{chat}");
+    assert!(chat.get("x-usai-raw").is_none(), "{chat}");
+    assert!(chat.get("requestBody").is_none(), "{chat}");
     // The facts a Usai consumer can rely on travel with the operation.
     let order = &doc["paths"]["/orders"]["post"];
     assert_eq!(order["x-usai-validated"]["body"], "before-world");
