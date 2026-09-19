@@ -12,7 +12,7 @@ USAI="${1:?usai binary}"; ARTIFACT="${2:?hello artifact}"; DUR="${3:-10}"; shift
 CONCS=("${@:-1 16 64}")
 [ ${#CONCS[@]} -gt 0 ] || CONCS=(1 16 64)
 port="${BENCH_PORT:-19800}"
-start() { "$@" & echo $!; }
+start() { "$@" >/dev/null 2>&1 & echo $!; }
 wait_up() { for i in $(seq 1 100); do curl -s -o /dev/null "http://127.0.0.1:$1/hello/x" && return 0; sleep 0.1; done; return 1; }
 bench() {
   local name="$1" pid="$2"
