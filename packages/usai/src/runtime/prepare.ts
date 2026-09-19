@@ -106,3 +106,137 @@ export function prepareSchema(schema: AnySchema): number {
     return 0;
   }
 }
+
+// ---- the success path -----------------------------------------------------
+//
+// `zodPrepare` warms what a *rejected* input touches. The lazily built state
+// on the *accepting* path (the first parse of a real value through a node's
+// checks) is separate and was measured at 0.4–0.8 ms on the first parse of
+// every fresh world for `z.string().min(1).max(40)`, and 3 ms for a 12-field
+// body. Warming it means parsing a value the schema accepts, which is only
+// allowed when no application code can run on that path: every node is a
+// structural type from the list below and every check is one of the
+// library's own (no `refine`, `transform`, `preprocess`, `superRefine`,
+// `overwrite`, `custom`, `lazy`). `default`/`prefault`/`catch` are allowed
+// because the sample always supplies the value, so their getters never run.
+
+const STRUCTURAL = new Set(["object", "array", "tuple", "record", "string", "number", "int", "bigint", "boolean", "date", "literal", "enum", "null", "undefined", "any", "unknown", "nan", "optional", "nullable", "readonly", "nonoptional", "default", "prefault", "catch", "union", "pipe"]);
+const LIBRARY_CHECKS = new Set(["min_length", "max_length", "length_equals", "greater_than", "less_than", "multiple_of", "string_format", "number_format", "bigint_format", "min_size", "max_size", "size_equals"]);
+const FORMAT_SAMPLES: Record<string, string> = {
+  email: "sample@example.com", url: "https://example.com/", uri: "https://example.com/", uuid: "6f1a2b3c-4d5e-4f60-8a71-92b3c4d5e6f7", guid: "6f1a2b3c-4d5e-4f60-8a71-92b3c4d5e6f7",
+  datetime: "2026-01-01T00:00:00Z", date: "2026-01-01", time: "00:00:00", duration: "PT1S", ipv4: "192.0.2.1", ipv6: "2001:db8::1", cidrv4: "192.0.2.0/24", cidrv6: "2001:db8::/32",
+  base64: "aGVsbG8=", base64url: "aGVsbG8", e164: "+15550000000", emoji: "😀", nanoid: "V1StGXR8_Z5jdHi6B-myT", cuid: "cjld2cjxh0000qzrmn831i7rn", cuid2: "tz4a98xxat96iws9zmbrgj3a", ulid: "01ARZ3NDEKTSV4RRFFQ69G5FAV", ksuid: "0ujsszwN8NRY24YaXiTIE2VWDTS", xid: "9m4e2mr0ui3e8a215n4g", lowercase: "sample", uppercase: "SAMPLE", jwt: "eyJhbGciOiJIUzI1NiJ9.e30.ZRrHA1JJJW8opsbCGfG_HACGpVUMN_a9IV7pAx_Zmeo",
+};
+
+class NotStructural extends Error {}
+
+/** A value the schema accepts, built from its structure alone; throws
+ * `NotStructural` when the schema could run application code on the
+ * accepting path or when no sample can be derived. */
+function zodSample(s: unknown, depth = 0): unknown {
+  const zi = internals(s);
+  if (!zi || !zi.def || depth > 32) throw new NotStructural();
+  const d = zi.def;
+  const type = d.type;
+  if (typeof type !== "string" || !STRUCTURAL.has(type)) throw new NotStructural();
+  const checks = (d.checks ?? []) as Array<{ _zod?: { def?: Record<string, unknown> } }>;
+  const named = checks.map((c) => c._zod?.def ?? {});
+  if (named.some((c) => typeof c["check"] !== "string" || !LIBRARY_CHECKS.has(c["check"] as string))) throw new NotStructural();
+  const num = (k: string): number | undefined => {
+    const c = named.find((x) => x["check"] === k);
+    return c ? Number(c[k === "greater_than" || k === "less_than" ? "value" : k === "multiple_of" ? "value" : "minimum" in c ? "minimum" : "maximum"] ?? c["value"]) : undefined;
+  };
+  switch (type) {
+    case "string": {
+      const fmt = named.find((c) => c["check"] === "string_format");
+      if (fmt) {
+        const format = String(fmt["format"]);
+        if (format === "regex") {
+          // A user regex is data, not code: try a few plausible strings.
+          const pattern = fmt["pattern"];
+          if (!(pattern instanceof RegExp)) throw new NotStructural();
+          const candidate = ["x", "2026-01-01", "1", "a", "sample", "sample@example.com", "2026-01-01T00:00:00Z", "ABC-123", "12345", "+15550000000", "https://example.com/"].find((c) => pattern.test(c));
+          if (candidate === undefined) throw new NotStructural();
+          return candidate;
+        }
+        const sample = FORMAT_SAMPLES[format];
+        if (sample === undefined) throw new NotStructural();
+        return sample;
+      }
+      const min = named.find((c) => c["check"] === "min_length")?.["minimum"] as number | undefined;
+      const exact = named.find((c) => c["check"] === "length_equals")?.["length"] as number | undefined;
+      return "x".repeat(Math.max(1, exact ?? min ?? 1));
+    }
+    case "number":
+    case "int": {
+      const gt = named.find((c) => c["check"] === "greater_than");
+      const lt = named.find((c) => c["check"] === "less_than");
+      const mult = named.find((c) => c["check"] === "multiple_of");
+      let v = 1;
+      if (gt) v = Number(gt["value"]) + (gt["inclusive"] ? 0 : 1);
+      if (mult) v = Number(mult["value"]) * Math.ceil(v / Number(mult["value"]));
+      if (lt && v > Number(lt["value"]) - (lt["inclusive"] ? 0 : 1)) throw new NotStructural();
+      if (type === "int" || named.some((c) => c["check"] === "number_format")) v = Math.ceil(v);
+      return v;
+    }
+    case "bigint": return 1n;
+    case "boolean": return true;
+    case "date": return new Date(0);
+    case "literal": return (d["values"] as unknown[])?.[0];
+    case "enum": { const e = d["entries"] as Record<string, unknown> | undefined; const vals = e ? Object.values(e) : []; if (!vals.length) throw new NotStructural(); return vals[0]; }
+    case "null": return null;
+    case "undefined": return undefined;
+    case "any":
+    case "unknown": return "sample";
+    case "nan": return NaN;
+    case "optional":
+    case "nullable":
+    case "readonly":
+    case "nonoptional":
+    case "default":
+    case "prefault":
+    case "catch": return zodSample(d["innerType"], depth + 1);
+    case "pipe": {
+      // `pipe` is a transform unless the out side is a plain schema
+      // that accepts the in side's output (e.g. `z.coerce`); only accept
+      // the identity-shaped case where both sides are structural.
+      const out = internals(d["out"]);
+      if (!out || (out.def.type as string) === "transform") throw new NotStructural();
+      return zodSample(d["in"], depth + 1);
+    }
+    case "union": {
+      const options = d["options"] as unknown[];
+      if (!Array.isArray(options) || !options.length) throw new NotStructural();
+      return zodSample(options[0], depth + 1);
+    }
+    case "array": {
+      const min = named.find((c) => c["check"] === "min_length")?.["minimum"] as number | undefined;
+      const n = Math.max(1, min ?? 1);
+      const item = zodSample(d["element"], depth + 1);
+      return Array.from({ length: n }, () => item);
+    }
+    case "tuple": return ((d["items"] as unknown[]) ?? []).map((t) => zodSample(t, depth + 1));
+    case "record": return { key: zodSample(d["valueType"], depth + 1) };
+    case "object": {
+      const shape = d["shape"] as Record<string, unknown>;
+      if (!shape || typeof shape !== "object") throw new NotStructural();
+      if (d["catchall"] && (internals(d["catchall"])?.def.type as string) !== "never") throw new NotStructural();
+      const out: Record<string, unknown> = {};
+      for (const k of Object.keys(shape)) out[k] = zodSample(shape[k], depth + 1);
+      return out;
+    }
+    default: throw new NotStructural();
+  }
+}
+
+/** A value the schema provably accepts without running application code,
+ * or `undefined` when no such value can be derived. Zod only. */
+export function structuralSample(schema: AnySchema): { value: unknown } | undefined {
+  try {
+    const vendor = (schema as { "~standard"?: { vendor?: string } })["~standard"]?.vendor;
+    if (vendor !== "zod") return undefined;
+    return { value: zodSample(schema) };
+  } catch {
+    return undefined;
+  }
+}

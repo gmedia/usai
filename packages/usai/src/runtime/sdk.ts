@@ -3,7 +3,7 @@
 // invokes the handler, and encodes the outcome for the host.
 
 import { type AppDeclaration, type Workload, flatten } from "../declarations.ts";
-import { prepareSchema } from "./prepare.ts";
+import { prepareSchema, structuralSample } from "./prepare.ts";
 import { UsaiError, isUsaiError } from "../errors.ts";
 import { isHttpResponse, isRawResponse } from "../http.ts";
 import { type AnySchema, validateWith } from "../schema.ts";
@@ -342,10 +342,20 @@ export async function invoke(app: AppDeclaration, index: number, inputJson: stri
  * ~0.03 ms. Returns the number of schema nodes touched. */
 export function warm(app: AppDeclaration): number {
   let touched = 0;
+  const one = (s: AnySchema) => {
+    touched += prepareSchema(s);
+    // The accepting path, when the schema provably runs no application
+    // code on it: one real parse in the snapshot instead of one per world.
+    const sample = structuralSample(s);
+    if (sample) {
+      const r = validateWith(s, sample.value);
+      if (r.ok) touched += 1;
+    }
+  };
   for (const { workload } of flatten(app).workloads) {
     const c = workload.contracts;
-    for (const s of [c.params, c.query, c.headers, c.body, c.input, c.message]) if (s) touched += prepareSchema(s);
-    for (const s of Object.values(c.response ?? {})) if (s) touched += prepareSchema(s);
+    for (const s of [c.params, c.query, c.headers, c.body, c.input, c.message]) if (s) one(s);
+    for (const s of Object.values(c.response ?? {})) if (s) one(s);
   }
   return touched;
 }

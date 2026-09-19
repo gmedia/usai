@@ -343,8 +343,9 @@ fn link(engine: &WtEngine) -> Result<Linker<HostData>, EngineError> {
     Ok(linker)
 }
 
-const EXPORT_NAMES: [&str; 17] = [
+const EXPORT_NAMES: [&str; 18] = [
     "memory",
+    "qjs_run_gc",
     "wasm_malloc",
     "wasm_free",
     "qjs_init",
@@ -554,6 +555,12 @@ impl WasmEngine {
             .map_err(|e| EngineError::Compile(format!("validator warm-up failed: {e}")))?;
         guest.run_jobs(&mut store).await?;
         tracing::debug!(parses = warmed, "validators warmed before snapshot");
+        // Collect the warm-up's garbage before the snapshot. QuickJS triggers
+        // a full collection when its allocation count crosses a threshold set
+        // relative to the live size at the last collection; a snapshot taken
+        // just under that threshold made every world's first parse pay the
+        // whole cycle (measured 0.4–0.8 ms per request on every world).
+        guest.call1::<(), ()>(&mut store, "qjs_run_gc", ()).await?;
         let pending = guest
             .call1::<(), i32>(&mut store, "qjs_usai_pending_op_count", ())
             .await?;

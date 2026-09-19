@@ -253,6 +253,9 @@ importers:
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
 
   scripts/qualification/bench/app:
     dependencies:

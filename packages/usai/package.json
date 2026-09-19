@@ -69,7 +69,8 @@
     "@types/node": "^24.0.0",
     "typedoc": "0.28.20",
     "typedoc-plugin-markdown": "4.13.0",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "zod": "^4.6.5"
   },
   "sideEffects": [
     "./dist/index.js",
