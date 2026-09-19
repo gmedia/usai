@@ -286,9 +286,14 @@ pub async fn migrate(
         }
         let sql = tokio::fs::read_to_string(&file.path).await?;
         tracing::info!(migration = %file.name, "applying");
-        pg.apply_migration(&file.name, &sql, &file.checksum, cancel.clone())
-            .await?;
-        done.push(file.name.clone());
+        if pg
+            .apply_migration(&file.name, &sql, &file.checksum, cancel.clone())
+            .await?
+        {
+            done.push(file.name.clone());
+        } else {
+            tracing::info!(migration = %file.name, "already applied by another migrator");
+        }
     }
     Ok(done)
 }

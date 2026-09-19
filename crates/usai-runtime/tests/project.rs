@@ -233,16 +233,31 @@ async fn migrations_seeders_and_typed_env_end_to_end() {
     assert_eq!(v["json"]["env"]["DEBUG"], true);
     assert_eq!(v["json"]["env"]["APP_ENV"], "development");
 
-    // Migrate: three files from three directories, in name order.
+    // Migrate: three files from three directories, in name order. Four
+    // migrators at once (two replicas' migrate jobs and two operators) apply
+    // each file exactly once between them: the advisory lock serializes
+    // them and the ledger row goes in before the SQL, so a loser never runs
+    // a migration twice.
     let globs = db::migration_globs(&out.definition, &config.migrations.value);
     let files = db::discover_migrations(&root, &globs).unwrap();
     let manager = db::database(&rev, None).unwrap();
-    let applied = db::migrate(manager.as_ref(), &files, CancellationToken::new())
-        .await
-        .unwrap();
+    let mut racers = Vec::new();
+    for _ in 0..4 {
+        let m = Arc::clone(&manager);
+        let files = files.clone();
+        racers.push(tokio::spawn(async move {
+            db::migrate(m.as_ref(), &files, CancellationToken::new()).await
+        }));
+    }
+    let mut applied: Vec<String> = Vec::new();
+    for r in racers {
+        applied.extend(r.await.unwrap().unwrap());
+    }
+    applied.sort();
     assert_eq!(
         applied,
-        vec!["001_users.sql", "002_invoices.sql", "003_audit.sql"]
+        vec!["001_users.sql", "002_invoices.sql", "003_audit.sql"],
+        "each migration applied by exactly one migrator"
     );
     let again = db::migrate(manager.as_ref(), &files, CancellationToken::new())
         .await

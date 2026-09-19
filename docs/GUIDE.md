@@ -297,6 +297,8 @@ Health: `GET /_usai/live` (the process answers) and `GET /_usai/ready` (an activ
 
 Where the `/_usai/*` surfaces listen: `--status` puts status, metrics, live, ready and the docs on the **application** listener (development, trusted networks — a public proxy must then deny `/_usai/*`); `--status-addr 127.0.0.1:9090` (`USAI_STATUS_ADDR`) serves them on a **separate** listener instead, which is what production wants (scrape and probe a private port, expose nothing).
 
+Several replicas: HTTP and queue consumers share the work without configuration (messages are claimed with `SKIP LOCKED`; migrations serialize on an advisory lock). **Cron ticks on every instance that runs the scheduler** — keep it on one replica and start the others with `usai run --no-cron` (`USAI_NO_CRON=1`); `--no-queue` likewise dedicates replicas. `SUPPORTED.md` has the topology table.
+
 Logs: `--log-format json` (global flag) writes one JSON object per line with `timestamp`, `level` and fields, on stderr; the application's `console.*`/`ctx.log.*` lines carry `target: "app"` and appear at INFO. Results of one-shot commands go to stdout.
 
 Deploying with Docker: build the scaffold's `Dockerfile`, run it with

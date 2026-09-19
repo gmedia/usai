@@ -1105,16 +1105,21 @@ impl Postgres {
         }
     }
 
-    /// Runs a multi-statement script under runtime ownership (migrations):
-    /// one connection, one transaction, ledger row in the same transaction.
-    /// The lease follows C5 exactly like a query does.
+    /// Runs a migration under runtime ownership: one connection, one
+    /// transaction, ledger row in the same transaction; the lease follows
+    /// C5 exactly like a query does. Two migrators at once
+    /// (two replicas' `migrate` jobs, an operator and CI) serialize on an
+    /// advisory lock, and the ledger row is inserted *before* the SQL runs
+    /// so the loser's transaction fails on the primary key and its SQL
+    /// never executes; that case returns `Ok(false)` (applied by another
+    /// migrator), `Ok(true)` means this call applied it.
     pub async fn apply_migration(
         &self,
         name: &str,
         sql: &str,
         checksum: &str,
         cancel: CancellationToken,
-    ) -> Result<(), ResourceError> {
+    ) -> Result<bool, ResourceError> {
         let object = self.lease(&cancel).await?;
         let mut lease = Lease {
             object: Some(object),
@@ -1122,7 +1127,7 @@ impl Postgres {
             counters: Arc::clone(&self.counters),
         };
         let script = format!(
-            "BEGIN;\n{sql}\n;INSERT INTO usai_migrations (name, checksum) VALUES ({}, {});\nCOMMIT;",
+            "BEGIN;\nSELECT pg_advisory_xact_lock({MIGRATION_LOCK});\nINSERT INTO usai_migrations (name, checksum) VALUES ({}, {});\n{sql}\n;COMMIT;",
             quote_literal(name),
             quote_literal(checksum)
         );
@@ -1130,12 +1135,20 @@ impl Postgres {
             let client = lease.client();
             run_cancellable(client, &cancel, &self.counters, &self.tls, async {
                 match client.batch_execute(&script).await {
-                    Ok(()) => Ok(()),
+                    Ok(()) => Ok(true),
                     Err(e) => {
                         // The transaction is aborted; roll back explicitly so the
                         // connection is clean before it is judged reusable.
                         let _ = client.batch_execute("ROLLBACK").await;
-                        Err(e)
+                        if e.code() == Some(&tokio_postgres::error::SqlState::UNIQUE_VIOLATION)
+                            && e.as_db_error()
+                                .and_then(|d| d.table())
+                                .is_some_and(|t| t == "usai_migrations")
+                        {
+                            Ok(false)
+                        } else {
+                            Err(e)
+                        }
                     }
                 }
             })
@@ -1166,11 +1179,17 @@ impl Postgres {
             terminal: false,
             counters: Arc::clone(&self.counters),
         };
+        // Serialized on the migration lock: `CREATE TABLE IF NOT EXISTS`
+        // is not race-free on its own (two sessions pass the existence
+        // check; the loser gets 42P07 / a 23505 on pg_type).
         let result = lease
             .client()
-            .batch_execute("CREATE TABLE IF NOT EXISTS usai_migrations (name text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())")
+            .batch_execute(&format!("BEGIN; SELECT pg_advisory_xact_lock({MIGRATION_LOCK}); CREATE TABLE IF NOT EXISTS usai_migrations (name text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now()); COMMIT;"))
             .await
             .map_err(sql_error);
+        if result.is_err() {
+            let _ = lease.client().batch_execute("ROLLBACK").await;
+        }
         if !matches!(
             &result,
             Err(ResourceError::Operation {
@@ -1327,6 +1346,10 @@ async fn hold_transaction(
         }
     }
 }
+
+/// Advisory lock key that serializes migrators on one database
+/// (`SELECT pg_advisory_xact_lock(…)`); arbitrary, stable.
+const MIGRATION_LOCK: i64 = 0x7573_6169_6d69_6772; // "usaimigr"
 
 fn quote_literal(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))

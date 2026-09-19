@@ -26,7 +26,7 @@ Where to look, always:
   `detail`), `http` (class counters, `rejections`, latency buckets).
 - `GET /_usai/metrics`: the same as Prometheus text
   (`usai_http_request_seconds`, `usai_http_rejections_total{reason}`,
-  `usai_resource{kind,name,metric}`, `usai_queue_messages_total`).
+  `usai_resource{kind,name,metric}` (levels), `usai_resource_quarantines_total{kind,name}` (events), `usai_queue_messages_total`).
 - Logs: one line per event at `info`; a request that reached a world and
   failed with a **5xx** logs `application error` with `code=` (and a
   source-mapped stack); 4xx answers (`not_found`, `conflict`, validation)

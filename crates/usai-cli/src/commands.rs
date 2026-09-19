@@ -216,6 +216,8 @@ pub async fn run(
     announce: bool,
     require_signature: Vec<String>,
     max_worlds: u32,
+    no_cron: bool,
+    no_queue: bool,
 ) -> Result<()> {
     let trusted = trusted_signers(&require_signature)?;
     if !trusted.is_empty() {
@@ -241,9 +243,17 @@ pub async fn run(
             trusted_signers: trusted,
             max_worlds: max_worlds.max(1),
             default_app_concurrency: max_worlds.max(1),
+            cron_scheduler: !no_cron,
+            queue_consumers: !no_queue,
             ..RuntimeConfig::default()
         },
     );
+    if no_cron {
+        tracing::info!("cron scheduler off on this instance (--no-cron)");
+    }
+    if no_queue {
+        tracing::info!("queue consumers off on this instance (--no-queue)");
+    }
     let revision = runtime.install(definition).await?;
     runtime.activate(revision.id).await.map_err(|e| match e {
         usai_runtime::RuntimeError::MissingEnv(name) => anyhow::anyhow!(
@@ -345,6 +355,13 @@ async fn serve_until_signal(
             // metrics: on in dev, and wherever --status is asked for.
             serve_docs: expose_diagnostics || serve_status,
             serve_status,
+            // A WebSocket that sends nothing for this long is closed (1008);
+            // the reliability campaign shortens it to exercise the path.
+            socket_idle_timeout: std::env::var("USAI_SOCKET_IDLE_TIMEOUT")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .map(Duration::from_secs)
+                .unwrap_or(HttpConfig::default().socket_idle_timeout),
             ..HttpConfig::default()
         },
     );

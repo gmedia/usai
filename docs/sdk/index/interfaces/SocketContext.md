@@ -1,6 +1,6 @@
 [@sakaladev/usai](../../README.md) / [index](../README.md) / SocketContext
 
-# Interface: SocketContext\<Incoming, Outgoing, R = [`ResourceDeclaration`](ResourceDeclaration.md)[]\>
+# Interface: SocketContext\<Incoming, Outgoing, R = [`ResourceDeclaration`](ResourceDeclaration.md)[], A = `unknown`\>
 
 The context of a WebSocket connection, shared by `open`, `message` and
 `close`: request facts, `send`/`close`, connection-local `state`, and
@@ -17,6 +17,7 @@ in `message` the validated incoming `message`.
 | `Incoming` | - |
 | `Outgoing` | - |
 | `R` | [`ResourceDeclaration`](ResourceDeclaration.md)[] |
+| `A` | `unknown` |
 
 ## Properties
 
@@ -28,6 +29,7 @@ in `message` the validated incoming `message`.
 | <a id="params"></a> `params` | `readonly` | `Record`\<`string`, `string`\> | - | - | - |
 | <a id="query"></a> `query` | `readonly` | `Record`\<`string`, `string` \| `string`[]\> | - | - | - |
 | <a id="headers"></a> `headers` | `readonly` | `Record`\<`string`, `string`\> | - | - | - |
+| <a id="auth"></a> `auth` | `readonly` | `A` | The principal the `auth` declaration resolved; `undefined` without one. | - | - |
 | <a id="state"></a> `state` | `readonly` | `Record`\<`string`, `unknown`\> | Connection-local mutable state: survives messages, ends with the connection. | - | - |
 | <a id="message"></a> `message` | `readonly` | `Incoming` | The current message (in the `message` handler). | - | - |
 | <a id="closeinfo"></a> `closeInfo` | `readonly` | \| \{ `code`: `number` \| `null`; `reason`: `string`; \} \| `null` | Why the connection closed (in the `close` handler). | - | - |

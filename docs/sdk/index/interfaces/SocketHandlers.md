@@ -1,6 +1,6 @@
 [@sakaladev/usai](../../README.md) / [index](../README.md) / SocketHandlers
 
-# Interface: SocketHandlers\<I, O, R = [`ResourceDeclaration`](ResourceDeclaration.md)[]\>
+# Interface: SocketHandlers\<I, O, R = [`ResourceDeclaration`](ResourceDeclaration.md)[], A = `unknown`\>
 
 The three moments of a connection.
 
@@ -11,13 +11,14 @@ The three moments of a connection.
 | `I` | - |
 | `O` | - |
 | `R` | [`ResourceDeclaration`](ResourceDeclaration.md)[] |
+| `A` | `unknown` |
 
 ## Methods
 
 ### open()?
 
 ```ts
-optional open(ctx: SocketContext<I, O, R>): unknown;
+optional open(ctx: SocketContext<I, O, R, A>): unknown;
 ```
 
 After the upgrade.
@@ -26,7 +27,7 @@ After the upgrade.
 
 | Parameter | Type |
 | ------ | ------ |
-| `ctx` | [`SocketContext`](SocketContext.md)\<`I`, `O`, `R`\> |
+| `ctx` | [`SocketContext`](SocketContext.md)\<`I`, `O`, `R`, `A`\> |
 
 #### Returns
 
@@ -37,7 +38,7 @@ After the upgrade.
 ### message()?
 
 ```ts
-optional message(ctx: SocketContext<I, O, R>): unknown;
+optional message(ctx: SocketContext<I, O, R, A>): unknown;
 ```
 
 Once per incoming message, in order.
@@ -46,7 +47,7 @@ Once per incoming message, in order.
 
 | Parameter | Type |
 | ------ | ------ |
-| `ctx` | [`SocketContext`](SocketContext.md)\<`I`, `O`, `R`\> |
+| `ctx` | [`SocketContext`](SocketContext.md)\<`I`, `O`, `R`, `A`\> |
 
 #### Returns
 
@@ -57,7 +58,7 @@ Once per incoming message, in order.
 ### close()?
 
 ```ts
-optional close(ctx: SocketContext<I, O, R>): unknown;
+optional close(ctx: SocketContext<I, O, R, A>): unknown;
 ```
 
 After the connection closed, whoever closed it.
@@ -66,7 +67,7 @@ After the connection closed, whoever closed it.
 
 | Parameter | Type |
 | ------ | ------ |
-| `ctx` | [`SocketContext`](SocketContext.md)\<`I`, `O`, `R`\> |
+| `ctx` | [`SocketContext`](SocketContext.md)\<`I`, `O`, `R`, `A`\> |
 
 #### Returns
 

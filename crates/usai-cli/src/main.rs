@@ -83,6 +83,16 @@ enum Command {
         /// each reserves memory up front). USAI_MAX_WORLDS is the environment form
         #[arg(long, env = "USAI_MAX_WORLDS", default_value_t = 256)]
         max_worlds: u32,
+        /// Do not run the cron scheduler on this instance. Every instance
+        /// that runs it ticks every schedule; with several replicas, keep it
+        /// on exactly one (USAI_NO_CRON=1 on the others)
+        #[arg(long, env = "USAI_NO_CRON")]
+        no_cron: bool,
+        /// Do not run queue consumers on this instance (USAI_NO_QUEUE=1);
+        /// consumers on several replicas share the work safely, so this is
+        /// for dedicating replicas, not for correctness
+        #[arg(long, env = "USAI_NO_QUEUE")]
+        no_queue: bool,
     },
     /// Build, serve, and rebuild on change as a new revision
     Dev {
@@ -342,6 +352,8 @@ async fn async_main() {
             announce,
             require_signature,
             max_worlds,
+            no_cron,
+            no_queue,
         } => {
             commands::run(
                 &root,
@@ -354,6 +366,8 @@ async fn async_main() {
                 announce,
                 require_signature,
                 max_worlds,
+                no_cron,
+                no_queue,
             )
             .await
         }

@@ -456,7 +456,11 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
             &queue,
         );
     }
+    // Levels (gauge) and events (counter) are different metrics: the
+    // number of quarantines is cumulative, so it is not a `usai_resource`
+    // level and must not be alerted on as one.
     let mut resources = Vec::new();
+    let mut quarantines = Vec::new();
     for r in &status.resources {
         let base = format!(
             "kind=\"{}\",name=\"{}\"",
@@ -465,18 +469,22 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
         );
         resources.push((format!("{base},metric=\"in_use\""), r.in_use as f64));
         resources.push((format!("{base},metric=\"max\""), r.max as f64));
-        resources.push((
-            format!("{base},metric=\"quarantined\""),
-            r.quarantined as f64,
-        ));
+        quarantines.push((base, r.quarantined as f64));
     }
     if !resources.is_empty() {
         metric(
             &mut out,
             "usai_resource",
-            "Resource manager state",
+            "Resource manager state (current levels)",
             "gauge",
             &resources,
+        );
+        metric(
+            &mut out,
+            "usai_resource_quarantines_total",
+            "Connections quarantined because their outcome could not be proven (cumulative)",
+            "counter",
+            &quarantines,
         );
     }
     let t = &status.tasks;

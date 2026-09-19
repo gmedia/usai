@@ -28,15 +28,22 @@ export interface StreamHandle {
  *
  * @category Streams and WebSockets
  */
-export interface StreamContext<R = ResourceDeclaration[]> extends BaseContext {
-  readonly resources: ResourcesOf<R>;
+export interface StreamContext<O extends StreamOptions = StreamOptions> extends BaseContext {
+  /** The declared resources, typed by name from `resources: [...]`. */
+  readonly resources: ResourcesOf<O["resources"]>;
   readonly method: Method;
   readonly path: string;
   readonly url: string;
-  readonly params: Record<string, string>;
-  readonly query: Record<string, string | string[]>;
+  /** Path parameters, validated against `params` (strings when undeclared). */
+  readonly params: OutputOf<O["params"], Record<string, string>>;
+  /** Query, validated against `query`. */
+  readonly query: OutputOf<O["query"], Record<string, string | string[]>>;
   readonly headers: Record<string, string>;
+  /** The principal the `auth` declaration resolved; `undefined` without one. */
+  readonly auth: O["auth"] extends AuthDeclaration<infer P> ? P : undefined;
 }
+
+type OutputOf<S, Fallback> = S extends AnySchema ? Output<S> : Fallback;
 
 /** Options for `http.stream`.
  *
@@ -71,7 +78,7 @@ export interface StreamOptions<R extends ResourceDeclaration[] = ResourceDeclara
  * });
  * ```
  */
-function stream<R extends ResourceDeclaration[] = ResourceDeclaration[]>(path: string, options: StreamOptions<R>, handler: (ctx: StreamContext<R>, stream: StreamHandle) => unknown): Workload {
+function stream<O extends StreamOptions>(path: string, options: O, handler: (ctx: StreamContext<O>, stream: StreamHandle) => unknown): Workload {
   const method = options.method ?? "GET";
   const contracts: Workload["contracts"] = {};
   if (options.params) contracts.params = options.params;
@@ -106,13 +113,15 @@ export const streams = { stream };
  *
  * @category Streams and WebSockets
  */
-export interface SocketContext<Incoming, Outgoing, R = ResourceDeclaration[]> extends BaseContext {
+export interface SocketContext<Incoming, Outgoing, R = ResourceDeclaration[], A = unknown> extends BaseContext {
   readonly resources: ResourcesOf<R>;
   readonly path: string;
   readonly url: string;
   readonly params: Record<string, string>;
   readonly query: Record<string, string | string[]>;
   readonly headers: Record<string, string>;
+  /** The principal the `auth` declaration resolved; `undefined` without one. */
+  readonly auth: A;
   /** Connection-local mutable state: survives messages, ends with the connection. */
   readonly state: Record<string, unknown>;
   /** Send one message (validated against `outgoing` when declared). */
@@ -129,7 +138,7 @@ export interface SocketContext<Incoming, Outgoing, R = ResourceDeclaration[]> ex
  *
  * @category Streams and WebSockets
  */
-export interface SocketOptions<I extends AnySchema | undefined, O extends AnySchema | undefined, R extends ResourceDeclaration[] = ResourceDeclaration[]> extends WorkloadPolicies {
+export interface SocketOptions<I extends AnySchema | undefined, O extends AnySchema | undefined, R extends ResourceDeclaration[] = ResourceDeclaration[], A extends AuthDeclaration | undefined = AuthDeclaration | undefined> extends WorkloadPolicies {
   summary?: string;
   description?: string;
   /** Schema for messages from the client. An invalid message is answered
@@ -138,7 +147,7 @@ export interface SocketOptions<I extends AnySchema | undefined, O extends AnySch
   incoming?: I;
   /** Schema for messages to the client. */
   outgoing?: O;
-  auth?: AuthDeclaration;
+  auth?: A;
   resources?: R;
 }
 
@@ -148,13 +157,13 @@ type Out<S> = S extends AnySchema ? Output<S> : unknown;
  *
  * @category Streams and WebSockets
  */
-export interface SocketHandlers<I, O, R = ResourceDeclaration[]> {
+export interface SocketHandlers<I, O, R = ResourceDeclaration[], A = unknown> {
   /** After the upgrade. */
-  open?(ctx: SocketContext<I, O, R>): unknown;
+  open?(ctx: SocketContext<I, O, R, A>): unknown;
   /** Once per incoming message, in order. */
-  message?(ctx: SocketContext<I, O, R>): unknown;
+  message?(ctx: SocketContext<I, O, R, A>): unknown;
   /** After the connection closed, whoever closed it. */
-  close?(ctx: SocketContext<I, O, R>): unknown;
+  close?(ctx: SocketContext<I, O, R, A>): unknown;
 }
 
 /**
@@ -176,10 +185,10 @@ export interface SocketHandlers<I, O, R = ResourceDeclaration[]> {
  *
  * @category Streams and WebSockets
  */
-export function socket<I extends AnySchema | undefined = undefined, O extends AnySchema | undefined = undefined, R extends ResourceDeclaration[] = ResourceDeclaration[]>(
+export function socket<I extends AnySchema | undefined = undefined, O extends AnySchema | undefined = undefined, R extends ResourceDeclaration[] = ResourceDeclaration[], A extends AuthDeclaration | undefined = undefined>(
   path: string,
-  options: SocketOptions<I, O, R>,
-  handlers: SocketHandlers<Out<I>, Out<O>, R>,
+  options: SocketOptions<I, O, R, A>,
+  handlers: SocketHandlers<Out<I>, Out<O>, R, A extends AuthDeclaration<infer P> ? P : undefined>,
 ): Workload {
   const contracts: Workload["contracts"] = {};
   if (options.incoming) contracts.message = options.incoming;

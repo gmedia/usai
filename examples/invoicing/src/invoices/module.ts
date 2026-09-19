@@ -2,6 +2,7 @@ import { command, cron, defineModule, errors, http, publishes, type PostgresHand
 import { z } from "zod";
 import { db } from "../resources.ts";
 import { session } from "../auth/module.ts";
+import { feed, live } from "./live.ts";
 
 const sql = (ctx: { resources: Record<string, unknown> }) => ctx.resources["main"] as PostgresHandle;
 
@@ -138,7 +139,7 @@ export const stats = command("invoices:stats", { resources: [db] }, async (ctx) 
 
 export const invoices = defineModule({
   name: "invoices",
-  workloads: [create, get, list, issue, pay, remove, markOverdue, stats],
+  workloads: [create, get, list, issue, pay, remove, live, feed, markOverdue, stats],
   resources: [db],
   migrations: "./src/invoices/migrations/*.sql",
   seeders: "./src/invoices/seeders/*.ts",

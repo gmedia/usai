@@ -4,7 +4,7 @@
 
 ```ts
 const http: {
-  stream: <R>(path: string, options: StreamOptions<R>, handler: (ctx: StreamContext<R>, stream: StreamHandle) => unknown) => Workload;
+  stream: <O>(path: string, options: O, handler: (ctx: StreamContext<O>, stream: StreamHandle) => unknown) => Workload;
   get: Declare;
   post: Declare;
   put: Declare;
@@ -54,7 +54,7 @@ path twice is a build error; a path nobody declares is 404
 
 | Name | Type | Default value | Description |
 | ------ | ------ | ------ | ------ |
-| <a id="property-stream"></a> `stream()` | \<`R`\>(`path`: `string`, `options`: [`StreamOptions`](../interfaces/StreamOptions.md)\<`R`\>, `handler`: (`ctx`: [`StreamContext`](../interfaces/StreamContext.md)\<`R`\>, `stream`: [`StreamHandle`](../interfaces/StreamHandle.md)) => `unknown`) => [`Workload`](../interfaces/Workload.md) | `streams.stream` | Declare a streaming endpoint (`http.stream`): a **connection-bound** world that lives until the handler returns. `params` and `query` are validated before the world exists; `timeout` bounds the whole stream. Chunks are `text/event-stream` by default (`stream.event(name, data)` writes one server-sent event); set `content-type` in `start` for anything else. **Example** `export const events = http.stream("/events", { resources: [cache] }, async (ctx, stream) => { while (!ctx.signal.aborted) { await stream.event("tick", { total: await ctx.resources.cache.get("total") }); await ctx.sleep("1s"); } });` |
+| <a id="property-stream"></a> `stream()` | \<`O`\>(`path`: `string`, `options`: `O`, `handler`: (`ctx`: [`StreamContext`](../interfaces/StreamContext.md)\<`O`\>, `stream`: [`StreamHandle`](../interfaces/StreamHandle.md)) => `unknown`) => [`Workload`](../interfaces/Workload.md) | `streams.stream` | Declare a streaming endpoint (`http.stream`): a **connection-bound** world that lives until the handler returns. `params` and `query` are validated before the world exists; `timeout` bounds the whole stream. Chunks are `text/event-stream` by default (`stream.event(name, data)` writes one server-sent event); set `content-type` in `start` for anything else. **Example** `export const events = http.stream("/events", { resources: [cache] }, async (ctx, stream) => { while (!ctx.signal.aborted) { await stream.event("tick", { total: await ctx.resources.cache.get("total") }); await ctx.sleep("1s"); } });` |
 | <a id="property-get"></a> `get` | [`Declare`](../type-aliases/Declare.md) | - | `GET` endpoint. |
 | <a id="property-post"></a> `post` | [`Declare`](../type-aliases/Declare.md) | - | `POST` endpoint. |
 | <a id="property-put"></a> `put` | [`Declare`](../type-aliases/Declare.md) | - | `PUT` endpoint. |

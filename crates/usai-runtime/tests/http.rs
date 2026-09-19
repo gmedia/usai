@@ -1048,6 +1048,12 @@ async fn status_and_metrics_derive_from_runtime_truth() {
     );
     assert!(text.contains("usai_http_responses_total{class=\"2xx\"} 1"));
     assert!(text.contains("usai_resource{kind=\"cache.local\",name=\"hits\",metric=\"max\"}"));
+    assert!(
+        text.contains("# TYPE usai_resource_quarantines_total counter")
+            && text.contains("usai_resource_quarantines_total{kind=\"cache.local\",name=\"hits\"}"),
+        "quarantines are a counter, not a level: {text}"
+    );
+    assert!(!text.contains("metric=\"quarantined\""));
     // Round two: why requests were refused, and how long they took.
     assert!(
         text.contains("usai_http_rejections_total{reason=\"validation\"} 1"),

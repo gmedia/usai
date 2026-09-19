@@ -10,10 +10,10 @@
 - Metrics: `usai_http_responses_total{class="5xx"}` and
   `usai_http_workload_responses_total{workload,class="5xx"}` rise for the
   workloads that lease the database (the others stay 2xx);
-  `usai_resource{kind="postgres",name="main",metric="quarantined"}` rises by
+  `usai_resource_quarantines_total{kind="postgres",name="main"}` rises by
   the number of pooled connections that were open when the server died —
-  it is a counter (quarantined ever), so alert on `increase()`, not on the
-  level; `usai_http_request_seconds` p99 stays low.
+  a counter, so alert on `increase()`; `usai_http_request_seconds` p99
+  stays low.
 - Log: `WARN connection quarantined: original query has no terminal outcome`
   and `application error … code="connection_closed"` for the connections
   that were open, then `code="pool_error" … cannot connect to <host:port> as

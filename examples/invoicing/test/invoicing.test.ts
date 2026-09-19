@@ -128,6 +128,30 @@ test("invoicing: tenants, sessions, transactional invoices, pagination, signed r
     assert.ok(overdue.value.overdue >= 1, "ours (plus the seeded demo tenant's on a fresh database; no webhook there)");
     assert.ok(await waitFor(() => hooks.received.some((r) => r.event === "invoice.overdue"), 20_000), "overdue webhook");
 
+    // Live views: the SSE stream's first event and a WebSocket round trip,
+    // both authenticated, both scoped to the tenant.
+    const sse = await fetch(`${app.url}/invoices/live?everyMs=200`, { headers: auth });
+    if (sse.status !== 200) assert.fail(`live: ${sse.status} ${await sse.text()}`);
+    assert.match(sse.headers.get("content-type") ?? "", /text\/event-stream/);
+    const reader = sse.body!.getReader();
+    let text = "";
+    while (!text.includes("\n\n")) { const { value, done } = await reader.read(); if (done) break; text += new TextDecoder().decode(value); }
+    await reader.cancel();
+    assert.match(text, /event: counts/);
+    const counts = JSON.parse(text.split("data: ")[1]!.split("\n")[0]!) as { count: number; overdue: number };
+    assert.ok(counts.count >= 1 && counts.overdue >= 1, text);
+    const ws = new WebSocket(`${app.url.replace(/^http/, "ws")}/invoices/socket`, { headers: auth } as never);
+    const messages: string[] = [];
+    await new Promise<void>((ok, bad) => {
+      ws.addEventListener("open", () => ws.send(JSON.stringify({ type: "counts" })));
+      ws.addEventListener("message", (e) => { messages.push(String(e.data)); if (messages.length === 2) ok(); });
+      ws.addEventListener("error", () => bad(new Error("websocket error")));
+      setTimeout(() => bad(new Error(`websocket: ${messages.length} messages`)), 10_000);
+    });
+    ws.close();
+    assert.equal((JSON.parse(messages[0]!) as { type: string }).type, "hello");
+    assert.equal((JSON.parse(messages[1]!) as { type: string; count: number }).count, counts.count);
+
     // Pay an overdue invoice; the command reports per tenant and status.
     const paid = await app.http.post(`/invoices/${invoice.id}/pay`, { headers: auth });
     assert.equal(paid.status, 200, paid.text);

@@ -8,6 +8,9 @@
 #   scripts/qualification/p6/run.sh idle-burst       # 60 s idle then a burst: first-second latency and errors
 #   scripts/qualification/p6/run.sh dead-letter      # a webhook endpoint that always fails: 5 attempts then dead
 #   scripts/qualification/p6/run.sh soak <seconds>   # steady load; status sampled every 60 s (memory plateau, ownership)
+#   scripts/qualification/p6/run.sh conn-churn       # connection-bound worlds (SSE + WebSocket): 500 cycles, held through a
+#                                                     revision replacement, an app restart and a proxy restart, abrupt client
+#                                                     death, a client that never reads, an idle socket (USAI_SOCKET_IDLE_TIMEOUT)
 # Campaign steps tolerate failing curls (that is the point); only the setup is strict.
 set -uo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -127,6 +130,71 @@ dead_letter() {
   curl -s -X PUT "$BASE/tenant/webhook" -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"url":"http://127.0.0.1:9/","secret":"dead-letter-secret-1234"}' > /dev/null
 }
 
+live_worlds() { status | grep -o '"liveWorlds":[0-9]*' | cut -d: -f2; }
+wait_baseline() { local d=$((SECONDS + ${1:-30})); while [ $SECONDS -lt $d ]; do [ "$(live_worlds)" = "0" ] && { echo "live worlds back to 0 after $((SECONDS - d + ${1:-30})) s"; return 0; }; sleep 0.5; done; echo "live worlds still $(live_worlds) after ${1:-30} s"; return 1; }
+conn() { node "$here/connchurn.mjs" "$BASE" "$TOKEN" "$@"; }
+
+conn_churn() {
+  local n="${1:-500}"
+  echo "== cycles: $n × (SSE two events + WS hello/ask/answer), 16 at a time"
+  conn cycles "$n" 16
+  wait_baseline 15
+
+  echo "== held through a revision replacement: 40 connections (USAI_MAX_WORLDS is 48 here), replacement at t=10 s"
+  conn hold 40 40 > "$here/out/conn.replace.json" &
+  local hp=$!; sleep 10
+  local body; body=$(curl -s -X POST "$CONTROL/revisions" "${AUTH[@]}" -H 'content-type: application/json' -d '{"artifact":"/app/.usai/build"}')
+  local r; r=$(echo "$body" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  local t0=$SECONDS
+  curl -s -o /dev/null -X POST "$CONTROL/revisions/$r/activate" "${AUTH[@]}"
+  while curl -s "$CONTROL/revisions" "${AUTH[@]}" | grep -q '"state":"draining"'; do sleep 0.2; done
+  echo "replacement rev$r active; previous drained in $((SECONDS - t0)) s (connections are asked to stop, then closed at the drain bound)"
+  wait $hp; cat "$here/out/conn.replace.json"
+  wait_baseline 15
+
+  echo "== held through an app restart (SIGTERM → drain → start): 40 connections (USAI_MAX_WORLDS is 48 here), restart at t=10 s"
+  conn hold 40 40 > "$here/out/conn.restart.json" &
+  hp=$!; sleep 10
+  t0=$SECONDS
+  docker kill -s SIGTERM usai-p5-app-1 >/dev/null
+  while [ "$(docker inspect -f '{{.State.Running}}' usai-p5-app-1)" = "true" ]; do sleep 0.1; done
+  echo "app exited after $((SECONDS - t0)) s"
+  docker compose start app >/dev/null 2>&1
+  wait_healthy 60 || echo "NOT HEALTHY after restart"
+  echo "healthy again after $((SECONDS - t0)) s"
+  wait $hp; cat "$here/out/conn.restart.json"
+  wait_baseline 15
+
+  echo "== held through a proxy restart: 40 connections (USAI_MAX_WORLDS is 48 here), caddy restarted at t=10 s"
+  conn hold 40 40 > "$here/out/conn.proxy.json" &
+  hp=$!; sleep 10
+  t0=$SECONDS
+  docker compose restart caddy >/dev/null 2>&1
+  wait_healthy 60 || echo "NOT HEALTHY after proxy restart"
+  echo "proxy back after $((SECONDS - t0)) s"
+  wait $hp; cat "$here/out/conn.proxy.json"
+  wait_baseline 15
+
+  echo "== abrupt client death: 40 connections (USAI_MAX_WORLDS is 48 here), client killed -9 at t=5 s (no close frames, no aborts)"
+  conn hold 40 60 > "$here/out/conn.abrupt.json" &
+  hp=$!; sleep 5
+  echo "live worlds before kill: $(live_worlds)"
+  kill -9 $hp; wait $hp 2>/dev/null || true
+  wait_baseline 30
+
+  echo "== a client that never reads: 10 SSE connections unread for 30 s (rss before/after)"
+  echo "rss before: $(rss_mb) MiB"
+  for i in $(seq 1 10); do conn slow 30 > /dev/null & done; wait
+  echo "rss after: $(rss_mb) MiB"
+  wait_baseline 15
+
+  echo "== idle socket: nothing sent; the server closes it (USAI_SOCKET_IDLE_TIMEOUT=${USAI_SOCKET_IDLE_TIMEOUT:-300} s in this deployment)"
+  conn idle $(( ${USAI_SOCKET_IDLE_TIMEOUT:-300} + 5 ))
+  wait_baseline 15
+  status > "$here/out/conn.status.json"
+  echo "gauges: $(status | grep -o '"gauges":{[^}]*}')"
+}
+
 soak() {
   local s="${1:-3600}"; local out="$here/out/soak.load.jsonl"; local samples="$here/out/soak.samples.jsonl"; rm -f "$out" "$samples"
   echo "soak start $(date -u +%FT%TZ) for $s s"
@@ -152,5 +220,6 @@ case "${1:-}" in
   idle-burst) idle_burst ;;
   dead-letter) dead_letter ;;
   soak) soak "${2:-3600}" ;;
+  conn-churn) conn_churn "${2:-500}" ;;
   *) echo "usage: $0 churn|db-flap|restart-loop|overload|idle-burst|dead-letter|soak"; exit 2 ;;
 esac

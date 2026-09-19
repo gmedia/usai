@@ -17,6 +17,8 @@ services:
       RUST_LOG: info
       # Sized for the 512 MB limit below: RSS ≈ worlds × 8 MB keep-resident + images.
       USAI_MAX_WORLDS: ${USAI_MAX_WORLDS:-48}
+      # Idle WebSockets are closed (1008) after this; the connection campaign shortens it.
+      USAI_SOCKET_IDLE_TIMEOUT: ${USAI_SOCKET_IDLE_TIMEOUT:-300}
     command: ["run", "--artifact", "/app/.usai/build", "--host", "0.0.0.0", "--port", "3000", "--status", "--control", "0.0.0.0:3900"]
     depends_on:
       postgres: { condition: service_healthy }

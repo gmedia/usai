@@ -1,6 +1,6 @@
 [@sakaladev/usai](../../README.md) / [index](../README.md) / StreamContext
 
-# Interface: StreamContext\<R = [`ResourceDeclaration`](ResourceDeclaration.md)[]\>
+# Interface: StreamContext\<O *extends* [`StreamOptions`](StreamOptions.md) = [`StreamOptions`](StreamOptions.md)\>
 
 The context of a streaming request: request facts plus [BaseContext](BaseContext.md).
 
@@ -12,19 +12,20 @@ The context of a streaming request: request facts plus [BaseContext](BaseContext
 
 | Type Parameter | Default type |
 | ------ | ------ |
-| `R` | [`ResourceDeclaration`](ResourceDeclaration.md)[] |
+| `O` *extends* [`StreamOptions`](StreamOptions.md) | [`StreamOptions`](StreamOptions.md) |
 
 ## Properties
 
 | Property | Modifier | Type | Description | Overrides | Inherited from |
 | ------ | ------ | ------ | ------ | ------ | ------ |
-| <a id="resources"></a> `resources` | `readonly` | [`ResourcesOf`](../type-aliases/ResourcesOf.md)\<`R`\> | The declared resources by name, as their in-world handles ([PostgresHandle](PostgresHandle.md), [CacheLocalHandle](CacheLocalHandle.md), [HttpClientHandle](HttpClientHandle.md)). Reading an undeclared name throws `resource_not_declared` with the fix. | [`BaseContext`](BaseContext.md).[`resources`](BaseContext.md#resources) | - |
+| <a id="resources"></a> `resources` | `readonly` | [`ResourcesOf`](../type-aliases/ResourcesOf.md)\<`O`\[`"resources"`\]\> | The declared resources, typed by name from `resources: [...]`. | [`BaseContext`](BaseContext.md).[`resources`](BaseContext.md#resources) | - |
 | <a id="method"></a> `method` | `readonly` | [`Method`](../type-aliases/Method.md) | - | - | - |
 | <a id="path"></a> `path` | `readonly` | `string` | - | - | - |
 | <a id="url"></a> `url` | `readonly` | `string` | - | - | - |
-| <a id="params"></a> `params` | `readonly` | `Record`\<`string`, `string`\> | - | - | - |
-| <a id="query"></a> `query` | `readonly` | `Record`\<`string`, `string` \| `string`[]\> | - | - | - |
+| <a id="params"></a> `params` | `readonly` | `OutputOf`\<`O`\[`"params"`\], `Record`\<`string`, `string`\>\> | Path parameters, validated against `params` (strings when undeclared). | - | - |
+| <a id="query"></a> `query` | `readonly` | `OutputOf`\<`O`\[`"query"`\], `Record`\<`string`, `string` \| `string`[]\>\> | Query, validated against `query`. | - | - |
 | <a id="headers"></a> `headers` | `readonly` | `Record`\<`string`, `string`\> | - | - | - |
+| <a id="auth"></a> `auth` | `readonly` | `O`\[`"auth"`\] *extends* [`AuthDeclaration`](AuthDeclaration.md)\<`P`\> ? `P` : `undefined` | The principal the `auth` declaration resolved; `undefined` without one. | - | - |
 | <a id="tasks"></a> `tasks` | `readonly` | [`TaskHandle`](TaskHandle.md) | Start tasks: owned (`invoke`) or transferred (`dispatch`). | - | [`BaseContext`](BaseContext.md).[`tasks`](BaseContext.md#tasks) |
 | <a id="queue"></a> `queue` | `readonly` | [`QueueHandle`](QueueHandle.md) | Publish to a queue topic; durable once the insert commits. | - | [`BaseContext`](BaseContext.md).[`queue`](BaseContext.md#queue) |
 | <a id="signal"></a> `signal` | `readonly` | [`UsaiAbortSignal`](UsaiAbortSignal.md) | Aborts when this world is cancelled. | - | [`BaseContext`](BaseContext.md).[`signal`](BaseContext.md#signal) |

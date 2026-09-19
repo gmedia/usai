@@ -23,7 +23,17 @@ and nothing is promised.
 | PostgreSQL | 15, 16, 17, 18 (TLS with verified certificates; `sslmode=disable|prefer|require`) |
 | Outbound HTTP | http/1.1 and h2 to any http(s) origin the application declares |
 | Inbound HTTP | HTTP/1.1 behind a reverse proxy that terminates TLS (Caddy, nginx, an ingress) |
-| WebSocket / SSE | ✓ through the same proxy (idle timeout 300 s by default) |
+| WebSocket / SSE | ✓ through the same proxy; idle WebSockets are closed with 1008 after `USAI_SOCKET_IDLE_TIMEOUT` (300 s); qualified by the P6 `conn-churn` campaign (cycles, held through replacement/restart/proxy restart, abrupt client death, unread streams) |
+
+## Deployment topology
+
+| | Supported | Notes |
+|---|---|---|
+| One runtime instance behind a reverse proxy | ✓ | the topology the P5/P6 campaigns qualified (`docs/deploy/compose.production.yaml`) |
+| N replicas behind a load balancer, one PostgreSQL | ✓ with the rules below | HTTP and queue consumers need nothing: consumers claim messages with `FOR UPDATE SKIP LOCKED`, so replicas share the work; migrations serialize on an advisory lock, so several `migrate` jobs at once apply each file exactly once |
+| Cron on N replicas | **every instance that runs the scheduler ticks every schedule** | there is no leader election; run the scheduler on exactly one replica (`usai run --no-cron` / `USAI_NO_CRON=1` on the others) or write idempotent jobs. The topology does not change the application's semantics silently: each instance's `/_usai/status` says whether it schedules |
+| Rolling deployment | ✓ | each instance drains its own in-flight work (`docs/runbooks/deploy-and-rollback.md`); connection-bound worlds are closed at the drain bound (WebSocket 1012, stream ended) and clients reconnect to the new instance |
+| `cache.local` across replicas | ✗ | per process by definition; shared state belongs in PostgreSQL |
 
 ## Developer toolchain
 
