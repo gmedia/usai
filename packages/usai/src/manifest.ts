@@ -10,6 +10,13 @@ import { jsonSchemaOf } from "./schema.ts";
  *
  * @category Build */
 export const MANIFEST_VERSION = 1 as const;
+/** The host↔guest contract this SDK's in-world runtime speaks
+ * (`docs/GUEST-ABI.md`). Stamped into `builtWith.abi`; a runtime with a
+ * different bridge refuses the artifact at install instead of faulting
+ * every world.
+ *
+ * @category Build */
+export const GUEST_ABI = 1 as const;
 /** The version of this SDK, stamped into manifests it describes (provenance
  * for compatibility diagnostics; not part of the application's identity).
  * Replaced at build time from package.json; the fallback is for source checkouts. */
@@ -60,7 +67,7 @@ export interface Manifest {
   auth: Array<{ name: string; scheme: string; header?: string; description?: string }>;
   env: Array<{ name: string; kind: string; required: boolean; values: string[] }>;
   codeSha256: string;
-  builtWith?: { sdk?: string; runtime?: string };
+  builtWith?: { sdk?: string; runtime?: string; abi?: number };
 }
 
 function describeContracts(workload: Workload): ManifestContracts {
@@ -164,6 +171,6 @@ export function describe(app: AppDeclaration): Manifest {
     auth: [...authByName.values()],
     env,
     codeSha256: "",
-    builtWith: { sdk: SDK_VERSION },
+    builtWith: { sdk: SDK_VERSION, abi: GUEST_ABI },
   };
 }

@@ -53,10 +53,32 @@ pub fn banner(
             }
         }
     }
+    for (title, kind) in [("Streams", "stream"), ("WebSockets", "socket")] {
+        let items: Vec<_> = m
+            .workloads
+            .iter()
+            .filter(|w| w.trigger.kind_name() == kind)
+            .collect();
+        if !items.is_empty() {
+            let _ = writeln!(out, "\n{title}");
+            for w in items {
+                match &w.trigger {
+                    Trigger::Stream { method, path } => {
+                        let _ = writeln!(out, "  {method:<6} {path}");
+                    }
+                    Trigger::Socket { path } => {
+                        let _ = writeln!(out, "  {:<6} {path}", "GET");
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
     for (title, kind) in [
         ("Tasks", "task"),
         ("Commands", "command"),
         ("Services", "service"),
+        ("Queues", "queue"),
     ] {
         let items: Vec<_> = m
             .workloads
@@ -76,7 +98,17 @@ pub fn banner(
         .filter(|w| matches!(w.trigger, Trigger::Cron { .. }))
         .collect();
     if !cron.is_empty() {
-        let _ = writeln!(out, "\nCron");
+        // Whether this instance ticks them is a fact about the instance,
+        // not the application (several replicas: one scheduler).
+        let scheduled = status.map(|s| s.scheduler.cron);
+        let _ = writeln!(
+            out,
+            "\nCron{}",
+            match scheduled {
+                Some(false) => "   (not scheduled on this instance: --no-cron)",
+                _ => "",
+            }
+        );
         for w in cron {
             if let Trigger::Cron { schedule, .. } = &w.trigger {
                 let _ = writeln!(out, "  {:<16} {schedule}", w.name);

@@ -232,6 +232,9 @@ pub enum RuntimeError {
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeStatus {
     pub engine: &'static str,
+    /// What this instance runs besides HTTP: with several replicas, cron
+    /// belongs on exactly one of them (`--no-cron` elsewhere).
+    pub scheduler: SchedulerStatus,
     /// Compiled application images alive (one per held revision, plus
     /// whatever a build or a world still references). Wasm engine only.
     pub compiled_images_live: u64,
@@ -241,6 +244,15 @@ pub struct RuntimeStatus {
     pub resources: Vec<ResourceStatus>,
     pub worlds_in_use: u32,
     pub worlds_max: u32,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SchedulerStatus {
+    /// This instance ticks the application's cron schedules.
+    pub cron: bool,
+    /// This instance runs the application's queue consumers.
+    pub queue: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -908,6 +920,10 @@ impl Runtime {
             .collect();
         RuntimeStatus {
             engine: self.engine.name(),
+            scheduler: SchedulerStatus {
+                cron: self.config.cron_scheduler,
+                queue: self.config.queue_consumers,
+            },
             compiled_images_live: crate::engine::wasm::IMAGES_LIVE
                 .load(std::sync::atomic::Ordering::Relaxed),
             gauges: self.ledger.gauges.snapshot(),

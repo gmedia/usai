@@ -621,7 +621,7 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
             tokio::time::sleep(Duration::from_millis(120)).await;
             while rx.try_recv().is_ok() {}
             let started = std::time::Instant::now();
-            {
+            let env_changed = {
                 let fresh: std::collections::HashMap<String, String> =
                     crate::parse_dotenv(&rebuild_root.join(".env"))
                         .into_iter()
@@ -630,8 +630,11 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
                 if *current != fresh {
                     eprintln!("\n.env changed: {} variable(s) now loaded", fresh.len());
                     *current = fresh;
+                    true
+                } else {
+                    false
                 }
-            }
+            };
             let config = match load_config(rebuild_engine.as_ref(), &rebuild_root).await {
                 Ok(c) => c,
                 Err(e) => {
@@ -658,9 +661,13 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
                         }
                     });
                     let previous = rebuild_runtime.active().ok();
-                    if previous
-                        .as_ref()
-                        .is_some_and(|p| p.definition.identity() == out.definition.identity())
+                    // The environment is bound at activation, not part of the
+                    // identity: a changed .env needs a new revision even when
+                    // the application is byte-identical.
+                    if !env_changed
+                        && previous
+                            .as_ref()
+                            .is_some_and(|p| p.definition.identity() == out.definition.identity())
                     {
                         eprintln!(
                             "\nrebuilt in {:?}: the application is unchanged ({}); keeping revision {}",

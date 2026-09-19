@@ -905,8 +905,10 @@
     const items = responses.map(([status, r]) => {
       const schema = r.content && r.content["application/json"] && r.content["application/json"].schema;
       const isEnvelope = schema && deref(schema).__name === "UsaiError";
+      const isStream = r.content && r.content["text/event-stream"];
       const node = el("div", {}, el("p", { class: "resp-desc" }, r.description || ""),
-        isEnvelope ? el("p", { class: "note" }, "Error envelope ", el("code", {}, `{ "error": { "code", "message", "details?" } }`), "; ", ...errorCodes(op, status))
+        isStream ? el("p", { class: "note" }, "Server-sent events (", el("code", {}, "text/event-stream"), "): ", el("code", {}, "event:"), " and ", el("code", {}, "data:"), " lines per ", el("code", {}, "stream.event(name, data)"), "; the body ends when the handler returns.")
+          : isEnvelope ? el("p", { class: "note" }, "Error envelope ", el("code", {}, `{ "error": { "code", "message", "details?" } }`), "; ", ...errorCodes(op, status))
           : schema ? propsTable(schema, 0, { markRequired: false })
           : el("p", { class: "note" }, status === "default" ? "Opaque response: the handler writes it." : "No body contract declared; the handler's return value is encoded as JSON."));
       return [status, node, `st-${String(status)[0]}`];

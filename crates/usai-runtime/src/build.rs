@@ -376,9 +376,17 @@ pub async fn build(engine: &dyn Engine, options: &BuildOptions) -> Result<BuildO
         .and_then(|b| b.get("sdk"))
         .cloned()
         .unwrap_or(serde_json::Value::Null);
+    // The guest ABI the bundled SDK speaks: what the runtime checks at
+    // install (`GUEST_ABI`); a bundle that predates the stamp spoke ABI 1.
+    let abi = manifest_value
+        .get("builtWith")
+        .and_then(|b| b.get("abi"))
+        .cloned()
+        .unwrap_or(serde_json::json!(1));
     manifest_value["builtWith"] = serde_json::json!({
         "sdk": sdk,
         "runtime": crate::definition::RUNTIME_VERSION,
+        "abi": abi,
     });
     let manifest: Manifest = serde_json::from_value(manifest_value)?;
     tokio::fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest)?).await?;

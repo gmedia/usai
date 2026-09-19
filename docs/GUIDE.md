@@ -171,13 +171,12 @@ usai app reconcile -- --dry-run
 ## 7. PostgreSQL
 
 ```ts
-import { postgres, env, type PostgresHandle } from "@sakaladev/usai";
-const db = postgres("main", { pool: { max: 16 } });   // URL from DATABASE_URL
+import { postgres, env } from "@sakaladev/usai";
+const db = postgres("db", { pool: { max: 16 } });   // URL from DATABASE_URL
 
 type UserRow = { id: number; name: string };
 export const listUsers = http.get("/users", { response: { 200: z.array(User) }, resources: [db] }, async (ctx) => {
-  const sql = ctx.resources["main"] as PostgresHandle;
-  return sql.query<UserRow>(`select id, name from users order by id`);   // rows are Record<string, unknown> unless you say otherwise
+  return ctx.resources.db.query<UserRow>(`select id, name from users order by id`);   // typed from `resources: [db]`; rows are Record<string, unknown> unless you say otherwise
 });
 
 export default defineApp({ workloads: [listUsers], resources: [db], env: env({ DATABASE_URL: env.url() }) });

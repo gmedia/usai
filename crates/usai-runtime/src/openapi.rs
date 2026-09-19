@@ -416,7 +416,13 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
                     },
                 );
             }
-            if c.response.is_empty() {
+            if lifetime == "stream" {
+                // The response is the stream itself, not a JSON body.
+                responses.insert(
+                    "200".into(),
+                    json!({ "description": "Event stream; the connection stays open until the handler returns", "content": { "text/event-stream": { "schema": { "type": "string" } } } }),
+                );
+            } else if c.response.is_empty() {
                 responses.insert(
                     "200".into(),
                     json!({ "description": "OK; the handler's return value as JSON (no contract declared), or 204 when it returns nothing", "content": { "application/json": {} } }),

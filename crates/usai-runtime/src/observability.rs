@@ -317,6 +317,16 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
     let g = &status.gauges;
     metric(
         &mut out,
+        "usai_scheduler",
+        "1 when this instance runs the scheduler of that kind (cron: exactly one replica should)",
+        "gauge",
+        &[
+            ("kind=\"cron\"".into(), f64::from(status.scheduler.cron)),
+            ("kind=\"queue\"".into(), f64::from(status.scheduler.queue)),
+        ],
+    );
+    metric(
+        &mut out,
         "usai_worlds_live",
         "Execution worlds currently alive",
         "gauge",

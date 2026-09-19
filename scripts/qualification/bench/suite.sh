@@ -34,11 +34,11 @@ log() { echo "[$(date -u +%H:%M:%S)] $*"; }
 
 # ---- database ---------------------------------------------------------------
 reset_db() {
-  node -e '
+  (cd "$here" && node -e '
     const { Client } = require("pg");
     const c = new Client({ connectionString: process.env.DATABASE_URL });
     c.connect().then(() => c.query("drop schema public cascade; create schema public;")).then(() => c.end()).catch((e) => { console.error(e.message); process.exit(1); });
-  ' && "$USAI" --root "$here/app" db migrate >/dev/null
+  ') && "$USAI" --root "$here/app" db migrate >/dev/null
 }
 
 prepare() {
@@ -112,7 +112,7 @@ cell() {
   local base="http://127.0.0.1:$port" cpu0 cpu1 json
   cpu0=$(cpu_seconds "$name")
   if [ "$cls" = D ] || [ "$c" -le 4 ] || ! command -v oha >/dev/null; then
-    json=$(pin_client node "$here/load.mjs" "$base" "$cls" "$c" "$DUR")
+    json=$(cd "$here" && pin_client node "$here/load.mjs" "$base" "$cls" "$c" "$DUR")
   else
     local args=(-z "${DUR}s" -c "$c" --no-tui --output-format json)
     case "$cls" in
@@ -143,7 +143,7 @@ cell() {
 
 conformant() {
   local name="$1"; local port; port=$(port_of "$name")
-  if node "$here/conformance.mjs" "http://127.0.0.1:$port" > "$OUT/$name.conformance.txt" 2>&1; then return 0; fi
+  if (cd "$here" && node "$here/conformance.mjs" "http://127.0.0.1:$port") > "$OUT/$name.conformance.txt" 2>&1; then return 0; fi
   log "$name deviates from the contract (see $OUT/$name.conformance.txt): not measured"; grep '✗' "$OUT/$name.conformance.txt"; return 1
 }
 

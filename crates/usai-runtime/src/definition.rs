@@ -13,6 +13,13 @@ use sha2::{Digest, Sha256};
 /// Manifest format version. Bump when a field changes meaning.
 pub const MANIFEST_VERSION: u32 = 1;
 
+/// The host↔guest contract the runtime's bridge speaks (`docs/GUEST-ABI.md`).
+/// The SDK stamps the ABI it was written against into `builtWith.abi`; a
+/// different number is refused at install, because the symptom otherwise
+/// is a world fault on every request. Bumped when the bridge's surface or
+/// the invocation protocol changes; independent of the manifest format.
+pub const GUEST_ABI: u32 = 1;
+
 /// The three lifetime families of `GOAL.md` §9.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -388,6 +395,10 @@ pub struct BuiltWith {
     /// `usai` runtime version that built the artifact.
     #[serde(default)]
     pub runtime: Option<String>,
+    /// Guest ABI the SDK in the bundle speaks (`GUEST_ABI`); absent in
+    /// artifacts from SDKs before 0.0.6, which spoke ABI 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub abi: Option<u32>,
 }
 
 /// This runtime's version, as shipped.
@@ -421,6 +432,11 @@ pub enum DefinitionError {
         sdk: String,
         runtime: String,
     },
+    #[error(
+        "this artifact's SDK ({sdk}) speaks guest ABI {found}; runtime {RUNTIME_VERSION} speaks ABI {GUEST_ABI}. \
+         Rebuild the artifact with the @sakaladev/usai that matches this runtime (`usai build`), or run the runtime it was built with."
+    )]
+    UnsupportedAbi { found: u32, sdk: String },
     #[error("manifest describes code {expected} but the loaded code hashes to {found}")]
     CodeMismatch { expected: String, found: String },
     #[error("duplicate workload id {0}")]
@@ -478,11 +494,24 @@ impl ApplicationDefinition {
             let built = manifest.built_with.clone().unwrap_or(BuiltWith {
                 sdk: None,
                 runtime: None,
+                abi: None,
             });
             return Err(DefinitionError::UnsupportedVersion {
                 found: manifest.manifest_version,
                 sdk: built.sdk.unwrap_or_else(|| "unknown".into()),
                 runtime: built.runtime.unwrap_or_else(|| "unknown".into()),
+            });
+        }
+        // An absent ABI is the one SDKs stamped nothing for (ABI 1).
+        let abi = manifest.built_with.as_ref().and_then(|b| b.abi).unwrap_or(1);
+        if abi != GUEST_ABI {
+            return Err(DefinitionError::UnsupportedAbi {
+                found: abi,
+                sdk: manifest
+                    .built_with
+                    .as_ref()
+                    .and_then(|b| b.sdk.clone())
+                    .unwrap_or_else(|| "unknown".into()),
             });
         }
         if manifest.code_sha256 != code.sha256 {
@@ -665,6 +694,28 @@ mod tests {
             ApplicationDefinition::new(m, code).unwrap_err(),
             DefinitionError::CodeMismatch { .. }
         ));
+    }
+
+    #[test]
+    fn a_foreign_guest_abi_is_refused_at_definition_time() {
+        let code = Code::new("export default {}");
+        let mut m = manifest(&code);
+        m.built_with = Some(BuiltWith {
+            sdk: Some("9.9.9".into()),
+            runtime: None,
+            abi: Some(GUEST_ABI + 1),
+        });
+        let err = ApplicationDefinition::new(m, code.clone()).unwrap_err();
+        assert!(matches!(err, DefinitionError::UnsupportedAbi { found, .. } if found == GUEST_ABI + 1));
+        assert!(err.to_string().contains("9.9.9"), "{err}");
+        // Older artifacts stamped nothing and spoke ABI 1.
+        let mut m = manifest(&code);
+        m.built_with = Some(BuiltWith {
+            sdk: Some("0.0.5".into()),
+            runtime: None,
+            abi: None,
+        });
+        assert!(ApplicationDefinition::new(m, code).is_ok());
     }
 
     #[test]
