@@ -59,10 +59,13 @@ floor() {
   PHASES="$dir/phases.jsonl"
   log "== floor $cell"
   docker rm -f "$name" >/dev/null 2>&1 || true
-  docker run -d --name "$name" --network host \
+  # Runs as the invoking user so the sampler may read /proc/<pid>/smaps_rollup
+  # and fd (root-owned processes hide them from it); no compile cache, the
+  # artifact is precompiled and the filesystem is read-only.
+  docker run -d --name "$name" --network host --user "$(id -u):$(id -g)" \
     --cpus "$cpus" --memory "${mem}m" --memory-swap "${mem}m" ${PIN:+--cpuset-cpus "$PIN"} \
-    -v "$USAI:/usai:ro" -v "$root:/app:ro" -w /app \
-    -e DATABASE_URL="${DATABASE_URL//127.0.0.1/127.0.0.1}" -e USAI_MAX_WORLDS="$worlds" \
+    -v "$USAI:/usai:ro" -v "$root:/app:ro" -w /app --read-only --tmpfs /tmp \
+    -e HOME=/tmp -e USAI_COMPILE_CACHE=0 -e DATABASE_URL="$DATABASE_URL" -e USAI_MAX_WORLDS="$worlds" \
     "$BASE_IMAGE" /usai run --artifact /app/.usai/build --port "$port" --status-addr "127.0.0.1:$status" --drain-timeout 5 \
     > "$dir/container.id"
   local started; started=$(date +%s.%N)
