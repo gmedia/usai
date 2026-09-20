@@ -20,6 +20,8 @@ OUT="${OUT:-$here/out/$(date -u +%Y%m%dT%H%M%SZ)}"
 mkdir -p "$OUT"
 log() { echo "[$(date -u +%H:%M:%S)] $*" | tee -a "$OUT/log.txt"; }
 pin_bg() { if [ -n "$PIN" ]; then exec taskset -c "$PIN" "$@"; else exec "$@"; fi; }
+# bc prints `.27` for 0.27, which is not JSON: every number goes through here.
+num() { printf "%.4f" "$(echo "$1" | bc -l)"; }
 psql_q() { node -e '
   const { Client } = require("pg"); const c = new Client({ connectionString: process.env.DATABASE_URL });
   c.connect().then(() => c.query(process.argv[1])).then((r) => { console.log(JSON.stringify(r.rows)); return c.end(); }).catch((e) => { console.error(e.message); process.exit(1); });
@@ -54,9 +56,9 @@ cell() {
   t0=$(date +%s.%N)
   "$USAI" --root "$OUT/app-c$c" app publish -- "$messages" bulk 32 > "$dir/publish.json" 2> "$dir/publish.err"
   t1=$(date +%s.%N)
-  local publish_s; publish_s=$(echo "$t1 - $t0" | bc -l | cut -c1-6)
+  local publish_s; publish_s=$(num "$t1 - $t0")
   local ready; ready=$(psql_q "select count(*)::int as n from usai_queue where topic = 'bench.work' and state = 'ready'" | tr -dc 0-9)
-  log "  published $ready in $publish_s s ($(echo "$ready / ($t1 - $t0)" | bc -l | cut -c1-6) publishes/s)"
+  log "  published $ready in $publish_s s ($(num "$ready / ($t1 - $t0)") publishes/s)"
   # 2. Start the instances; the drain clock runs from the first process up
   # until the last message is done.
   local pids=()
@@ -72,9 +74,9 @@ cell() {
   local processed; processed=$(psql_q "select count(*)::int as n from processed" | tr -dc 0-9)
   # Consumers start at activation, before readiness answers: the clock runs
   # from the processes' launch (startup included, ≈0.6 s) to the last done.
-  local drain_s; drain_s=$(echo "$t1 - $t0" | bc -l | cut -c1-6)
-  local startup_s; startup_s=$(echo "$up - $t0" | bc -l | cut -c1-6)
-  local rate; rate=$(echo "$processed / ($t1 - $t0)" | bc -l | cut -c1-8)
+  local drain_s; drain_s=$(num "$t1 - $t0")
+  local startup_s; startup_s=$(num "$up - $t0")
+  local rate; rate=$(num "$processed / ($t1 - $t0)")
   # Claim-to-run latency: processed.at − usai_queue.created_at (the wait in the
   # table, dominated here by the backlog: everything was published first).
   local latency; latency=$(psql_q "select round(percentile_cont(0.5) within group (order by extract(epoch from p.at - q.created_at)) * 1000)::int as p50_ms, round(percentile_cont(0.99) within group (order by extract(epoch from p.at - q.created_at)) * 1000)::int as p99_ms, round(max(extract(epoch from p.at - q.created_at)) * 1000)::int as max_ms from processed p join usai_queue q on (q.payload->>'n')::bigint = p.id and q.payload->>'batch' = 'bulk' and q.topic = 'bench.work'")
@@ -87,13 +89,13 @@ cell() {
     const base = process.argv[1]; const total = 500;
     (async () => { let ok = 0; for (let i = 0; i < total; i++) { const r = await fetch(`${base}/enqueue`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ n: 1000000 + i, batch: "route" }) }); if (r.status === 202) ok++; } console.log(JSON.stringify({ ok })); })();
   ' "http://127.0.0.1:4401" > "$dir/producer-seq.json"
-  t1=$(date +%s.%N); seq_ms=$(echo "($t1 - $t0) * 1000 / 500" | bc -l | cut -c1-6)
+  t1=$(date +%s.%N); seq_ms=$(num "($t1 - $t0) * 1000 / 500")
   t0=$(date +%s.%N)
   node -e '
     const base = process.argv[1]; const total = 4000; let next = 0, ok = 0;
     (async () => { await Promise.all(Array.from({ length: 16 }, async () => { while (next < total) { const i = next++; const r = await fetch(`${base}/enqueue`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ n: 2000000 + i, batch: "route16" }) }); if (r.status === 202) ok++; } })); console.log(JSON.stringify({ ok })); })();
   ' "http://127.0.0.1:4401" > "$dir/producer-par.json"
-  t1=$(date +%s.%N); par_rate=$(echo "4000 / ($t1 - $t0)" | bc -l | cut -c1-8)
+  t1=$(date +%s.%N); par_rate=$(num "4000 / ($t1 - $t0)")
   until [ "$(psql_q "select count(*)::int as n from usai_queue where topic = 'bench.work' and state <> 'done'" | tr -dc 0-9)" = 0 ]; do sleep 0.25; done
   for i in $(seq 1 "$n"); do curl -s -m 3 "http://127.0.0.1:$((4410 + i))/_usai/status" > "$dir/status-$i.json"; done
   for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done
