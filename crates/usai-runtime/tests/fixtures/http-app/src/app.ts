@@ -5,6 +5,7 @@ import {
   defineModule,
   http,
   auth,
+  cookies,
   cache,
   errors,
   env,
@@ -83,25 +84,32 @@ export const persistent = http.post("/hits", { resources: [hits] }, async (ctx) 
 
 export const me = http.get("/me", { auth: authenticated }, async (ctx) => ctx.auth);
 
-// A session cookie: a custom scheme that declares where its credential
-// travels, so the OpenAPI document says `apiKey in: cookie` instead of
-// inventing an Authorization header; and one that declares nothing.
-const session = auth.custom({
+// A session cookie: the cookie scheme hands the cookie's value to the
+// resolver and the OpenAPI document says `apiKey in: cookie`; login sets two
+// cookies at once (a repeated header); a custom scheme that declares nothing
+// gets no invented security scheme.
+const session = auth.cookie({
   name: "session",
   description: "the sid cookie set by /login",
-  credential: { in: "cookie", name: "sid" },
-  resolve: async (ctx) => {
-    const cookie = ctx.request.headers["cookie"] ?? "";
-    const sid = cookie
-      .split(";")
-      .map((c) => c.trim())
-      .find((c) => c.startsWith("sid="))
-      ?.slice(4);
+  cookie: "sid",
+  resolve: async (_ctx, sid) => {
     if (sid !== "s3ss10n") throw errors.unauthorized("no session");
     return { userId: "u1" };
   },
 });
 export const meByCookie = http.get("/me/cookie", { auth: session }, async (ctx) => ctx.auth);
+export const login = http.post("/login", {}, async () =>
+  http.response(
+    200,
+    { ok: true },
+    {
+      "set-cookie": [
+        cookies.serialize("sid", "s3ss10n", { maxAge: 3600 }),
+        cookies.serialize("theme", "dark", { httpOnly: false }),
+      ],
+    },
+  ),
+);
 const opaque = auth.custom({
   name: "opaque",
   resolve: async () => ({ userId: "anyone" }),
@@ -504,6 +512,7 @@ export default defineApp({
     persistent,
     me,
     meByCookie,
+    login,
     meOpaque,
     boom,
     badShape,

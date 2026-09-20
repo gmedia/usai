@@ -4,7 +4,9 @@
 
 The statements available on a connection. Rows are plain objects keyed
 by column name; values arrive as JSON (uuid, timestamptz and numeric
-as strings, integers and floats as numbers, json/jsonb as values).
+as strings, integers and floats as numbers, json/jsonb as values, `bytea`
+as a base64 string — `bytes.fromBase64` turns it back into a
+`Uint8Array`). A `Uint8Array` parameter binds to a `bytea` column.
 
 ## Extended by
 

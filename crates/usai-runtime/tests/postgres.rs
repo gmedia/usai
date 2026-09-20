@@ -142,6 +142,33 @@ async fn normal_completion_returns_the_connection() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn bytes_bind_to_bytea_and_come_back_as_base64() {
+    let Some(f) = fixture().await else { return };
+    // The http helper carries no query string; call the workload directly.
+    let (_, w) = f
+        .runtime
+        .active()
+        .unwrap()
+        .definition
+        .workload("http:GET /blobs/put")
+        .map(|(i, w)| (i, w.id.clone()))
+        .unwrap();
+    let r = f.runtime.invoke(&w, json!({ "kind": "http", "env": {}, "request": { "method": "GET", "path": "/blobs/put", "url": "/blobs/put?hex=00ff10", "params": {}, "query": { "hex": "00ff10" }, "headers": {}, "body": null } })).await.unwrap();
+    let put = r.outcome.unwrap().unwrap();
+    assert_eq!(put["status"], 200, "{put}");
+    assert_eq!(
+        put["json"]["length"], 3,
+        "three bytes stored as bytea, not as base64 text: {put}"
+    );
+    let id = put["json"]["id"].as_i64().unwrap().to_string();
+    let (status, body) = f.http("GET", "/blobs/:id", json!({ "id": id })).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["hex"], "00ff10");
+    assert_eq!(body["base64"], "AP8Q");
+    f.baseline();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sql_error_is_terminal_and_the_connection_is_reused() {
     let Some(f) = fixture().await else { return };
     let (status, body) = f.http("GET", "/fail", json!({})).await;

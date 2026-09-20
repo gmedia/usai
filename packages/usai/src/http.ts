@@ -17,10 +17,17 @@ import type { BaseContext } from "./runtime/context.ts";
  *
  * @category HTTP
  */
+/** Response headers a handler sets: one value, or several for a header that
+ * repeats (`set-cookie`).
+ *
+ * @category HTTP
+ */
+export type ResponseHeaders = Record<string, string | readonly string[]>;
+
 export interface HttpResponse<T = unknown> {
   readonly __usai: "response";
   readonly status: number;
-  readonly headers: Record<string, string>;
+  readonly headers: ResponseHeaders;
   readonly body: T;
 }
 
@@ -31,7 +38,7 @@ export interface HttpResponse<T = unknown> {
 export interface RawResponse {
   readonly __usai: "raw-response";
   readonly status: number;
-  readonly headers: Record<string, string>;
+  readonly headers: ResponseHeaders;
   readonly text?: string;
   readonly bytes?: Uint8Array;
 }
@@ -295,26 +302,26 @@ export const http = {
   raw,
 
   /** An explicit status and headers around a contract-encoded body. */
-  response<T>(status: number, body: T, headers: Record<string, string> = {}): HttpResponse<T> {
+  response<T>(status: number, body: T, headers: ResponseHeaders = {}): HttpResponse<T> {
     return { __usai: "response", status, headers, body };
   },
   /** `201 Created` with a body. */
-  created<T>(body: T, headers: Record<string, string> = {}): HttpResponse<T> {
+  created<T>(body: T, headers: ResponseHeaders = {}): HttpResponse<T> {
     return { __usai: "response", status: 201, headers, body };
   },
   /** `202 Accepted` with a body: the work continues elsewhere (a dispatched task). */
-  accepted<T>(body: T, headers: Record<string, string> = {}): HttpResponse<T> {
+  accepted<T>(body: T, headers: ResponseHeaders = {}): HttpResponse<T> {
     return { __usai: "response", status: 202, headers, body };
   },
   /** `204 No Content`. */
-  noContent(headers: Record<string, string> = {}): HttpResponse<null> {
+  noContent(headers: ResponseHeaders = {}): HttpResponse<null> {
     return { __usai: "response", status: 204, headers, body: null };
   },
   /** Raw text or bytes with an explicit status, for `http.raw` handlers. */
   rawResponse(
     status: number,
     body: string | Uint8Array,
-    headers: Record<string, string> = {},
+    headers: ResponseHeaders = {},
   ): RawResponse {
     return typeof body === "string"
       ? { __usai: "raw-response", status, headers, text: body }

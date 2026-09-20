@@ -63,11 +63,11 @@ path twice is a build error; a path nobody declares is 404
 | <a id="property-head"></a> `head` | [`Declare`](../type-aliases/Declare.md) | - | `HEAD` endpoint. |
 | <a id="property-options"></a> `options` | [`Declare`](../type-aliases/Declare.md) | - | `OPTIONS` endpoint. |
 | <a id="property-raw"></a> `raw()` | \{ \<`R`\> (`path`: `string`, `options`: [`RawOptions`](../interfaces/RawOptions.md)\<`R`\>, `handler`: [`RawHandler`](../type-aliases/RawHandler.md)\<`R`\>): [`Workload`](../interfaces/Workload.md); (`path`: `string`, `handler`: [`RawHandler`](../type-aliases/RawHandler.md)): [`Workload`](../interfaces/Workload.md); \} | - | Low-level escape hatch: exact bytes in ([RawContext](../interfaces/RawContext.md)), a [RawResponse](../interfaces/RawResponse.md) or [HttpResponse](../interfaces/HttpResponse.md) out. No schema validation; the reference shows the statuses from `responses`. |
-| `response()` | ( `status`: `number`, `body`: `T`, `headers?`: `Record`\<`string`, `string`\> ) => [`HttpResponse`](../interfaces/HttpResponse.md)\<`T`\> | - | An explicit status and headers around a contract-encoded body. |
-| `created()` | (`body`: `T`, `headers?`: `Record`\<`string`, `string`\>) => [`HttpResponse`](../interfaces/HttpResponse.md)\<`T`\> | - | `201 Created` with a body. |
-| `accepted()` | (`body`: `T`, `headers?`: `Record`\<`string`, `string`\>) => [`HttpResponse`](../interfaces/HttpResponse.md)\<`T`\> | - | `202 Accepted` with a body: the work continues elsewhere (a dispatched task). |
-| `noContent()` | (`headers?`: `Record`\<`string`, `string`\>) => [`HttpResponse`](../interfaces/HttpResponse.md)\<`null`\> | - | `204 No Content`. |
-| `rawResponse()` | ( `status`: `number`, `body`: `string` \| `Uint8Array`\<`ArrayBufferLike`\>, `headers?`: `Record`\<`string`, `string`\> ) => [`RawResponse`](../interfaces/RawResponse.md) | - | Raw text or bytes with an explicit status, for `http.raw` handlers. |
+| `response()` | ( `status`: `number`, `body`: `T`, `headers?`: `ResponseHeaders` ) => [`HttpResponse`](../interfaces/HttpResponse.md)\<`T`\> | - | An explicit status and headers around a contract-encoded body. |
+| `created()` | (`body`: `T`, `headers?`: `ResponseHeaders`) => [`HttpResponse`](../interfaces/HttpResponse.md)\<`T`\> | - | `201 Created` with a body. |
+| `accepted()` | (`body`: `T`, `headers?`: `ResponseHeaders`) => [`HttpResponse`](../interfaces/HttpResponse.md)\<`T`\> | - | `202 Accepted` with a body: the work continues elsewhere (a dispatched task). |
+| `noContent()` | (`headers?`: `ResponseHeaders`) => [`HttpResponse`](../interfaces/HttpResponse.md)\<`null`\> | - | `204 No Content`. |
+| `rawResponse()` | ( `status`: `number`, `body`: `string` \| `Uint8Array`\<`ArrayBufferLike`\>, `headers?`: `ResponseHeaders` ) => [`RawResponse`](../interfaces/RawResponse.md) | - | Raw text or bytes with an explicit status, for `http.raw` handlers. |
 
 ## Example
 

@@ -2,8 +2,6 @@
 
 # Interface: HttpResponse\<T = `unknown`\>
 
-Explicit response: status, headers, and a body the runtime encodes.
-
 ## Type Parameters
 
 | Type Parameter | Default type |
@@ -16,5 +14,5 @@ Explicit response: status, headers, and a body the runtime encodes.
 | ------ | ------ | ------ |
 | <a id="__usai"></a> `__usai` | `readonly` | `"response"` |
 | <a id="status"></a> `status` | `readonly` | `number` |
-| <a id="headers"></a> `headers` | `readonly` | `Record`\<`string`, `string`\> |
+| <a id="headers"></a> `headers` | `readonly` | `ResponseHeaders` |
 | <a id="body"></a> `body` | `readonly` | `T` |

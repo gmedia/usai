@@ -32,7 +32,7 @@ export interface AuthDeclaration<Principal = unknown> {
   readonly name: string;
   /** For the OpenAPI security scheme: where the credential comes from. */
   readonly description?: string;
-  readonly scheme: "bearer" | "header" | "custom";
+  readonly scheme: "bearer" | "header" | "cookie" | "custom";
   readonly header?: string;
   /** For a custom scheme: where the credential travels, so the OpenAPI
    * document and the reference describe it truthfully (a cookie, a query

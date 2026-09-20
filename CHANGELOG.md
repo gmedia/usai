@@ -96,6 +96,13 @@ two-replica campaign passed; the 72 h soak is running.
   `RawContext.request` documents `bytes()`, `text()`, `json()`.
 - `socket.accept` (sent by the SDK after auth) completes the upgrade; older
   bundles accept implicitly on the first receive/send.
+- **Cookies**: `auth.cookie({ cookie: "sid", resolve })` hands the cookie's value to the
+  resolver (401 before the handler when missing); `cookies.parse/serialize/sign/verify`
+  (Secure + HttpOnly + SameSite=Lax defaults, HMAC-SHA256 signing with rotation);
+  response headers take an array value for a header that repeats (`"set-cookie": [a, b]`).
+- **Bytes**: a `Uint8Array` SQL parameter binds to `bytea`; `bytes.toBase64/fromBase64`
+  convert `bytea` columns and raw bodies; `usai/test` sends a `Uint8Array` body and every
+  `TestResponse` carries `bytes`.
 - `auth.custom({ credential: { in: "cookie" | "header" | "query", name } })`
   declares where a custom scheme's credential travels: OpenAPI emits an
   `apiKey` there and the reference's request panel sends it (a cookie via

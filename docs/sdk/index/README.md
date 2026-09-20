@@ -51,7 +51,7 @@ Vocabulary used throughout:
 
 | Name | Description |
 | ------ | ------ |
-| [HttpResponse](interfaces/HttpResponse.md) | Explicit response: status, headers, and a body the runtime encodes. |
+| [bytes](variables/bytes.md) | Base64 ↔ `Uint8Array`. |
 | [RawResponse](interfaces/RawResponse.md) | Raw response for the escape hatch: bytes or text, no contract. |
 | [HttpHandlerResult](type-aliases/HttpHandlerResult.md) | What an HTTP handler may return: the body (encoded as JSON with status 200, or the single declared `response` status), an explicit [HttpResponse](interfaces/HttpResponse.md) from `http.response`/`http.created`/…, or a [RawResponse](interfaces/RawResponse.md). Promises of any of these are awaited. |
 | [HttpContext](interfaces/HttpContext.md) | The context of one HTTP request, typed from the declared contracts: `params`, `query`, `headers` and `body` carry the schemas' output types (already validated at the boundary, before this world existed), `auth` carries the principal the auth declaration resolved. Everything on [BaseContext](interfaces/BaseContext.md) is available too. The world lives for this request only; nothing here survives the response. |
@@ -115,7 +115,7 @@ Vocabulary used throughout:
 | [PostgresDeclaration](interfaces/PostgresDeclaration.md) | A PostgreSQL pool owned by the runtime. Each operation leases one connection; reuse follows terminal proof (contract C5). |
 | [postgres](functions/postgres.md) | Declare a PostgreSQL resource. The runtime owns the pool for its whole lifetime; a workload that lists the resource gets a [PostgresHandle](interfaces/PostgresHandle.md) at `ctx.resources.<name>`, and every statement leases one connection for exactly that operation. The connection returns to the pool only after a **terminal outcome** (the result or the error arrived); a world that dies mid-statement proves nothing about the connection, so it is quarantined, then removed and replaced, never reused. Connection loss and pool exhaustion surface to HTTP callers as 503, not 500. |
 | [SqlParam](type-aliases/SqlParam.md) | A statement parameter (`$1`, `$2`, …): scalars bind to their SQL type, objects and arrays bind as JSON (`jsonb`); cast in SQL when a column needs something else (`$1::uuid[]`). |
-| [SqlExecutor](interfaces/SqlExecutor.md) | The statements available on a connection. Rows are plain objects keyed by column name; values arrive as JSON (uuid, timestamptz and numeric as strings, integers and floats as numbers, json/jsonb as values). |
+| [SqlExecutor](interfaces/SqlExecutor.md) | The statements available on a connection. Rows are plain objects keyed by column name; values arrive as JSON (uuid, timestamptz and numeric as strings, integers and floats as numbers, json/jsonb as values, `bytea` as a base64 string — `bytes.fromBase64` turns it back into a `Uint8Array`). A `Uint8Array` parameter binds to a `bytea` column. |
 | [PostgresHandle](interfaces/PostgresHandle.md) | The in-world handle for a `postgres` resource. Rows are plain objects keyed by column name; values are JSON (uuid/timestamps as strings). Each statement leases its own connection; `transaction` pins one for the callback and commits when it returns, rolls back when it throws. A world that ends with the transaction still open is a lifecycle error, and the runtime rolls back on its behalf. |
 | [HttpClientOptions](interfaces/HttpClientOptions.md) | Options for [httpClient](functions/httpClient.md). Secrets never go in the declaration: name the environment variables that hold them. |
 | [HttpClientDeclaration](interfaces/HttpClientDeclaration.md) | Outbound HTTP, declared: the runtime owns the client (pool, TLS roots, timeouts), every request is an operation owned by the world, and the destination is visible in `usai graph` and the API docs. There is no global `fetch` inside a world. |
@@ -131,8 +131,15 @@ Vocabulary used throughout:
 | [AuthRequest](interfaces/AuthRequest.md) | What an auth resolver sees of the request: no body, no world yet. |
 | [BearerOptions](interfaces/BearerOptions.md) | Options for `auth.bearer`. |
 | [HeaderOptions](interfaces/HeaderOptions.md) | Options for `auth.header`. |
+| [CookieOptions](interfaces/CookieOptions.md) | Options for `auth.cookie`. |
 | [CustomOptions](interfaces/CustomOptions.md) | Options for `auth.custom`. |
 | [auth](variables/auth.md) | Declare an authentication boundary. Attach it to a workload with `auth: <declaration>`; `resolve` runs before the handler, with the workload's `ctx` (its declared resources) plus `ctx.request`, and the principal it returns is `ctx.auth`, typed. A missing credential or a thrown `errors.unauthorized()` answers 401 and the handler never runs. Authentication (who) lives here; authorization (may they) is business logic in the handler. One declaration is reused by reference across endpoints; its `name` is the OpenAPI security scheme. In v0 the resolver is application code and runs inside the request's world (ADR-0004); the rest of the boundary — routing, decoding, schema validation — runs before any world exists. |
+| [CookieAttributes](interfaces/CookieAttributes.md) | Attributes of a `Set-Cookie` value. Secure, HttpOnly and `SameSite=Lax` are the defaults: a session cookie that a script can read or that travels over http is the exception, and has to be asked for. |
+| [parseCookies](functions/parseCookies.md) | Parses a `cookie` request header into a name → value map (the first occurrence of a name wins, as browsers order them by specificity). Values are percent-decoded when they decode; a malformed pair is skipped. |
+| [serializeCookie](functions/serializeCookie.md) | Serialises one `Set-Cookie` header value. The value is percent-encoded where the cookie grammar requires it, so anything round-trips through `parseCookies`. |
+| [signCookieValue](functions/signCookieValue.md) | `value.signature` — a value the client can read but not alter. The signature is HMAC-SHA256 over the value with `secret`, base64url. Rotate by verifying against several secrets and signing with the newest. |
+| [verifyCookieValue](functions/verifyCookieValue.md) | The value behind a `signCookieValue` result, or `null` when the signature does not match any of the secrets (constant-time compare per secret). |
+| [cookies](variables/cookies.md) | The cookie helpers as one object, for `import { cookies } from "@sakaladev/usai"`. |
 | [CredentialLocation](interfaces/CredentialLocation.md) | Where a custom scheme's credential travels: `{ in: "cookie", name: "sid" }`, `{ in: "header", name: "x-session" }`, `{ in: "query", name: "token" }`. |
 
 ## Errors
@@ -191,6 +198,7 @@ Vocabulary used throughout:
 
 | Name | Description |
 | ------ | ------ |
+| [HttpResponse](interfaces/HttpResponse.md) | - |
 | [RawRequestBody](interfaces/RawRequestBody.md) | The exact bytes of a raw request, decoded on demand: `await ctx.request.bytes()`, `await ctx.request.text()`, or `await ctx.request.json()`. Each is a method (the body is not read until asked for). |
 | [Declare](type-aliases/Declare.md) | The signature of `http.get`/`post`/…. |
 | [RawHandler](type-aliases/RawHandler.md) | The handler of `http.raw`. |

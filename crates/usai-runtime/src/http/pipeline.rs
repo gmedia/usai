@@ -129,11 +129,29 @@ impl Reply {
     }
 }
 
+/// A response header the guest set: one value, or several for a header that
+/// repeats (`set-cookie`).
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub(crate) enum HeaderValues {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl HeaderValues {
+    fn iter(&self) -> impl Iterator<Item = &str> {
+        match self {
+            HeaderValues::One(v) => std::slice::from_ref(v).iter().map(String::as_str),
+            HeaderValues::Many(vs) => vs.iter().map(String::as_str),
+        }
+    }
+}
+
 #[derive(Deserialize)]
 pub(crate) struct GuestHttpOutput {
     status: u16,
     #[serde(default)]
-    headers: BTreeMap<String, String>,
+    headers: BTreeMap<String, HeaderValues>,
     #[serde(default)]
     json: Option<Value>,
     #[serde(default)]
@@ -1276,12 +1294,14 @@ pub(crate) fn render_output(output: GuestHttpOutput, lifecycle: Option<String>) 
             StatusCode::from_u16(output.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
         let mut builder = Response::builder().status(status);
         let mut has_content_type = false;
-        for (name, value) in &output.headers {
+        for (name, values) in &output.headers {
             if name.eq_ignore_ascii_case("content-type") {
                 has_content_type = true;
             }
-            if let Ok(v) = HeaderValue::from_str(value) {
-                builder = builder.header(name.as_str(), v);
+            for value in values.iter() {
+                if let Ok(v) = HeaderValue::from_str(value) {
+                    builder = builder.header(name.as_str(), v);
+                }
             }
         }
         if let Some(codes) = lifecycle {

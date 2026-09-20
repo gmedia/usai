@@ -6,6 +6,7 @@
 const auth: {
   bearer: AuthDeclaration<P>;
   header: AuthDeclaration<P>;
+  cookie: AuthDeclaration<P>;
   custom: AuthDeclaration<P>;
 };
 ```
@@ -28,6 +29,7 @@ before any world exists.
 | ------ | ------ | ------ |
 | `bearer()` | (`options`: [`BearerOptions`](../interfaces/BearerOptions.md)\<`P`\>) => [`AuthDeclaration`](../interfaces/AuthDeclaration.md)\<`P`\> | `Authorization: Bearer <token>`; `resolve` receives the token. |
 | `header()` | (`options`: [`HeaderOptions`](../interfaces/HeaderOptions.md)\<`P`\>) => [`AuthDeclaration`](../interfaces/AuthDeclaration.md)\<`P`\> | A credential in the named header (an API key); `resolve` receives its value. |
+| `cookie()` | (`options`: [`CookieOptions`](../interfaces/CookieOptions.md)\<`P`\>) => [`AuthDeclaration`](../interfaces/AuthDeclaration.md)\<`P`\> | A cookie (`cookie: "sid"`); `resolve` receives its value. A missing cookie is a 401 before the handler runs. Login sets it with `http.response(200, body, { "set-cookie": cookies.serialize("sid", value, { maxAge }) })`, logout clears it with `maxAge: 0`. The OpenAPI document says `apiKey in: cookie` and the reference's request panel sends the browser's cookie with `credentials: include`. |
 | `custom()` | (`options`: [`CustomOptions`](../interfaces/CustomOptions.md)\<`P`\>) => [`AuthDeclaration`](../interfaces/AuthDeclaration.md)\<`P`\> | Anything else: `resolve` reads the request itself. |
 
 ## Example

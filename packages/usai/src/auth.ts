@@ -42,6 +42,20 @@ export interface HeaderOptions<P> {
   resolve: (ctx: BaseContext & { request: AuthRequest }, value: string) => P | Promise<P>;
 }
 
+/** Options for `auth.cookie`.
+ *
+ * @category Authentication
+ */
+export interface CookieOptions<P> {
+  name?: string;
+  description?: string;
+  /** The cookie's name (`sid`). Its value is what `resolve` receives; a
+   * signed value is verified in the resolver with `cookies.verify`. */
+  cookie: string;
+  /** Return the principal, or throw `errors.unauthorized()`. */
+  resolve: (ctx: BaseContext & { request: AuthRequest }, value: string) => P | Promise<P>;
+}
+
 /** Options for `auth.custom`.
  *
  * @category Authentication
@@ -113,6 +127,22 @@ export const auth = {
       ...(options.description ? { description: options.description } : {}),
       scheme: "header",
       header: options.header.toLowerCase(),
+      resolve: options.resolve as AuthDeclaration<P>["resolve"],
+    };
+  },
+  /** A cookie (`cookie: "sid"`); `resolve` receives its value. A missing
+   * cookie is a 401 before the handler runs. Login sets it with
+   * `http.response(200, body, { "set-cookie": cookies.serialize("sid", value, { maxAge }) })`,
+   * logout clears it with `maxAge: 0`. The OpenAPI document says
+   * `apiKey in: cookie` and the reference's request panel sends the browser's
+   * cookie with `credentials: include`. */
+  cookie<P>(options: CookieOptions<P>): AuthDeclaration<P> {
+    return {
+      __usai: "auth",
+      name: options.name ?? `cookie-${++anonymous}`,
+      ...(options.description ? { description: options.description } : {}),
+      scheme: "cookie",
+      credential: { in: "cookie", name: options.cookie },
       resolve: options.resolve as AuthDeclaration<P>["resolve"],
     };
   },

@@ -9,6 +9,7 @@ import {
   env,
   queue,
   cache,
+  bytes,
 } from "@sakaladev/usai";
 import { z } from "zod";
 
@@ -21,6 +22,9 @@ const User = z.object({ id: z.number().int(), name: z.string(), email: z.string(
 export const setup = command("setup", { resources: [db] }, async (ctx) => {
   await d(ctx).execute(
     `create table if not exists users (id serial primary key, name text not null, email text not null unique)`,
+  );
+  await d(ctx).execute(
+    `create table if not exists blobs (id serial primary key, data bytea not null)`,
   );
   await d(ctx).execute(`truncate users restart identity`);
   await d(ctx).execute(`insert into users (name, email) values ($1, $2), ($3, $4)`, [
@@ -46,6 +50,36 @@ export const getUser = http.get(
     );
     if (!row) throw errors.notFound("user not found");
     return row;
+  },
+);
+
+// Bytes both ways: a Uint8Array parameter binds to bytea, a bytea column
+// arrives as base64 and `bytes.fromBase64` gives the Uint8Array back.
+export const putBlob = http.get(
+  "/blobs/put",
+  { query: z.object({ hex: z.string().regex(/^([0-9a-f]{2})*$/) }), resources: [db] },
+  async (ctx) => {
+    const data = new Uint8Array(ctx.query.hex.match(/../g)?.map((h) => parseInt(h, 16)) ?? []);
+    const row = await d(ctx).one<{ id: number; length: number }>(
+      `insert into blobs (data) values ($1) returning id, length(data) as length`,
+      [data],
+    );
+    return row;
+  },
+);
+export const getBlob = http.get(
+  "/blobs/:id",
+  { params: z.object({ id: z.coerce.number().int() }), resources: [db] },
+  async (ctx) => {
+    const row = await d(ctx).one<{ data: string }>(`select data from blobs where id = $1`, [
+      ctx.params.id,
+    ]);
+    if (!row) throw errors.notFound("no blob");
+    const data = bytes.fromBase64(row.data);
+    return {
+      hex: Array.from(data, (b) => b.toString(16).padStart(2, "0")).join(""),
+      base64: row.data,
+    };
   },
 );
 
@@ -229,6 +263,8 @@ export default defineApp({
     setup,
     getUser,
     listUsers,
+    putBlob,
+    getBlob,
     slow,
     fail,
     tls,

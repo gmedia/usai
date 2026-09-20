@@ -42,6 +42,8 @@ export interface TestResponse {
   headers: Record<string, string>;
   body: unknown;
   text: string;
+  /** The response body's exact bytes (a downloaded file, a binary raw response). */
+  bytes: Uint8Array;
   /** Lifecycle violations the request's world committed (`detached_work`,
    * …), from the `x-usai-lifecycle` header the harness's runtime exposes.
    * A request that followed the rules has `[]`; assert on it. */
@@ -53,7 +55,10 @@ export interface TestResponse {
  * @category Testing
  */
 export interface RequestOptions {
-  /** A JSON value (serialized, `content-type: application/json`) or a raw string. */
+  /** A JSON value (serialized, `content-type: application/json`), a raw
+   * string, or bytes (`Uint8Array`, sent as-is — set `content-type` in
+   * `headers`, `application/octet-stream` otherwise: a file upload to an
+   * `http.raw` route). */
   body?: unknown;
   headers?: Record<string, string>;
   query?: Record<string, string | number | boolean>;
@@ -285,19 +290,25 @@ export async function testApp(options: TestAppOptions = {}): Promise<TestApp> {
     for (const [k, v] of Object.entries(options.query ?? {}))
       target.searchParams.append(k, String(v));
     const headers: Record<string, string> = { ...(options.headers ?? {}) };
-    let body: string | undefined;
-    if (options.body !== undefined) {
+    let body: string | Uint8Array | undefined;
+    const hasContentType = Object.keys(headers).some((h) => h.toLowerCase() === "content-type");
+    if (options.body instanceof Uint8Array) {
+      body = options.body;
+      if (!hasContentType) headers["content-type"] = "application/octet-stream";
+    } else if (options.body !== undefined) {
       body = typeof options.body === "string" ? options.body : JSON.stringify(options.body);
-      if (
-        typeof options.body !== "string" &&
-        !Object.keys(headers).some((h) => h.toLowerCase() === "content-type")
-      )
+      if (typeof options.body !== "string" && !hasContentType)
         headers["content-type"] = "application/json";
     }
     const init: RequestInit = { method, headers };
-    if (body !== undefined) init.body = body;
+    if (body !== undefined)
+      init.body =
+        typeof body === "string"
+          ? body
+          : new Blob([Uint8Array.from(body) as Uint8Array<ArrayBuffer>]);
     const res = await fetch(target, init);
-    const text = await res.text();
+    const raw = new Uint8Array(await res.arrayBuffer());
+    const text = new TextDecoder().decode(raw);
     let parsed: unknown = text;
     const type = res.headers.get("content-type") ?? "";
     if (type.includes("json") && text.length > 0) {
@@ -315,7 +326,7 @@ export async function testApp(options: TestAppOptions = {}): Promise<TestApp> {
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
-    return { status: res.status, headers: out, body: parsed, text, violations };
+    return { status: res.status, headers: out, body: parsed, text, bytes: raw, violations };
   };
 
   let closed = false;

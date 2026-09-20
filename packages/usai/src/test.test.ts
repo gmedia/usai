@@ -16,6 +16,7 @@ test("usai/test drives the application through the real runtime", {
   const app = await testApp({ root, binary });
   try {
     const ok = await app.http.get("/hello/world");
+    assert.equal(new TextDecoder().decode(ok.bytes), ok.text, "bytes are the exact body");
     assert.equal(ok.status, 200);
     assert.deepEqual(ok.body, { hello: "world" });
     const missing = await app.http.get("/hello/nobody");

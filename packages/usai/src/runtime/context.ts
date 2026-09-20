@@ -12,6 +12,7 @@ import type {
   SqlExecutor,
 } from "../resources.ts";
 import { UsaiError } from "../errors.ts";
+import { bytes } from "../bytes.ts";
 
 /** What `ctx.log` and `console` offer inside a world.
  *
@@ -182,15 +183,25 @@ function cacheLocalHandle(name: string): CacheLocalHandle {
   };
 }
 
+// Parameters cross the boundary as JSON; bytes travel as base64 and the
+// host binds them to `bytea` (a text or other column would see the base64
+// string — the statement's parameter type decides, as for every parameter).
+const sqlParams = (params: readonly unknown[]): unknown[] =>
+  params.map((p) => (p instanceof Uint8Array ? bytes.toBase64(p) : p));
+
 function sqlExecutor(name: string, lease?: number): SqlExecutor {
   const extra = lease === undefined ? {} : { lease };
   return {
     query: (sql, params = []) =>
-      resourceCall(name, "query", { sql, params, ...extra }) as Promise<never[]>,
+      resourceCall(name, "query", { sql, params: sqlParams(params), ...extra }) as Promise<never[]>,
     one: (sql, params = []) =>
-      resourceCall(name, "one", { sql, params, ...extra }) as Promise<never>,
+      resourceCall(name, "one", { sql, params: sqlParams(params), ...extra }) as Promise<never>,
     execute: (sql, params = []) =>
-      resourceCall(name, "execute", { sql, params, ...extra }) as Promise<number>,
+      resourceCall(name, "execute", {
+        sql,
+        params: sqlParams(params),
+        ...extra,
+      }) as Promise<number>,
   };
 }
 

@@ -8,6 +8,7 @@ type SqlParam =
   | number
   | boolean
   | null
+  | Uint8Array
   | Record<string, unknown>
   | unknown[];
 ```

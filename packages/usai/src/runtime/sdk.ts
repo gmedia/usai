@@ -5,7 +5,8 @@
 import { type AppDeclaration, type Workload, flatten } from "../declarations.ts";
 import { type Finalizer, REPARSE, hostFinal, prepareSchema, structuralSample } from "./prepare.ts";
 import { UsaiError, isUsaiError } from "../errors.ts";
-import { isHttpResponse, isRawResponse } from "../http.ts";
+import { parseCookies } from "../cookies.ts";
+import { type ResponseHeaders, isHttpResponse, isRawResponse } from "../http.ts";
 import { type AnySchema, validateWith } from "../schema.ts";
 import { type BaseContext, makeBase, op } from "./context.ts";
 import { describe } from "../manifest.ts";
@@ -76,7 +77,7 @@ type Input =
 
 interface HttpOutput {
   status: number;
-  headers: Record<string, string>;
+  headers: ResponseHeaders;
   json?: unknown;
   text?: string;
   base64?: string;
@@ -188,6 +189,13 @@ async function authenticate(
     },
   };
   if (declaration.scheme === "custom") return declaration.resolve(ctx, undefined);
+  if (declaration.scheme === "cookie") {
+    const name = declaration.credential?.name ?? "";
+    const value = parseCookies(request.headers["cookie"])[name];
+    if (value === undefined || value === "")
+      throw new UsaiError("unauthorized", 401, `missing ${name} cookie`);
+    return declaration.resolve(ctx, value);
+  }
   const header = declaration.header ?? "authorization";
   const raw = request.headers[header];
   if (raw === undefined || raw === "")
@@ -217,7 +225,7 @@ function encodeHttp(workload: Workload, result: unknown): HttpOutput {
     return out;
   }
   let status: number;
-  let headers: Record<string, string>;
+  let headers: ResponseHeaders;
   let body: unknown;
   if (isHttpResponse(result)) {
     ({ status, headers, body } = result);

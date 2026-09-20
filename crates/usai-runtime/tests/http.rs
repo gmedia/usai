@@ -1388,3 +1388,49 @@ async fn a_draining_host_fails_readiness_and_closes_connections_while_still_serv
     token.cancel();
     s.shutdown.cancel();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_cookie_scheme_reads_the_cookie_and_login_sets_two() {
+    let Some(s) = start().await else { return };
+    let login = s
+        .client
+        .post(format!("{}/login", s.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(login.status(), 200);
+    let cookies: Vec<&str> = login
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .map(|v| v.to_str().unwrap())
+        .collect();
+    assert_eq!(cookies.len(), 2, "{cookies:?}");
+    assert_eq!(
+        cookies[0],
+        "sid=s3ss10n; Max-Age=3600; Path=/; Secure; HttpOnly; SameSite=Lax"
+    );
+    assert_eq!(cookies[1], "theme=dark; Path=/; Secure; SameSite=Lax");
+
+    let (status, body) = s.get("/me/cookie").await;
+    assert_eq!(status, 401);
+    assert_eq!(body["error"]["message"], "missing sid cookie");
+    let r = s
+        .client
+        .get(format!("{}/me/cookie", s.base))
+        .header("cookie", "theme=dark; sid=s3ss10n")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(r.json::<Value>().await.unwrap()["userId"], "u1");
+    let r = s
+        .client
+        .get(format!("{}/me/cookie", s.base))
+        .header("cookie", "sid=wrong")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 401);
+    s.shutdown.cancel();
+}

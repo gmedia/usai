@@ -494,6 +494,15 @@ fn to_sql(
             )
         }
         Type::UUID => typed!(uuid::Uuid, value.as_str().and_then(|s| s.parse().ok())),
+        // Bytes cross the boundary as base64 (the SDK encodes a `Uint8Array`).
+        Type::BYTEA => typed!(
+            Vec<u8>,
+            value.as_str().and_then(|s| base64::Engine::decode(
+                &base64::engine::general_purpose::STANDARD,
+                s
+            )
+            .ok())
+        ),
         Type::JSON | Type::JSONB => Ok(Box::new(value.clone())),
         Type::TIMESTAMPTZ => typed!(
             chrono::DateTime<chrono::Utc>,

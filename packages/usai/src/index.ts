@@ -58,7 +58,22 @@ export type {
 } from "./http.ts";
 export type { AnySchema, Output } from "./schema.ts";
 export { auth } from "./auth.ts";
-export type { AuthRequest, BearerOptions, HeaderOptions, CustomOptions } from "./auth.ts";
+export type {
+  AuthRequest,
+  BearerOptions,
+  HeaderOptions,
+  CookieOptions,
+  CustomOptions,
+} from "./auth.ts";
+export {
+  cookies,
+  parseCookies,
+  serializeCookie,
+  signCookieValue,
+  verifyCookieValue,
+} from "./cookies.ts";
+export { bytes } from "./bytes.ts";
+export type { CookieAttributes } from "./cookies.ts";
 export { task, cron, command, service, dispatches, publishes, seeder } from "./workloads.ts";
 export type { SeederDeclaration, SeederContext } from "./workloads.ts";
 export type {
