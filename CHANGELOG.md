@@ -68,6 +68,10 @@ two-replica campaign passed; the 72 h soak is running.
 - **Uploads and headers**: `multipart.parse(bytes, contentType)` splits a form body into
   fields and files; `defineApp({ headers })` sets static response headers on every
   application response (a handler's own wins).
+- **Drain asks background work to stop before cancelling it**: dispatched tasks, cron
+  ticks and queue messages see `ctx.signal.aborted` and their `ctx.sleep` return at
+  the start of a drain (services and connections already did); a long task can record
+  where it got to. The drain bound still cancels what has not returned.
 - `http.stream(path, { contentType })` declares a non-SSE stream (CSV, NDJSON): the
   response's `content-type` and the OpenAPI document follow it. A stream handler that
   fails after the head is logged and counted (`usai_http_streams_failed_total`).

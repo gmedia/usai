@@ -198,6 +198,33 @@ async fn draining_waits_for_dispatched_tasks() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn draining_asks_a_long_task_to_stop_before_the_bound_cancels_it() {
+    let Some(rt) = runtime().await else { return };
+    let a = rt.active().unwrap();
+    let r = rt.invoke("http:POST /long", json!({ "kind": "http", "env": {}, "request": { "method": "POST", "path": "/long", "url": "/long", "params": {}, "query": {}, "headers": {}, "body": null } })).await.unwrap();
+    assert!(r.outcome.unwrap().is_ok());
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    // The task would run for a minute; the drain fires its stop token, the
+    // loop exits at the next tick, and the drain finishes well inside its
+    // bound instead of cancelling the world at it.
+    let b = rt.install(Arc::clone(&a.definition)).await.unwrap();
+    rt.activate(b.id).await.unwrap();
+    let started = std::time::Instant::now();
+    rt.drain(a.id).await.unwrap();
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(
+        audit(&rt, "long:stopped").await,
+        json!(1),
+        "the task saw the stop and recorded it"
+    );
+    baseline(&rt).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn cron_runs_in_fresh_worlds_and_can_be_invoked_deterministically() {
     let Some(rt) = runtime().await else { return };
     let r = rt.run_cron("nightly").await.unwrap();

@@ -222,6 +222,26 @@ export const record = task(
     return { recorded: ctx.input.what, sawParent: globalThis.__mutable ?? null };
   },
 );
+// A long task that winds down when the revision drains: the stop token
+// fires `ctx.signal`, the sleep returns, the loop exits and the audit says so.
+export const longTask = task("long", { resources: [audit] }, async (ctx) => {
+  let ticks = 0;
+  while (!ctx.signal.aborted && ticks < 600) {
+    await ctx.sleep("100ms");
+    ticks++;
+  }
+  await (ctx.resources["audit"] as Audit).increment(
+    ctx.signal.aborted ? "long:stopped" : "long:finished",
+  );
+  return { ticks, stopped: ctx.signal.aborted };
+});
+export const startLong = dispatches(
+  http.post("/long", {}, async (ctx) => {
+    const { id } = await ctx.tasks.dispatch(longTask, null);
+    return { id };
+  }),
+  longTask,
+);
 export const slowTask = task("slow", {}, async (ctx) => {
   await ctx.sleep("5s");
   return { done: true };
@@ -557,6 +577,8 @@ export default defineApp({
     sendReceipt,
     record,
     slowTask,
+    longTask,
+    startLong,
     single,
     invokesSingle,
     privateChat,

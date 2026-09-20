@@ -41,11 +41,14 @@ declare global {
   var __usai_app: unknown;
 }
 
-/** `ctx.signal`: aborts when this world is cancelled — the client went
- * away, the deadline passed, the revision drained, or the owner of an
- * `invoke` was cancelled. Pending host operations reject with
- * `cancelled` at the same moment; the signal is for the handler's own
- * loops and cleanup.
+/** `ctx.signal`: aborts when this world is asked to stop or is cancelled.
+ * A revision drain *asks* first — services, connections, dispatched tasks,
+ * cron ticks and queue messages see `aborted` become true and a pending
+ * `ctx.sleep` return, while operations keep running, so a loop can record
+ * where it got to and return; what has not returned by the drain bound is
+ * cancelled outright (no more code runs). A client that went away, a
+ * deadline, or a cancelled `invoke` owner cancel outright too: pending host
+ * operations reject with `cancelled` and the world ends.
  *
  * @category Context
  */

@@ -273,7 +273,7 @@ pub async fn run_tick(
         json!({ "scheduledAt": scheduled_at.to_rfc3339() }),
     );
     let result = runtime
-        .execute(admission, input, cancel)
+        .execute_with_stop(admission, input, cancel, Some(revision.connections_stop()))
         .await
         .map_err(|e| e.to_string())?;
     match (&result.termination, &result.outcome) {

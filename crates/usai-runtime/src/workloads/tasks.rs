@@ -229,7 +229,14 @@ impl TaskQueue {
                             return;
                         }
                     };
-                    match runtime.execute(admission, dispatched.input, cancel).await {
+                    // The revision's stop token fires at drain: the task's
+                    // `ctx.signal` aborts and its sleeps return, so a long task can
+                    // record where it got to before the drain bound cancels it.
+                    let stop = dispatched.revision.connections_stop();
+                    match runtime
+                        .execute_with_stop(admission, dispatched.input, cancel, Some(stop))
+                        .await
+                    {
                         Ok(result) => match (&result.termination, &result.outcome) {
                             (Termination::Completed, Some(Ok(_))) => {
                                 queue.completed.fetch_add(1, Ordering::SeqCst);

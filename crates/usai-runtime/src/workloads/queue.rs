@@ -372,7 +372,7 @@ async fn run_message(
         json!({ "message": claimed.payload, "id": claimed.id.to_string(), "attempt": claimed.attempts }),
     );
     let result = runtime
-        .execute(admission, input, cancel)
+        .execute_with_stop(admission, input, cancel, Some(revision.connections_stop()))
         .await
         .map_err(|e| e.to_string())?;
     match (&result.termination, &result.outcome) {
