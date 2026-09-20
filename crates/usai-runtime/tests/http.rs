@@ -330,6 +330,31 @@ async fn boundary_final_slots_keep_zod_semantics_without_a_second_parse() {
         .await
         .unwrap();
     assert_eq!(r.json::<Value>().await.unwrap(), json!({ "keys": ["a"] }));
+    // A strict object refuses the unknown key before any world exists.
+    let r = s
+        .client
+        .post(format!("{}/shape-strict", s.base))
+        .json(&json!({ "a": "x", "extra": 1 }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 400);
+    let body = r.json::<Value>().await.unwrap();
+    assert_eq!(body["error"]["code"], "validation_failed", "{body}");
+    assert!(
+        body["error"]["details"]["issues"]
+            .to_string()
+            .contains("extra"),
+        "{body}"
+    );
+    let r = s
+        .client
+        .post(format!("{}/shape-strict", s.base))
+        .json(&json!({ "a": "x" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.json::<Value>().await.unwrap(), json!({ "keys": ["a"] }));
     // A transform is not final: the world parses and the handler sees its output.
     let r = s
         .client

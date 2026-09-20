@@ -63,6 +63,13 @@ export const shape = http.post(
   { body: z.object({ a: z.string(), n: z.number().optional() }) },
   async (ctx) => ({ keys: Object.keys(ctx.body) }),
 );
+// A strict object refuses unknown keys at the boundary (400), instead of
+// stripping them: what a team wants when a client typo must not pass.
+export const shapeStrict = http.post(
+  "/shape-strict",
+  { body: z.strictObject({ a: z.string() }) },
+  async (ctx) => ({ keys: Object.keys(ctx.body) }),
+);
 export const shaped = http.post(
   "/shape-transform",
   { body: z.object({ a: z.string().transform((v) => v.toUpperCase()) }) },
@@ -649,6 +656,7 @@ export default defineApp({
     cryptoRoute,
     passwordRoute,
     shape,
+    shapeStrict,
     shaped,
   ],
   resources: [hits, audit, upstream],
