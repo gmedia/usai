@@ -198,10 +198,7 @@ impl HostBindings for WorldShared {
     fn log(&self, level: &str, message: &str) {
         // `message\0{json}`: the guest's structured fields, when it sent some
         // (`console.info("paid", { invoiceId })`).
-        let (message, fields) = message
-            .split_once('\0')
-            .map(|(m, f)| (m, f))
-            .unwrap_or((message, ""));
+        let (message, fields) = message.split_once('\0').unwrap_or((message, ""));
         let mut logs = self.logs.lock().expect("logs poisoned");
         if logs.len() < self.max_logs {
             logs.push(LogLine {
