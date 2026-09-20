@@ -186,9 +186,16 @@ async fn resource(ctx: OpContext, payload: String) -> OpOutcome {
     let Some(manager) = ctx.resources.get(&request.name) else {
         return OpOutcome::from_resource_error(&ResourceError::Unknown(request.name));
     };
+    // Runtime-only knobs never come from the guest: a world's statement
+    // always commits synchronously (`async_commit` belongs to the queue's
+    // own bookkeeping, `workloads/queue.rs`).
+    let mut args = request.args;
+    if let Some(object) = args.as_object_mut() {
+        object.remove("async_commit");
+    }
     let call = ResourceCall {
         method: request.method,
-        args: request.args,
+        args,
     };
     match manager.call(call, ctx.cancel.clone()).await {
         Ok(value) => OpOutcome::ok(&value),

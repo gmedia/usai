@@ -325,6 +325,15 @@ struct SqlRequest {
     /// Set when the statement belongs to an open transaction.
     #[serde(default)]
     lease: Option<u64>,
+    /// Runtime bookkeeping only (the queue's claim/done marks): the
+    /// statement runs in its own transaction with `synchronous_commit = off`,
+    /// so a commit does not wait for the WAL fsync. Losing such a mark to a
+    /// crash means one redelivery — at-least-once already allows that — and
+    /// the mark costs a network round trip instead of a disk flush (the
+    /// queue campaign: 215 → ≈1 000 msg/s per instance on a 12 ms-fsync
+    /// disk). Never exposed to application code; the guest cannot set it.
+    #[serde(default)]
+    async_commit: bool,
 }
 
 enum Finished<T> {
@@ -830,6 +839,44 @@ impl ResourceManager for Postgres {
                             .map(row_to_json)
                             .collect::<Result<Vec<_>, _>>()
                             .map(Value::Array)
+                    })
+                    .await
+                }
+                "one" if request.async_commit => {
+                    run_cancellable(client, &cancel, &self.counters, &self.tls, async {
+                        client
+                            .batch_execute("BEGIN; SET LOCAL synchronous_commit = off")
+                            .await?;
+                        let rows = match client.query(&statement, &refs).await {
+                            Ok(rows) => rows,
+                            Err(e) => {
+                                let _ = client.batch_execute("ROLLBACK").await;
+                                return Err(e);
+                            }
+                        };
+                        client.batch_execute("COMMIT").await?;
+                        Ok(rows
+                            .first()
+                            .map(row_to_json)
+                            .transpose()?
+                            .unwrap_or(Value::Null))
+                    })
+                    .await
+                }
+                "execute" if request.async_commit => {
+                    run_cancellable(client, &cancel, &self.counters, &self.tls, async {
+                        client
+                            .batch_execute("BEGIN; SET LOCAL synchronous_commit = off")
+                            .await?;
+                        let n = match client.execute(&statement, &refs).await {
+                            Ok(n) => n,
+                            Err(e) => {
+                                let _ = client.batch_execute("ROLLBACK").await;
+                                return Err(e);
+                            }
+                        };
+                        client.batch_execute("COMMIT").await?;
+                        Ok(json!(n))
                     })
                     .await
                 }

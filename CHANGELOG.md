@@ -84,6 +84,12 @@ two-replica campaign passed; the 72 h soak is running.
   `btoa` are QuickJS-ng's own (the bridge used to shadow them with a quadratic
   JavaScript version). A 3 MB body decode went from a CPU-slice fault to 0.2 s. New
   core `91f178df…` (`guest/PROVENANCE.md`); `GUEST_ABI` unchanged.
+- **Queue throughput ≈4× on fsync-bound disks.** A claim is now an index probe
+  (`usai_queue_claim`; the planner sorted every ready row per claim before), and the
+  queue's own marks — claim, done, retry — commit without waiting for the WAL flush
+  (`synchronous_commit = off` for those statements only; a lost mark is one redelivery,
+  which at-least-once already allows; a message's publish and the handler's writes keep
+  their synchronous commits). An empty claim retries once before sleeping.
 - **Queue publish no longer prepares the schema on every call.** `CREATE TABLE IF NOT
   EXISTS` + `CREATE INDEX IF NOT EXISTS` ran per publish (two DDL statements and their
   locks); now once per database per process, retried once if the table vanished.

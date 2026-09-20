@@ -104,6 +104,28 @@ pub(crate) async fn sql(
         .map_err(|e| e.to_string())
 }
 
+/// A bookkeeping statement (claim, done, retry, dead): committed without
+/// waiting for the WAL flush. Losing one to a crash redelivers a message,
+/// which at-least-once already allows; the message's own effects (the
+/// handler's writes) keep their synchronous commits.
+async fn mark(
+    manager: &dyn ResourceManager,
+    method: &str,
+    sql: &str,
+    params: Vec<Value>,
+) -> Result<Value, String> {
+    manager
+        .call(
+            ResourceCall {
+                method: method.into(),
+                args: json!({ "sql": sql, "params": params, "async_commit": true }),
+            },
+            CancellationToken::new(),
+        )
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Databases whose queue table this process has already prepared, by the
 /// resource's fingerprint: DDL costs a catalog lock and a commit, and it
 /// used to run on **every publish** (the queue campaign measured 300
@@ -256,6 +278,12 @@ pub fn start(
             let deadline = workload.timeout_ms;
             tokio::spawn(async move {
                 let locked_by = format!("{}:{}:{worker}", revision.id, name);
+                // Empty claims in a row: the first may be a lost race with a
+                // sibling worker on the head of the queue (the row it picked
+                // was taken between the read and the lock), so it retries at
+                // once; only a run of them means the topic is empty and the
+                // poll interval applies.
+                let mut empty_claims: u32 = 0;
                 if let Err(e) = ensure_schema_once(manager.as_ref()).await {
                     tracing::error!(queue = %name, error = %e, "queue schema unavailable; consumer stopping");
                     return;
@@ -264,7 +292,7 @@ pub fn start(
                     if stop.is_cancelled() {
                         return;
                     }
-                    let claimed = sql(
+                    let claimed = mark(
                         manager.as_ref(),
                         "one",
                         "UPDATE usai_queue SET state = 'processing', locked_at = now(), locked_by = $1, attempts = attempts + 1
@@ -276,8 +304,14 @@ pub fn start(
                     .await;
                     let claimed = match claimed {
                         Ok(Value::Null) => {
+                            empty_claims += 1;
+                            let wait = match empty_claims {
+                                1 => Duration::ZERO,
+                                2 => Duration::from_millis(10),
+                                _ => POLL_INTERVAL,
+                            };
                             tokio::select! {
-                                _ = tokio::time::sleep(POLL_INTERVAL) => continue,
+                                _ = tokio::time::sleep(wait) => continue,
                                 _ = stop.cancelled() => return,
                             }
                         }
@@ -296,6 +330,7 @@ pub fn start(
                             }
                         }
                     };
+                    empty_claims = 0;
                     stats.claimed.fetch_add(1, Ordering::SeqCst);
 
                     // Boundary validation before any world exists (C6).
@@ -326,7 +361,7 @@ pub fn start(
                     match outcome {
                         Ok(()) => {
                             stats.done.fetch_add(1, Ordering::SeqCst);
-                            let _ = sql(manager.as_ref(), "execute", "UPDATE usai_queue SET state = 'done', locked_at = NULL, locked_by = NULL WHERE id = $1", vec![json!(claimed.id)]).await;
+                            let _ = mark(manager.as_ref(), "execute", "UPDATE usai_queue SET state = 'done', locked_at = NULL, locked_by = NULL WHERE id = $1", vec![json!(claimed.id)]).await;
                         }
                         Err(error) => {
                             let attempt = claimed.attempts.max(1) as u32;
@@ -334,7 +369,7 @@ pub fn start(
                                 stats.retried.fetch_add(1, Ordering::SeqCst);
                                 let delay = retry.delay_ms(attempt);
                                 tracing::warn!(queue = %name, id = claimed.id, attempt, delay_ms = delay, error = %error, "message failed; retrying");
-                                let _ = sql(
+                                let _ = mark(
                                     manager.as_ref(),
                                     "execute",
                                     "UPDATE usai_queue SET state = 'ready', available_at = now() + ($2::bigint * interval '1 millisecond'), locked_at = NULL, locked_by = NULL, last_error = $3 WHERE id = $1",
