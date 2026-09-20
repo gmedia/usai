@@ -27,6 +27,7 @@ The context of one task invocation: the validated `input` plus
 | <a id="log"></a> `log` | `readonly` | `Pick`\<[`ConsoleLike`](ConsoleLike.md), `"debug"` \| `"info"` \| `"warn"` \| `"error"`\> | Structured logging; lines carry the workload, world and request ids and reach the runtime's log (`target: "app"`). A trailing plain object is structured `fields` (`ctx.log.info("paid", { invoiceId })`), the rest is the message. `console.*` is the same. | - | [`BaseContext`](BaseContext.md).[`log`](BaseContext.md#log) |
 | <a id="input"></a> `input` | `readonly` | `I` | - | - | - |
 | <a id="resources"></a> `resources` | `readonly` | [`ResourcesOf`](../type-aliases/ResourcesOf.md)\<`R`\> | The declared resources by name, as their in-world handles ([PostgresHandle](PostgresHandle.md), [CacheLocalHandle](CacheLocalHandle.md), [HttpClientHandle](HttpClientHandle.md)). Reading an undeclared name throws `resource_not_declared` with the fix. | [`BaseContext`](BaseContext.md).[`resources`](BaseContext.md#resources) | - |
+| <a id="requestid"></a> `requestId` | `readonly` | `string` | The request id of the world that invoked or dispatched this task (`ctx.requestId` there; the `x-request-id` the client sent or the runtime minted), so one id joins a request with the work it handed off: it is on this world's log lines and on its outbound calls too. Empty when the task was started by hand (`usai task run`) or by cron. | - | - |
 
 ## Methods
 

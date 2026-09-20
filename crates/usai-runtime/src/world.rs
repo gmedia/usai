@@ -171,6 +171,7 @@ impl HostBindings for WorldShared {
             revision: self.revision.clone(),
             children: Arc::clone(&self.children),
             attachment: self.attachment.clone(),
+            request_id: self.request_id.clone(),
         };
         match spawn_operation(
             &self.ledger,

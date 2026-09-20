@@ -143,8 +143,34 @@ two-replica campaign passed; the 72 h soak is running.
   refused (it started a second scheduler); `invalid_state` messages name the
   states that would have been accepted; the control surface answers
   `404 unknown_workload` and `409 no_active_revision` instead of a 500.
+- **The request id follows the hand-off.** A task a request invokes or
+  dispatches runs in a world that carries the request's id: `ctx.requestId`
+  in the task, `request_id` on its log lines and on its outbound calls.
+- Every missing environment variable is reported in one message
+  (`missing required environment: DATABASE_URL, SESSION_SECRET`), not one
+  per restart; invalid values likewise.
+- OpenAPI: `x-usai-validated` says `both` for a slot that is refused at the
+  boundary and parsed again in the world (a transforming schema); a route
+  without a body no longer lists `invalid_json`; the 401 description names
+  the `unauthorized` code.
 
 ### SDK (`@sakaladev/usai`)
+
+- **`tokens.sign` / `tokens.verify`**: signed, self-describing bearer access
+  tokens (`<payload>.<signature>`, HMAC-SHA256, base64url, `iat`/`exp`
+  added, several secrets for rotation, constant-time verify) — verified in
+  the resolver without a database hit. Not a JWT; `cookies.sign` stays the
+  cookie form.
+- `TaskContext.requestId`: the id of the request that invoked or dispatched
+  the task (empty for cron, `usai task run` and queue consumers).
+- `usai/test`: **`app.logs(filter)`** and **`app.waitForLog(filter, timeoutMs)`**
+  — the runtime's JSON log (the application's lines at INFO, the runtime's
+  at WARN, `fields` parsed), filtered by `requestId`, `workload`, `level`,
+  `target`, `message`; how a test observes a dispatched task. The harness
+  now runs the runtime with `--log-format json` and `RUST_LOG=warn,app=info`
+  by default and forwards the lines to stderr as before.
+- Globals: `KeyUsage`, `CryptoKey`, `HmacImportParams` names, so code written
+  against the DOM's WebCrypto types typechecks in a world.
 
 - **`ctx.resources` is typed from `resources: [...]`** (`ResourcesOf`); an
   undeclared name is a compile error.
@@ -218,6 +244,11 @@ two-replica campaign passed; the 72 h soak is running.
   object storage; no multipart parser), binary columns (hex), the default
   30 s deadline and `504 deadline_exceeded`, and what the proxy owns — CORS,
   security headers, static files, the access log — with one Caddy block.
+- GUIDE: access tokens and refresh-token rows, the lockout recipe and where
+  per-IP limits live (§4); "decide inside the transaction, throw outside"
+  (§7); the request id across hand-offs (§14); log access in tests and what
+  `--conditions=usai` is for (§15). `AuthRequest`'s reference says where the
+  resolver runs (inside the world) and what it must list.
 - Two references: `docs/ENVIRONMENT.md` (every `USAI_*` variable — operating,
   tuning, tooling) and `docs/CONTROL-API.md` (the `--control` surface:
   install, activate, drain, remove, invoke, stop, with every error code).

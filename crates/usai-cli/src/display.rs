@@ -287,7 +287,7 @@ pub fn inspect(definition: &ApplicationDefinition) -> String {
                     if once {
                         " (once; the world only strips undeclared keys)"
                     } else {
-                        ""
+                        " (then parsed again in the world: the schema transforms or refines, so the handler sees the transformed value)"
                     }
                 );
             }

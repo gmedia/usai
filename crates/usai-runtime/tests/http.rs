@@ -967,6 +967,27 @@ async fn openapi_is_generated_from_the_definition() {
     // The facts a Usai consumer can rely on travel with the operation.
     let order = &doc["paths"]["/orders"]["post"];
     assert_eq!(order["x-usai-validated"]["body"], "before-world");
+    // A transforming schema is refused at the boundary and parsed again in
+    // the world; the document says so instead of hiding it.
+    assert_eq!(
+        doc["paths"]["/shape-transform"]["post"]["x-usai-validated"]["body"],
+        "both"
+    );
+    assert!(
+        doc["paths"]["/counter"]["get"]["responses"]["400"].is_null()
+            || !doc["paths"]["/counter"]["get"]["responses"]["400"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("invalid_json"),
+        "a route without a body does not promise invalid_json"
+    );
+    assert!(
+        doc["paths"]["/me"]["get"]["responses"]["401"]["description"]
+            .as_str()
+            .is_some_and(|d| d.contains("unauthorized")),
+        "{}",
+        doc["paths"]["/me"]["get"]["responses"]["401"]
+    );
     assert_eq!(order["x-usai-resources"][0]["name"], "audit");
     assert_eq!(order["x-usai-dispatches"], json!(["task:record"]));
     assert_eq!(order["x-usai-lifetime"], "request");
@@ -1465,6 +1486,55 @@ async fn every_request_has_an_id_the_world_sees_and_the_response_carries() {
         .to_owned();
     assert_eq!(echoed.len(), 36, "{echoed}");
     assert_eq!(r.json::<Value>().await.unwrap()["id"], echoed);
+    // A signed bearer token round-trips inside the world.
+    let r: Value = s
+        .client
+        .get(format!("{}/token", s.base))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(r["sub"], "u1", "{r}");
+    assert!(r["exp"].as_u64().is_some_and(|e| e > 1_700_000_000), "{r}");
+    assert_eq!(r["tampered"], Value::Null);
+    assert!(r["token"].as_str().unwrap().contains('.'));
+    // The id follows the work the request hands off: the task it invokes
+    // sees it, and so does the one it dispatches.
+    let r: Value = s
+        .client
+        .get(format!("{}/request-id/hand-off", s.base))
+        .header("x-request-id", "trace-handoff-1")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(r["id"], "trace-handoff-1");
+    assert_eq!(r["invoked"], "trace-handoff-1", "{r}");
+    let mut last = Value::Null;
+    for _ in 0..50 {
+        last = s
+            .client
+            .get(format!("{}/request-id/last", s.base))
+            .send()
+            .await
+            .unwrap()
+            .json::<Value>()
+            .await
+            .unwrap()["last"]
+            .clone();
+        if last == "trace-handoff-1" {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        last, "trace-handoff-1",
+        "the dispatched task saw the request id"
+    );
     // The client's, when sane.
     let r = s
         .client

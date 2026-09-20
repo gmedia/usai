@@ -31,3 +31,45 @@ test("usai/test drives the application through the real runtime", {
     await app.close();
   }
 });
+
+const fixture = resolve(
+  import.meta.dirname,
+  "../../../crates/usai-runtime/tests/fixtures/http-app",
+);
+
+test("the harness keeps the runtime's log and joins a request with the tasks it handed off", {
+  skip: !existsSync(binary) ? "usai binary not built" : false,
+}, async () => {
+  const { testApp } = await import("./test.ts");
+  const app = await testApp({
+    root: fixture,
+    binary,
+    env: { UPSTREAM_URL: "http://127.0.0.1:9/" },
+  });
+  try {
+    const res = await app.http.get("/request-id/hand-off", {
+      headers: { "x-request-id": "support-ticket-42" },
+    });
+    assert.equal(res.status, 200, res.text);
+    assert.equal(res.headers["x-request-id"], "support-ticket-42");
+    // The dispatched task runs after the response: wait for its line.
+    const line = await app.waitForLog({
+      requestId: "support-ticket-42",
+      workload: "task:echo-request-id",
+      message: "echoed request id",
+    });
+    assert.equal(line.level, "INFO");
+    assert.equal(line.target, "app");
+    assert.deepEqual(line.fields, { requestId: "support-ticket-42" });
+    // Both hand-offs — the invoked child and the dispatched one — carry the id.
+    const forRequest = app.logs({ requestId: "support-ticket-42", target: "app" });
+    assert.equal(forRequest.length, 2, JSON.stringify(forRequest));
+    assert.deepEqual(app.logs({ requestId: "someone-else" }), []);
+    await assert.rejects(
+      app.waitForLog({ message: "never written" }, 200),
+      /no log line matched message=never written within 200 ms/,
+    );
+  } finally {
+    await app.close();
+  }
+});

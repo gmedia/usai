@@ -697,8 +697,8 @@
   const lifecycleForOp = (op) => {
     const validated = op["x-usai-validated"] || {};
     return lifecycle({
-      validatedBefore: Object.entries(validated).filter(([, w]) => w === "before-world").map(([s]) => s),
-      validatedInWorld: Object.entries(validated).filter(([, w]) => w === "in-world").map(([s]) => s),
+      validatedBefore: Object.entries(validated).filter(([, w]) => w === "before-world" || w === "both").map(([s]) => s),
+      validatedInWorld: Object.entries(validated).filter(([, w]) => w === "in-world" || w === "both").map(([s]) => s),
       auth: op["x-usai-auth"], raw: op["x-usai-raw"], lifetime: op["x-usai-lifetime"] || "request",
       timeoutMs: op["x-usai-timeout-ms"], timeoutSource: op["x-usai-timeout-source"], concurrency: op["x-usai-max-concurrency"],
       resources: op["x-usai-resources"] || [], dispatches: op["x-usai-dispatches"] || [], publishes: op["x-usai-publishes"] || [],
@@ -1000,7 +1000,7 @@
     const params = op.parameters || [];
     const bodySchema = op.requestBody && op.requestBody.content && op.requestBody.content["application/json"] && op.requestBody.content["application/json"].schema;
     const validated = op["x-usai-validated"] || {};
-    const where = (slot) => validated[slot] === "in-world" ? el("span", { class: "where w" }, "validated in the world") : validated[slot] === "before-world" ? el("span", { class: "where b" }, "validated before a world exists") : null;
+    const where = (slot) => validated[slot] === "in-world" ? el("span", { class: "where w" }, "validated in the world") : validated[slot] === "both" ? el("span", { class: "where b" }, "validated before a world exists, parsed again in the world (the schema transforms)") : validated[slot] === "before-world" ? el("span", { class: "where b" }, "validated before a world exists") : null;
     const req = el("div", { class: "sec" }, el("h2", {}, "Request"));
     const slots = [["path", "params", "Path parameters"], ["query", "query", "Query"], ["header", "headers", "Headers"]];
     let any = false;

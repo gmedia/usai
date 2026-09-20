@@ -120,6 +120,9 @@ pub struct OpContext {
     /// Per-world state a host subsystem attached at creation (a stream
     /// sink, a socket link). Opaque to the op layer.
     pub attachment: Option<Arc<dyn std::any::Any + Send + Sync>>,
+    /// The request id the world runs under, handed to the worlds it
+    /// invokes or dispatches so one id joins a request with its hand-offs.
+    pub request_id: Option<Arc<str>>,
 }
 
 /// Hooks other subsystems (tasks, cron) register so the op layer does not

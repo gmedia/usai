@@ -133,7 +133,7 @@ Vocabulary used throughout:
 
 | Name | Description |
 | ------ | ------ |
-| [AuthRequest](interfaces/AuthRequest.md) | What an auth resolver sees of the request: no body, no world yet. |
+| [AuthRequest](interfaces/AuthRequest.md) | What an auth resolver sees of the request: method, path, headers and query — never the body. The resolver runs **inside the request's world**, after the boundary validated the request and before the handler (ADR-0004): `ctx.resources` and `ctx.env` are the route's, so a session lookup is an ordinary query, and a route that uses the scheme must list the resources the resolver leases (`resources: [db]`) — a missing one is `500 resource_not_declared` at the first request, not a compile error. `ctx.resources` is untyped here (the scheme is declared once and reused by many routes); cast to the handle type you declared. |
 | [BearerOptions](interfaces/BearerOptions.md) | Options for `auth.bearer`. |
 | [HeaderOptions](interfaces/HeaderOptions.md) | Options for `auth.header`. |
 | [CookieOptions](interfaces/CookieOptions.md) | Options for `auth.cookie`. |
@@ -146,6 +146,11 @@ Vocabulary used throughout:
 | [verifyCookieValue](functions/verifyCookieValue.md) | The value behind a `signCookieValue` result, or `null` when the signature does not match any of the secrets (constant-time compare per secret). |
 | [cookies](variables/cookies.md) | The cookie helpers as one object, for `import { cookies } from "@sakaladev/usai"`. |
 | [CredentialLocation](interfaces/CredentialLocation.md) | Where a custom scheme's credential travels: `{ in: "cookie", name: "sid" }`, `{ in: "header", name: "x-session" }`, `{ in: "query", name: "token" }`. |
+| [TokenOptions](interfaces/TokenOptions.md) | Options for `tokens.sign`. |
+| [TokenClaims](type-aliases/TokenClaims.md) | What `tokens.verify` returns: the payload as signed, plus the claims `sign` added. |
+| [signToken](functions/signToken.md) | Signs `payload` (a JSON object of your claims — a user id, a role) with `secret`, adding `iat` and `exp`. The result is `<payload>.<signature>`, both base64url, opaque to the client, verifiable by any instance that holds the secret. |
+| [verifyToken](functions/verifyToken.md) | The claims of a token `signToken` produced, or `null` when the token is malformed, expired, or signed with none of the secrets (pass an array to rotate: verify against old and new, sign with the new). Comparison is constant-time per secret. Nothing about *why* it failed is returned — a client gets `401 unauthorized` either way, and the reason is not its business. |
+| [tokens](variables/tokens.md) | The token helpers as one object, for `import { tokens } from "@sakaladev/usai"`. |
 
 ## Errors
 

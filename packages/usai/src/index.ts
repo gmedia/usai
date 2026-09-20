@@ -73,6 +73,8 @@ export {
   verifyCookieValue,
 } from "./cookies.ts";
 export { bytes } from "./bytes.ts";
+export { tokens, signToken, verifyToken } from "./tokens.ts";
+export type { TokenOptions, TokenClaims } from "./tokens.ts";
 export { multipart, parseMultipart, encodeMultipart } from "./multipart.ts";
 export type { MultipartBody, MultipartFile, MultipartPart } from "./multipart.ts";
 export type { CookieAttributes } from "./cookies.ts";

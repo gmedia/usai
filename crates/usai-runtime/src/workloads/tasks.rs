@@ -109,7 +109,11 @@ impl OpHandler for InvokeHandler {
                 relation: ChildRelation::Owned,
                 id: child_id,
             });
-        let input = super::input(&revision, "task", json!({ "input": request.input }));
+        let input = super::input(
+            &revision,
+            "task",
+            json!({ "input": request.input, "requestId": ctx.request_id.as_deref() }),
+        );
         let cancel = ctx.cancel.child_token();
         Ok(Box::pin(async move {
             match runtime.execute(admission, input, cancel).await {
@@ -145,7 +149,11 @@ impl OpHandler for DispatchHandler {
         let dispatch_id = self.queue.enqueue(Dispatched {
             revision: Arc::clone(&revision),
             workload: id.clone(),
-            input: super::input(&revision, "task", json!({ "input": request.input })),
+            input: super::input(
+                &revision,
+                "task",
+                json!({ "input": request.input, "requestId": ctx.request_id.as_deref() }),
+            ),
             parent: ctx.world,
         })?;
         ctx.children

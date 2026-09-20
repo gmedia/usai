@@ -157,6 +157,55 @@ Runtime status JSON (`/status` on the control surface).
 
 ***
 
+### logs()
+
+```ts
+logs(filter?: LogFilter): LogLine[];
+```
+
+The runtime's log lines so far (the last 10 000), newest last —
+everything the application wrote with `console.*`/`ctx.log.*` (target
+`app`, at INFO) and the runtime's own WARN/ERROR lines. Filter by the
+request id a response carried (`res.headers["x-request-id"]`) to see
+what a request did, **including the tasks it dispatched**: the id
+follows the hand-off.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `filter?` | [`LogFilter`](LogFilter.md) |
+
+#### Returns
+
+[`LogLine`](LogLine.md)[]
+
+***
+
+### waitForLog()
+
+```ts
+waitForLog(filter: LogFilter, timeoutMs?: number): Promise<LogLine>;
+```
+
+Waits for a log line matching `filter` (already written or arriving
+within `timeoutMs`, default 5 000) — how a test observes a dispatched
+task, which runs after the response was sent. Rejects on timeout with
+the lines seen so far.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `filter` | [`LogFilter`](LogFilter.md) |
+| `timeoutMs?` | `number` |
+
+#### Returns
+
+`Promise`\<[`LogLine`](LogLine.md)\>
+
+***
+
 ### close()
 
 ```ts

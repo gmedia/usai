@@ -6,6 +6,7 @@ import {
   http,
   auth,
   cookies,
+  tokens,
   cache,
   errors,
   env,
@@ -84,6 +85,14 @@ export const persistent = http.post("/hits", { resources: [hits] }, async (ctx) 
 
 export const me = http.get("/me", { auth: authenticated }, async (ctx) => ctx.auth);
 export const requestId = http.get("/request-id", {}, async (ctx) => ({ id: ctx.requestId }));
+// A signed bearer token, made and checked inside the world (HMAC + the
+// core's native base64): what a mobile backend's access token looks like.
+export const tokenRoundTrip = http.get("/token", {}, async () => {
+  const token = await tokens.sign({ sub: "u1" }, "fixture-secret", { expiresIn: "15m" });
+  const claims = await tokens.verify<{ sub: string }>(token, ["rotated", "fixture-secret"]);
+  const tampered = await tokens.verify(`${token.slice(0, -2)}xx`, "fixture-secret");
+  return { token, sub: claims?.sub ?? null, exp: claims?.exp ?? null, tampered };
+});
 export const framed = http.get("/framed", {}, async () =>
   http.response(200, { ok: true }, { "x-frame-options": "SAMEORIGIN" }),
 );
@@ -222,6 +231,24 @@ export const record = task(
     return { recorded: ctx.input.what, sawParent: globalThis.__mutable ?? null };
   },
 );
+// The request id follows the work a request hands off: an invoked child
+// sees it, and so does a dispatched one (read back through the audit).
+export const echoRequestId = task("echo-request-id", { resources: [audit] }, async (ctx) => {
+  await (ctx.resources["audit"] as Audit).set("last-request-id", ctx.requestId);
+  ctx.log.info("echoed request id", { requestId: ctx.requestId });
+  return { requestId: ctx.requestId };
+});
+export const handOff = dispatches(
+  http.get("/request-id/hand-off", { resources: [audit] }, async (ctx) => {
+    const child = (await ctx.tasks.invoke(echoRequestId)) as { requestId: string };
+    await ctx.tasks.dispatch(echoRequestId);
+    return { id: ctx.requestId, invoked: child.requestId };
+  }),
+  echoRequestId,
+);
+export const lastDispatched = http.get("/request-id/last", { resources: [audit] }, async (ctx) => ({
+  last: await (ctx.resources["audit"] as Audit).get("last-request-id"),
+}));
 // A long task that winds down when the revision drains: the stop token
 // fires `ctx.signal`, the sleep returns, the loop exits and the audit says so.
 export const longTask = task("long", { resources: [audit] }, async (ctx) => {
@@ -562,6 +589,7 @@ export default defineApp({
     persistent,
     me,
     requestId,
+    tokenRoundTrip,
     framed,
     decodeBig,
     meByCookie,
@@ -579,6 +607,9 @@ export default defineApp({
     slowTask,
     longTask,
     startLong,
+    echoRequestId,
+    handOff,
+    lastDispatched,
     single,
     invokesSingle,
     privateChat,

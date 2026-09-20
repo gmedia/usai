@@ -39,6 +39,12 @@ export interface TaskOptions<
 export interface TaskContext<I, R = ResourceDeclaration[]> extends BaseContext {
   readonly input: I;
   readonly resources: ResourcesOf<R>;
+  /** The request id of the world that invoked or dispatched this task
+   * (`ctx.requestId` there; the `x-request-id` the client sent or the
+   * runtime minted), so one id joins a request with the work it handed
+   * off: it is on this world's log lines and on its outbound calls too.
+   * Empty when the task was started by hand (`usai task run`) or by cron. */
+  readonly requestId: string;
 }
 
 /**

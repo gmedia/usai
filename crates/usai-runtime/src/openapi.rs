@@ -327,7 +327,20 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
                 ("body", c.body.is_some()),
             ] {
                 if present {
-                    validated.insert(slot.into(), json!("before-world"));
+                    // `before-world`: refused at the boundary and final
+                    // there. `both`: refused at the boundary, then parsed
+                    // again in the world because the schema transforms
+                    // (`.toLowerCase()`, `.transform()`) — the handler sees
+                    // the transformed value.
+                    let final_at_boundary = c.boundary_final.iter().any(|f| f == slot);
+                    validated.insert(
+                        slot.into(),
+                        json!(if final_at_boundary {
+                            "before-world"
+                        } else {
+                            "both"
+                        }),
+                    );
                 }
             }
             for slot in &c.in_world_only {
@@ -476,7 +489,12 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
                 || c.body.is_some()
                 || !c.in_world_only.is_empty();
             if validates {
-                responses.insert("400".into(), json!({ "description": "Boundary validation failed: code validation_failed, details.slot and details.issues[] (path, message); or invalid_json when the body is not JSON", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UsaiError" } } } }));
+                let description = if c.body.is_some() {
+                    "Boundary validation failed: code validation_failed, details.slot and details.issues[] (path, message); or invalid_json when the body is not JSON"
+                } else {
+                    "Boundary validation failed: code validation_failed, details.slot and details.issues[] (path, message)"
+                };
+                responses.insert("400".into(), json!({ "description": description, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UsaiError" } } } }));
             }
             if c.body.is_some() {
                 responses.insert("413".into(), json!({ "description": "Body larger than the runtime's limit (1 MiB by default): payload_too_large", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UsaiError" } } } }));
@@ -491,7 +509,7 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
         if let Some(auth) = &workload.auth {
             responses
                 .entry("401".to_owned())
-                .or_insert_with(|| json!({ "description": "Authentication failed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UsaiError" } } } }));
+                .or_insert_with(|| json!({ "description": "Authentication failed: code unauthorized (the credential is missing, malformed, or the resolver refused it)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UsaiError" } } } }));
             if let Some(spec) = definition.auth(auth) {
                 let scheme = match spec.scheme.as_str() {
                     "bearer" => Some(json!({ "type": "http", "scheme": "bearer" })),

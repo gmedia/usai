@@ -34,6 +34,8 @@ interface TaskInput {
   kind: "task";
   env: Record<string, string | number | boolean | undefined>;
   input: unknown;
+  /** The id of the request whose world invoked or dispatched this task. */
+  requestId?: string | null;
 }
 interface CronInput {
   kind: "cron";
@@ -325,8 +327,13 @@ async function runHttp(workload: Workload, input: HttpInput): Promise<HttpOutput
 
 async function runTask(workload: Workload, input: TaskInput): Promise<unknown> {
   const base = makeBase(workload.resources, input.env);
+  setRequestId(input.requestId ?? undefined);
   const parsed = parse("input", workload.contracts.input, input.input);
-  return (workload.handler as (ctx: unknown) => unknown)({ ...base, input: parsed });
+  return (workload.handler as (ctx: unknown) => unknown)({
+    ...base,
+    input: parsed,
+    requestId: input.requestId ?? "",
+  });
 }
 
 async function runCron(workload: Workload, input: CronInput): Promise<unknown> {

@@ -483,19 +483,28 @@ impl Runtime {
                 "already active",
             ));
         }
+        // Every problem at once: an operator with three variables to set
+        // should not need three restarts to learn their names.
         let mut env = BTreeMap::new();
+        let mut missing = Vec::new();
+        let mut invalid = Vec::new();
         for requirement in &revision.definition.manifest().env {
             match (self.env)(&requirement.name).filter(|v| !v.is_empty()) {
-                Some(value) => {
-                    crate::definition::validate_env(requirement, &value)
-                        .map_err(RuntimeError::InvalidEnv)?;
-                    env.insert(requirement.name.clone(), value);
-                }
-                None if requirement.required => {
-                    return Err(RuntimeError::MissingEnv(requirement.name.clone()));
-                }
+                Some(value) => match crate::definition::validate_env(requirement, &value) {
+                    Ok(()) => {
+                        env.insert(requirement.name.clone(), value);
+                    }
+                    Err(problem) => invalid.push(problem),
+                },
+                None if requirement.required => missing.push(requirement.name.clone()),
                 None => {}
             }
+        }
+        if !missing.is_empty() {
+            return Err(RuntimeError::MissingEnv(missing.join(", ")));
+        }
+        if !invalid.is_empty() {
+            return Err(RuntimeError::InvalidEnv(invalid.join("; ")));
         }
         *revision.env.write().expect("env poisoned") = Arc::new(env);
         let mut bound = BoundResources::default();
@@ -948,8 +957,11 @@ impl Runtime {
                 stop,
                 revision: Some(Arc::clone(&revision)),
                 attachment,
+                // A request's own id, or the one a parent world handed to
+                // the task it invoked or dispatched.
                 request_id: input["request"]["headers"]["x-request-id"]
                     .as_str()
+                    .or_else(|| input["requestId"].as_str())
                     .map(Arc::from),
             },
         )

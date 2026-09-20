@@ -25,12 +25,17 @@ declare function btoa(data: string): string;
 declare function fetch(input: unknown, init?: unknown): Promise<never>;
 
 type UsaiDigest = "SHA-256" | "SHA-384" | "SHA-512";
+/** The key usages a world's HMAC keys take — the names the DOM lib uses, so
+ * code written against `lib.dom` (`usage: KeyUsage[]`) typechecks here. */
+type KeyUsage = "sign" | "verify";
+type HmacImportParams = { name: "HMAC"; hash: UsaiDigest | { name: UsaiDigest } };
 interface UsaiCryptoKey {
   readonly type: "secret";
   readonly algorithm: { name: "HMAC"; hash: { name: UsaiDigest } };
   readonly extractable: false;
-  readonly usages: ReadonlyArray<"sign" | "verify">;
+  readonly usages: ReadonlyArray<KeyUsage>;
 }
+type CryptoKey = UsaiCryptoKey;
 /** The WebCrypto subset a world provides: SHA-2 digests, HMAC, random bytes
  * and UUIDs (host entropy per world). Password hashing is `password` in the SDK. */
 declare const crypto: {
@@ -44,9 +49,9 @@ declare const crypto: {
     importKey(
       format: "raw",
       keyData: ArrayBuffer | ArrayBufferView,
-      algorithm: { name: "HMAC"; hash: UsaiDigest | { name: UsaiDigest } },
+      algorithm: HmacImportParams,
       extractable: boolean,
-      usages: ReadonlyArray<"sign" | "verify">,
+      usages: ReadonlyArray<KeyUsage>,
     ): Promise<UsaiCryptoKey>;
     sign(
       algorithm: "HMAC" | { name: "HMAC" },

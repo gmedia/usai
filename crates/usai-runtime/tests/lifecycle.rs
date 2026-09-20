@@ -43,9 +43,12 @@ const workloads = {
   "task:timer-zero-order": async () => {
     // A zero-delay timer is asynchronous ("later"), runs after microtasks
     // queued in the same turn, and keeps its order against longer timers.
+    // The long one is 100 ms, not 5: timers fire by expiry, and a test
+    // process descheduled for a few ms between the two calls would
+    // legitimately see the short one expire first.
     const order = [];
     const done = new Promise((resolve) => {
-      setTimeout(() => { order.push("t5"); resolve(); }, 5);
+      setTimeout(() => { order.push("t5"); resolve(); }, 100);
       setTimeout(() => order.push("t0"), 0);
       Promise.resolve().then(() => order.push("micro"));
       order.push("sync");
@@ -495,21 +498,30 @@ async fn failed_activation_leaves_the_active_revision_untouched() {
         workloads: vec![task("task:count")],
         resources: vec![],
         auth: vec![],
-        env: vec![EnvRequirement {
-            name: "DATABASE_URL".into(),
-            kind: "url".into(),
-            required: true,
-            values: vec![],
-        }],
+        env: vec![
+            EnvRequirement {
+                name: "DATABASE_URL".into(),
+                kind: "url".into(),
+                required: true,
+                values: vec![],
+            },
+            EnvRequirement {
+                name: "SESSION_SECRET".into(),
+                kind: "string".into(),
+                required: true,
+                values: vec![],
+            },
+        ],
         code_sha256: code.sha256.clone(),
     };
     let b = rt
         .install(ApplicationDefinition::new(manifest, code).unwrap())
         .await
         .unwrap();
+    // Every missing variable in one answer, not one per restart.
     let err = rt.activate(b.id).await.unwrap_err();
     assert!(
-        matches!(err, RuntimeError::MissingEnv(ref n) if n == "DATABASE_URL"),
+        matches!(err, RuntimeError::MissingEnv(ref n) if n == "DATABASE_URL, SESSION_SECRET"),
         "{err}"
     );
     assert_eq!(rt.active().unwrap().id, a.id);

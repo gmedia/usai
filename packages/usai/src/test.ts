@@ -117,8 +117,58 @@ export interface TestApp {
   queue(topic: string): { deliver<T = unknown>(message: unknown): Promise<WorkOutcome<T>> };
   /** Runtime status JSON (`/status` on the control surface). */
   status(): Promise<Record<string, unknown>>;
+  /** The runtime's log lines so far (the last 10 000), newest last —
+   * everything the application wrote with `console.*`/`ctx.log.*` (target
+   * `app`, at INFO) and the runtime's own WARN/ERROR lines. Filter by the
+   * request id a response carried (`res.headers["x-request-id"]`) to see
+   * what a request did, **including the tasks it dispatched**: the id
+   * follows the hand-off. */
+  logs(filter?: LogFilter): LogLine[];
+  /** Waits for a log line matching `filter` (already written or arriving
+   * within `timeoutMs`, default 5 000) — how a test observes a dispatched
+   * task, which runs after the response was sent. Rejects on timeout with
+   * the lines seen so far. */
+  waitForLog(filter: LogFilter, timeoutMs?: number): Promise<LogLine>;
   /** Stop the runtime (drains, then exits). Always call it, in `after`. */
   close(): Promise<void>;
+}
+
+/** One line of the runtime's JSON log, as `TestApp.logs` returns it.
+ *
+ * @category Testing
+ */
+export interface LogLine {
+  timestamp: string;
+  level: "TRACE" | "DEBUG" | "INFO" | "WARN" | "ERROR";
+  message: string;
+  /** `app` for the application's own lines; the runtime module otherwise. */
+  target: string;
+  /** The workload id (`task:send-reset-email`) when a world wrote the line. */
+  workload?: string;
+  world?: string;
+  /** The request id the world ran under — the request's own, or the one
+   * handed to a task it invoked or dispatched. */
+  requestId?: string;
+  /** Structured fields: the trailing object of `ctx.log.info("paid", { id })`. */
+  fields?: Record<string, unknown>;
+  /** Every other attribute the line carried. */
+  [key: string]: unknown;
+}
+
+/** What `TestApp.logs` / `waitForLog` select on; every given field must match.
+ *
+ * @category Testing
+ */
+export interface LogFilter {
+  requestId?: string;
+  workload?: string;
+  level?: LogLine["level"];
+  /** `app` for the application's lines. */
+  target?: string;
+  /** A substring of the message, or a pattern. */
+  message?: string | RegExp;
+  /** Any predicate over the parsed line. */
+  where?: (line: LogLine) => boolean;
 }
 
 /** Thrown when the harness itself fails: the binary is missing, the
@@ -208,6 +258,8 @@ export async function testApp(options: TestAppOptions = {}): Promise<TestApp> {
   // --diagnostics: the runtime reports lifecycle violations and error details
   // to the client, which is what a test wants to assert on.
   const args = [
+    "--log-format",
+    "json",
     "--root",
     root,
     "run",
@@ -225,10 +277,31 @@ export async function testApp(options: TestAppOptions = {}): Promise<TestApp> {
       USAI_CONTROL_TOKEN: token,
       // No load balancer in front of a test runtime: stop at once on SIGINT.
       USAI_DRAIN_GRACE: "0",
-      RUST_LOG: process.env["RUST_LOG"] ?? "warn",
+      // The runtime's own lines at WARN; the application's at INFO so
+      // `app.logs()` sees what the handlers wrote.
+      RUST_LOG: process.env["RUST_LOG"] ?? "warn,app=info",
       ...(options.env ?? {}),
     },
-    stdio: ["ignore", "pipe", "inherit"],
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  // Every log line is kept (bounded) for `logs()` and forwarded to this
+  // process's stderr as before, so a failing run still shows the runtime's
+  // words in the terminal.
+  const kept: LogLine[] = [];
+  const waiters = new Set<(line: LogLine) => void>();
+  createInterface({ input: child.stderr! }).on("line", (raw) => {
+    process.stderr.write(`${raw}\n`);
+    if (!raw.startsWith("{")) return;
+    let line: LogLine;
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      line = normalizeLogLine(parsed);
+    } catch {
+      return;
+    }
+    kept.push(line);
+    if (kept.length > 10_000) kept.splice(0, kept.length - 10_000);
+    for (const waiter of waiters) waiter(line);
   });
   const announced = new Promise<{ app: string; control: string }>((resolve, reject) => {
     const timer = setTimeout(
@@ -329,10 +402,35 @@ export async function testApp(options: TestAppOptions = {}): Promise<TestApp> {
     return { status: res.status, headers: out, body: parsed, text, bytes: raw, violations };
   };
 
+  const logs = (filter: LogFilter = {}): LogLine[] => kept.filter((l) => matches(l, filter));
+  const waitForLog = (filter: LogFilter, timeoutMs = 5000): Promise<LogLine> => {
+    const found = kept.find((l) => matches(l, filter));
+    if (found) return Promise.resolve(found);
+    return new Promise((resolve, reject) => {
+      const waiter = (line: LogLine) => {
+        if (matches(line, filter)) {
+          waiters.delete(waiter);
+          clearTimeout(timer);
+          resolve(line);
+        }
+      };
+      const timer = setTimeout(() => {
+        waiters.delete(waiter);
+        reject(
+          new UsaiTestError(
+            `no log line matched ${describeFilter(filter)} within ${timeoutMs} ms; ${kept.length} lines seen${kept.length ? `, the last: ${JSON.stringify(kept[kept.length - 1])}` : ""}`,
+          ),
+        );
+      }, timeoutMs);
+      waiters.add(waiter);
+    });
+  };
   let closed = false;
   return {
     url,
     controlUrl,
+    logs,
+    waitForLog,
     http: {
       get: (p, o) => request("GET", p, o),
       post: (p, o) => request("POST", p, o),
@@ -362,4 +460,41 @@ export async function testApp(options: TestAppOptions = {}): Promise<TestApp> {
       clearTimeout(timer);
     },
   };
+}
+
+function normalizeLogLine(parsed: Record<string, unknown>): LogLine {
+  const { request_id, fields, ...rest } = parsed;
+  const line = rest as unknown as LogLine;
+  if (typeof request_id === "string" && request_id.length > 0) line.requestId = request_id;
+  if (typeof fields === "string") {
+    try {
+      line.fields = JSON.parse(fields) as Record<string, unknown>;
+    } catch {
+      line.fields = { raw: fields };
+    }
+  } else if (fields && typeof fields === "object") {
+    line.fields = fields as Record<string, unknown>;
+  }
+  return line;
+}
+
+function matches(line: LogLine, filter: LogFilter): boolean {
+  if (filter.requestId !== undefined && line.requestId !== filter.requestId) return false;
+  if (filter.workload !== undefined && line.workload !== filter.workload) return false;
+  if (filter.level !== undefined && line.level !== filter.level) return false;
+  if (filter.target !== undefined && line.target !== filter.target) return false;
+  if (filter.message !== undefined) {
+    if (typeof filter.message === "string") {
+      if (!line.message.includes(filter.message)) return false;
+    } else if (!filter.message.test(line.message)) return false;
+  }
+  if (filter.where && !filter.where(line)) return false;
+  return true;
+}
+
+function describeFilter(filter: LogFilter): string {
+  const parts = Object.entries(filter)
+    .filter(([, v]) => v !== undefined)
+    .map(([k, v]) => `${k}=${typeof v === "function" ? "<predicate>" : String(v)}`);
+  return parts.length ? parts.join(" ") : "<any line>";
 }
