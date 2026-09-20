@@ -36,6 +36,8 @@ export interface StreamHandle {
  * @category Streams and WebSockets
  */
 export interface StreamContext<O extends StreamOptions = StreamOptions> extends BaseContext {
+  /** The request's id (`x-request-id`, the client's or minted). */
+  readonly requestId: string;
   /** The declared resources, typed by name from `resources: [...]`. */
   readonly resources: ResourcesOf<O["resources"]>;
   readonly method: Method;
@@ -127,6 +129,8 @@ export const streams = { stream };
  */
 export interface SocketContext<Incoming, Outgoing, R = ResourceDeclaration[], A = unknown>
   extends BaseContext {
+  /** The upgrade request's id (`x-request-id`, the client's or minted). */
+  readonly requestId: string;
   readonly resources: ResourcesOf<R>;
   readonly path: string;
   readonly url: string;

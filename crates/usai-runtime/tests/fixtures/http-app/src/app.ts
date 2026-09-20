@@ -83,6 +83,7 @@ export const persistent = http.post("/hits", { resources: [hits] }, async (ctx) 
 }));
 
 export const me = http.get("/me", { auth: authenticated }, async (ctx) => ctx.auth);
+export const requestId = http.get("/request-id", {}, async (ctx) => ({ id: ctx.requestId }));
 
 // A session cookie: the cookie scheme hands the cookie's value to the
 // resolver and the OpenAPI document says `apiKey in: cookie`; login sets two
@@ -511,6 +512,7 @@ export default defineApp({
     counter,
     persistent,
     me,
+    requestId,
     meByCookie,
     login,
     meOpaque,

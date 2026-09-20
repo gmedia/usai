@@ -73,6 +73,10 @@ type ResponseOf<O extends HttpOptions> = O["response"] extends AnySchema
  * @category HTTP
  */
 export interface HttpContext<O extends HttpOptions = HttpOptions> extends BaseContext {
+  /** The request's id: the client's `x-request-id` when it sent a sane one,
+   * minted by the runtime otherwise. On the response as `x-request-id`, on
+   * every log line this world writes, and on every `httpClient` call it makes. */
+  readonly requestId: string;
   readonly method: Method;
   /** The matched path, as requested. */
   readonly path: string;
@@ -98,6 +102,8 @@ export interface HttpContext<O extends HttpOptions = HttpOptions> extends BaseCo
  * @category HTTP
  */
 export interface RawContext<R = ResourceDeclaration[]> extends BaseContext {
+  /** See {@link HttpContext.requestId}. */
+  readonly requestId: string;
   readonly method: Method;
   readonly path: string;
   readonly url: string;

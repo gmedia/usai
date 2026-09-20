@@ -8,7 +8,7 @@ import { UsaiError, isUsaiError } from "../errors.ts";
 import { parseCookies } from "../cookies.ts";
 import { type ResponseHeaders, isHttpResponse, isRawResponse } from "../http.ts";
 import { type AnySchema, validateWith } from "../schema.ts";
-import { type BaseContext, makeBase, op } from "./context.ts";
+import { type BaseContext, makeBase, op, setRequestId } from "./context.ts";
 import { describe } from "../manifest.ts";
 import { resolveEnv } from "../env.ts";
 
@@ -273,6 +273,7 @@ async function runHttp(workload: Workload, input: HttpInput): Promise<HttpOutput
   const raw = workload.trigger["raw"] === true;
   // No declared auth: no resolver, no await (one microtask hop fewer).
   t = ledger !== null ? now() : 0;
+  setRequestId(request.headers["x-request-id"]);
   const auth = workload.auth ? await authenticate(workload, base, request) : undefined;
   if (workload.auth) mark("auth", t);
   if (raw) {
@@ -285,6 +286,7 @@ async function runHttp(workload: Workload, input: HttpInput): Promise<HttpOutput
       method: request.method,
       path: request.path,
       url: request.url,
+      requestId: request.headers["x-request-id"] ?? "",
       params: request.params,
       query: request.query,
       headers: request.headers,
@@ -303,6 +305,7 @@ async function runHttp(workload: Workload, input: HttpInput): Promise<HttpOutput
     method: request.method,
     path: request.path,
     url: request.url,
+    requestId: request.headers["x-request-id"] ?? "",
     params: parseValidated("params", workload.contracts.params, request.params, request.validated),
     query: parseValidated("query", workload.contracts.query, request.query, request.validated),
     headers: parseValidated(
@@ -360,6 +363,7 @@ async function runQueue(workload: Workload, input: QueueInput): Promise<unknown>
 async function runStream(workload: Workload, input: StreamInput): Promise<unknown> {
   const base = makeBase(workload.resources, input.env);
   const { request } = input;
+  setRequestId(request.headers["x-request-id"]);
   const auth = await authenticate(workload, base, request);
   const ctx = {
     ...base,
@@ -367,6 +371,7 @@ async function runStream(workload: Workload, input: StreamInput): Promise<unknow
     method: request.method,
     path: request.path,
     url: request.url,
+    requestId: request.headers["x-request-id"] ?? "",
     params: parse("params", workload.contracts.params, request.params),
     query: parse("query", workload.contracts.query, request.query),
     headers: request.headers,
@@ -430,6 +435,7 @@ async function runSocket(workload: Workload, input: SocketInput): Promise<unknow
       protocol = "bearer";
     }
   }
+  setRequestId(headers["x-request-id"]);
   const auth = await authenticate(workload, base, { ...request, headers, body: null });
   // Auth passed: let the upgrade complete (a refusal above answers 401 instead).
   await op("socket.accept", protocol ? { protocol } : {});
@@ -440,6 +446,7 @@ async function runSocket(workload: Workload, input: SocketInput): Promise<unknow
     auth,
     path: request.path,
     url: request.url,
+    requestId: request.headers["x-request-id"] ?? "",
     params: request.params,
     query: request.query,
     headers: request.headers,

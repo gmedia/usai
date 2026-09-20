@@ -23,6 +23,7 @@ only; nothing here survives the response.
 
 | Property | Modifier | Type | Description | Overrides | Inherited from |
 | ------ | ------ | ------ | ------ | ------ | ------ |
+| <a id="requestid"></a> `requestId` | `readonly` | `string` | The request's id: the client's `x-request-id` when it sent a sane one, minted by the runtime otherwise. On the response as `x-request-id`, on every log line this world writes, and on every `httpClient` call it makes. | - | - |
 | <a id="method"></a> `method` | `readonly` | [`Method`](../type-aliases/Method.md) | - | - | - |
 | <a id="path"></a> `path` | `readonly` | `string` | The matched path, as requested. | - | - |
 | <a id="url"></a> `url` | `readonly` | `string` | Path plus query string. | - | - |

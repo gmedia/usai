@@ -233,6 +233,39 @@ impl futures_util::Stream for WorldBody {
     }
 }
 
+const REQUEST_ID: http::HeaderName = http::HeaderName::from_static("x-request-id");
+
+/// The client's `x-request-id` when it is short and printable (a proxy's
+/// trace id, a test's marker), else a fresh UUID. Never the client's bytes
+/// verbatim into a log line.
+fn request_id_for(headers: &HeaderMap) -> String {
+    headers
+        .get(REQUEST_ID)
+        .and_then(|v| v.to_str().ok())
+        .filter(|s| {
+            !s.is_empty()
+                && s.len() <= 128
+                && s.bytes()
+                    .all(|b| b.is_ascii_graphic() && b != b'"' && b != b'\\')
+        })
+        .map(str::to_owned)
+        .unwrap_or_else(|| {
+            let mut bytes = [0u8; 16];
+            // SAFETY of the fallback: a request id is a correlation token, not
+            // a secret; a failed entropy read degrades to the clock.
+            if getrandom::fill(&mut bytes).is_err() {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0);
+                bytes[..16].copy_from_slice(&now.to_le_bytes());
+            }
+            uuid::Builder::from_random_bytes(bytes)
+                .into_uuid()
+                .to_string()
+        })
+}
+
 fn header_map_to_json(headers: &HeaderMap) -> Value {
     let mut out = serde_json::Map::new();
     for (name, value) in headers {
@@ -421,10 +454,17 @@ impl HttpHost {
         Ok(built)
     }
 
-    pub async fn handle(self: Arc<Self>, request: Request<Incoming>) -> HttpResponse {
+    pub async fn handle(self: Arc<Self>, mut request: Request<Incoming>) -> HttpResponse {
         // Runtime-owned surfaces are not application traffic.
         let internal = request.uri().path().starts_with("/_usai/");
         let started = std::time::Instant::now();
+        // One id per request, the client's when it sent a sane one, minted
+        // otherwise: it rides into the world's headers (`ctx.requestId`, the
+        // world's log lines, outbound calls) and back out on the response.
+        let request_id = request_id_for(request.headers());
+        if let Ok(v) = HeaderValue::from_str(&request_id) {
+            request.headers_mut().insert(REQUEST_ID, v.clone());
+        }
         let mut response = match self.pipeline(request).await {
             Ok(mut response) => {
                 if !internal {
@@ -468,6 +508,9 @@ impl HttpHost {
                 response
             }
         };
+        if !internal && let Ok(v) = HeaderValue::from_str(&request_id) {
+            response.headers_mut().insert(REQUEST_ID, v);
+        }
         // A 101 hands the connection to the socket pump; everything else
         // closes after this response while the process is on its way out.
         if self.is_draining() && response.status() != StatusCode::SWITCHING_PROTOCOLS {

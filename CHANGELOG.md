@@ -62,6 +62,9 @@ two-replica campaign passed; the 72 h soak is running.
   (`new WebSocket(url, ["bearer", token])`); the runtime echoes
   `Sec-WebSocket-Protocol: bearer`. A 101 is counted as an upgrade, not a 5xx;
   `upgrades` and `streams` counters move.
+- **Request ids.** `x-request-id` accepted from the client (sanitized) or minted;
+  on the response, on every log line of the world (`request_id`), on outbound
+  `httpClient` calls, and `ctx.requestId` in HTTP-shaped handlers.
 - **The request body bound is a knob**: `USAI_MAX_BODY_BYTES` (1 MiB default); the 413 names it.
 - **HTTP boundary**: a non-JSON body on a JSON contract is `415
   unsupported_media_type`; `405` carries `Allow`; a 500 whose code is not one of

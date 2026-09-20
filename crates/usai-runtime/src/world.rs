@@ -151,6 +151,7 @@ pub struct WorldShared {
     /// The workload id, so an application log line says which workload
     /// wrote it without the application embedding the name itself.
     workload: Arc<str>,
+    request_id: Option<Arc<str>>,
 }
 
 impl HostBindings for WorldShared {
@@ -204,11 +205,18 @@ impl HostBindings for WorldShared {
         // of their own (`app`), so the default filter shows them at INFO in
         // `dev` and `run` while the runtime's internals stay at their level.
         let workload = &*self.workload;
+        let request_id = self.request_id.as_deref().unwrap_or("");
         match level {
-            "error" => tracing::error!(target: "app", workload, world = %self.id, "{message}"),
-            "warn" => tracing::warn!(target: "app", workload, world = %self.id, "{message}"),
-            "debug" => tracing::debug!(target: "app", workload, world = %self.id, "{message}"),
-            _ => tracing::info!(target: "app", workload, world = %self.id, "{message}"),
+            "error" => {
+                tracing::error!(target: "app", workload, world = %self.id, request_id, "{message}")
+            }
+            "warn" => {
+                tracing::warn!(target: "app", workload, world = %self.id, request_id, "{message}")
+            }
+            "debug" => {
+                tracing::debug!(target: "app", workload, world = %self.id, request_id, "{message}")
+            }
+            _ => tracing::info!(target: "app", workload, world = %self.id, request_id, "{message}"),
         }
     }
 }
@@ -227,6 +235,10 @@ pub struct WorldSpec {
     pub stop: Option<CancellationToken>,
     pub revision: Option<Arc<crate::runtime::Revision>>,
     pub attachment: Option<Arc<dyn std::any::Any + Send + Sync>>,
+    /// The request id of the work this world runs (`x-request-id`, taken
+    /// from the client or minted by the host), so every line the world logs
+    /// can be joined with the proxy's access log and the caller's trace.
+    pub request_id: Option<Arc<str>>,
 }
 
 pub struct WorldDriver {
@@ -284,6 +296,7 @@ impl WorldDriver {
             accepting_ops: AtomicBool::new(true),
             max_logs: 1_000,
             workload,
+            request_id: spec.request_id.clone(),
         });
         let bindings: Arc<dyn HostBindings> = Arc::clone(&shared) as Arc<dyn HostBindings>;
         let t_inst = std::time::Instant::now();

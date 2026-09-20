@@ -1434,3 +1434,57 @@ async fn a_cookie_scheme_reads_the_cookie_and_login_sets_two() {
     assert_eq!(r.status(), 401);
     s.shutdown.cancel();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn every_request_has_an_id_the_world_sees_and_the_response_carries() {
+    let Some(s) = start().await else { return };
+    // Minted when the client sends none: a UUID, on the response and in ctx.
+    let r = s
+        .client
+        .get(format!("{}/request-id", s.base))
+        .send()
+        .await
+        .unwrap();
+    let echoed = r
+        .headers()
+        .get("x-request-id")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(echoed.len(), 36, "{echoed}");
+    assert_eq!(r.json::<Value>().await.unwrap()["id"], echoed);
+    // The client's, when sane.
+    let r = s
+        .client
+        .get(format!("{}/request-id", s.base))
+        .header("x-request-id", "trace-abc.123")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.headers().get("x-request-id").unwrap(), "trace-abc.123");
+    assert_eq!(r.json::<Value>().await.unwrap()["id"], "trace-abc.123");
+    // Replaced when not: too long, or not printable ASCII.
+    let long = "x".repeat(200);
+    let r = s
+        .client
+        .get(format!("{}/request-id", s.base))
+        .header("x-request-id", long.as_str())
+        .send()
+        .await
+        .unwrap();
+    assert_ne!(
+        r.headers().get("x-request-id").unwrap().to_str().unwrap(),
+        long
+    );
+    // Refusals before a world carry one too.
+    let r = s
+        .client
+        .get(format!("{}/nowhere", s.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 404);
+    assert!(r.headers().get("x-request-id").is_some());
+    s.shutdown.cancel();
+}

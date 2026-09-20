@@ -907,6 +907,9 @@ impl Runtime {
                 stop,
                 revision: Some(Arc::clone(&revision)),
                 attachment,
+                request_id: input["request"]["headers"]["x-request-id"]
+                    .as_str()
+                    .map(Arc::from),
             },
         )
         .await?;

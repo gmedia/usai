@@ -234,10 +234,20 @@ interface RawFetchResponse {
   body: { text?: string; base64?: string };
 }
 
+// The request id of the work this world runs, for outbound calls: set at
+// the HTTP entry, undefined for tasks, cron, queue messages and services
+// (a world is one unit of work, so a module-level value is that unit's).
+let currentRequestId: string | undefined;
+export function setRequestId(id: string | undefined): void {
+  currentRequestId = id;
+}
+
 function httpClientHandle(name: string): HttpClientHandle {
   return {
     async fetch(url: string, init: FetchInit = {}): Promise<FetchResponse> {
       const headers = { ...(init.headers ?? {}) };
+      if (currentRequestId && !Object.keys(headers).some((h) => h.toLowerCase() === "x-request-id"))
+        headers["x-request-id"] = currentRequestId;
       let body = init.body;
       if (init.json !== undefined) {
         body = JSON.stringify(init.json);

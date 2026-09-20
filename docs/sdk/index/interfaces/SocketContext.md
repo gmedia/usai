@@ -23,6 +23,7 @@ in `message` the validated incoming `message`.
 
 | Property | Modifier | Type | Description | Overrides | Inherited from |
 | ------ | ------ | ------ | ------ | ------ | ------ |
+| <a id="requestid"></a> `requestId` | `readonly` | `string` | The upgrade request's id (`x-request-id`, the client's or minted). | - | - |
 | <a id="resources"></a> `resources` | `readonly` | [`ResourcesOf`](../type-aliases/ResourcesOf.md)\<`R`\> | The declared resources by name, as their in-world handles ([PostgresHandle](PostgresHandle.md), [CacheLocalHandle](CacheLocalHandle.md), [HttpClientHandle](HttpClientHandle.md)). Reading an undeclared name throws `resource_not_declared` with the fix. | [`BaseContext`](BaseContext.md).[`resources`](BaseContext.md#resources) | - |
 | <a id="path"></a> `path` | `readonly` | `string` | - | - | - |
 | <a id="url"></a> `url` | `readonly` | `string` | - | - | - |

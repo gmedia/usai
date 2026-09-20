@@ -19,6 +19,7 @@ bytes on `request`. Read the body once.
 
 | Property | Modifier | Type | Description | Overrides | Inherited from |
 | ------ | ------ | ------ | ------ | ------ | ------ |
+| <a id="requestid"></a> `requestId` | `readonly` | `string` | See [HttpContext.requestId](HttpContext.md#requestid). | - | - |
 | <a id="method"></a> `method` | `readonly` | [`Method`](../type-aliases/Method.md) | - | - | - |
 | <a id="path"></a> `path` | `readonly` | `string` | - | - | - |
 | <a id="url"></a> `url` | `readonly` | `string` | - | - | - |

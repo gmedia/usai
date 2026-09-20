@@ -18,6 +18,7 @@ The context of a streaming request: request facts plus [BaseContext](BaseContext
 
 | Property | Modifier | Type | Description | Overrides | Inherited from |
 | ------ | ------ | ------ | ------ | ------ | ------ |
+| <a id="requestid"></a> `requestId` | `readonly` | `string` | The request's id (`x-request-id`, the client's or minted). | - | - |
 | <a id="resources"></a> `resources` | `readonly` | [`ResourcesOf`](../type-aliases/ResourcesOf.md)\<`O`\[`"resources"`\]\> | The declared resources, typed by name from `resources: [...]`. | [`BaseContext`](BaseContext.md).[`resources`](BaseContext.md#resources) | - |
 | <a id="method"></a> `method` | `readonly` | [`Method`](../type-aliases/Method.md) | - | - | - |
 | <a id="path"></a> `path` | `readonly` | `string` | - | - | - |
