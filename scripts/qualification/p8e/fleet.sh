@@ -9,7 +9,9 @@
 # Environment: DATABASE_URL (a throwaway database), USAI (binary), OUT (run
 # directory), PIN (cpu list the fleet is confined to, e.g. 12-15), BASE_IMAGE
 # (a distro image whose glibc matches the host's binary; default ubuntu:26.04),
-# NODE (node binary for the comparator). Ports 3800–3999.
+# NODE (node binary for the comparator), USAI_WASM_KEEP_RESIDENT (forwarded to
+# the boxed instance when set, the cell name gets a "-kr<bytes>" suffix: the C2
+# residency lever). Ports 3800–3999.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/../../.." && pwd)"
@@ -54,7 +56,7 @@ floor() {
   local root port status
   case "$app" in hello) root="$HELLO";; template) root="$TEMPLATE";; *) echo "floor: hello|template"; exit 2;; esac
   port=3800; status=3801
-  local name="p8e-floor" cell="$app-${mem}m-${cpus}c-${worlds}w"
+  local name="p8e-floor" cell="$app-${mem}m-${cpus}c-${worlds}w${USAI_WASM_KEEP_RESIDENT:+-kr$USAI_WASM_KEEP_RESIDENT}"
   local dir="$OUT/floor-$cell"; mkdir -p "$dir"
   PHASES="$dir/phases.jsonl"
   log "== floor $cell"
@@ -66,6 +68,7 @@ floor() {
     --cpus "$cpus" --memory "${mem}m" --memory-swap "${mem}m" ${PIN:+--cpuset-cpus "$PIN"} \
     -v "$USAI:/usai:ro" -v "$root:/app:ro" -w /app --read-only --tmpfs /tmp \
     -e HOME=/tmp -e USAI_COMPILE_CACHE=0 -e DATABASE_URL="$DATABASE_URL" -e USAI_MAX_WORLDS="$worlds" \
+    ${USAI_WASM_KEEP_RESIDENT:+-e USAI_WASM_KEEP_RESIDENT="$USAI_WASM_KEEP_RESIDENT"} \
     "$BASE_IMAGE" /usai run --artifact /app/.usai/build --port "$port" --status-addr "127.0.0.1:$status" --drain-timeout 5 \
     > "$dir/container.id"
   local started; started=$(date +%s.%N)

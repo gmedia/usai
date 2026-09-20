@@ -14,6 +14,7 @@ four scoreboards; a reader who wants one number is reading the wrong document.
 | **hello** (class A) | the runtime tax microscope: what a request costs when the handler does nothing | `suite.sh invoice` / `sweep` |
 | **contracts and PostgreSQL** (classes B–F) | product economics: what the tax is relative to real work | `suite.sh invoice` / `sweep` |
 | **soak, failure, churn** | production trust: what happens over days and under harm | `scripts/qualification/p5`, `p6` (`docs/measurements/2026-09-18-p5-p6-qualification.md`) |
+| **floors, residency, density** | efficiency: what an application costs when it does mostly nothing, and how small a host runs it | `scripts/qualification/p8e` (`docs/measurements/2026-09-20-p8e-efficiency.md`) |
 
 Hello stays in the suite forever — when the hot path improves, hello is where
 it shows first — but it is never quoted alone.
@@ -88,8 +89,13 @@ counts. `report.mjs` renders the tables.
 
 1. **Performance** — req/s, p50/p95/p99, CPU per request, per class and
    concurrency.
-2. **Efficiency** — RSS idle and under load, memory per request; density
-   (many applications per host) later.
+2. **Efficiency** — RSS and PSS idle and under load, what returns after a
+   burst, the floors a cgroup box will run one application in, and density
+   (N mostly-idle applications per host against Node + Fastify): the P8E
+   fleet, `scripts/qualification/p8e/` and
+   `docs/measurements/2026-09-20-p8e-efficiency.md` (technical floor 48 MiB /
+   0.25 vCPU; supported floor 192 MiB / 1 vCPU; ≈30 MiB PSS and 0.00 % CPU per
+   idle application at N=50 vs ≈36 MiB / 0.12 % for Node).
 3. **Correctness / lifecycle** — cross-request state, resource reuse safety,
    cancellation, recovery: the probes here and the runtime's acceptance
    tests.

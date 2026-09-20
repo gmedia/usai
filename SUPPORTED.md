@@ -14,7 +14,8 @@ and nothing is promised.
 | macOS arm64 (14+) | development only | binaries are published; no production qualification |
 | Windows | ✗ | use WSL2 or Docker |
 | Kernel | ≥ 5.10 | the substrate uses `madvise`/`mprotect`-based memory reset; pagemap scanning is used when the kernel offers it |
-| Memory | 512 MB minimum for the runtime; 1 GB recommended | the pooling allocator reserves per-world slots up front |
+| **Host envelope** | **192 MiB and 1 vCPU per application instance** (`--max-worlds 48`, PostgreSQL `pool.max` 4, status + metrics on) | measured 2026-09-19 (`docs/measurements/2026-09-20-p8e-efficiency.md`): idle 40 MiB RSS / 35 MiB PSS and 0.00 % CPU; a c=16 burst peaks at ≈102 MiB and 1 000 req/s on one vCPU, so 192 MiB leaves ≥ 25 % headroom. 128 MiB passes with 20 %; the technical floor is 48 MiB / 0.25 vCPU for a hello-only application (32 MiB is OOM-killed). Memory grows with the peak number of *concurrently used* worlds (≈4 MiB RSS / ≈1.5 MiB PSS per touched slot, kept resident so the next world does not fault the image back in), not with request count; size the limit for `40 MiB + max_worlds × 4 MiB` worst case, or lower `--max-worlds`. `USAI_WASM_KEEP_RESIDENT=0` returns the memory after a burst at ≈2× the CPU per request and half the throughput on one vCPU (measured; values between 0 and the default change nothing). A fractional vCPU works but its burst p99 is the CFS throttle (≈60–80 ms at 0.25–0.5 vCPU) |
+| Many applications per host | ✓ one process per application | measured to N = 50 on one host: ≈30 MiB PSS (47 MiB RSS) and no idle CPU per idle application, linear in N; each holds its own `pool.max` connections (N × `pool.max` on the PostgreSQL side — 200 at N=50 with `pool.max` 4); a single process serving many applications is an open question (`docs/OPEN-QUESTIONS.md` Q17), not a feature |
 
 ## Data and network
 

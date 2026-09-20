@@ -28,6 +28,7 @@ Design choices are closed early where reasoning is sufficient. Empirical questio
 |---|---|---|---|
 | Q8 | **Multi-core model** — one runtime with shared resources? sharded engines? scheduling topology? | empirical | single-core execution; budgets (ADR-0012) and resource identity (ADR-0011) written so they can be partitioned; no process-global singleton assumptions |
 | Q10 | **Absolute p50 gap above c ≈ 16** (EXP-012B) — mechanism unknown | empirical | non-blocking until a target SLO needs it; do not rerun EXP-012B |
+| Q17 | **Multi-application runtime process** — one process, one pool, many definitions: the only way to remove the per-application intercept the P8E density run measured (≈30 MiB PSS and one process per idle application, linear to N=50; `docs/measurements/2026-09-20-p8e-efficiency.md` §5, §8). `GOAL.md` §52 lists the memory reservation policy for many-app density as research-grade | formal research | one process per application; revisions are of one application (`Runtime.active`); density is processes per host and `SUPPORTED.md` states its arithmetic (N × `pool.max` connections) |
 
 ## Closed
 

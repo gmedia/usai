@@ -2,7 +2,7 @@
 
 > Where the project is right now. Update this in the same change that moves it.
 
-**Last updated:** 2026-09-19
+**Last updated:** 2026-09-20
 
 ## Where things stand
 
@@ -15,14 +15,21 @@ Production substrate        Wasm image + pooling/COW (ADR-0016); attributed and 
 Developer preview           v0.0.5 (2026-09-19) — one tag publishes binaries (linux x86_64/aarch64, macOS arm64), npm
                             (@sakaladev/usai, @sakaladev/create-usai) and Docker images (runtime + dev, amd64 + arm64);
                             main since then: P7 fixes, the documentation split, typed ctx.resources, replica flags (0.0.6 candidate)
-Production ready            NO — see "Production readiness" below
+Efficiency envelope         MEASURED (P8E, 2026-09-20): supported floor 192 MiB / 1 vCPU; 48 MiB / 0.25 vCPU runs hello;
+                            ≈30 MiB PSS and 0.00 % CPU per idle application at N=50 (Node + Fastify: ≈36 MiB, 0.12 %)
+Production ready            NOT YET — alpha, production qualification in progress: 24 h soak clean (35.0 M requests, 0 runtime
+                            errors), connection campaign passed, 72 h soak running (ends 2026-09-22 22:28 UTC); see below
 ```
 
-## Production readiness (honest report, 2026-09-19)
+## Production readiness (honest report, 2026-09-20)
 
-Usai is a **developer preview**. Run it for development, evaluation and
-internal tools you can afford to restart; do not put it in front of paying
-traffic yet. The gates in `docs/ROADMAP.md`, with where each stands:
+Usai is an **alpha with production qualification in progress**: no longer a
+preview (the 24 h soak, the failure campaigns and the connection campaign
+passed on a production-shaped deployment), not yet a support promise (the
+72 h soak is running, no human outside developer has built from the docs,
+contracts still move within 0.0.x). Run it for development, evaluation and
+internal tools you can afford to restart; put it in front of paying traffic
+only if you can live with those three caveats. The gates in `docs/ROADMAP.md`, with where each stands:
 
 | Gate | State | What exists / what is missing |
 |---|---|---|
@@ -30,21 +37,23 @@ traffic yet. The gates in `docs/ROADMAP.md`, with where each stands:
 | Distribution (P3.5) | ✓ | native binary, `pnpm usai` wrapper, Docker runtime/dev images, compose path, artifact↔runtime compatibility refused before serving, smoke test in CI and after every release |
 | Real application built as a user (P4) | ✓ | `examples/invoicing` (tenants, sessions, transactional invoices, pagination, signed retried webhooks over outbound HTTP, cron, command, seeder, test through the real runtime) — GUIDE §17; primitives it forced: ADR-0017, enum params. A second outside-developer run (notes API) fed 14 fixes |
 | Operational qualification (P5) | ✓ | production-shaped deployment (Caddy → runtime image → PostgreSQL) broken 13 ways under load; `docs/runbooks/` (8 pages: which metric, which log line, what workloads do, when it recovers); findings fixed (503 for unavailable dependencies, migrations in the artifact, bounded revisions, self-retiring revisions); evidence `docs/measurements/2026-09-18-p5-p6-qualification.md` |
-| Reliability qualification (P6) | ◐ | 1 000 revision replacements under load (2.04 M requests, 0 errors, flat RSS after the malloc-arena fix), DB flap ×10, restart loop ×10, overload (only 503 capacity), dead-letter — all passed; **24 h soak running** (started 2026-09-18 22:18 UTC; at 3 h: 8.3 M worlds, RSS 57 MiB, 0 detached work); chained on the VM after it: the **connection campaign** (`p6/run.sh conn-churn`: SSE + WebSocket cycles, connections held through a revision replacement, an app restart and a proxy restart, abrupt client death, unread streams, idle sockets — the deployment-level WS/SSE evidence `SUPPORTED.md` claims) and then the **72 h soak** |
+| Reliability qualification (P6) | ◐ → ✓ pending 72 h | 1 000 revision replacements under load (2.04 M requests, 0 errors, flat RSS after the malloc-arena fix), DB flap ×10, restart loop ×10, overload (only 503 capacity), dead-letter — passed; **24 h soak passed** (2026-09-18 22:18 → 09-19 22:19 UTC: 34 978 737 ok, 0 × 4xx/5xx/503, 35.0 M worlds, RSS 54.8 → 56.2 MiB, 0 detached work, 0 quarantined; 9 client timeouts in 5 seconds traced to two host stalls while Docker extracted image layers for the benchmarks — `journalctl -u docker` at the same seconds); **connection campaign passed** (500 SSE+WS cycles; 40 connections held through a revision replacement, an app restart and a proxy restart; abrupt client death costs slots until `USAI_SOCKET_IDLE_TIMEOUT` — the sizing rule is now written down; unread streams +0.7 MiB each; idle sockets closed 1008); **72 h soak running** (2026-09-19 22:28 → 2026-09-22 22:28 UTC). Evidence: `docs/measurements/2026-09-18-p5-p6-qualification.md` |
 | External developer validation (P7) | ◐ | four fresh-eyes runs (0.0.1: 21 items; 0.0.4: 14; **0.0.5: three personas — payment webhooks, a Rails developer's multi-tenant SaaS, an SRE deploying from the public docs — 0 blockers on the developer side, 2 on the operator side, ~25 frictions, all fixed below**); doc-to-first-200 in 4–10 min for all three; no human outside developers yet |
 | Frozen contracts, `SUPPORTED.md`, upgrade matrix (RC) | ◐ | `SUPPORTED.md` written; runtime × artifact (N, N−1) matrix tested in CI against the last release; contracts still move within 0.0.x (they must, until P7 says the API is right) |
 | Supply chain | ✓ | artifact signing (`usai keygen` / `build --sign` / `run --require-signature`, native image covered, control installs verified); RustSec + npm audit in CI; binaries with SHA-256, npm via Trusted Publishing, images by digest |
 | Security qualification | ◐ | threat model, `SECURITY.md`; robustness tests (600 mutated artifacts, 600 garbage control/HTTP requests: no panic, no leaked work); worlds are semantic isolation, not a hostile sandbox (ADR-0008); coverage-guided fuzzing (`fuzz/`, libFuzzer: manifest → definition → OpenAPI/router/cron/env, the HTTP boundary and guest output, source maps) two minutes per target on every push and ten nightly — young: the corpus is days old, not months |
 | Comparative benchmarks | ✓ (first run) | hello endpoint vs Node/Bun/Deno on the VM: `docs/measurements/2026-09-19-comparative-hello.md` — ≈1 ms per request is the **measured fixed cost of the current implementation** (2× below Node, 5× below Bun/Deno at c=64), not a proven price of the model: the research representation reached +51 µs over Node/Fastify at c=1 on HTTP+PostgreSQL. **P8 (hot-path parity)** 2026-09-19, c=1 phase done — `docs/measurements/2026-09-19-p8-parity.md`: the whole-request invoice (`USAI_PROFILE=1`, host phases + engine phases + the guest's own ledger) found three costs the semantics never asked for — Zod's accepting path rebuilt per world, three evals per request, validation paid twice — and four levers removed them: **C2a** structural-sample warm-up in the snapshot, **C1** direct-call guest ABI (ADR-0018), **C2b** validate once (exact finalizer), **C3** owned buffers + in-core settle (four typed calls per request) after a `perf` audit that put the runtime's own per-request logic at ≈2.5 %. VM 47, c=1 pinned, soak co-tenant: hello 1.70 → 0.90 ms p50 / 1.45 → 0.65 ms CPU; contract-heavy 5.27 → 1.28 / 4.76 → 0.90; PostgreSQL classes −18…45 % CPU. What remains is itemised (interpreter running the developer surface ≈0.26 ms, boundary JSON ≈0.15, fresh world ≈0.16, Wasmtime lazy funcref init ≈2 % — upstream). `suite.sh leak` (counter/cancellation/RSS, all comparators) and the PHP-FPM comparator at c=1 measured the same morning. Next: `suite.sh sweep` on the idle VM after the 72 h soak |
+| Efficiency envelope (P8E) | ✓ | `docs/measurements/2026-09-20-p8e-efficiency.md` (VM 47, cpus 12–15, soak as disclosed co-tenant, 72 cells + the C2 cells): **technical floor 48 MiB / 0.25 vCPU** (hello; 32 MiB OOM-killed at the first request), **supported floor 192 MiB / 1 vCPU / 48 worlds** (PostgreSQL pool 4, task, cron, status + metrics: 1 015 req/s at c=16, p50 15 ms, no OOM in any of 30 cells down to 128 MiB; 8-world cells answer c=16 with 503 `capacity_exhausted` and 0 × 5xx — admission, not failure), **density** N=1…50 vs Node + Fastify: ≈30 MiB PSS / 47 RSS and 0.00 % CPU per idle Usai application at N=50 vs ≈36 / 84 and 0.12 %; cold first response 11–16 ms vs 45–62; burst 100 req/s costs Usai ≈1.7× Node's CPU per request. Idle fix: the watchdog and epoch tickers park while no world is live (`crate::idle`, 300 wakeups/s → 0); `/_usai/status` reports `process` (RSS, PSS, faults, CPU, threads, fds). Against the prediction: memory does not return after a burst (≈4 MiB RSS / 1.5 PSS per touched slot, kept resident) — C2 measured: `USAI_WASM_KEEP_RESIDENT` 2 MiB is identical to the default, 0 returns the memory (100 → 45 MiB) at half the throughput and ≈100 faults per request; default kept, knob documented with its price. `SUPPORTED.md` Host envelope row, Q17 (multi-application process) recorded |
 | Vendored Wasmtime patch | ◐ | **upstream PR open: [bytecodealliance/wasmtime#14357](https://github.com/bytecodealliance/wasmtime/pull/14357)** (2026-09-19; the patch plus unit tests that fail on the unpatched code); provenance in `vendor/README.md`, status in `docs/upstream/wasmtime-pagemap-reset.md`; the freshness tests are the rebase tests; the vendor stays until it lands in a release |
 
-Next gates: **P6** long soaks (24 h running, then the connection campaign and 72 h, chained on the VM) and **P7** outside
-developers building from the public docs alone (three real humans, unguided, would already be informative); RC freezes contracts only
-after P7 says the API is right. Wording after a clean 24 h: *alpha, production qualification in progress* — no longer a preview, not yet a support promise.
+Next gates: **P6** the 72 h soak (running, ends 2026-09-22 22:28 UTC) and **P7** outside developers building from the public
+docs alone (three real humans, unguided, would already be informative); RC freezes contracts only after P7 says the API is right.
+After the 72 h soak, on the idle VM: `suite.sh sweep` (the concurrency curve, all comparators) — the third number the P9 decision
+needs (`2026-09-20-p8e-efficiency.md` §7).
 
 Multi-instance: the topology is now stated (`SUPPORTED.md`): HTTP and queues share work across replicas, migrations serialize on an advisory lock, **cron ticks on every instance that schedules** (`--no-cron` elsewhere); a two-replica campaign has not been run.
 
-Current phase (`docs/ROADMAP.md`): **P5 done, P6 soaking, P7 in progress.** Depth, not breadth.
+Current phase (`docs/ROADMAP.md`): **P5 done, P6 72 h soaking, P7 in progress, P8 c=1 done, P8E done.** Depth, not breadth.
 
 ```text
 execution substrate recovery   ← ADR-0016 first pass done; measure on a real VM next
@@ -162,7 +171,7 @@ capabilities (design), latency histogram in metrics, an API reference page.
 ## Next
 
 1. ~~Propose the Wasmtime pagemap-reset patch upstream~~ — **PR open: bytecodealliance/wasmtime#14357**, CI green, awaiting review; the vendor stays until a release carries it. ~~The eval-based invoke/outcome/pending floor~~ — gone (ADR-0018; P8 c=1 phase done, `docs/measurements/2026-09-19-p8-parity.md`).
-2. Waiting on wall clock: the 24 h soak (ends ≈2026-09-19 22:18 UTC) → `conn-churn` → 72 h soak (≈2026-09-23), chained on VM 47; then append results to `2026-09-18-p5-p6-qualification.md`, flip the wording to "alpha, production qualification in progress", release v0.0.6 (user's decision: after the 24 h soak + churn), run `suite.sh sweep` / `leak` / PHP on the idle VM.
+2. Waiting on wall clock: ~~24 h soak → `conn-churn`~~ (passed, appended to `2026-09-18-p5-p6-qualification.md`; wording flipped to "alpha, production qualification in progress") → **72 h soak running** (ends 2026-09-22 22:28 UTC; no image pulls on the host until then); then `suite.sh sweep` on the idle VM and the P9 decision. Release v0.0.6 is the user's call (the 24 h soak + churn it waited for are in).
 3. Waiting on humans: P7 external developers (the internal fresh-eyes rounds — docs-only, bookmarks app, shelf app on the P8 main — are the rehearsal, not the evidence).
 4. Acceptance audit done (`docs/ACCEPTANCE-AUDIT.md`); the one remaining ◐, crash/restart recovery, is the orchestrator's by design (D15; queue messages survive, in-memory dispatches are counted lost). ~~Tutorial application~~ — GUIDE §16 walks `examples/todos`, §17 `examples/invoicing`. ~~First tag~~ — v0.0.1…v0.0.5 shipped. ~~Per-world CPU accounting~~ — done (`WorkResult.cpu`, `usai_guest_cpu_seconds_total`; fairness/budgets stay a D13 follow-up, `docs/THREAT-MODEL.md`).
 5. Released: `v0.0.1`–`v0.0.4` (2026-09-18) — `release.yml` publishes binaries, npm `@sakaladev/usai` + `@sakaladev/create-usai` (Trusted Publishing/OIDC; `workflow_dispatch` for scaffolder-only fixes) and Docker images (Docker Hub `sakaladev/usai`, the canonical address, and GHCR `ghcr.io/gmedia/usai` as a public mirror). v0.0.4 verified from the registries: `docker pull` on amd64 and arm64, the container smoke against Docker Hub, and the pure-npm path (`pnpm dlx @sakaladev/create-usai` → `pnpm install` → `pnpm dev` fetching the release binary → `pnpm test`). The unscoped `usai` name is refused by npm as too similar to existing packages. Open: artifact signing (ADR-0005 follow-up).

@@ -48,7 +48,7 @@ replaced revisions now retire themselves once settled.
 | overload: 200 clients against `--max-worlds 48` | **103 258 × 503 `capacity_exhausted`, 0 × 5xx**, admitted requests p99 median 140 ms (max 472 ms); `usai_http_rejections_total{reason="capacity"}` 103 899 |
 | idle 60 s → 32-client burst | first second p50 25 ms / p99 214 ms, second p50 18 ms; 0 errors |
 | dead letter: endpoint always 500 | 5 attempts (500 ms exponential: 0.5, 1, 2, 4 s), `retried` 4, `dead` 1, five `webhook_deliveries` rows, `usai_queue.state = dead` with the error |
-| 1 h soak | started 2026-09-19 (see the soak section when appended) |
+| soaks (1 h, 24 h; 72 h running) and the connection campaign | below |
 
 What the churn campaign found before it passed: RSS grew ~2 MB per
 replacement until the container's 512 MB limit killed the process after
@@ -61,8 +61,46 @@ cold slots for a new module and keeps 100 warm unused ones
 (`max_unused_warm_slots`), so churn touched ever more keep-resident pages;
 set to 0, slots used = peak concurrency.
 
+## Soaks (appended 2026-09-20)
+
+Same deployment, same 8-client load through Caddy (`loadgen.mjs`, list →
+get → create on `examples/invoicing`), a status sample every 60 s.
+
+| Soak | Window | Result |
+|---|---|---|
+| 1 h | 2026-09-19 | 49 M worlds, 0 errors, RSS +0.9 % |
+| **24 h** | 2026-09-18 22:18 → 2026-09-19 22:19 UTC (86 374 s of load) | **34 978 737 ok, 0 × 4xx, 0 × 5xx, 0 × 503**, 9 client errors in **5 bad seconds** (below); p99 median 273.9 ms; RSS 54.8 → max 58.1 → 56.2 MiB at the end (1 416 samples); 35 007 080 worlds created, `liveWorlds` max 8 and 0 at the end, `detachedWorkDetected` 0, completions dropped late / rejected stale 0; PostgreSQL pool: 89.2 M operations, 3.50 M transactions, 9 cancelled, 6 rolled back for a dying world, **0 quarantined**, 8/8 available at the end |
+| 72 h | started 2026-09-19 22:28 UTC → ends 2026-09-22 22:28 UTC | running; appended when it ends |
+
+**The 5 bad seconds** (t = 28 741–28 745 s and 40 325–40 326 s, p99 ≈ 10 001 ms
+= the client's own 10 s timeout): both episodes are whole-second gaps in
+which the load client itself completed 0–34 requests instead of ≈400, the
+application log has no WARN or ERROR line, and `journalctl -u docker` on the
+host has, at the same seconds, `dockerd … healthcheck failed fatally` at
+06:17:45–50 UTC (a PHP comparator's images being pulled and built for the
+P8 report) and `image pulled ubuntu:26.04` at 09:30:46 UTC (the P8E fleet's
+base image). The VM stalled for the whole host while Docker extracted image
+layers; the runtime, the client and the proxy all stalled with it. Reported
+as what it is — a host stall caused by the operator's own activity, not a
+runtime defect — and the reason the 72 h soak runs with no image pulls on
+the host.
+
+## Connection campaign (`p6/run.sh conn-churn`, 2026-09-19 22:2x UTC)
+
+The deployment-level WebSocket/SSE evidence `SUPPORTED.md` claims, on the
+same deployment with `--max-worlds 48` and `USAI_SOCKET_IDLE_TIMEOUT=20`:
+
+| Scenario | Result |
+|---|---|
+| 500 cycles × (SSE two events + WS hello/ask/answer), 16 at a time | 6.9 s; SSE 500 ok (p50 207 ms to the second event), WS 500 ok (p50 6.3 ms), 0 errors; live worlds back to 0 in 0 s |
+| 40 connections held through a **revision replacement** (control surface, t=10 s) | previous revision drained in 0 s; all 40 closed at the drain bound — 20 × WS `1012 server draining`, 20 × SSE ended; 0 failed probes; live worlds 0 |
+| 40 held through an **app restart** (SIGTERM → drain → start) | app exited after 0 s, healthy again after 2 s; 20 × `1012`, 20 × SSE ended; 0 failed probes |
+| 40 held through a **proxy restart** (Caddy) | proxy back after 11 s; the 40 client-side connections died with the proxy (20 × WS `1006`, 20 × SSE terminated) and 20 reconnects failed while it was down — the proxy's behaviour, not the runtime's; live worlds 0 afterwards |
+| **abrupt client death** (40 connections, client `kill -9`, no close frames) | the runtime does not learn of a dead peer that sent no FIN/RST: **live worlds still 40 after 30 s**, and SSE probes got 503 (48 slots, 40 held) from t≈37 s. The connection-bound worlds ended at the idle timeout (20 s of silence → `1008 idle timeout`, then the fleet returned to 0). **Sizing rule**: `--max-worlds` must exceed the number of connections you are prepared to hold through `USAI_SOCKET_IDLE_TIMEOUT` plus the request concurrency, and the idle timeout is the bound on how long a vanished client costs a slot |
+| a client that never reads: 10 SSE connections unread for 30 s | RSS 89.7 → 96.7 MiB (+0.7 MiB per unread stream: the bounded send buffer), live worlds 0 afterwards |
+| idle socket, nothing sent | closed by the server with `1008 idle timeout` after 20 s, as documented |
+
 ## Not done here
 
-24 h and 72 h soaks (started on the VM, results appended when they end);
-WebSocket/stream churn (covered by the runtime's connection tests, not by
-this deployment, which has none); multi-instance deployments.
+Multi-instance deployments (two replicas behind one proxy, one PostgreSQL:
+the topology `SUPPORTED.md` states but has not campaigned).
