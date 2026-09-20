@@ -302,8 +302,12 @@ Draft tag message:
 > cost, status token and surface switches, replica flags (--no-cron/--no-queue/
 > --no-services), drain grace for zero-502 rolling restarts, lost-consumer
 > queue reclaim, WebSocket auth before the upgrade, typed ctx.resources, the
-> Application Reference and generated SDK reference, P5/P6/P8/P8E qualified
-> (24 h soak, connection and two-replica campaigns)
+> Application Reference and generated SDK reference, request ids across
+> hand-offs (tasks and queue messages), cookies/tokens/bytes/multipart helpers,
+> exclusive cron, native codecs in the core, auth schemes with their own
+> resources, a test harness that reads the runtime's log, ENVIRONMENT and
+> CONTROL-API references, P5/P6/P8/P8E qualified (24 h soak, connection,
+> two-replica and queue-throughput campaigns, 78 M fuzz executions)
 
 ## 0.0.5 — 2026-09-18
 
