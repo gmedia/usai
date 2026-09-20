@@ -47,13 +47,15 @@ const sha256 = async (text: string) =>
   hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
 
 /** Bearer sessions: the token is random from host entropy; only its SHA-256
- * is stored. The resolver runs inside the request's world with the
- * workload's resources (ADR-0004). */
-export const session = auth.bearer<Principal>({
+ * is stored. The resolver runs inside the request's world (ADR-0004) with
+ * the scheme's own resource — `db`, typed on `ctx.resources` — which every
+ * route using the scheme leases without listing it. */
+export const session = auth.bearer({
   name: "session",
   description: "The token from POST /signup or POST /login; expires after SESSION_TTL_HOURS.",
+  resources: [db],
   resolve: async (ctx, token) => {
-    const row = await sql(ctx).one<Principal>(
+    const row = await ctx.resources.main.one<Principal>(
       `select u.id as "userId", u.tenant_id as "tenantId", u.email
          from sessions s join users u on u.id = s.user_id
         where s.token_hash = $1 and s.expires_at > now()`,
