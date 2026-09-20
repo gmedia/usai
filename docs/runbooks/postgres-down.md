@@ -39,6 +39,23 @@
   is down). Queue consumers log `claim failed; backing off`; when the
   database answers again, `INFO database reachable again`.
 
+## Refused versus unreachable
+
+Two outages look different on the wire. A **stopped server** refuses the
+connection at once (`connection refused`): every attempt fails in
+microseconds, the 503s are fast, worlds are held for nothing. An
+**unreachable server** — a network partition, a firewall dropping SYNs, a
+host that is gone — answers nothing, and every attempt waits the connect
+timeout: **5 s by default**, so every request that needs the database holds
+its world for 5 s before its 503. At 1 000 req/s that is 5 000 worlds
+wanted against a `--max-worlds` of 256: the instance answers `503
+capacity_exhausted` for most of them until the network returns. That is
+the admission bound doing its job (`overload.md`), but the recovery is
+slower and the worlds are wasted. Set the connect timeout in the URL for a
+service that must fail fast — `postgres://…/app?connect_timeout=2` (seconds,
+PostgreSQL's own parameter; the runtime applies 5 when it is absent) — and
+keep it above the network's real connect latency.
+
 ## What the workloads do
 
 Finite work fails terminally for that request (no implicit retry, ADR-0014):
