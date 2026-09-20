@@ -47,7 +47,14 @@ pub const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS usai_queue (
   last_error text,
   created_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS usai_queue_ready ON usai_queue (topic, available_at) WHERE state = 'ready';";
+CREATE INDEX IF NOT EXISTS usai_queue_ready ON usai_queue (topic, available_at) WHERE state = 'ready';
+CREATE INDEX IF NOT EXISTS usai_queue_claim ON usai_queue (topic, id) WHERE state = 'ready';
+CREATE INDEX IF NOT EXISTS usai_queue_processing ON usai_queue (topic, locked_at) WHERE state = 'processing';";
+// `usai_queue_claim` is what the claim walks: `ORDER BY id LIMIT 1` over the
+// ready rows of a topic in id order, so a claim is three buffer reads
+// whatever the backlog. Without it the planner sorted every ready row per
+// claim (the queue campaign: 20 000 ready messages → 13 ms per claim, the
+// consumers' whole budget). `usai_queue_processing` is the sweeper's.
 
 #[derive(Default)]
 pub struct QueueStats {
