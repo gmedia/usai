@@ -1212,12 +1212,20 @@ async fn status_and_metrics_derive_from_runtime_truth() {
         "{text}"
     );
     assert!(text.contains("usai_http_rejections_total{reason=\"capacity\"} 0"));
+    // The histogram is admitted requests only: the validation refusal was
+    // decided before a world existed and must not improve the p99.
     assert!(text.contains("# TYPE usai_http_request_seconds histogram"));
     assert!(
-        text.contains("usai_http_request_seconds_bucket{le=\"+Inf\"} 2"),
+        text.contains("usai_http_request_seconds_bucket{le=\"+Inf\"} 1"),
         "{text}"
     );
-    assert!(text.contains("usai_http_request_seconds_count 2"));
+    assert!(text.contains("usai_http_request_seconds_count 1"));
+    assert!(text.contains("usai_http_requests_total 2"), "{text}");
+    // State labels are lowercase, as `/_usai/status` spells them.
+    assert!(
+        text.contains("state=\"active\"") && !text.contains("state=\"Active\""),
+        "{text}"
+    );
     assert_eq!(
         status["http"]["rejections"],
         json!({ "route": 0, "validation": 1, "auth": 0, "capacity": 0, "draining": 0, "other": 0 })

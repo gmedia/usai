@@ -74,6 +74,16 @@ mem_limit / MemoryMax  ≥  40 + max_worlds × 4 + 30   (MiB)
 48 worlds → ≥ 262 MiB; the compose file uses 512 MiB; 192 MiB is the supported floor measured with 48 worlds and a 16-client burst
 ```
 
+**Per-workload memory** on top of that formula, for the operations that
+allocate more than a world does:
+
+| Operation | Peak per concurrent call | Retained after |
+|---|---|---|
+| `crypto.password.hash` / `verify` (Argon2id, 19 MiB, 2 passes) | ≈ 20 MiB, on the blocking pool (≤ one per core at once) | none — the heap is trimmed after each call; budget `cores × 20 MiB` for a login burst |
+| A body up to `USAI_MAX_BODY_BYTES` (1 MiB default) | ≈ 3× the body (bytes, the guest copy, the decoded value) | none |
+| A held revision (replacement, rollback) | ≈ 30 MiB compiled image | until it is removed |
+| A `cache.local` | its declared `maxEntries × entry size` | for the revision's life |
+
 Go below that and the box is OOM-killed at the first burst, not at idle
 (idle RSS is ≈40 MiB whatever the limit — the hello application fits 48 MiB
 but only for 16 worlds and no pool). Watch `usai_process_resident_memory_bytes`

@@ -492,10 +492,14 @@ impl HttpHost {
                             reply.body["error"]["code"].as_str().unwrap_or(""),
                         )
                     });
+                    // A refusal decided before a world existed is not a
+                    // served request: it is counted under `rejections`, and
+                    // stays out of the latency histogram so a flood of bad
+                    // requests cannot make the p99 look better.
                     self.stats.record_with(
                         reply.status.as_u16(),
                         reply.before_world,
-                        Some(started.elapsed()),
+                        (!reply.before_world).then(|| started.elapsed()),
                         reason,
                     );
                 }
@@ -1270,7 +1274,7 @@ impl HttpHost {
                         tracing::warn!(world = %result.world, workload, code = v.code, "{}", v.message);
                     }
                     if let Some(Err(e)) = &result.outcome {
-                        tracing::error!(world = %result.world, workload, name = %e.name, message = %e.message, "socket handler failed");
+                        tracing::error!(world = %result.world, workload, name = %e.name, error = %e.message, "socket handler failed");
                     }
                 }
                 Ok(Err(e)) => tracing::error!(workload, error = %e, "socket world failed"),
@@ -1435,6 +1439,10 @@ pub(crate) fn render_output(output: GuestHttpOutput, lifecycle: Option<String>) 
     }
 }
 
+/// Connection-level dependency failures, one line per code per second.
+static DEPENDENCY_LOG: crate::observability::RateLimitedLog =
+    crate::observability::RateLimitedLog::new(std::time::Duration::from_secs(1));
+
 impl HttpHost {
     /// Known application errors map to their declared status; anything else
     /// is sanitized (C11).
@@ -1489,7 +1497,18 @@ impl HttpHost {
                 // of the response did not match) are what the developer
                 // needs: always in the log, in the response only in dev.
                 let details = usai.get("details").cloned().unwrap_or(Value::Null);
-                tracing::error!(world = %world, workload, code = raw_code, message = %error.message, %details, stack = error.stack.as_deref().unwrap_or(""), "application error");
+                if crate::resource::postgres::connection_level(raw_code) {
+                    // The database is down: every request fails the same way,
+                    // and a stack per request is noise that buries the one
+                    // line that matters. One warning per code per second,
+                    // counting what it stands for; `/_usai/ready` and
+                    // `resources[].ready` carry the state.
+                    if let Some(suppressed) = DEPENDENCY_LOG.allow(raw_code) {
+                        tracing::warn!(world = %world, workload, code = raw_code, error = %error.message, suppressed, "dependency unavailable");
+                    }
+                } else {
+                    tracing::error!(world = %world, workload, code = raw_code, error = %error.message, %details, stack = error.stack.as_deref().unwrap_or(""), "application error");
+                }
                 if self.config.expose_diagnostics {
                     if !details.is_null() {
                         body["error"]["details"] = details;
@@ -1500,7 +1519,7 @@ impl HttpHost {
             }
             return json_response(status, &body);
         }
-        tracing::error!(world = %world, workload, name = %error.name, message = %error.message, stack = error.stack.as_deref().unwrap_or(""), "unexpected handler failure");
+        tracing::error!(world = %world, workload, name = %error.name, error = %error.message, stack = error.stack.as_deref().unwrap_or(""), "unexpected handler failure");
         let mut body = json!({ "error": { "code": "internal", "message": "internal error" } });
         if self.config.expose_diagnostics {
             body["error"]["message"] = Value::String(format!("{}: {}", error.name, error.message));

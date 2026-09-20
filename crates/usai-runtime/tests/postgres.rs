@@ -327,6 +327,56 @@ async fn ambiguous_abandonment_quarantines_the_connection() {
     f.baseline();
 }
 
+/// `resources[].ready` in `/_usai/status` follows the last contact with the
+/// server: a connection-level failure (here the server terminating our own
+/// backend, SQLSTATE 57P01) makes it false with the error beside it; the
+/// next successful operation makes it true again. A query's own error (a
+/// bad statement) says nothing about the database and leaves it ready.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn resource_readiness_follows_connection_level_failures() {
+    let Some(f) = fixture().await else { return };
+    let rev = f.runtime.active().unwrap();
+    let manager = rev.resources().get("main").cloned().unwrap();
+    let call = |sql: &str| ResourceCall {
+        method: "one".into(),
+        args: json!({ "sql": sql, "params": [] }),
+    };
+    assert!(f.pg_status().ready);
+    let err = manager
+        .call(
+            call("select * from no_such_table"),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("no_such_table"), "{err}");
+    assert!(f.pg_status().ready, "a query error is not an outage");
+    let err = manager
+        .call(
+            call("select pg_terminate_backend(pg_backend_pid())"),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, usai_runtime::resource::ResourceError::Operation { code, .. } if code == "sql_57p01" || code == "connection_closed"),
+        "{err:?}"
+    );
+    let s = f.pg_status();
+    assert!(!s.ready, "{s:?}");
+    assert!(
+        s.detail["lastError"].as_str().unwrap().contains("terminat"),
+        "{s:?}"
+    );
+    assert!(s.detail["unreadyForSeconds"].is_u64());
+    let (status, body) = f.http("GET", "/users/:id", json!({ "id": "1" })).await;
+    assert_eq!(status, 200, "{body}");
+    let s = f.pg_status();
+    assert!(s.ready, "{s:?}");
+    assert!(!s.detail.contains_key("lastError"));
+    f.baseline();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn no_connection_state_leaks_across_worlds() {
     let Some(f) = fixture().await else { return };

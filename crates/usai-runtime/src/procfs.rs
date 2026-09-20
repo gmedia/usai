@@ -99,3 +99,17 @@ mod tests {
         assert!(p.open_fds >= 3);
     }
 }
+
+/// Hands the allocator's free heap back to the kernel. glibc keeps what a
+/// burst freed inside its arenas (an Argon2 hash is 19 MiB per call; a
+/// removed revision's compiled image is tens of MiB), so RSS would show the
+/// peak long after the work ended and read like a leak. Called after those
+/// two bursts only — never on a request path — and a no-op off glibc.
+pub fn release_heap() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    // SAFETY: malloc_trim(0) takes no pointers and is safe to call at any
+    // time; it only returns free memory the allocator already owns.
+    unsafe {
+        libc::malloc_trim(0);
+    }
+}

@@ -59,6 +59,47 @@ impl Rejection {
     }
 }
 
+/// One line per key per interval for a failure that repeats on every request
+/// while a dependency is down. The first occurrence logs at once; the next
+/// line for the same key waits the interval and says how many it stands for.
+pub struct RateLimitedLog {
+    interval: std::time::Duration,
+    seen: std::sync::Mutex<std::collections::BTreeMap<String, (std::time::Instant, u64)>>,
+}
+
+impl RateLimitedLog {
+    pub const fn new(interval: std::time::Duration) -> Self {
+        Self {
+            interval,
+            seen: std::sync::Mutex::new(std::collections::BTreeMap::new()),
+        }
+    }
+
+    /// `Some(suppressed)` when the caller should log now (`suppressed` is
+    /// how many occurrences since the previous line were not logged),
+    /// `None` when this one is folded into the next line.
+    pub fn allow(&self, key: &str) -> Option<u64> {
+        let now = std::time::Instant::now();
+        let mut seen = self.seen.lock().expect("rate limit poisoned");
+        match seen.get_mut(key) {
+            Some((last, suppressed)) if now.duration_since(*last) < self.interval => {
+                *suppressed += 1;
+                None
+            }
+            Some((last, suppressed)) => {
+                let n = *suppressed;
+                *last = now;
+                *suppressed = 0;
+                Some(n)
+            }
+            None => {
+                seen.insert(key.to_owned(), (now, 0));
+                Some(0)
+            }
+        }
+    }
+}
+
 /// HTTP host counters. Class-level counters, a fixed-bucket latency
 /// histogram and per-reason rejection counters: cheap (one atomic add
 /// each), bounded, and enough for an error rate, a p99 and a "why are we
@@ -491,12 +532,11 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
         .map(|r| {
             (
                 format!(
-                    "revision=\"{}\",application=\"{}\",state=\"{:?}\"",
+                    "revision=\"{}\",application=\"{}\",state=\"{}\"",
                     r.id,
                     label(&r.application),
-                    r.state
-                )
-                .to_lowercase(),
+                    format!("{:?}", r.state).to_lowercase()
+                ),
                 r.in_flight as f64,
             )
         })
@@ -517,12 +557,11 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
             r.services.iter().map(move |s| {
                 (
                     format!(
-                        "revision=\"{}\",service=\"{}\",state=\"{:?}\"",
+                        "revision=\"{}\",service=\"{}\",state=\"{}\"",
                         r.id,
                         label(&s.name),
-                        s.state
-                    )
-                    .to_lowercase(),
+                        format!("{:?}", s.state).to_lowercase()
+                    ),
                     1.0,
                 )
             })
@@ -864,5 +903,29 @@ mod tests {
         assert!(text.contains("usai_http_responses_total{class=\"2xx\"} 9"));
         assert!(text.contains("usai_tasks{state=\"running\"} 1"));
         assert!(text.lines().all(|l| l.starts_with('#') || l.contains(' ')));
+    }
+
+    #[test]
+    fn a_rate_limited_log_folds_repeats_into_the_next_line() {
+        let log = RateLimitedLog::new(std::time::Duration::from_millis(50));
+        assert_eq!(
+            log.allow("pool_error"),
+            Some(0),
+            "the first occurrence logs at once"
+        );
+        assert_eq!(log.allow("pool_error"), None);
+        assert_eq!(log.allow("pool_error"), None);
+        assert_eq!(
+            log.allow("connection_closed"),
+            Some(0),
+            "keys are independent"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        assert_eq!(
+            log.allow("pool_error"),
+            Some(2),
+            "the next line says what it stands for"
+        );
+        assert_eq!(log.allow("pool_error"), None);
     }
 }

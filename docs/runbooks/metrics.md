@@ -25,6 +25,7 @@ requests is a trap, read the rejections beside it.
 | `usai_detached_work_total` | counter | — | Finite worlds that ended with live asynchronous work |
 | `usai_world_budget` | gauge | kind | Runtime world budget |
 | `usai_revision_in_flight` | gauge | application, revision, state | Work in flight per revision |
+| `usai_service` | gauge | revision, service, state | 1 per declared `service()`, at its current state (absent when the application declares none) |
 | `usai_queue_messages_total` | counter | revision, state | Queue messages by outcome, per revision |
 | `usai_cron_ticks_total` | counter | revision, state | Cron ticks per revision: due on this instance, skipped (previous still running), failed, taken by another instance (exclusive schedules) |
 | `usai_resource` | gauge | kind, metric, name | Resource manager state (current levels) |
@@ -48,6 +49,7 @@ requests is a trap, read the rejections beside it.
 | `usai_http_request_seconds` | histogram | le | Time to the response, by bucket |
 | `usai_http_upgrades_total` | counter | — | WebSocket upgrades |
 | `usai_http_streams_total` | counter | — | Streaming responses |
+| `usai_http_streams_failed_total` | counter | — | Streams whose handler failed after the 200 and the head were sent (the body ended early) |
 
 Label values:
 
@@ -59,11 +61,15 @@ Label values:
 - `usai_completions_total{outcome}`: `delivered`, `dropped_late`,
   `rejected_stale` — a completion that arrived after its world ended is
   dropped or rejected by design (C4), not lost work.
-- `usai_revision_in_flight{state}`: `Installed`, `Active`, `Draining`,
-  `Retired`.
-- `usai_service{state}`: `Starting`, `Running`, `Stopping`, `Stopped`,
-  `Failed` — `Failed` stays 1 when the restart policy is exhausted (log line
+- `usai_revision_in_flight{state}`: `installed`, `active`, `draining`,
+  `retired` — lowercase here and in `/_usai/status` alike.
+- `usai_service{state}`: `starting`, `running`, `stopping`, `stopped`,
+  `failed` — `failed` stays 1 when the restart policy is exhausted (log line
   `service gave up`); it does not make the instance unready.
+- `usai_http_workload_responses_total{workload}`: the workload id,
+  `<kind>:<name>` as `usai inspect` lists it (`http:listInvoices`,
+  `socket:chat`), one series per workload that has answered; a request that never matched a route is under
+  `usai_http_rejections_total{reason="route"}` and has no workload.
 - `usai_queue_messages_total{state}`: `claimed`, `done`, `retried`, `dead`,
   `invalid`, `reclaimed` (claimed by a consumer that died, returned for
   another attempt or dead-lettered). Per instance and revision, cumulative.
@@ -92,9 +98,9 @@ Label values:
 | Pool poisoned / database flapping | `increase(usai_resource_quarantines_total[5m]) > 0` while the database is healthy | a connection's outcome could not be proven (C5); a burst during a failover is expected, a steady trickle is a bug or a network problem (`postgres-down.md`) |
 | Pool saturated | `usai_resource{metric="in_use"} == on (kind,name) usai_resource{metric="max"}` for 1 m | queries wait; size `pool.max` against `--max-worlds` |
 | Detached work | `increase(usai_detached_work_total[1h]) > 0` | an application bug: a handler returned with work in flight (`500 detached_work`) |
-| Service gave up | `usai_service{state="Failed"} == 1` | the restart policy is exhausted; the instance stays ready, the service is down |
+| Service gave up | `usai_service{state="failed"} == 1` | the restart policy is exhausted; the instance stays ready, the service is down |
 | Cron on two replicas | `sum(usai_scheduler{kind="cron"}) > 1` and the schedule is not `exclusive` | the schedule fires on each — declare it `exclusive: true` or start the others with `--no-cron` |
-| Memory drift | `usai_process_resident_memory_bytes` rising while `usai_worlds_live` is flat over hours | the plateau is `base + touched slots × 4 MiB` (`memory-pressure.md`); growth beyond it is a leak — report it with the soak samples |
+| Memory drift | `usai_process_proportional_memory_bytes` rising over hours while `usai_worlds_live` is flat and no revision was installed | the plateau is `base + touched slots × 4 MiB` (`memory-pressure.md`); a password-hashing burst or a held revision raises RSS for minutes, not hours — growth beyond that is a leak — report it with the soak samples |
 | Dead letters | `increase(usai_queue_messages_total{state="dead"}[15m]) > 0` | messages out of attempts (`queue-dead-letter.md`) |
 | Lost consumers | `increase(usai_queue_messages_total{state="reclaimed"}[15m]) > 0` | a consumer died mid-message (a crash, an OOM kill); the message was redelivered — look for the restart |
 | 5xx rate | `rate(usai_http_responses_total{class="5xx"}[5m])` | as for any service; `deadline_exceeded` (504) is in it |

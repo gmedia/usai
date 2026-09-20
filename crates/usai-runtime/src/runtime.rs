@@ -214,8 +214,10 @@ pub enum RuntimeError {
     Admission(#[from] BudgetExhausted),
     #[error("unknown revision {0}")]
     UnknownRevision(RevisionId),
-    #[error("revision {0} is {1:?}, not active")]
-    NotActive(RevisionId, RevisionState),
+    /// The revision is not in a state the operation accepts; the third
+    /// field says which states would have been.
+    #[error("revision {0} is {state}, {2}", state = format!("{:?}", .1).to_lowercase())]
+    NotActive(RevisionId, RevisionState, &'static str),
     #[error("no active revision")]
     NoActiveRevision,
     #[error("unknown workload {0}")]
@@ -472,6 +474,15 @@ impl Runtime {
     /// untouched (ADR-0006).
     pub async fn activate(&self, id: RevisionId) -> Result<Arc<Revision>, RuntimeError> {
         let revision = self.revision(id)?;
+        // Activating the active revision again would open its resources a
+        // second time and start a second scheduler beside the first.
+        if revision.state() == RevisionState::Active {
+            return Err(RuntimeError::NotActive(
+                id,
+                RevisionState::Active,
+                "already active",
+            ));
+        }
         let mut env = BTreeMap::new();
         for requirement in &revision.definition.manifest().env {
             match (self.env)(&requirement.name).filter(|v| !v.is_empty()) {
@@ -660,10 +671,18 @@ impl Runtime {
                     .write()
                     .expect("revisions poisoned")
                     .remove(&id);
+                // The compiled image goes with the last reference; return
+                // the heap it occupied so RSS reflects the revisions held.
+                drop(revision);
+                crate::procfs::release_heap();
                 tracing::info!(revision = %id, "revision removed");
                 Ok(())
             }
-            state => Err(RuntimeError::NotActive(id, state)),
+            state => Err(RuntimeError::NotActive(
+                id,
+                state,
+                "only an installed or retired revision can be removed (drain it first)",
+            )),
         }
     }
 
@@ -693,7 +712,11 @@ impl Runtime {
         workload_id: &str,
     ) -> Result<Admission, RuntimeError> {
         if revision.state() != RevisionState::Active {
-            return Err(RuntimeError::NotActive(revision.id, revision.state()));
+            return Err(RuntimeError::NotActive(
+                revision.id,
+                revision.state(),
+                "not active",
+            ));
         }
         let (index, _) = revision
             .definition
@@ -731,7 +754,13 @@ impl Runtime {
     ) -> Result<Admission, RuntimeError> {
         match revision.state() {
             RevisionState::Active | RevisionState::Draining => {}
-            state => return Err(RuntimeError::NotActive(revision.id, state)),
+            state => {
+                return Err(RuntimeError::NotActive(
+                    revision.id,
+                    state,
+                    "not active or draining",
+                ));
+            }
         }
         let (index, _) = revision
             .definition
@@ -1030,6 +1059,14 @@ impl Runtime {
             }
         }
         self.shutdown.cancel();
+        // What the drain bound did not settle is cancelled now (the client
+        // sees 499 / a closed connection): the revision still retires, and
+        // the line says how much work it took with it.
+        let remaining = std::mem::take(&mut *self.revisions.write().expect("revisions poisoned"));
+        for revision in remaining.into_values() {
+            revision.set_state(RevisionState::Retired);
+            tracing::info!(revision = %revision.id, cancelled_in_flight = revision.in_flight(), "revision retired");
+        }
         self.resources.shutdown().await;
     }
 }

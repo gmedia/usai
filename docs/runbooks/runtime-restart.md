@@ -12,22 +12,45 @@ in-flight work (a second signal forces the exit)` → `revision retired` and
 `http listener closed; draining connections` (either order; they are
 concurrent) → `drained; ownership returned to baseline`. All are ordinary log
 lines with timestamp and level (JSON with `--log-format json`). Exit code 0.
-In-flight requests finish (bounded by the drain timeout, 30 s by default —
-`--drain-timeout <s>` / `USAI_DRAIN_TIMEOUT`), new connections are refused by
-the closed listener, services get their stop signal first, dispatched tasks
-that were queued finish or are counted as `lost`. The orchestrator's grace
-period must cover grace + drain timeout (the compose files use 35 s for
-2 + 30). Measured: drain completes in < 1 s at 1 000 req/s. A single replica's
-proxy answers 502 for the 2–3 s between exit and the replacement's first
-listen — run two replicas and restart them one at a time
-(`deploy-and-rollback.md` → Rolling restart): with the grace and a proxy that
-retries a refused connection, the two-replica campaign measured **0 × 502 over
-two restarts under load** (before the grace: one 502 per restart, a request
-the proxy wrote onto an idle keep-alive connection the instant it closed).
-Set the grace at or above the balancer's health-check interval.
 
-A second SIGTERM/SIGINT forces the exit (`forced shutdown with N live
-worlds and M live operations`, exit 130).
+What happens to the work in flight, in order:
+
+- **At the drain start** every connection-bound and background world of the
+  revision gets the stop: WebSockets are closed with `1012 server draining`,
+  a stream's and a task's `ctx.signal` aborts and a pending `ctx.sleep`
+  returns, so a handler that checks the signal ends cleanly and a stream's
+  body ends (the client reconnects to the replacement). Services get their
+  stop first.
+- **In-flight requests finish** (bounded by the drain timeout, 30 s by
+  default — `--drain-timeout <s>` / `USAI_DRAIN_TIMEOUT`); new connections
+  are refused by the closed listener; dispatched tasks that were queued
+  finish or are counted as `lost`.
+- **At the drain timeout** what has not returned is cancelled: `WARN drain
+  did not finish; cancelling what is left` (`error="revision rev<n> did not drain
+  within 30s"`), then `revision retired cancelled_in_flight=<n>`. A cancelled
+  request's client sees the connection close (the runtime records it as
+  **499**, client-side/cancelled, not a 5xx); a cancelled queue message goes
+  back for another attempt; a cancelled task logs `termination="cancelled:
+  …"`. Nothing else is written on the way out.
+
+The orchestrator's grace period must cover grace + drain timeout (the
+compose files use 35 s for 2 + 30). Measured: drain completes in < 1 s at
+1 000 req/s. A single replica's proxy answers 502 for the 2–3 s between exit
+and the replacement's first listen — run two replicas and restart them one
+at a time (`deploy-and-rollback.md` → Rolling restart): with the grace and a
+proxy that retries a refused connection, the two-replica campaign measured
+**0 × 502 over two restarts under load** (before the grace: one 502 per
+restart, a request the proxy wrote onto an idle keep-alive connection the
+instant it closed). Set the grace at or above the balancer's health-check
+interval.
+
+**Second and third signal.** A second SIGTERM/SIGINT *during the grace* ends
+the grace early (`second signal: closing the listener now`) and the drain
+proceeds normally. A second signal *during the drain* forces the exit
+(`forced shutdown live_worlds=N live_ops=M`, exit 130) — in-flight requests
+are lost exactly as under SIGKILL. So from a cold start: one signal is a
+clean stop; two during the grace is a quick clean stop; two after the grace
+(or three in total) is a forced exit.
 
 ## SIGKILL / crash
 

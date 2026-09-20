@@ -192,6 +192,11 @@ impl ResourceProvider for PostgresProvider {
         Ok(Arc::new(Postgres {
             identity,
             pool,
+            health: Mutex::new(Health {
+                ready: true,
+                last_error: None,
+                since: std::time::Instant::now(),
+            }),
             endpoint,
             user,
             max: max as u32,
@@ -214,9 +219,21 @@ struct Counters {
     rolled_back_for_world: AtomicU64,
 }
 
+/// What the last contact with the server said. `/_usai/status` reports it as
+/// `resources[].ready`: true until a connection-level failure (the pool
+/// cannot connect, a connection closed under a query, 08xxx/57P0x), true
+/// again after the next successful operation or probe. A per-query error
+/// (a constraint, a syntax error) is the query's, not the database's.
+struct Health {
+    ready: bool,
+    last_error: Option<String>,
+    since: std::time::Instant,
+}
+
 pub struct Postgres {
     identity: ResourceIdentity,
     pool: Pool,
+    health: Mutex<Health>,
     /// `host:port[, …]` and user, for messages (never the password).
     endpoint: String,
     user: String,
@@ -347,6 +364,17 @@ enum Finished<T> {
 /// the physical connection has none worth reusing.
 fn connection_lost(code: &str) -> bool {
     code.starts_with("08") || matches!(code, "57P01" | "57P02" | "57P03")
+}
+
+/// Error codes that say the *database* is unreachable, as opposed to a
+/// query that failed: they drive `resources[].ready` and are logged as one
+/// rate-limited warning instead of a stack per request.
+pub(crate) fn connection_level(code: &str) -> bool {
+    code == "pool_error"
+        || code == "connection_closed"
+        || code
+            .strip_prefix("sql_")
+            .is_some_and(|c| connection_lost(&c.to_ascii_uppercase()))
 }
 
 fn sql_error(error: tokio_postgres::Error) -> ResourceError {
@@ -767,6 +795,70 @@ impl ResourceManager for Postgres {
         call: ResourceCall,
         cancel: CancellationToken,
     ) -> Result<Value, ResourceError> {
+        let result = self.call_inner(call, cancel).await;
+        self.observe(&result);
+        result
+    }
+
+    fn status(&self) -> ResourceStatus {
+        self.status_inner()
+    }
+
+    /// `SELECT 1` on a leased connection: the pool can hand one out and the
+    /// server answers. Failures name the reason.
+    async fn probe(&self) -> Result<(), String> {
+        let result = self.probe_inner().await;
+        match &result {
+            Ok(()) => self.observe::<()>(&Ok(())),
+            Err(e) => self.mark_unready(e),
+        }
+        result
+    }
+
+    async fn shutdown(&self) {
+        self.pool.close();
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+impl Postgres {
+    /// Folds one outcome into `Health`: a connection-level failure makes the
+    /// resource unready, any success makes it ready again.
+    fn observe<T>(&self, result: &Result<T, ResourceError>) {
+        match result {
+            Ok(_) => {
+                let mut health = self.health.lock().expect("health poisoned");
+                if !health.ready {
+                    tracing::info!(resource = %self.identity.name, "database reachable again");
+                    health.ready = true;
+                    health.last_error = None;
+                    health.since = std::time::Instant::now();
+                }
+            }
+            Err(ResourceError::Operation { code, message, .. }) if connection_level(code) => {
+                self.mark_unready(&format!("{code}: {message}"));
+            }
+            Err(_) => {}
+        }
+    }
+
+    fn mark_unready(&self, error: &str) {
+        let mut health = self.health.lock().expect("health poisoned");
+        if health.ready {
+            health.ready = false;
+            health.since = std::time::Instant::now();
+        }
+        health.last_error = Some(error.to_owned());
+    }
+
+    async fn call_inner(
+        &self,
+        call: ResourceCall,
+        cancel: CancellationToken,
+    ) -> Result<Value, ResourceError> {
         match call.method.as_str() {
             "begin" => return self.begin(cancel).await,
             "commit" | "rollback" => {
@@ -924,7 +1016,7 @@ impl ResourceManager for Postgres {
         }
     }
 
-    fn status(&self) -> ResourceStatus {
+    fn status_inner(&self) -> ResourceStatus {
         let status = self.pool.status();
         let mut detail = BTreeMap::new();
         detail.insert(
@@ -959,9 +1051,20 @@ impl ResourceManager for Postgres {
         detail.insert("poolSize".into(), json!(status.size));
         detail.insert("available".into(), json!(status.available));
         detail.insert("waiting".into(), json!(status.waiting));
+        let ready = {
+            let health = self.health.lock().expect("health poisoned");
+            if let Some(error) = &health.last_error {
+                detail.insert("lastError".into(), json!(error));
+                detail.insert(
+                    "unreadyForSeconds".into(),
+                    json!(health.since.elapsed().as_secs()),
+                );
+            }
+            health.ready
+        };
         ResourceStatus {
             identity: self.identity.clone(),
-            ready: true,
+            ready,
             in_use: (status.size.saturating_sub(status.available)) as u32,
             max: self.max,
             quarantined: self.counters.quarantined.load(Ordering::SeqCst),
@@ -969,9 +1072,7 @@ impl ResourceManager for Postgres {
         }
     }
 
-    /// `SELECT 1` on a leased connection: the pool can hand one out and the
-    /// server answers. Failures name the reason.
-    async fn probe(&self) -> Result<(), String> {
+    async fn probe_inner(&self) -> Result<(), String> {
         let object = self
             .pool
             .get()
@@ -989,14 +1090,6 @@ impl ResourceManager for Postgres {
             }
             Err(e) => Err(sql_error(e).to_string()),
         }
-    }
-
-    async fn shutdown(&self) {
-        self.pool.close();
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
     }
 }
 

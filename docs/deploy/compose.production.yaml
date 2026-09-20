@@ -38,7 +38,7 @@ services:
       - --status-addr
       - 0.0.0.0:9090          # reachable from the compose network only (not published)
       - --max-worlds
-      - "48"                  # ≈ 48 × 8 MB keep-resident + images; fits the 512 MB limit below
+      - "48"                  # ≈ 40 MB base + 48 × 4 MB per touched world slot (+30 MB per held revision); fits the 512 MB limit below
     environment:
       DATABASE_URL: "postgres://app:change-me@postgres:5432/app?sslmode=disable"
       # USAI_REQUIRE_SIGNATURE: <public key hex>   # refuse unsigned/tampered artifacts
@@ -71,7 +71,10 @@ configs:
         reverse_proxy app:3000 {
           health_uri /_usai/ready
           health_port 9090
-          health_interval 5s
+          # At or below the drain grace (USAI_DRAIN_GRACE, 2 s): the proxy
+          # must learn the instance is draining before its listener closes.
+          health_interval 1s
+          lb_try_duration 5s
         }
       }
 

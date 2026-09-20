@@ -81,6 +81,12 @@ fn runtime_error(e: RuntimeError) -> ControlResponse {
         RuntimeError::UnknownRevision(_) => {
             error(StatusCode::NOT_FOUND, "unknown_revision", e.to_string())
         }
+        RuntimeError::UnknownWorkload(_) => {
+            error(StatusCode::NOT_FOUND, "unknown_workload", e.to_string())
+        }
+        RuntimeError::NoActiveRevision => {
+            error(StatusCode::CONFLICT, "no_active_revision", e.to_string())
+        }
         RuntimeError::NotActive(..) | RuntimeError::DrainTimeout(..) => {
             error(StatusCode::CONFLICT, "invalid_state", e.to_string())
         }

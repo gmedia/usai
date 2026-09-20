@@ -14,6 +14,18 @@ held revision. The P6 soak reports the actual plateau for a workload
 (`rssMax` in the soak samples); `/_usai/status` reports `process.rssKib`
 and `process.pssKib` live.
 
+Two things sit on top of that plateau and are **not** the world pool:
+
+- **Password hashing.** `crypto.password.hash`/`verify` is Argon2id at
+  19 MiB per call, on the blocking pool (up to one per core at once); the
+  allocator hands the memory back after each call (`malloc_trim`), but a
+  login burst still peaks at ≈ 20 MiB × concurrent hashes above the plateau.
+  A drill measured +150–200 MiB retained after a burst on a build before the
+  trim; if you see that on a current build, report it.
+- **Held revisions.** A replacement holds two compiled images (~30 MiB each)
+  until the old one retires; a rollback-and-forth holds them longer. The
+  heap is returned when the revision is removed.
+
 ## What you see when the limit is too low
 
 `docker inspect` shows `OOMKilled: true`; the log has no error before a
@@ -33,5 +45,8 @@ one vCPU (the C2 table in the P8E report; values between 0 and the default
 memory-limited instance with fewer worlds refuses with 503
 `capacity_exhausted` instead of dying — the right failure. Watch
 `usai_worlds_live` and the container's RSS together: RSS that keeps rising
-while `usai_worlds_live` does not is a leak — report it with the soak
-samples.
+**over hours** while `usai_worlds_live` and the number of held revisions do
+not — after a password-hashing burst has had a minute to settle — is a
+leak; report it with the soak samples (`usai_process_proportional_memory_bytes`
+beside RSS: PSS rising is the honest signal, RSS alone counts shared image
+pages).

@@ -23,10 +23,15 @@ advisory lock), then switch the symlink and restart.
 
 ## Unit
 
+A **template unit**: `usai-app@1` and `usai-app@2` are two instances of one
+file, each with its own port derived from the instance name (`%i`). One
+instance is `systemctl enable --now usai-app@1`; a second replica on the
+same VM is `usai-app@2`.
+
 ```ini
-# /etc/systemd/system/usai-app.service
+# /etc/systemd/system/usai-app@.service
 [Unit]
-Description=Usai application (app)
+Description=Usai application (app, replica %i)
 After=network-online.target postgresql.service
 Wants=network-online.target
 
@@ -34,13 +39,18 @@ Wants=network-online.target
 User=usai
 Group=usai
 EnvironmentFile=/etc/usai/app.env
+# Per-replica overrides (USAI_NO_CRON=1 on every replica but one for
+# schedules that are not `exclusive`), absent when the file does not exist.
+EnvironmentFile=-/etc/usai/app-%i.env
 Environment=USAI_MAX_WORLDS=48
 # Zero-502 rolling restart: readiness fails and connections close after
 # their response for the grace, then in-flight work drains (bounded).
 Environment=USAI_DRAIN_GRACE=2 USAI_DRAIN_TIMEOUT=30
-# The private surfaces on a port only the proxy and the scraper reach.
-Environment=USAI_STATUS_ADDR=127.0.0.1:9090 USAI_STATUS_TOKEN=<random>
-ExecStart=/usr/local/bin/usai --log-format json run --artifact /srv/app/current --host 127.0.0.1 --port 3000 --require-signature <public-key-hex>
+# The private surfaces on a port only the proxy and the scraper reach:
+# 9091 for replica 1, 9092 for replica 2.
+Environment=USAI_STATUS_ADDR=127.0.0.1:909%i USAI_STATUS_TOKEN=<random>
+# The application on 3001, 3002, …
+ExecStart=/usr/local/bin/usai --log-format json run --artifact /srv/app/current --host 127.0.0.1 --port 300%i --require-signature <public-key-hex>
 # SIGTERM is the drain signal; give it grace + drain + a margin before SIGKILL.
 KillSignal=SIGTERM
 TimeoutStopSec=40
@@ -59,18 +69,28 @@ MemoryMax=512M
 WantedBy=multi-user.target
 ```
 
+```bash
+# /etc/usai/app-2.env — the second replica does not schedule cron
+USAI_NO_CRON=1
+```
+
 `MemoryMax` is the same number as the compose `mem_limit` (`SUPPORTED.md` →
 Host envelope: 192 MiB is the supported floor for 48 worlds; 512 M leaves
-room for a held revision and a burst). `TimeoutStopSec` must exceed
-`USAI_DRAIN_GRACE + USAI_DRAIN_TIMEOUT`; the compose file uses 35 s for
-2 + 30.
+room for a held revision and a burst; add ≈150–200 MiB when the application
+hashes passwords under load — `sizing.md` → Per-workload memory).
+`TimeoutStopSec` must exceed `USAI_DRAIN_GRACE + USAI_DRAIN_TIMEOUT`; the
+compose file uses 35 s for 2 + 30.
 
-Two replicas on one VM are two units (`usai-app@1`, `usai-app@2` with
-`%i`-derived ports) or one unit per VM; exactly one of them runs the
-scheduler — the others get `Environment=USAI_NO_CRON=1` (and `USAI_NO_SERVICES=1`
-when a `service()` must be single). The proxy in front health-checks each
-replica's `/_usai/ready` and retries a refused connection on the other
-(`deploy-and-rollback.md` → Rolling restart has the Caddy block).
+Exactly one replica runs the scheduler for schedules that are not
+`exclusive: true` — the others get `USAI_NO_CRON=1` in their `app-%i.env`
+(and `USAI_NO_SERVICES=1` when a `service()` must be single). The proxy in
+front health-checks each replica's `/_usai/ready` on its status port
+(`127.0.0.1:9091`, `:9092`) and retries a refused connection on the other
+(`deploy-and-rollback.md` → Rolling restart has the Caddy block; the health
+interval must be at or below the drain grace).
+
+A single-replica VM is the same unit as `usai-app@1` — there is no
+non-template variant to maintain.
 
 ## Deploy (rolling)
 

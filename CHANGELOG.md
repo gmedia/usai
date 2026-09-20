@@ -126,6 +126,22 @@ two-replica campaign passed; the 72 h soak is running.
 - `usai_resource_quarantines_total` is a counter of its own.
 - Fuzzing: coverage-guided targets over the manifest, the HTTP boundary and
   source maps (`fuzz/`), two minutes per push and ten nightly in CI.
+- From the runbook drill: a 5xx log line's error text is the `error` field
+  (it was a second `message`, colliding with the line's own in JSON);
+  `usai_http_request_seconds` is admitted requests only (refusals decided
+  before a world are counted, not timed); `/_usai/status` →
+  `resources[].ready` follows the last contact with the database (false with
+  `lastError` on a connection-level failure, true after the next success —
+  it stayed true through an outage); a database outage writes one `WARN
+  dependency unavailable … suppressed=<n>` per error code per second instead
+  of an `ERROR` and a stack per request, and `INFO database reachable again`
+  when it returns; the heap is returned after a password hash and after a
+  revision removal (`malloc_trim` — an Argon2 burst used to retain 150–200
+  MiB); a timed-out drain still retires the revision and says so (`revision
+  retired cancelled_in_flight=<n>`); activating the active revision again is
+  refused (it started a second scheduler); `invalid_state` messages name the
+  states that would have been accepted; the control surface answers
+  `404 unknown_workload` and `409 no_active_revision` instead of a 500.
 
 ### SDK (`@sakaladev/usai`)
 
@@ -172,6 +188,8 @@ two-replica campaign passed; the 72 h soak is running.
   `USAI_DIAGNOSTICS=1`) are accepted (only `true`/`false` were).
 - `usai run --diagnostics` (`USAI_DIAGNOSTICS`) exposes error detail to clients
   for debugging.
+- `usai inspect` prints each PostgreSQL resource's `pool.max` (with the
+  default made explicit).
 
 ### Documentation
 
@@ -199,6 +217,18 @@ two-replica campaign passed; the 72 h soak is running.
   object storage; no multipart parser), binary columns (hex), the default
   30 s deadline and `504 deadline_exceeded`, and what the proxy owns — CORS,
   security headers, static files, the access log — with one Caddy block.
+- Two references: `docs/ENVIRONMENT.md` (every `USAI_*` variable — operating,
+  tuning, tooling) and `docs/CONTROL-API.md` (the `--control` surface:
+  install, activate, drain, remove, invoke, stop, with every error code).
+- Runbooks corrected by the drill: postgres-down (idle connections vanish,
+  only in-flight ones are quarantined; `sql_57p01` beside `connection_closed`;
+  the rate-limited warning), runtime-restart (what the second and third
+  signal do; 499 on the drain-timeout cancel; streams and sockets end at the
+  drain start), metrics (`usai_service`, `usai_http_streams_failed_total`,
+  lowercase state labels, the `<kind>:<name>` workload label), sizing and
+  memory-pressure (per-workload memory: Argon2, bodies, held revisions), the
+  systemd page (a real `%i` template unit with derived ports), and the
+  production compose's Caddy block (`health_interval 1s`, at the drain grace).
 
 ### Qualification (evidence, not features)
 

@@ -369,6 +369,16 @@ pub fn inspect(definition: &ApplicationDefinition) -> String {
             if !r.env.is_empty() {
                 let _ = writeln!(out, "    env: {}", r.env.join(", "));
             }
+            // The bound an operator sizes against (`docs/runbooks/sizing.md`),
+            // with its default made explicit when the declaration left it out.
+            if r.kind == "postgres" {
+                let max = r.config["pool"]["max"].as_u64();
+                let _ = writeln!(
+                    out,
+                    "    pool.max: {}",
+                    max.map_or_else(|| "16 (default)".to_owned(), |n| n.to_string())
+                );
+            }
         }
     }
     if !m.env.is_empty() {

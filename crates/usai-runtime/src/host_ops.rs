@@ -226,7 +226,7 @@ async fn crypto(ctx: OpContext, payload: String) -> OpOutcome {
     let work = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
         use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
         let argon = argon2::Argon2::default();
-        match request {
+        let result = match request {
             CryptoRequest::PasswordHash { password } => {
                 let mut salt = [0u8; 16];
                 getrandom::fill(&mut salt).map_err(|e| e.to_string())?;
@@ -243,7 +243,11 @@ async fn crypto(ctx: OpContext, payload: String) -> OpOutcome {
                     argon.verify_password(password.as_bytes(), &parsed).is_ok()
                 ))
             }
-        }
+        };
+        // The 19 MiB the hash used is free now; give it back rather than
+        // let a login burst read as +150 MiB of RSS for the process's life.
+        crate::procfs::release_heap();
+        result
     });
     tokio::select! {
         result = work => match result {

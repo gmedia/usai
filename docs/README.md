@@ -16,6 +16,9 @@
 | [`OPEN-QUESTIONS.md`](OPEN-QUESTIONS.md) | before deciding anything about schema, response API, auth, artifacts, reload, runtime-local state, revisions, multi-core, or security |
 | [`GUEST-ABI.md`](GUEST-ABI.md) | when touching the bridge, the SDK's `invoke`, or any host operation |
 | [`THREAT-MODEL.md`](THREAT-MODEL.md) | before deploying, or when touching input handling, limits, or secrets |
+| [`ENVIRONMENT.md`](ENVIRONMENT.md) | every `USAI_*` variable the runtime, CLI and launcher read — operating, tuning, tooling |
+| [`CONTROL-API.md`](CONTROL-API.md) | the orchestrator's surface (`--control`): install, activate, drain, remove, invoke, stop |
+| [`runbooks/`](runbooks/README.md) | when something is wrong in production: one page per incident class, plus metrics, sizing and systemd |
 | [`ROADMAP.md`](ROADMAP.md) | the phases to production-ready and what each one must prove — the phase decides what work is allowed |
 | [`ACCEPTANCE-AUDIT.md`](ACCEPTANCE-AUDIT.md) | to see which `GOAL.md` §53 acceptance items have automated evidence and which are gaps |
 | [`measurements/`](measurements/) | the substrate's measured economics (research VM), before any performance claim |
@@ -41,6 +44,8 @@ docs/
   OPEN-QUESTIONS.md         living: undecided design questions
   GUEST-ABI.md              host <-> guest contract
   THREAT-MODEL.md           what v0 promises and does not
+  ENVIRONMENT.md            every USAI_* variable
+  CONTROL-API.md            the control surface reference
   adr/                      architecture decision records
 ```
 

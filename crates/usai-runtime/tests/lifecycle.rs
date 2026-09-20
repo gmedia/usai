@@ -453,6 +453,24 @@ async fn revision_replacement_drains_the_old_revision() {
         rt.admit(&a, "task:count"),
         Err(RuntimeError::NotActive(..))
     ));
+    // Activating the active revision again is refused (it would start a
+    // second scheduler beside the first), and the message says why.
+    let err = rt.activate(b.id).await.unwrap_err();
+    assert!(matches!(
+        err,
+        RuntimeError::NotActive(_, RevisionState::Active, _)
+    ));
+    assert_eq!(
+        err.to_string(),
+        format!("revision {} is active, already active", b.id)
+    );
+    // A live revision cannot be removed; the message names the states that can.
+    let err = rt.remove(a.id).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("is draining, only an installed or retired revision"),
+        "{err}"
+    );
     rt.drain(a.id).await.unwrap();
     assert_eq!(a.state(), RevisionState::Retired);
     let r = in_flight.await.unwrap();

@@ -22,6 +22,10 @@ and how recovery happens — without reading Rust.
 | Sizing: `--max-worlds`, `pool.max`, `concurrency`, memory, CPU, replicas | [sizing.md](sizing.md) |
 | Running on a VM under systemd (deploy, rolling restart, rollback without Docker) | [systemd.md](systemd.md) |
 
+References the pages lean on: [`../ENVIRONMENT.md`](../ENVIRONMENT.md)
+(every `USAI_*` variable) and [`../CONTROL-API.md`](../CONTROL-API.md) (the
+orchestrator's surface).
+
 Where to look, always:
 
 - `GET /_usai/status` (with `--status`): gauges (`liveWorlds`, `liveOps`,
@@ -32,8 +36,10 @@ Where to look, always:
   (`usai_http_request_seconds`, `usai_http_rejections_total{reason}`,
   `usai_resource{kind,name,metric}` (levels), `usai_resource_quarantines_total{kind,name}` (events), `usai_queue_messages_total`).
 - Logs: one line per event at `info`; a request that reached a world and
-  failed with a **5xx** logs `application error` with `code=` (and a
-  source-mapped stack); 4xx answers (`not_found`, `conflict`, validation)
+  failed with a **5xx** logs `application error` with `code=`, `error=` (and a
+  source-mapped stack) — except a connection-level dependency failure, which
+  is one `WARN dependency unavailable` per code per second with a
+  `suppressed` count; 4xx answers (`not_found`, `conflict`, validation)
   are the application's answers, counted but not logged. The application's
   own `console.*`/`ctx.log.*` lines carry `target: "app"`. `RUST_LOG=debug`
   adds a `world trace` line per world. `--log-format json` for shipping.
