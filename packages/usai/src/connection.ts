@@ -28,8 +28,18 @@ export interface StreamHandle {
   start(options?: { status?: number; headers?: Record<string, string> }): Promise<void>;
   /** One chunk. Commits a 200 head on first use. */
   send(chunk: string | Uint8Array): Promise<void>;
-  /** Server-sent event: `event:` + `data:` lines. */
-  event(name: string, data: unknown): Promise<void>;
+  /** Server-sent event: `event:` + `data:` lines (`data` is JSON unless it
+   * is already a string; a multi-line string becomes several `data:`
+   * lines). `id` sets the event's `id:` — the browser's `EventSource` sends
+   * the last one back as the `last-event-id` header when it reconnects, so
+   * a handler that reads `ctx.headers["last-event-id"]` resumes where the
+   * client left off; `retry` (milliseconds) tells the browser how long to
+   * wait before reconnecting. */
+  event(
+    name: string,
+    data: unknown,
+    options?: { id?: string | number; retry?: number },
+  ): Promise<void>;
 }
 
 /** The context of a streaming request: request facts plus {@link BaseContext}.
@@ -80,9 +90,11 @@ export interface StreamOptions<R extends ResourceDeclaration[] = ResourceDeclara
  * Declare a streaming endpoint (`http.stream`): a **connection-bound**
  * world that lives until the handler returns. `params` and `query` are
  * validated before the world exists; `timeout` bounds the whole stream.
- * Chunks are `text/event-stream` by default (`stream.event(name, data)`
- * writes one server-sent event); set `content-type` in `start` for
- * anything else.
+ * Chunks are `text/event-stream` by default (`stream.event(name, data, { id })`
+ * writes one server-sent event; a reconnecting `EventSource` sends the last
+ * `id` back as `ctx.headers["last-event-id"]`); set `content-type` in
+ * `start` for anything else. A client that leaves cancels the world — the
+ * normal end of a stream, not a failure.
  *
  * @example
  * ```ts

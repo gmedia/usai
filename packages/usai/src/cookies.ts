@@ -122,7 +122,9 @@ async function hmac(secret: string, value: string): Promise<string> {
  * @category Authentication
  */
 export async function signCookieValue(value: string, secret: string): Promise<string> {
-  if (value.includes(".")) throw new TypeError("a signed cookie value may not contain '.'");
+  if (!secret) throw new TypeError("a cookie secret is required");
+  // Any value: the signature is base64url (no dot), and verify splits on
+  // the last dot, so `user-id|email` or a dotted id round-trips.
   return `${value}.${await hmac(secret, value)}`;
 }
 

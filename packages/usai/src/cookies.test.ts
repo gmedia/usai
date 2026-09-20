@@ -46,5 +46,8 @@ test("sign/verify: tamper-proof, rotation-friendly, constant shape", async () =>
   );
   assert.equal(await verifyCookieValue("no-dot", "secret-a"), null);
   assert.equal(await verifyCookieValue(undefined, "secret-a"), null);
-  await assert.rejects(signCookieValue("a.b", "s"), TypeError);
+  // Dots in the value round-trip: verify splits on the last one.
+  const dotted = await signCookieValue("6f1a.dev@example.com", "s");
+  assert.equal(await verifyCookieValue(dotted, "s"), "6f1a.dev@example.com");
+  await assert.rejects(signCookieValue("a", ""), /secret is required/);
 });

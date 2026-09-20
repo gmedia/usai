@@ -258,7 +258,10 @@ function encodeHttp(workload: Workload, result: unknown): HttpOutput {
       body = checked.value;
     }
   }
-  if (status === 204 || body === undefined) return { status, headers };
+  // Statuses that carry no body by definition go out without one, whatever
+  // the handler returned beside them (`http.notModified()` has `null`).
+  if (status === 204 || status === 205 || status === 304 || body === undefined)
+    return { status, headers };
   return { status, headers, json: body === undefined ? null : body };
 }
 
@@ -376,8 +379,8 @@ async function runStream(workload: Workload, input: StreamInput): Promise<unknow
     path: request.path,
     url: request.url,
     requestId: request.headers["x-request-id"] ?? "",
-    params: parse("params", workload.contracts.params, request.params),
-    query: parse("query", workload.contracts.query, request.query),
+    params: parseValidated("params", workload.contracts.params, request.params, request.validated),
+    query: parseValidated("query", workload.contracts.query, request.query, request.validated),
     headers: request.headers,
   };
   const stream = {
@@ -388,9 +391,23 @@ async function runStream(workload: Workload, input: StreamInput): Promise<unknow
       if (typeof chunk === "string") await op("stream.send", { text: chunk });
       else await op("stream.send", { base64: base64FromBytes(chunk) });
     },
-    event: async (name: string, data: unknown) => {
+    event: async (
+      name: string,
+      data: unknown,
+      options?: { id?: string | number; retry?: number },
+    ) => {
       const payload = typeof data === "string" ? data : JSON.stringify(data);
-      await op("stream.send", { text: `event: ${name}\ndata: ${payload}\n\n` });
+      // Multi-line data is several `data:` lines (the wire format), so a
+      // string with newlines reaches the client intact.
+      const lines = payload
+        .split("\n")
+        .map((l) => `data: ${l}`)
+        .join("\n");
+      const id =
+        options?.id !== undefined ? `id: ${String(options.id).replace(/[\r\n]/g, "")}\n` : "";
+      const retry =
+        options?.retry !== undefined ? `retry: ${Math.max(0, Math.floor(options.retry))}\n` : "";
+      await op("stream.send", { text: `${id}${retry}event: ${name}\n${lines}\n\n` });
     },
   };
   // If nothing was streamed, the return value is an ordinary response.

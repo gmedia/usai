@@ -383,10 +383,28 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
+/// The JSON pointer of an issue. A missing required property is reported by
+/// JSON Schema at the *object* (`""`), by Zod at the property (`/name`): a
+/// form wants the field, so the pointer names it — the same path the world
+/// would have given (GUIDE §4: the paths are the same wherever the check ran).
+fn issue_path(error: &jsonschema::ValidationError<'_>) -> String {
+    let base = error.instance_path().to_string();
+    match error.kind() {
+        jsonschema::error::ValidationErrorKind::Required { property } => {
+            let name = property
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| property.to_string());
+            format!("{base}/{}", name.replace('~', "~0").replace('/', "~1"))
+        }
+        _ => base,
+    }
+}
+
 fn validate(slot: &str, validator: &jsonschema::Validator, value: &Value) -> Result<(), Reply> {
     let issues: Vec<Value> = validator
         .iter_errors(value)
-        .map(|e| json!({ "path": e.instance_path().to_string(), "message": readable_issue(&e) }))
+        .map(|e| json!({ "path": issue_path(&e), "message": readable_issue(&e) }))
         .collect();
     if issues.is_empty() {
         Ok(())
@@ -1079,17 +1097,23 @@ impl HttpHost {
             head = head_rx => match head {
                 Ok(head) => {
                     let mut builder = Response::builder().status(StatusCode::from_u16(head.status).unwrap_or(StatusCode::OK));
+                    let mut set_by_handler = std::collections::BTreeSet::new();
                     for (name, value) in head.headers {
                         if let Ok(v) = HeaderValue::from_str(&value) {
+                            set_by_handler.insert(name.to_ascii_lowercase());
                             builder = builder.header(name.as_str(), v);
                         }
                     }
                     builder = builder.header("x-usai-lifetime", "stream");
                     // An event stream is never cacheable; proxies that buffer
-                    // whole responses need telling as well.
-                    builder = builder
-                        .header(header::CACHE_CONTROL, "no-cache")
-                        .header("x-accel-buffering", "no");
+                    // whole responses need telling as well. The handler's
+                    // own value for either header wins (no duplicates).
+                    if !set_by_handler.contains("cache-control") {
+                        builder = builder.header(header::CACHE_CONTROL, "no-cache");
+                    }
+                    if !set_by_handler.contains("x-accel-buffering") {
+                        builder = builder.header("x-accel-buffering", "no");
+                    }
                     self.stats.streams.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     let body = WorldBody { receiver: body_rx, _guard: cancel.drop_guard() };
                     // The world keeps running; its result is observed by the task.
@@ -1111,6 +1135,15 @@ impl HttpHost {
                                         Some(format!("{}: {}", e.name, e.message))
                                     }
                                     (crate::world::Termination::Completed, _) => None,
+                                    // The client went away (a closed tab, an
+                                    // EventSource reconnecting, a drain): the
+                                    // world was cancelled with the connection.
+                                    // That is how every event stream ends —
+                                    // not a failure, not a counter.
+                                    (crate::world::Termination::Cancelled { reason }, _) => {
+                                        tracing::debug!(world = %result.world, workload, reason, "stream ended with its client");
+                                        None
+                                    }
                                     (t, _) => Some(format!("{t:?}")),
                                 };
                                 if let Some(error) = failed {

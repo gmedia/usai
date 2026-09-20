@@ -143,6 +143,58 @@ publishing through the application or waiting for the scheduler.
 
 ***
 
+### stream()
+
+```ts
+stream(path: string, options?: RequestOptions): Promise<TestStream>;
+```
+
+Opens an event stream (`http.stream`, `text/event-stream`) and reads
+it event by event: `const s = await app.stream("/events"); const first =
+await s.next(); s.close()`. Headers (a cookie, a bearer token,
+`last-event-id`) go in `options.headers`. The response's status and
+headers are known once the promise resolves; a non-2xx status resolves
+too (read `status`/`text` instead of `next`).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `path` | `string` |
+| `options?` | [`RequestOptions`](RequestOptions.md) |
+
+#### Returns
+
+`Promise`\<[`TestStream`](TestStream.md)\>
+
+***
+
+### socket()
+
+```ts
+socket(path: string, options?: SocketOptions): Promise<TestSocket>;
+```
+
+Opens a WebSocket (`socket(...)`) with the headers a browser would send —
+a `cookie`, or `["bearer", token]` as `protocols` — and exchanges JSON
+messages: `const ws = await app.socket("/chat", { headers: { cookie } });
+await ws.send({ text: "hi" }); const reply = await ws.next(); await ws.close()`.
+A refused credential rejects with the HTTP status (`TestSocketRefused`,
+`status` 401) before any frame.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `path` | `string` |
+| `options?` | [`SocketOptions`](SocketOptions.md) |
+
+#### Returns
+
+`Promise`\<[`TestSocket`](TestSocket.md)\>
+
+***
+
 ### status()
 
 ```ts

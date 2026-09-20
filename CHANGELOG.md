@@ -152,10 +152,25 @@ two-replica campaign passed; the 72 h soak is running.
 - Every missing environment variable is reported in one message
   (`missing required environment: DATABASE_URL, SESSION_SECRET`), not one
   per restart; invalid values likewise.
-- OpenAPI: `x-usai-validated` says `both` for a slot that is refused at the
-  boundary and parsed again in the world (a transforming schema); a route
-  without a body no longer lists `invalid_json`; the 401 description names
-  the `unauthorized` code.
+- OpenAPI: **declared errors are typed** — each declared status is the error
+  envelope with `error.code` narrowed to the declared codes (an enum a
+  generated client switches on) and its reason phrase (`Not Found: code
+  not_found`; a `401` declared in `response:` used to read "Success");
+  `x-usai-validated` says `both` for a slot that is refused at the boundary
+  and parsed again in the world (a transforming schema); a route without a
+  body no longer lists `invalid_json`; a raw `GET` has no `requestBody` and
+  lists its path parameters; `204`/`205`/`304` carry no content; the socket
+  description says what the browser does per auth scheme (a cookie travels
+  with the upgrade by itself).
+- A client leaving an event stream is the normal end of the stream: logged
+  at debug, not `ERROR`, and not counted in `usai_http_streams_failed_total`.
+- A missing required property is reported at its pointer (`/name`), as the
+  world's validator would, not at the object (`""`).
+- A stream handler's own `cache-control`/`x-accel-buffering` values win
+  (they were duplicated). Stream routes honour the boundary-final proof
+  like HTTP routes.
+- The reference page (`/_usai/docs`) explains CSV/raw/bodiless responses and
+  the cookie/header/bearer cases for WebSockets.
 
 ### SDK (`@sakaladev/usai`)
 
@@ -179,6 +194,19 @@ two-replica campaign passed; the 72 h soak is running.
   by default and forwards the lines to stderr as before.
 - Globals: `KeyUsage`, `CryptoKey`, `HmacImportParams` names, so code written
   against the DOM's WebCrypto types typechecks in a world.
+- `stream.event(name, data, { id, retry })` writes `id:`/`retry:` so a
+  browser's `EventSource` resumes (`ctx.headers["last-event-id"]`); multi-line
+  data becomes several `data:` lines.
+- `http.notModified(headers)`, and a bodiless `HttpResponse<null>`
+  (`noContent`, `notModified`) is accepted by a handler whatever its
+  `response` contract — a `304` needs no `304: z.null()`.
+- `cookies.sign` accepts values containing `.` (verify splits on the last dot).
+- `usai/test`: **`app.stream(path)`** (server-sent events one by one — `event`,
+  `data`, `json`, `id` — or `text()` for a CSV download; `close()` to leave)
+  and **`app.socket(path, { headers, protocols })`** (a WebSocket the way a
+  browser opens one: a cookie, or `["bearer", token]`; `send`, `next`,
+  `closed`, `close`; `TestSocketRefused` with the status when the upgrade is
+  refused).
 
 - **`ctx.resources` is typed from `resources: [...]`** (`ResourcesOf`); an
   undeclared name is a compile error.
@@ -252,6 +280,12 @@ two-replica campaign passed; the 72 h soak is running.
   object storage; no multipart parser), binary columns (hex), the default
   30 s deadline and `504 deadline_exceeded`, and what the proxy owns — CORS,
   security headers, static files, the access log — with one Caddy block.
+- GUIDE §4/§9: cookies in the browser (Secure on localhost and Safari,
+  SameSite as the CSRF posture, `EventSource`/`WebSocket` and cookies), CORS
+  in development (the dev server's proxy, or `http.options` +
+  `defineApp({ headers })`), declare `errors` rather than error schemas,
+  `z.strictObject` at the boundary, SSE ids; THREAT-MODEL names the browser
+  posture (no CORS, no CSRF token, what stands in for one).
 - GUIDE: access tokens and refresh-token rows, the lockout recipe and where
   per-IP limits live (§4); "decide inside the transaction, throw outside"
   (§7); the request id across hand-offs (§14); log access in tests and what

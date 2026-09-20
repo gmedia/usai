@@ -866,7 +866,14 @@
     if (o.kind === "websockets") {
       send.disabled = true;
       const authed = o.op && o.op.security && o.op.security.length;
-      form.append(el("p", { class: "hint" }, "A WebSocket is not sent from here; connect with ", el("code", {}, authed ? `new WebSocket(${JSON.stringify(baseUrl().replace(/^http/, "ws") + o.path)}, ["bearer", token])` : `new WebSocket(${JSON.stringify(baseUrl().replace(/^http/, "ws") + o.path)})`), "."));
+      const wsScheme = authed && o.op["x-usai-auth"] && securitySchemes[o.op["x-usai-auth"]];
+      const wsUrl = JSON.stringify(baseUrl().replace(/^http/, "ws") + o.path);
+      const wsCall = !authed ? `new WebSocket(${wsUrl})`
+        : !wsScheme || wsScheme.type === "http" ? `new WebSocket(${wsUrl}, ["bearer", token])`
+        : wsScheme.in === "cookie" ? `new WebSocket(${wsUrl})  // the ${wsScheme.name} cookie travels with the upgrade`
+        : wsScheme.in === "header" ? `new WebSocket(${wsUrl}, [${JSON.stringify(wsScheme.name)}, value])`
+        : `new WebSocket(${wsUrl})`;
+      form.append(el("p", { class: "hint" }, "A WebSocket is not sent from here; connect with ", el("code", {}, wsCall), "."));
     }
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -935,12 +942,18 @@
     const sec = el("div", { class: "sec" }, el("h2", {}, "Responses", el("span", { class: "n" }, String(responses.length))));
     const items = responses.map(([status, r]) => {
       const schema = r.content && r.content["application/json"] && r.content["application/json"].schema;
-      const isEnvelope = schema && deref(schema).__name === "UsaiError";
+      const isEnvelope = schema && (deref(schema).__name === "UsaiError" || (deref(schema).allOf || []).some((part) => deref(part).__name === "UsaiError"));
       const isStream = r.content && r.content["text/event-stream"];
+      const otherMedia = r.content && Object.keys(r.content).find((m) => m !== "application/json" && m !== "text/event-stream");
+      const isRaw = op["x-usai-raw"];
+      const bodiless = ["204", "205", "304"].includes(String(status)) || (!r.content && !isRaw);
       const node = el("div", {}, el("p", { class: "resp-desc" }, r.description || ""),
         isStream ? el("p", { class: "note" }, "Server-sent events (", el("code", {}, "text/event-stream"), "): ", el("code", {}, "event:"), " and ", el("code", {}, "data:"), " lines per ", el("code", {}, "stream.event(name, data)"), "; the body ends when the handler returns.")
+          : otherMedia ? el("p", { class: "note" }, "Streamed ", el("code", {}, otherMedia), " body: the handler writes it chunk by chunk (", el("code", {}, "stream.send"), "); the body ends when the handler returns.")
           : isEnvelope ? el("p", { class: "note" }, "Error envelope ", el("code", {}, `{ "error": { "code", "message", "details?" } }`), "; ", ...errorCodes(op, status))
           : schema ? propsTable(schema, 0, { markRequired: false })
+          : isRaw ? el("p", { class: "note" }, status === "default" ? "Opaque response: the handler writes it." : "Raw response: the handler writes the status, headers and bytes itself (", el("code", {}, "http.rawResponse"), "); the description above is what it declared.")
+          : bodiless && String(status)[0] !== "2" ? el("p", { class: "note" }, "No body.")
           : el("p", { class: "note" }, status === "default" ? "Opaque response: the handler writes it." : "No body contract declared; the handler's return value is encoded as JSON."));
       return [status, node, `st-${String(status)[0]}`];
     });
@@ -1021,7 +1034,17 @@
       const msgs = el("div", { class: "sec" }, el("h2", {}, "Messages"));
       msgs.append(sock.incoming ? slotBlock("Incoming (client → server)", sock.incoming, [el("span", { class: "where w" }, "validated in the world; an invalid message is answered with an error envelope and dropped")]) : el("p", {}, "Incoming messages: no contract declared (any text frame)."));
       msgs.append(sock.outgoing ? slotBlock("Outgoing (server → client)", sock.outgoing, []) : el("p", {}, "Outgoing messages: no contract declared."));
-      if (op.security && op.security.length) msgs.append(el("p", { class: "life-note" }, "Authenticated: a browser cannot set headers on a WebSocket — pass the token as the second subprotocol, ", el("code", {}, 'new WebSocket(url, ["bearer", token])'), "; the server echoes the bearer subprotocol. A refused credential is answered with the HTTP status (401) before the upgrade."));
+      if (op.security && op.security.length) {
+        const scheme = op["x-usai-auth"] && securitySchemes[op["x-usai-auth"]];
+        const how = !scheme || scheme.type === "http"
+          ? ["a browser cannot set headers on a WebSocket — pass the token as the second subprotocol, ", el("code", {}, 'new WebSocket(url, ["bearer", token])'), "; the server echoes the bearer subprotocol."]
+          : scheme.in === "cookie"
+            ? ["the browser sends the ", el("code", {}, scheme.name), " cookie with the upgrade request by itself (same-site, or with the proxy allowing credentials); nothing to pass to ", el("code", {}, "new WebSocket(url)"), "."]
+            : scheme.in === "header"
+              ? ["a browser cannot set headers on a WebSocket — pass the value as the second subprotocol, ", el("code", {}, `new WebSocket(url, [${JSON.stringify(scheme.name)}, value])`), "."]
+              : ["the route's custom resolver reads the upgrade request (", el("code", {}, scheme.in ? `${scheme.in}: ${scheme.name}` : "headers, query"), ")."];
+        msgs.append(el("p", { class: "life-note" }, "Authenticated: ", ...how, " A refused credential is answered with the HTTP status (401) before the upgrade."));
+      }
       frag.append(msgs);
     }
     if (o.kind !== "websockets") frag.append(responsesBlock(op));

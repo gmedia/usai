@@ -58,10 +58,23 @@ One chunk. Commits a 200 head on first use.
 ### event()
 
 ```ts
-event(name: string, data: unknown): Promise<void>;
+event(
+   name: string, 
+   data: unknown, 
+   options?: {
+  id?: string | number;
+  retry?: number;
+}
+): Promise<void>;
 ```
 
-Server-sent event: `event:` + `data:` lines.
+Server-sent event: `event:` + `data:` lines (`data` is JSON unless it
+is already a string; a multi-line string becomes several `data:`
+lines). `id` sets the event's `id:` — the browser's `EventSource` sends
+the last one back as the `last-event-id` header when it reconnects, so
+a handler that reads `ctx.headers["last-event-id"]` resumes where the
+client left off; `retry` (milliseconds) tells the browser how long to
+wait before reconnecting.
 
 #### Parameters
 
@@ -69,6 +82,9 @@ Server-sent event: `event:` + `data:` lines.
 | ------ | ------ |
 | `name` | `string` |
 | `data` | `unknown` |
+| `options?` | \{ `id?`: `string` \| `number`; `retry?`: `number`; \} |
+| `options.id?` | `string` \| `number` |
+| `options.retry?` | `number` |
 
 #### Returns
 

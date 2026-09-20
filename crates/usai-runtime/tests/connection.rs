@@ -222,6 +222,21 @@ async fn client_disconnect_ends_the_stream_world() {
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+    // The client leaving is how every event stream ends: not a failed
+    // stream (no ERROR line, no counter), just a world cancelled with its
+    // connection.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let status: Value = s
+        .client
+        .get(format!("{}/_usai/status", s.base))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(status["http"]["streams_failed"], json!(0), "{status}");
+    assert_eq!(status["http"]["streams"], json!(1), "{status}");
     finish(s).await;
 }
 

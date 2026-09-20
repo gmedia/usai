@@ -46,16 +46,19 @@ export interface RawResponse {
 
 /** What an HTTP handler may return: the body (encoded as JSON with status
  * 200, or the single declared `response` status), an explicit
- * {@link HttpResponse} from `http.response`/`http.created`/…, or a
- * {@link RawResponse}. Promises of any of these are awaited.
+ * {@link HttpResponse} from `http.response`/`http.created`/…, a bodiless
+ * one (`http.noContent()`, `http.notModified({ etag })`) whatever the
+ * declared contract, or a {@link RawResponse}. Promises of any of these are
+ * awaited.
  *
  * @category HTTP
  */
 export type HttpHandlerResult<T> =
   | T
   | HttpResponse<T>
+  | HttpResponse<null>
   | RawResponse
-  | Promise<T | HttpResponse<T> | RawResponse>;
+  | Promise<T | HttpResponse<T> | HttpResponse<null> | RawResponse>;
 
 type OutputOf<S, Fallback> = S extends AnySchema ? Output<S> : Fallback;
 type ResponseOf<O extends HttpOptions> = O["response"] extends AnySchema
@@ -323,6 +326,13 @@ export const http = {
   /** `204 No Content`. */
   noContent(headers: ResponseHeaders = {}): HttpResponse<null> {
     return { __usai: "response", status: 204, headers, body: null };
+  },
+  /** `304 Not Modified`, for a conditional GET whose `if-none-match` matched
+   * the `etag` you computed: no body, the cache headers repeated so the
+   * client keeps its copy (`http.notModified({ etag, "cache-control": "private, max-age=0" })`).
+   * Needs no entry in the `response` contract. */
+  notModified(headers: ResponseHeaders = {}): HttpResponse<null> {
+    return { __usai: "response", status: 304, headers, body: null };
   },
   /** Raw text or bytes with an explicit status, for `http.raw` handlers. */
   rawResponse(

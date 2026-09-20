@@ -115,6 +115,20 @@ export interface TestApp {
    * consumer's logic (idempotency: deliver the same message twice) without
    * publishing through the application or waiting for the scheduler. */
   queue(topic: string): { deliver<T = unknown>(message: unknown): Promise<WorkOutcome<T>> };
+  /** Opens an event stream (`http.stream`, `text/event-stream`) and reads
+   * it event by event: `const s = await app.stream("/events"); const first =
+   * await s.next(); s.close()`. Headers (a cookie, a bearer token,
+   * `last-event-id`) go in `options.headers`. The response's status and
+   * headers are known once the promise resolves; a non-2xx status resolves
+   * too (read `status`/`text` instead of `next`). */
+  stream(path: string, options?: RequestOptions): Promise<TestStream>;
+  /** Opens a WebSocket (`socket(...)`) with the headers a browser would send —
+   * a `cookie`, or `["bearer", token]` as `protocols` — and exchanges JSON
+   * messages: `const ws = await app.socket("/chat", { headers: { cookie } });
+   * await ws.send({ text: "hi" }); const reply = await ws.next(); await ws.close()`.
+   * A refused credential rejects with the HTTP status (`TestSocketRefused`,
+   * `status` 401) before any frame. */
+  socket(path: string, options?: SocketOptions): Promise<TestSocket>;
   /** Runtime status JSON (`/status` on the control surface). */
   status(): Promise<Record<string, unknown>>;
   /** The runtime's log lines so far (the last 10 000), newest last —
@@ -153,6 +167,79 @@ export interface LogLine {
   fields?: Record<string, unknown>;
   /** Every other attribute the line carried. */
   [key: string]: unknown;
+}
+
+/** One server-sent event as `TestStream.next` returns it.
+ *
+ * @category Testing
+ */
+export interface SseEvent {
+  /** The `event:` name; `"message"` when the frame had none. */
+  event: string;
+  /** The `data:` lines joined with `\n`. */
+  data: string;
+  /** `data` parsed as JSON when it is JSON, else `undefined`. */
+  json: unknown;
+  id?: string;
+  retry?: number;
+}
+
+/** An open event stream.
+ *
+ * @category Testing
+ */
+export interface TestStream {
+  readonly status: number;
+  readonly headers: Record<string, string>;
+  /** The next event, or `null` when the stream ended; rejects after `timeoutMs` (default 5 000). */
+  next(timeoutMs?: number): Promise<SseEvent | null>;
+  /** The whole body as text, for a stream that is not SSE (a CSV download). Waits for the end. */
+  text(): Promise<string>;
+  /** Closes the connection — what a browser does when the tab goes; the world is cancelled. */
+  close(): void;
+}
+
+/** Options for `TestApp.socket`.
+ *
+ * @category Testing
+ */
+export interface SocketOptions {
+  /** Request headers for the upgrade (`cookie`, …). */
+  headers?: Record<string, string>;
+  /** `Sec-WebSocket-Protocol` entries: `["bearer", token]` is how a browser passes a bearer token. */
+  protocols?: readonly string[];
+}
+
+/** An open WebSocket.
+ *
+ * @category Testing
+ */
+export interface TestSocket {
+  /** The subprotocol the server chose, if any. */
+  readonly protocol: string | undefined;
+  /** Sends one text frame: a string as is, anything else as JSON. */
+  send(message: unknown): Promise<void>;
+  /** The next text frame (parsed as JSON when it is JSON, else the string), or `null` once closed; rejects after `timeoutMs` (default 5 000). */
+  next<T = unknown>(timeoutMs?: number): Promise<T | null>;
+  /** Waits for the server's close frame: `{ code, reason }`. */
+  closed(timeoutMs?: number): Promise<{ code: number; reason: string }>;
+  /** Sends a close frame and ends the connection. */
+  close(code?: number, reason?: string): Promise<void>;
+}
+
+/** Thrown by `TestApp.socket` when the server answered the upgrade with an
+ * HTTP status instead of `101` (a refused credential is a `401`).
+ *
+ * @category Testing
+ */
+export class TestSocketRefused extends Error {
+  readonly status: number;
+  readonly body: string;
+  constructor(status: number, body: string) {
+    super(`websocket upgrade refused: ${status} ${body}`.trim());
+    this.status = status;
+    this.body = body;
+  }
 }
 
 /** What `TestApp.logs` / `waitForLog` select on; every given field must match.
@@ -445,6 +532,8 @@ export async function testApp(options: TestAppOptions = {}): Promise<TestApp> {
     queue: (topic) => ({
       deliver: (message) => invoke({ kind: "queue", name: topic, input: message ?? null }),
     }),
+    stream: (path, options) => openStream(new URL(path, url), options),
+    socket: (path, options) => openSocket(new URL(path, url), options ?? {}),
     status: async () => (await control("/status")) as Record<string, unknown>,
     close: async () => {
       if (closed) return;
@@ -497,4 +586,306 @@ function describeFilter(filter: LogFilter): string {
     .filter(([, v]) => v !== undefined)
     .map(([k, v]) => `${k}=${typeof v === "function" ? "<predicate>" : String(v)}`);
   return parts.length ? parts.join(" ") : "<any line>";
+}
+
+async function openStream(target: URL, options: RequestOptions = {}): Promise<TestStream> {
+  for (const [k, v] of Object.entries(options.query ?? {}))
+    target.searchParams.append(k, String(v));
+  const controller = new AbortController();
+  const res = await fetch(target, {
+    headers: { accept: "text/event-stream", ...(options.headers ?? {}) },
+    signal: controller.signal,
+  });
+  const headers: Record<string, string> = {};
+  res.headers.forEach((v, k) => {
+    headers[k] = v;
+  });
+  const reader = res.body?.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let ended = !reader;
+  const pending: SseEvent[] = [];
+  const parseFrame = (frame: string): SseEvent | null => {
+    let event = "message";
+    const data: string[] = [];
+    let id: string | undefined;
+    let retry: number | undefined;
+    for (const line of frame.split("\n")) {
+      if (line === "" || line.startsWith(":")) continue;
+      const colon = line.indexOf(":");
+      const field = colon < 0 ? line : line.slice(0, colon);
+      const value = colon < 0 ? "" : line.slice(colon + 1).replace(/^ /, "");
+      if (field === "event") event = value;
+      else if (field === "data") data.push(value);
+      else if (field === "id") id = value;
+      else if (field === "retry" && /^\d+$/.test(value)) retry = Number(value);
+    }
+    if (data.length === 0 && id === undefined && retry === undefined) return null;
+    const joined = data.join("\n");
+    let json: unknown;
+    try {
+      json = JSON.parse(joined);
+    } catch {
+      json = undefined;
+    }
+    const out: SseEvent = { event, data: joined, json };
+    if (id !== undefined) out.id = id;
+    if (retry !== undefined) out.retry = retry;
+    return out;
+  };
+  const pull = async (): Promise<boolean> => {
+    if (!reader) return false;
+    const { value, done } = await reader.read();
+    if (done) {
+      ended = true;
+      return false;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    let at: number;
+    while ((at = buffer.indexOf("\n\n")) >= 0) {
+      const frame = buffer.slice(0, at);
+      buffer = buffer.slice(at + 2);
+      const parsed = parseFrame(frame.replace(/\r/g, ""));
+      if (parsed) pending.push(parsed);
+    }
+    return true;
+  };
+  const next = async (timeoutMs = 5000): Promise<SseEvent | null> => {
+    const deadline = Date.now() + timeoutMs;
+    while (pending.length === 0) {
+      if (ended) return null;
+      const remaining = deadline - Date.now();
+      if (remaining <= 0)
+        throw new UsaiTestError(`no event within ${timeoutMs} ms on ${target.pathname}`);
+      const more = await Promise.race([
+        pull(),
+        new Promise<"timeout">((r) => setTimeout(() => r("timeout"), remaining)),
+      ]);
+      if (more === "timeout")
+        throw new UsaiTestError(`no event within ${timeoutMs} ms on ${target.pathname}`);
+    }
+    return pending.shift() ?? null;
+  };
+  const text = async (): Promise<string> => {
+    const parts: string[] = [];
+    if (buffer) parts.push(buffer);
+    while (reader && !ended) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      parts.push(decoder.decode(value, { stream: true }));
+    }
+    ended = true;
+    return parts.join("");
+  };
+  return {
+    status: res.status,
+    headers,
+    next,
+    text,
+    close: () => {
+      controller.abort();
+      ended = true;
+    },
+  };
+}
+
+async function openSocket(target: URL, options: SocketOptions): Promise<TestSocket> {
+  const net = await import("node:net");
+  const { createHash, randomBytes } = await import("node:crypto");
+  const key = randomBytes(16).toString("base64");
+  const port = Number(target.port || 80);
+  const socket = net.connect(port, target.hostname);
+  await new Promise<void>((resolve, reject) => {
+    socket.once("connect", () => resolve());
+    socket.once("error", reject);
+  });
+  const lines = [
+    `GET ${target.pathname}${target.search} HTTP/1.1`,
+    `Host: ${target.host}`,
+    "Upgrade: websocket",
+    "Connection: Upgrade",
+    `Sec-WebSocket-Key: ${key}`,
+    "Sec-WebSocket-Version: 13",
+  ];
+  if (options.protocols?.length)
+    lines.push(`Sec-WebSocket-Protocol: ${options.protocols.join(", ")}`);
+  for (const [k, v] of Object.entries(options.headers ?? {})) lines.push(`${k}: ${v}`);
+  socket.write(`${lines.join("\r\n")}\r\n\r\n`);
+  // The upgrade response, then frames.
+  let buffer = Buffer.alloc(0);
+  const chunks: Array<() => void> = [];
+  let ended = false;
+  socket.on("data", (d: Buffer) => {
+    buffer = Buffer.concat([buffer, d]);
+    for (const wake of chunks.splice(0)) wake();
+  });
+  socket.on("close", () => {
+    ended = true;
+    for (const wake of chunks.splice(0)) wake();
+  });
+  socket.on("error", () => {
+    ended = true;
+    for (const wake of chunks.splice(0)) wake();
+  });
+  const waitData = (timeoutMs: number): Promise<void> =>
+    new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new UsaiTestError(`websocket: nothing received within ${timeoutMs} ms`)),
+        timeoutMs,
+      );
+      chunks.push(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  // Head.
+  let protocol: string | undefined;
+  for (;;) {
+    const end = buffer.indexOf("\r\n\r\n");
+    if (end >= 0) {
+      const head = buffer.subarray(0, end).toString();
+      buffer = buffer.subarray(end + 4);
+      const status = Number(head.split(" ")[1]);
+      const headers: Record<string, string> = {};
+      for (const line of head.split("\r\n").slice(1)) {
+        const i = line.indexOf(":");
+        if (i > 0) headers[line.slice(0, i).trim().toLowerCase()] = line.slice(i + 1).trim();
+      }
+      if (status !== 101) {
+        const length = Number(headers["content-length"] ?? 0);
+        while (buffer.length < length && !ended) await waitData(5000);
+        const body = buffer.subarray(0, length).toString();
+        socket.destroy();
+        throw new TestSocketRefused(status, body);
+      }
+      const expected = createHash("sha1")
+        .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+        .digest("base64");
+      if (headers["sec-websocket-accept"] !== expected) {
+        socket.destroy();
+        throw new UsaiTestError("websocket: bad Sec-WebSocket-Accept");
+      }
+      protocol = headers["sec-websocket-protocol"];
+      break;
+    }
+    if (ended) throw new UsaiTestError("websocket: connection closed before the upgrade answered");
+    await waitData(5000);
+  }
+  const frame = (opcode: number, payload: Buffer): Buffer => {
+    const mask = randomBytes(4);
+    const len = payload.length;
+    const header =
+      len < 126
+        ? Buffer.from([0x80 | opcode, 0x80 | len])
+        : len < 65536
+          ? Buffer.concat([
+              Buffer.from([0x80 | opcode, 0x80 | 126]),
+              (() => {
+                const b = Buffer.alloc(2);
+                b.writeUInt16BE(len);
+                return b;
+              })(),
+            ])
+          : Buffer.concat([
+              Buffer.from([0x80 | opcode, 0x80 | 127]),
+              (() => {
+                const b = Buffer.alloc(8);
+                b.writeBigUInt64BE(BigInt(len));
+                return b;
+              })(),
+            ]);
+    const masked = Buffer.from(payload.map((byte, i) => byte ^ mask[i % 4]!));
+    return Buffer.concat([header, mask, masked]);
+  };
+  const messages: Array<{ opcode: number; payload: Buffer }> = [];
+  let closeFrame: { code: number; reason: string } | undefined;
+  const drainFrames = () => {
+    for (;;) {
+      if (buffer.length < 2) return;
+      const opcode = buffer[0]! & 0x0f;
+      const masked = (buffer[1]! & 0x80) !== 0;
+      let len = buffer[1]! & 0x7f;
+      let at = 2;
+      if (len === 126) {
+        if (buffer.length < 4) return;
+        len = buffer.readUInt16BE(2);
+        at = 4;
+      } else if (len === 127) {
+        if (buffer.length < 10) return;
+        len = Number(buffer.readBigUInt64BE(2));
+        at = 10;
+      }
+      const maskLen = masked ? 4 : 0;
+      if (buffer.length < at + maskLen + len) return;
+      let payload = buffer.subarray(at + maskLen, at + maskLen + len);
+      if (masked) {
+        const mask = buffer.subarray(at, at + 4);
+        payload = Buffer.from(payload.map((byte, i) => byte ^ mask[i % 4]!));
+      }
+      buffer = buffer.subarray(at + maskLen + len);
+      if (opcode === 0x9) socket.write(frame(0xa, Buffer.from(payload)));
+      else if (opcode === 0x8) {
+        closeFrame = {
+          code: payload.length >= 2 ? payload.readUInt16BE(0) : 1005,
+          reason: payload.subarray(2).toString(),
+        };
+        ended = true;
+      } else if (opcode === 0x1 || opcode === 0x2)
+        messages.push({ opcode, payload: Buffer.from(payload) });
+    }
+  };
+  const nextFrame = async (timeoutMs: number) => {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      drainFrames();
+      if (messages.length) return messages.shift()!;
+      if (ended) return null;
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new UsaiTestError(`websocket: no message within ${timeoutMs} ms`);
+      await waitData(remaining);
+    }
+  };
+  return {
+    protocol,
+    send: async (message) => {
+      const text = typeof message === "string" ? message : JSON.stringify(message);
+      socket.write(frame(0x1, Buffer.from(text)));
+    },
+    next: async <T>(timeoutMs = 5000): Promise<T | null> => {
+      const f = await nextFrame(timeoutMs);
+      if (!f) return null;
+      const text = f.payload.toString();
+      try {
+        return JSON.parse(text) as T;
+      } catch {
+        return text as unknown as T;
+      }
+    },
+    closed: async (timeoutMs = 5000) => {
+      const deadline = Date.now() + timeoutMs;
+      for (;;) {
+        drainFrames();
+        if (closeFrame) return closeFrame;
+        if (ended) return { code: 1006, reason: "connection closed" };
+        const remaining = deadline - Date.now();
+        if (remaining <= 0)
+          throw new UsaiTestError(`websocket: no close frame within ${timeoutMs} ms`);
+        await waitData(remaining);
+      }
+    },
+    close: async (code = 1000, reason = "") => {
+      const payload = Buffer.alloc(2 + Buffer.byteLength(reason));
+      payload.writeUInt16BE(code, 0);
+      payload.write(reason, 2);
+      socket.write(frame(0x8, payload));
+      await new Promise<void>((resolve) => {
+        const done = () => resolve();
+        socket.once("close", done);
+        setTimeout(() => {
+          socket.destroy();
+          resolve();
+        }, 1000);
+      });
+    },
+  };
 }

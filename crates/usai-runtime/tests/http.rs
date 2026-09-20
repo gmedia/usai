@@ -290,6 +290,24 @@ async fn invalid_boundary_input_fails_before_any_world_exists() {
         .await
         .unwrap();
     assert_eq!(r.status(), 400);
+    // A missing required property points at the property (`/name`), as the
+    // world's validator would — a form attaches the issue to its field.
+    let r = s
+        .client
+        .post(format!("{}/users", s.base))
+        .json(&json!({ "email": "a@b.co" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 400);
+    let body: Value = r.json().await.unwrap();
+    let paths: Vec<&str> = body["error"]["details"]["issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|i| i["path"].as_str())
+        .collect();
+    assert!(paths.contains(&"/name"), "{body}");
     let r = s
         .client
         .put(format!("{}/users", s.base))
@@ -999,6 +1017,28 @@ async fn openapi_is_generated_from_the_definition() {
     // The facts a Usai consumer can rely on travel with the operation.
     let order = &doc["paths"]["/orders"]["post"];
     assert_eq!(order["x-usai-validated"]["body"], "before-world");
+    // Declared errors are typed: the code is an enum a generated client can
+    // switch on, and the description is the status's reason phrase.
+    let not_found = &doc["paths"]["/users/{id}"]["get"]["responses"]["404"];
+    assert_eq!(
+        not_found["description"], "Not Found: code not_found",
+        "{not_found}"
+    );
+    assert_eq!(
+        not_found["content"]["application/json"]["schema"]["allOf"][1]["properties"]["error"]["properties"]
+            ["code"]["enum"],
+        json!(["not_found"]),
+        "{not_found}"
+    );
+    // A raw GET has no request body and lists its path parameters.
+    let image = &doc["paths"]["/images/{id}"]["get"];
+    assert!(image.get("requestBody").is_none(), "{image}");
+    assert_eq!(image["parameters"][0]["name"], "id", "{image}");
+    assert_eq!(image["parameters"][0]["in"], "path");
+    assert!(
+        doc["paths"]["/decode"]["post"].get("requestBody").is_some(),
+        "a raw POST still takes a body"
+    );
     // A transforming schema is refused at the boundary and parsed again in
     // the world; the document says so instead of hiding it.
     assert_eq!(
@@ -1522,6 +1562,32 @@ async fn every_request_has_an_id_the_world_sees_and_the_response_carries() {
         .to_owned();
     assert_eq!(echoed.len(), 36, "{echoed}");
     assert_eq!(r.json::<Value>().await.unwrap()["id"], echoed);
+    // A conditional GET: 200 with the handler's ETag, then a bodiless 304
+    // that the response contract never had to declare.
+    let r = s
+        .client
+        .get(format!("{}/cached", s.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(r.headers().get("etag").unwrap(), "\"v1\"");
+    assert_eq!(r.json::<Value>().await.unwrap(), json!({ "v": 1 }));
+    let r = s
+        .client
+        .get(format!("{}/cached", s.base))
+        .header("if-none-match", "\"v1\"")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 304);
+    assert_eq!(r.headers().get("etag").unwrap(), "\"v1\"");
+    assert!(
+        r.headers().get("content-type").is_none(),
+        "{:?}",
+        r.headers()
+    );
+    assert_eq!(r.bytes().await.unwrap().len(), 0);
     // A signed bearer token round-trips inside the world.
     let r: Value = s
         .client

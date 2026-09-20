@@ -92,6 +92,16 @@ export const persistent = http.post("/hits", { resources: [hits] }, async (ctx) 
 
 export const me = http.get("/me", { auth: authenticated }, async (ctx) => ctx.auth);
 export const requestId = http.get("/request-id", {}, async (ctx) => ({ id: ctx.requestId }));
+// A conditional GET: the ETag is the handler's, the 304 needs no contract.
+export const cached = http.get(
+  "/cached",
+  { response: { 200: z.object({ v: z.number() }) } },
+  async (ctx) => {
+    const etag = '"v1"';
+    if (ctx.headers["if-none-match"] === etag) return http.notModified({ etag });
+    return http.response(200, { v: 1 }, { etag, "cache-control": "private, max-age=0" });
+  },
+);
 // A signed bearer token, made and checked inside the world (HMAC + the
 // core's native base64): what a mobile backend's access token looks like.
 export const tokenRoundTrip = http.get("/token", {}, async () => {
@@ -199,6 +209,14 @@ export const decodeBig = http.raw("/decode", { method: "POST" }, async (ctx) => 
     { "content-type": "application/json" },
   );
 });
+// A raw GET with a path parameter: the document must not invent a request
+// body for it and must list `{id}`.
+export const rawImage = http.raw(
+  "/images/:id",
+  { method: "GET", responses: { 200: "the image bytes" } },
+  async (ctx) =>
+    http.rawResponse(200, `image ${ctx.params["id"]}`, { "content-type": "image/png" }),
+);
 export const webhook = http.raw(
   "/webhook",
   { responses: { 200: "echo of the body length", 401: "bad signature" } },
@@ -602,6 +620,7 @@ export default defineApp({
     me,
     requestId,
     tokenRoundTrip,
+    cached,
     framed,
     decodeBig,
     meByCookie,
@@ -614,6 +633,7 @@ export default defineApp({
     slow,
     echoQuery,
     webhook,
+    rawImage,
     sendReceipt,
     record,
     slowTask,

@@ -105,7 +105,10 @@ function describeContracts(workload: Workload): ManifestContracts {
     const json = jsonSchemaOf(schema, "input");
     if (json) {
       out[slot] = json;
-      if (workload.kind === "http" && hostFinal(schema)) boundaryFinal.push(slot);
+      // The host validates request slots for HTTP and stream routes alike
+      // (sockets carry no contracts for them); a final schema is parsed once.
+      if ((workload.kind === "http" || workload.kind === "stream") && hostFinal(schema))
+        boundaryFinal.push(slot);
     } else inWorldOnly.push(slot);
   }
   if (workload.contracts.response) {

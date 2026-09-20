@@ -100,15 +100,81 @@ fn note(operation: &mut Value, text: &str) {
     });
 }
 
-/// The reason phrase a consumer expects next to a status.
+/// The reason phrase a consumer expects next to a status — for every status
+/// an application declares, not only the successes: a `401` declared in
+/// `response:` is "Unauthorized", never "Success".
 fn reason(status: u16) -> &'static str {
     match status {
         200 => "OK",
         201 => "Created",
         202 => "Accepted",
+        203 => "Non-Authoritative Information",
         204 => "No content",
+        205 => "Reset Content",
+        206 => "Partial Content",
+        300..=399 => match status {
+            301 => "Moved Permanently",
+            302 => "Found",
+            303 => "See Other",
+            304 => "Not Modified",
+            307 => "Temporary Redirect",
+            308 => "Permanent Redirect",
+            _ => "Redirection",
+        },
+        400..=499 => match status {
+            400 => "Bad Request",
+            401 => "Unauthorized",
+            402 => "Payment Required",
+            403 => "Forbidden",
+            404 => "Not Found",
+            405 => "Method Not Allowed",
+            406 => "Not Acceptable",
+            409 => "Conflict",
+            410 => "Gone",
+            412 => "Precondition Failed",
+            413 => "Payload Too Large",
+            415 => "Unsupported Media Type",
+            422 => "Unprocessable Content",
+            423 => "Locked",
+            428 => "Precondition Required",
+            429 => "Too Many Requests",
+            _ => "Client Error",
+        },
+        500..=599 => match status {
+            500 => "Internal Server Error",
+            501 => "Not Implemented",
+            502 => "Bad Gateway",
+            503 => "Service Unavailable",
+            504 => "Gateway Timeout",
+            _ => "Server Error",
+        },
         _ => "Success",
     }
+}
+
+/// Statuses that carry no body by definition.
+fn bodiless(status: u16) -> bool {
+    matches!(status, 204 | 205 | 304) || (100..200).contains(&status)
+}
+
+/// The error envelope narrowed to the codes an operation declares for a
+/// status: `error.code` becomes an enum a generated client can switch on.
+fn declared_error_schema(codes: &[String]) -> Value {
+    json!({
+        "allOf": [
+            { "$ref": "#/components/schemas/UsaiError" },
+            { "type": "object", "properties": { "error": { "type": "object", "properties": { "code": { "type": "string", "enum": codes } } } } }
+        ]
+    })
+}
+
+/// `{id}` path parameters for a route whose params have no schema (a raw
+/// route): the path template says they exist, so the document does.
+fn path_parameters(path: &str) -> Vec<Value> {
+    path.split('/')
+        .filter_map(|segment| segment.strip_prefix(':'))
+        .map(|name| json!({ "name": name, "in": "path", "required": true, "schema": { "type": "string" } }))
+        .collect()
 }
 
 fn operation_id(workload: &WorkloadSpec) -> String {
@@ -291,10 +357,22 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
             let c = &workload.contracts;
             let incoming = c.message.as_ref().map(clean).unwrap_or(Value::Null);
             let outgoing = c.response.get(&200).map(clean).unwrap_or(Value::Null);
+            let credential = match workload
+                .auth
+                .as_ref()
+                .and_then(|a| definition.auth(a))
+                .map(|a| (a.scheme.as_str(), a.header.clone(), a.credential.clone()))
+            {
+                None => String::new(),
+                Some(("bearer", _, _)) => " From a browser, `new WebSocket(url, [\"bearer\", token])` carries the credential in Sec-WebSocket-Protocol; a refused credential is answered with the HTTP status (401) before the upgrade.".to_owned(),
+                Some(("header", header, _)) => format!(" From a browser, `new WebSocket(url, [\"{0}\", value])` carries the {0} credential in Sec-WebSocket-Protocol; a refused credential is answered with the HTTP status (401) before the upgrade.", header.unwrap_or_default()),
+                Some(("cookie", _, Some(c))) => format!(" The browser sends the `{}` cookie with the upgrade request by itself (same-site, or `credentials` allowed by the proxy); a missing or refused cookie is answered with the HTTP status (401) before the upgrade.", c.name),
+                Some(_) => " The route is authenticated by a custom resolver that reads the upgrade request; a refused credential is answered with the HTTP status (401) before the upgrade.".to_owned(),
+            };
             note(
                 &mut operation,
                 &format!(
-                    "WebSocket endpoint: send an HTTP upgrade. From a browser, `new WebSocket(url, [\"bearer\", token])` carries the credential in Sec-WebSocket-Protocol when the route is authenticated; a refused credential is answered with the HTTP status before the upgrade. Messages are JSON text frames: incoming messages must match the `incoming` schema (an invalid one is answered with a validation_failed envelope and dropped, the connection stays open), outgoing messages match `outgoing`. Incoming schema: {}. Outgoing schema: {}. A draining server closes with code 1012.",
+                    "WebSocket endpoint: send an HTTP upgrade.{credential} Messages are JSON text frames: incoming messages must match the `incoming` schema (an invalid one is answered with a validation_failed envelope and dropped, the connection stays open), outgoing messages match `outgoing`. Incoming schema: {}. Outgoing schema: {}. A draining server closes with code 1012.",
                     if incoming.is_null() {
                         "any".to_owned()
                     } else {
@@ -412,7 +490,13 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
                 "Raw endpoint: the handler reads exact bytes and writes the response itself. The request body is not described; the statuses below are the ones the handler declares.",
             );
             operation["x-usai-raw"] = json!(true);
-            operation["requestBody"] = json!({ "content": { "*/*": {} } });
+            if !matches!(method.as_str(), "GET" | "HEAD" | "DELETE" | "OPTIONS") {
+                operation["requestBody"] = json!({ "content": { "*/*": {} } });
+            }
+            let params = path_parameters(path);
+            if !params.is_empty() {
+                operation["parameters"] = Value::Array(params);
+            }
             let declared = match &workload.trigger {
                 Trigger::Http { responses, .. } => responses.clone(),
                 _ => Default::default(),
@@ -460,7 +544,7 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
             for (status, schema) in &c.response {
                 responses.insert(
                     status.to_string(),
-                    if *status == 204 {
+                    if bodiless(*status) {
                         json!({ "description": reason(*status) })
                     } else {
                         json!({
@@ -501,10 +585,33 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
                 responses.insert("415".into(), json!({ "description": "The body is not application/json: unsupported_media_type", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UsaiError" } } } }));
             }
         }
+        // Declared errors, typed: one response per status whose `error.code`
+        // is the enum of the codes declared for it (`if (res.status === 409)
+        // res.error.code` narrows in a generated client). A status the
+        // runtime already documents (400 validation) keeps its schema and
+        // gains the declared codes in its description.
+        let mut by_status: std::collections::BTreeMap<u16, Vec<String>> = Default::default();
         for error in &workload.errors {
-            responses
-                .entry(error.status.to_string())
-                .or_insert_with(|| json!({ "description": format!("Declared error: {}", error.code), "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UsaiError" } } } }));
+            let codes = by_status.entry(error.status).or_default();
+            if !codes.contains(&error.code) {
+                codes.push(error.code.clone());
+            }
+        }
+        for (status, codes) in by_status {
+            let description = format!("{}: code {}", reason(status), codes.join(" | "));
+            match responses.get_mut(&status.to_string()) {
+                Some(existing) => {
+                    let previous = existing["description"].as_str().unwrap_or("").to_owned();
+                    existing["description"] =
+                        json!(format!("{previous}; also declared: {}", codes.join(" | ")));
+                }
+                None => {
+                    responses.insert(
+                        status.to_string(),
+                        json!({ "description": description, "content": { "application/json": { "schema": declared_error_schema(&codes) } } }),
+                    );
+                }
+            }
         }
         if let Some(auth) = &workload.auth {
             responses

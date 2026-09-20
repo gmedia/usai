@@ -20,6 +20,7 @@ const http: {
   created: HttpResponse<T>;
   accepted: HttpResponse<T>;
   noContent: HttpResponse<null>;
+  notModified: HttpResponse<null>;
   rawResponse: RawResponse;
 };
 ```
@@ -54,7 +55,7 @@ path twice is a build error; a path nobody declares is 404
 
 | Name | Type | Default value | Description |
 | ------ | ------ | ------ | ------ |
-| <a id="property-stream"></a> `stream()` | \<`O`\>(`path`: `string`, `options`: `O`, `handler`: (`ctx`: [`StreamContext`](../interfaces/StreamContext.md)\<`O`\>, `stream`: [`StreamHandle`](../interfaces/StreamHandle.md)) => `unknown`) => [`Workload`](../interfaces/Workload.md) | `streams.stream` | Declare a streaming endpoint (`http.stream`): a **connection-bound** world that lives until the handler returns. `params` and `query` are validated before the world exists; `timeout` bounds the whole stream. Chunks are `text/event-stream` by default (`stream.event(name, data)` writes one server-sent event); set `content-type` in `start` for anything else. **Example** `export const events = http.stream("/events", { resources: [cache] }, async (ctx, stream) => { while (!ctx.signal.aborted) { await stream.event("tick", { total: await ctx.resources.cache.get("total") }); await ctx.sleep("1s"); } });` |
+| <a id="property-stream"></a> `stream()` | \<`O`\>(`path`: `string`, `options`: `O`, `handler`: (`ctx`: [`StreamContext`](../interfaces/StreamContext.md)\<`O`\>, `stream`: [`StreamHandle`](../interfaces/StreamHandle.md)) => `unknown`) => [`Workload`](../interfaces/Workload.md) | `streams.stream` | Declare a streaming endpoint (`http.stream`): a **connection-bound** world that lives until the handler returns. `params` and `query` are validated before the world exists; `timeout` bounds the whole stream. Chunks are `text/event-stream` by default (`stream.event(name, data, { id })` writes one server-sent event; a reconnecting `EventSource` sends the last `id` back as `ctx.headers["last-event-id"]`); set `content-type` in `start` for anything else. A client that leaves cancels the world — the normal end of a stream, not a failure. **Example** `export const events = http.stream("/events", { resources: [cache] }, async (ctx, stream) => { while (!ctx.signal.aborted) { await stream.event("tick", { total: await ctx.resources.cache.get("total") }); await ctx.sleep("1s"); } });` |
 | <a id="property-get"></a> `get` | [`Declare`](../type-aliases/Declare.md) | - | `GET` endpoint. |
 | <a id="property-post"></a> `post` | [`Declare`](../type-aliases/Declare.md) | - | `POST` endpoint. |
 | <a id="property-put"></a> `put` | [`Declare`](../type-aliases/Declare.md) | - | `PUT` endpoint. |
@@ -67,6 +68,7 @@ path twice is a build error; a path nobody declares is 404
 | `created()` | (`body`: `T`, `headers?`: `ResponseHeaders`) => [`HttpResponse`](../interfaces/HttpResponse.md)\<`T`\> | - | `201 Created` with a body. |
 | `accepted()` | (`body`: `T`, `headers?`: `ResponseHeaders`) => [`HttpResponse`](../interfaces/HttpResponse.md)\<`T`\> | - | `202 Accepted` with a body: the work continues elsewhere (a dispatched task). |
 | `noContent()` | (`headers?`: `ResponseHeaders`) => [`HttpResponse`](../interfaces/HttpResponse.md)\<`null`\> | - | `204 No Content`. |
+| `notModified()` | (`headers?`: `ResponseHeaders`) => [`HttpResponse`](../interfaces/HttpResponse.md)\<`null`\> | - | `304 Not Modified`, for a conditional GET whose `if-none-match` matched the `etag` you computed: no body, the cache headers repeated so the client keeps its copy (`http.notModified({ etag, "cache-control": "private, max-age=0" })`). Needs no entry in the `response` contract. |
 | `rawResponse()` | ( `status`: `number`, `body`: `string` \| `Uint8Array`\<`ArrayBufferLike`\>, `headers?`: `ResponseHeaders` ) => [`RawResponse`](../interfaces/RawResponse.md) | - | Raw text or bytes with an explicit status, for `http.raw` handlers. |
 
 ## Example

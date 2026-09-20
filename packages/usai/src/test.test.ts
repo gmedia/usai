@@ -78,3 +78,58 @@ test("the harness keeps the runtime's log and joins a request with the tasks it 
     await app.close();
   }
 });
+
+test("the harness opens event streams and WebSockets the way a browser would", {
+  skip: !existsSync(binary) ? "usai binary not built" : false,
+}, async () => {
+  const { testApp, TestSocketRefused } = await import("./test.ts");
+  const app = await testApp({
+    root: fixture,
+    binary,
+    env: { UPSTREAM_URL: "http://127.0.0.1:9/" },
+  });
+  try {
+    // SSE: events one by one, then the end of the stream.
+    const events = await app.stream("/events", { query: { n: 2 } });
+    assert.equal(events.status, 200);
+    assert.equal(events.headers["content-type"], "text/event-stream");
+    assert.equal(events.headers["x-stream"], "yes");
+    assert.deepEqual(await events.next(), { event: "tick", data: '{"i":1}', json: { i: 1 } });
+    assert.deepEqual((await events.next())?.json, { i: 2 });
+    assert.deepEqual((await events.next())?.json, { total: 2 });
+    assert.equal(await events.next(), null, "the handler returned: the stream ended");
+    // Leaving early is allowed and is not a failed stream.
+    const endless = await app.stream("/endless");
+    assert.equal(endless.status, 200);
+    endless.close();
+    // A non-SSE stream reads as text.
+    const csv = await app.stream("/export.csv");
+    assert.equal(csv.headers["content-type"], "text/csv");
+    assert.equal(await csv.text(), "id,name\n1,Ayu\n");
+    // WebSocket: JSON both ways, the server's close frame observed.
+    const ws = await app.socket("/chat", {});
+    await ws.send({ text: "hello" });
+    assert.deepEqual(await ws.next(), { echo: "anon: hello", count: 1 });
+    await ws.send({ text: "bye" });
+    assert.deepEqual(await ws.next(), { echo: "anon: bye", count: 2 });
+    const closed = await ws.closed();
+    assert.equal(closed.code, 1000, JSON.stringify(closed));
+    assert.equal(closed.reason, "bye then");
+    // A bearer token rides as the second subprotocol; a refused one is a 401 before any frame.
+    const authed = await app.socket("/private-chat", { protocols: ["bearer", "secret"] });
+    assert.equal(authed.protocol, "bearer");
+    assert.deepEqual(await authed.next(), { user: "u1" });
+    await authed.close();
+    await assert.rejects(
+      app.socket("/private-chat", { protocols: ["bearer", "wrong"] }),
+      (e: unknown) => e instanceof TestSocketRefused && e.status === 401,
+    );
+    assert.deepEqual(
+      app.logs({ message: "stream handler failed" }),
+      [],
+      "a client leaving is not a failure",
+    );
+  } finally {
+    await app.close();
+  }
+});
