@@ -97,6 +97,26 @@ pub(crate) async fn sql(
         .map_err(|e| e.to_string())
 }
 
+/// Databases whose queue table this process has already prepared, by the
+/// resource's fingerprint: DDL costs a catalog lock and a commit, and it
+/// used to run on **every publish** (the queue campaign measured 300
+/// publishes/s on a database that takes 3 000 inserts/s — C13). Once per
+/// database per process is the contract; a database recreated underneath a
+/// running process is a `db migrate` matter, not a publish-time one.
+static PREPARED: std::sync::Mutex<std::collections::BTreeSet<String>> =
+    std::sync::Mutex::new(std::collections::BTreeSet::new());
+
+/// `ensure_schema`, once per database per process.
+pub async fn ensure_schema_once(manager: &dyn ResourceManager) -> Result<(), String> {
+    let key = manager.identity().fingerprint.clone();
+    if PREPARED.lock().expect("prepared poisoned").contains(&key) {
+        return Ok(());
+    }
+    ensure_schema(manager).await?;
+    PREPARED.lock().expect("prepared poisoned").insert(key);
+    Ok(())
+}
+
 /// Prepares the queue table on the backing database. Idempotent, and safe
 /// to run from several workers at once: `CREATE TABLE IF NOT EXISTS` is not
 /// race-free in PostgreSQL (two sessions can both pass the existence check
@@ -229,7 +249,7 @@ pub fn start(
             let deadline = workload.timeout_ms;
             tokio::spawn(async move {
                 let locked_by = format!("{}:{}:{worker}", revision.id, name);
-                if let Err(e) = ensure_schema(manager.as_ref()).await {
+                if let Err(e) = ensure_schema_once(manager.as_ref()).await {
                     tracing::error!(queue = %name, error = %e, "queue schema unavailable; consumer stopping");
                     return;
                 }
@@ -389,11 +409,11 @@ impl OpHandler for PublishHandler {
             )
         })?;
         Ok(Box::pin(async move {
-            if let Err(e) = ensure_schema(manager.as_ref()).await {
+            if let Err(e) = ensure_schema_once(manager.as_ref()).await {
                 return OpOutcome::err("queue_unavailable", 503, e);
             }
-            let result = manager
-                .call(
+            let insert = || {
+                manager.call(
                     ResourceCall {
                         method: "one".into(),
                         args: json!({
@@ -403,7 +423,22 @@ impl OpHandler for PublishHandler {
                     },
                     ctx.cancel.clone(),
                 )
-                .await;
+            };
+            let mut result = insert().await;
+            // The table vanished under a prepared process (a schema reset in
+            // development): prepare again, once, and retry.
+            if let Err(e) = &result
+                && e.to_string().contains("usai_queue")
+                && e.to_string().contains("does not exist")
+            {
+                PREPARED
+                    .lock()
+                    .expect("prepared poisoned")
+                    .remove(&manager.identity().fingerprint);
+                if ensure_schema_once(manager.as_ref()).await.is_ok() {
+                    result = insert().await;
+                }
+            }
             match result {
                 Ok(row) => OpOutcome::ok(
                     &json!({ "id": row.get("id").cloned().unwrap_or(Value::Null).to_string() }),

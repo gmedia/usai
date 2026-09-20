@@ -68,6 +68,11 @@ two-replica campaign passed; the 72 h soak is running.
 - **Uploads and headers**: `multipart.parse(bytes, contentType)` splits a form body into
   fields and files; `defineApp({ headers })` sets static response headers on every
   application response (a handler's own wins).
+- **Queue publish no longer prepares the schema on every call.** `CREATE TABLE IF NOT
+  EXISTS` + `CREATE INDEX IF NOT EXISTS` ran per publish (two DDL statements and their
+  locks); now once per database per process, retried once if the table vanished.
+  Measured locally: 800 → 1 840 publishes/s from one world, 330 → 880 through a route
+  at 16 clients (the queue campaign, `scripts/qualification/queue`).
 - **Cron across replicas**: `cron(name, { exclusive: true })` runs each tick on exactly
   one instance — the schedulers claim the tick in PostgreSQL (`usai_cron_ticks`) and
   the others count it as `taken`; refused at install without a postgres resource.
