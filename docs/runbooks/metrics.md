@@ -83,11 +83,20 @@ Label values:
 - `usai_tasks{state}`: `queued`, `running`, `completed`, `failed`, `lost`
   (dispatched in memory and gone with a shutdown — ADR-0010).
 - `usai_http_rejections_total{reason}`: `route`, `validation`, `auth`,
-  `capacity`, `draining`, `other`.
+  `capacity`, `draining`, `other`. `draining` is rare by design: a request
+  that was routed by a revision which retired between routing and
+  admission (`503 revision_draining`). A process stop does **not** produce
+  it — the listener keeps serving during the grace and then closes, so
+  requests are answered or refused at the socket, never rejected here.
 - `usai_http_responses_total{class}` and
   `usai_http_workload_responses_total{workload,class}`: `2xx`, `3xx`, `4xx`,
   `5xx`; a WebSocket upgrade (101) is a success and counts in
   `usai_http_upgrades_total`, a committed stream in `usai_http_streams_total`.
+  A request cancelled by its client's disconnect or by the drain bound is
+  recorded as **499** (`4xx`, code `cancelled`): the client did not receive
+  it, the log has `request cancelled` at debug. It is not a 5xx because the
+  runtime did not fail; count `increase(…{class="4xx"})` around a restart
+  with that in mind.
 - `usai_process_page_faults_total{kind}`: `minor`, `major`.
 
 ## Alerts worth setting from this page alone

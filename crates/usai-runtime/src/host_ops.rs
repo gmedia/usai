@@ -223,8 +223,13 @@ async fn crypto(ctx: OpContext, payload: String) -> OpOutcome {
         Ok(r) => r,
         Err(e) => return OpOutcome::err("invalid_crypto_request", 500, e.to_string()),
     };
+    // Hashes in flight: the heap is trimmed once when the last of a burst
+    // finishes, not once per hash under the burst.
+    static HASHING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let work = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
         use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+        use std::sync::atomic::Ordering;
+        HASHING.fetch_add(1, Ordering::SeqCst);
         let argon = argon2::Argon2::default();
         let result = match request {
             CryptoRequest::PasswordHash { password } => {
@@ -244,9 +249,11 @@ async fn crypto(ctx: OpContext, payload: String) -> OpOutcome {
                 ))
             }
         };
-        // The 19 MiB the hash used is free now; give it back rather than
+        // The 19 MiB each hash used is free now; give it back rather than
         // let a login burst read as +150 MiB of RSS for the process's life.
-        crate::procfs::release_heap();
+        if HASHING.fetch_sub(1, Ordering::SeqCst) == 1 {
+            crate::procfs::release_heap();
+        }
         result
     });
     tokio::select! {
