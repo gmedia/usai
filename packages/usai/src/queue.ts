@@ -66,6 +66,11 @@ export interface QueueContext<M, R = ResourceDeclaration[]> extends BaseContext 
   readonly attempt: number;
   /** The queue's id for this message (the one `publish` returned). */
   readonly id: string;
+  /** The request id of the world that published the message — the same
+   * value the publisher's response carried as `x-request-id` — on this
+   * world's log lines and outbound calls too; empty when the message was
+   * published by a cron tick, a command, or `usai queue run`. */
+  readonly requestId: string;
 }
 
 /**

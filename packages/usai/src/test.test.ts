@@ -61,7 +61,12 @@ test("the harness keeps the runtime's log and joins a request with the tasks it 
     assert.equal(line.level, "INFO");
     assert.equal(line.target, "app");
     assert.deepEqual(line.fields, { requestId: "support-ticket-42" });
-    // Both hand-offs — the invoked child and the dispatched one — carry the id.
+    // Both hand-offs — the invoked child and the dispatched one — carry the id
+    // (two worlds; the second line may land after the first was seen).
+    await app.waitForLog({
+      requestId: "support-ticket-42",
+      where: (l) => l.world !== line.world,
+    });
     const forRequest = app.logs({ requestId: "support-ticket-42", target: "app" });
     assert.equal(forRequest.length, 2, JSON.stringify(forRequest));
     assert.deepEqual(app.logs({ requestId: "someone-else" }), []);

@@ -145,7 +145,10 @@ two-replica campaign passed; the 72 h soak is running.
   `404 unknown_workload` and `409 no_active_revision` instead of a 500.
 - **The request id follows the hand-off.** A task a request invokes or
   dispatches runs in a world that carries the request's id: `ctx.requestId`
-  in the task, `request_id` on its log lines and on its outbound calls.
+  in the task, `request_id` on its log lines and on its outbound calls. A
+  queue message carries it too (`usai_queue.request_id`, a column added to
+  existing tables on first use), so the consumer's world — even a retry
+  minutes later — runs under the request that published it.
 - Every missing environment variable is reported in one message
   (`missing required environment: DATABASE_URL, SESSION_SECRET`), not one
   per restart; invalid values likewise.
@@ -166,8 +169,8 @@ two-replica campaign passed; the 72 h soak is running.
   resolver's `ctx.resources`, and every workload that uses the scheme leases
   them in addition to its own (no more repeating the session table on each
   route, no more `resource_not_declared` from the one route that forgot).
-- `TaskContext.requestId`: the id of the request that invoked or dispatched
-  the task (empty for cron, `usai task run` and queue consumers).
+- `TaskContext.requestId` and `QueueContext.requestId`: the id of the request
+  that invoked, dispatched or published (empty for cron and `usai task run`).
 - `usai/test`: **`app.logs(filter)`** and **`app.waitForLog(filter, timeoutMs)`**
   — the runtime's JSON log (the application's lines at INFO, the runtime's
   at WARN, `fields` parsed), filtered by `requestId`, `workload`, `level`,

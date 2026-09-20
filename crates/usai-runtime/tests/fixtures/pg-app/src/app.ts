@@ -235,6 +235,12 @@ export const orders = queue.consume(
     globalThis.__mutable = ((globalThis.__mutable as number | undefined) ?? 0) + 1;
     if (ctx.message.sleepMs) await ctx.sleep(ctx.message.sleepMs);
     const n = await (ctx.resources["seen"] as Seen).increment(`orders:${ctx.message.orderId}`);
+    // The publisher's request id rides with the message: remember it under
+    // a key the test can read.
+    if (ctx.requestId)
+      await (ctx.resources["seen"] as Seen).increment(
+        `rid:${ctx.message.orderId}:${ctx.requestId}`,
+      );
     if (ctx.message.fail !== undefined && ctx.attempt <= ctx.message.fail)
       throw errors.internal(`attempt ${ctx.attempt} failed on purpose`);
     return {

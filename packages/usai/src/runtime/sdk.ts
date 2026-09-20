@@ -57,6 +57,8 @@ interface QueueInput {
   message: unknown;
   id: string;
   attempt: number;
+  /** The request id of the world that published the message, if any. */
+  requestId?: string | null;
 }
 interface StreamInput {
   kind: "stream";
@@ -351,12 +353,14 @@ async function runCommand(workload: Workload, input: CommandInput): Promise<unkn
 
 async function runQueue(workload: Workload, input: QueueInput): Promise<unknown> {
   const base = makeBase(workload.resources, input.env);
+  setRequestId(input.requestId ?? undefined);
   const message = parse("message", workload.contracts.message, input.message);
   return (workload.handler as (ctx: unknown) => unknown)({
     ...base,
     message,
     id: input.id,
     attempt: input.attempt,
+    requestId: input.requestId ?? "",
   });
 }
 

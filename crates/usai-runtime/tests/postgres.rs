@@ -756,7 +756,7 @@ async fn queue_messages_run_in_fresh_worlds_with_explicit_retry() {
             .workload("http:POST /orders")
             .map(|(i, w)| (i, w.id.clone()))
             .unwrap();
-        let input = json!({ "kind": "http", "request": { "method": "POST", "path": "/orders", "url": "/orders", "params": {}, "query": {}, "headers": {}, "body": { "json": { "orderId": id } } } });
+        let input = json!({ "kind": "http", "request": { "method": "POST", "path": "/orders", "url": "/orders", "params": {}, "query": {}, "headers": { "x-request-id": format!("req-{id}") }, "body": { "json": { "orderId": id } } } });
         let r = f.runtime.invoke(&w, input).await.unwrap();
         let v = r.outcome.unwrap().unwrap();
         assert_eq!(v["status"], 200, "{v}");
@@ -767,6 +767,12 @@ async fn queue_messages_run_in_fresh_worlds_with_explicit_retry() {
             wait_for(&f, &format!("orders:{id}"), 1, Duration::from_secs(5)).await,
             json!(1),
             "message {id} processed exactly once"
+        );
+        // The consumer's world ran under the publisher's request id.
+        assert_eq!(
+            wait_for(&f, &format!("rid:{id}:req-{id}"), 1, Duration::from_secs(2)).await,
+            json!(1),
+            "message {id} carried its publisher's request id"
         );
     }
     let rev = f.runtime.active().unwrap();

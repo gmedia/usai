@@ -45,8 +45,10 @@ pub const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS usai_queue (
   locked_at timestamptz,
   locked_by text,
   last_error text,
-  created_at timestamptz NOT NULL DEFAULT now()
+  created_at timestamptz NOT NULL DEFAULT now(),
+  request_id text
 );
+ALTER TABLE usai_queue ADD COLUMN IF NOT EXISTS request_id text;
 CREATE INDEX IF NOT EXISTS usai_queue_ready ON usai_queue (topic, available_at) WHERE state = 'ready';
 CREATE INDEX IF NOT EXISTS usai_queue_claim ON usai_queue (topic, id) WHERE state = 'ready';
 CREATE INDEX IF NOT EXISTS usai_queue_processing ON usai_queue (topic, locked_at) WHERE state = 'processing';";
@@ -177,6 +179,10 @@ struct Claimed {
     id: i64,
     payload: Value,
     attempts: i32,
+    /// The request id of the world that published the message, so the
+    /// consumer's world runs under it (`ctx.requestId`, its log lines).
+    #[serde(default)]
+    request_id: Option<String>,
 }
 
 /// Starts consumer loops for every queue workload of the revision. Returns
@@ -298,7 +304,7 @@ pub fn start(
                         "UPDATE usai_queue SET state = 'processing', locked_at = now(), locked_by = $1, attempts = attempts + 1
                          WHERE id = (SELECT id FROM usai_queue WHERE topic = $2 AND state = 'ready' AND available_at <= now()
                                      ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1)
-                         RETURNING id, payload, attempts",
+                         RETURNING id, payload, attempts, request_id",
                         vec![json!(locked_by), json!(topic)],
                     )
                     .await;
@@ -404,7 +410,7 @@ async fn run_message(
     let input = super::input(
         revision,
         "queue",
-        json!({ "message": claimed.payload, "id": claimed.id.to_string(), "attempt": claimed.attempts }),
+        json!({ "message": claimed.payload, "id": claimed.id.to_string(), "attempt": claimed.attempts, "requestId": claimed.request_id }),
     );
     let result = runtime
         .execute_with_stop(admission, input, cancel, Some(revision.connections_stop()))
@@ -459,8 +465,8 @@ impl OpHandler for PublishHandler {
                     ResourceCall {
                         method: "one".into(),
                         args: json!({
-                            "sql": "INSERT INTO usai_queue (topic, payload, available_at) VALUES ($1, $2::jsonb, now() + ($3::bigint * interval '1 millisecond')) RETURNING id",
-                            "params": [request.topic, request.message, request.delay_ms.unwrap_or(0)],
+                            "sql": "INSERT INTO usai_queue (topic, payload, available_at, request_id) VALUES ($1, $2::jsonb, now() + ($3::bigint * interval '1 millisecond'), $4) RETURNING id",
+                            "params": [request.topic, request.message, request.delay_ms.unwrap_or(0), ctx.request_id.as_deref()],
                         }),
                     },
                     ctx.cancel.clone(),
