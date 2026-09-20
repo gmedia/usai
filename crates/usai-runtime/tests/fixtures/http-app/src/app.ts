@@ -100,6 +100,20 @@ export const persistent = http.post("/hits", { resources: [hits] }, async (ctx) 
 
 export const me = http.get("/me", { auth: authenticated }, async (ctx) => ctx.auth);
 export const requestId = http.get("/request-id", {}, async (ctx) => ({ id: ctx.requestId }));
+// Catch-all segments: `*rest` matches the remainder of the path (a file
+// tree, a preflight for every path) and arrives as one param.
+export const files = http.get(
+  "/files/*path",
+  { params: z.object({ path: z.string().min(1) }) },
+  async (ctx) => ({ path: ctx.params.path }),
+);
+export const preflight = http.options("/*any", {}, async () =>
+  http.noContent({
+    "access-control-allow-origin": "http://localhost:5173",
+    "access-control-allow-methods": "GET, POST, PATCH, DELETE",
+    "access-control-allow-headers": "content-type, authorization",
+  }),
+);
 // A conditional GET: the ETag is the handler's, the 304 needs no contract.
 export const cached = http.get(
   "/cached",
@@ -630,6 +644,8 @@ export default defineApp({
     requestId,
     tokenRoundTrip,
     cached,
+    files,
+    preflight,
     framed,
     decodeBig,
     meByCookie,

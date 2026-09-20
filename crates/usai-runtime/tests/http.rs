@@ -1596,6 +1596,41 @@ async fn every_request_has_an_id_the_world_sees_and_the_response_carries() {
         .to_owned();
     assert_eq!(echoed.len(), 36, "{echoed}");
     assert_eq!(r.json::<Value>().await.unwrap()["id"], echoed);
+    // Catch-all segments: the remainder of the path is one param, and an
+    // OPTIONS catch-all answers every preflight (a declared route wins over
+    // the runtime's 405).
+    let r = s
+        .client
+        .get(format!("{}/files/a/b/c.txt", s.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(
+        r.json::<Value>().await.unwrap(),
+        json!({ "path": "a/b/c.txt" })
+    );
+    let r = s
+        .client
+        .request(reqwest::Method::OPTIONS, format!("{}/users/{UUID}", s.base))
+        .header("origin", "http://localhost:5173")
+        .header("access-control-request-method", "GET")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 204, "{:?}", r.headers());
+    assert_eq!(
+        r.headers().get("access-control-allow-origin").unwrap(),
+        "http://localhost:5173"
+    );
+    // Literal routes still win over the catch-all for their own method.
+    let r = s
+        .client
+        .get(format!("{}/request-id", s.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
     // A conditional GET: 200 with the handler's ETag, then a bodiless 304
     // that the response contract never had to declare.
     let r = s

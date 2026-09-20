@@ -18,7 +18,7 @@ use serde_json::{Value, json};
 use std::convert::Infallible;
 use tokio_util::sync::CancellationToken;
 
-use super::router::{CompiledRevision, RouteKind, SlotValidators};
+use super::router::{CompiledRevision, Route, RouteKind, SlotValidators};
 use super::socket::{Inbound, SocketLink};
 use super::stream::StreamSink;
 use crate::engine::GuestError;
@@ -797,27 +797,43 @@ impl HttpHost {
                 format!("no route matches {} {path}", parts.method),
             )
         })?;
-        let route = matched
-            .value
-            .iter()
-            .find(|r| {
-                r.method == parts.method.as_str()
-                    || (parts.method == Method::HEAD && r.method == "GET")
-            })
-            .ok_or_else(|| {
-                // RFC 9110 §15.5.6: a 405 names what is allowed.
-                let mut allowed: Vec<&str> =
-                    matched.value.iter().map(|r| r.method.as_str()).collect();
-                if allowed.contains(&"GET") {
-                    allowed.push("HEAD");
-                }
-                Reply::error(
-                    StatusCode::METHOD_NOT_ALLOWED,
-                    "method_not_allowed",
-                    format!("{} is not allowed on {path}", parts.method),
-                )
-                .with_header("allow", allowed.join(", "))
-            })?;
+        let accepts = |r: &Route| {
+            r.method == parts.method.as_str() || (parts.method == Method::HEAD && r.method == "GET")
+        };
+        // The literal path matched but has no route for this method: a
+        // catch-all that does (`OPTIONS /*any`) serves before the 405.
+        let fallback = if matched.value.iter().any(accepts) {
+            None
+        } else {
+            compiled
+                .catch_alls
+                .at(&path)
+                .ok()
+                .filter(|m| m.value.iter().any(accepts))
+        };
+        let matched = fallback.unwrap_or(matched);
+        if !matched.value.iter().any(accepts) && matched.value.iter().all(|r| r.catch_all) {
+            // Only a catch-all matched, and not for this method: the URL is
+            // unknown, not a known resource refusing the method.
+            return Err(Reply::error(
+                StatusCode::NOT_FOUND,
+                "route_not_found",
+                format!("no route matches {} {path}", parts.method),
+            ));
+        }
+        let route = matched.value.iter().find(|r| accepts(r)).ok_or_else(|| {
+            // RFC 9110 §15.5.6: a 405 names what is allowed.
+            let mut allowed: Vec<&str> = matched.value.iter().map(|r| r.method.as_str()).collect();
+            if allowed.contains(&"GET") {
+                allowed.push("HEAD");
+            }
+            Reply::error(
+                StatusCode::METHOD_NOT_ALLOWED,
+                "method_not_allowed",
+                format!("{} is not allowed on {path}", parts.method),
+            )
+            .with_header("allow", allowed.join(", "))
+        })?;
         let params: Value = matched
             .params
             .iter()

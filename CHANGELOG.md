@@ -162,6 +162,10 @@ two-replica campaign passed; the 72 h soak is running.
   lists its path parameters; `204`/`205`/`304` carry no content; the socket
   description says what the browser does per auth scheme (a cookie travels
   with the upgrade by itself).
+- Catch-all routes: `/files/*path` takes the rest of the path as one
+  parameter; a catch-all serves the methods a literal path lacks
+  (`http.options("/*any", …)` answers every preflight while `GET /users/:id`
+  keeps its GET) and never turns an unknown URL into a 405.
 - A client leaving an event stream is the normal end of the stream: logged
   at debug, not `ERROR`, and not counted in `usai_http_streams_failed_total`.
 - A missing required property is reported at its pointer (`/name`), as the

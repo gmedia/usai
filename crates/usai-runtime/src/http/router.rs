@@ -18,8 +18,13 @@ pub enum RouteKind {
     Socket,
 }
 
+#[derive(Clone)]
 pub struct Route {
     pub method: String,
+    /// The path has a `*rest` segment. A catch-all serves what nothing else
+    /// claims; it does not turn every unknown URL into a 405 for the
+    /// methods it lacks (those stay 404).
+    pub catch_all: bool,
     pub index: usize,
     pub kind: RouteKind,
 }
@@ -44,6 +49,11 @@ pub struct SlotValidators {
 pub struct CompiledRevision {
     pub revision: Arc<Revision>,
     pub router: matchit::Router<Vec<Route>>,
+    /// Only the catch-all paths (`/*any`, `/files/*path`). A literal path
+    /// wins the match, but when it has no route for the request's method,
+    /// a catch-all that does (an `OPTIONS /*any` preflight answer) serves
+    /// instead of the literal's 405.
+    pub catch_alls: matchit::Router<Vec<Route>>,
     pub validators: BTreeMap<usize, SlotValidators>,
     /// `defineApp({ headers })`, parsed once per revision so a response
     /// costs no parsing (C13).
@@ -124,14 +134,14 @@ impl CompiledRevision {
                 Trigger::Socket { path } => ("GET", path.as_str(), RouteKind::Socket),
                 _ => continue,
             };
-            by_path
-                .entry(to_matchit_path(path))
-                .or_default()
-                .push(Route {
-                    method: method.to_ascii_uppercase(),
-                    index,
-                    kind,
-                });
+            let matchit_path = to_matchit_path(path);
+            let catch_all = matchit_path.contains("{*");
+            by_path.entry(matchit_path).or_default().push(Route {
+                method: method.to_ascii_uppercase(),
+                catch_all,
+                index,
+                kind,
+            });
             if kind != RouteKind::Raw && kind != RouteKind::Socket {
                 let c = &workload.contracts;
                 validators.insert(
@@ -147,12 +157,22 @@ impl CompiledRevision {
             }
         }
         let mut router = matchit::Router::new();
+        let mut catch_alls = matchit::Router::new();
         for (path, routes) in by_path {
             let workload = routes
                 .first()
                 .and_then(|r| definition.workload_by_index(r.index))
                 .map(|w| w.id.clone())
                 .unwrap_or_default();
+            if path.contains("{*") {
+                catch_alls
+                    .insert(path.clone(), routes.clone())
+                    .map_err(|e| RouteBuildError::Path {
+                        workload: workload.clone(),
+                        path: path.clone(),
+                        detail: e.to_string(),
+                    })?;
+            }
             router
                 .insert(path.clone(), routes)
                 .map_err(|e| RouteBuildError::Path {
@@ -182,6 +202,7 @@ impl CompiledRevision {
         Ok(Self {
             revision,
             router,
+            catch_alls,
             validators,
             headers,
         })
