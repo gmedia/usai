@@ -371,6 +371,8 @@ api.example.com {
 
 **Request ids.** Every request has one: the client's `x-request-id` when it sent a sane one (≤ 128 printable ASCII characters — a proxy's trace id), a UUID minted by the runtime otherwise. It comes back on the response as `x-request-id`, is `ctx.requestId` in HTTP, raw, stream and socket handlers, rides as `request_id` on every line the world logs (`ctx.log`/`console.*`, JSON and text), and goes out as `x-request-id` on every `httpClient` call the world makes — so the proxy's access log, the application's lines and the downstream service's logs join on one value without the application doing anything.
 
+**What a 5xx log line contains** — and does not. `application error` / `unexpected handler failure` lines carry `world`, `workload`, `request_id`, the error `code`, the error `message` **as the application wrote it**, `details` (for a response-contract failure: which field of the response did not match and the validator's message about it) and the source-mapped `stack`. The runtime never logs request bodies, headers, query strings, path parameters or the principal: what reaches the log about a request is what the application put in the error message and what it logged itself (`ctx.log`). Redaction is therefore the application's discipline (do not put a token or an email in an error message) plus the shipper's (a filter on `target == "app"` lines if your log pipeline redacts). Volume: one line per 5xx and per lifecycle violation, none per 2xx/4xx; application lines as written.
+
 Per-request logging: there is no access log by design — 2xx and 4xx are counted (`usai_http_responses_total`, per-workload counts in `/_usai/status`), 5xx and lifecycle violations are logged with the workload and world, and `RUST_LOG=usai_runtime=debug` adds a per-world trace line (workload, termination, duration, ops). Put request logging in the proxy in front.
 
 Where the `/_usai/*` surfaces listen: `--status` puts status, metrics, live, ready and the docs on the **application** listener (development, trusted networks — a public proxy must then deny `/_usai/*`); `--status-addr 127.0.0.1:9090` (`USAI_STATUS_ADDR`) serves them on a **separate** listener instead, which is what production wants (scrape and probe a private port, expose nothing). Both listeners take a **status token** (`USAI_STATUS_TOKEN`; `--status-token` exists but a flag shows in `ps`): with one set, `/_usai/status`, `/_usai/metrics` and `/_usai/openapi.json` answer `401` without `Authorization: Bearer <token>` (Prometheus: `authorization: { credentials: … }` in the scrape config); `/_usai/live` and `/_usai/ready` stay open because probes carry no headers and reveal only "up" and the name of a failing resource, and the `/_usai/docs` shell stays open and asks for the token in the browser. Set it whenever the status listener is reachable by anything other than your scraper and your orchestrator — the pages show the process's memory, per-route counters, the revision identity and the full OpenAPI profile (environment names, cron schedules, queue schemas). And switch off what nobody consumes: `--surfaces-off docs,metrics` (`USAI_SURFACES_OFF`) makes those paths a `404` on both listeners; the names are `status`, `metrics`, `docs` (reference + OpenAPI), `live`, `ready`. A production instance that is only probed and scraped typically runs `--status-addr <private> --surfaces-off docs` with a token.
@@ -421,6 +423,32 @@ test("users", async () => {
 ```
 
 `testApp` needs the `usai` binary (`USAI_BIN` or on `PATH`) and the project's declared environment (pass `env: { DATABASE_URL }`). With `migrate: true` (or `migrate: { seed: true }`) it runs `usai db migrate` / `usai db seed` first — for a throwaway database (`usai test` reads `.env`, so point `DATABASE_URL` at one that may be wiped). The harness starts the runtime with `--diagnostics`: every `TestResponse` carries `violations` (the world's lifecycle violations, e.g. `detached_work` for an un-awaited `dispatch`) — assert `deepEqual(res.violations, [])` on the requests that matter — and 500 bodies carry the error details. Lifecycle-specific tests are ordinary: mutate in one request, read in the next, and assert the mutation is gone.
+
+In CI, the tests need the binary and a PostgreSQL. The pure-npm path fetches the release binary on `pnpm install` (`@sakaladev/usai`'s wrapper; `USAI_RELEASE_BASE` for a mirror), and a service container is the database:
+
+```yaml
+# .github/workflows/test.yml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env: { POSTGRES_USER: app, POSTGRES_PASSWORD: app, POSTGRES_DB: test }
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U app" --health-interval 2s --health-timeout 2s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm usai test
+        env:
+          DATABASE_URL: postgres://app:app@127.0.0.1:5432/test
+```
+
+`pnpm usai test` runs `node --test` over the project with `USAI_BIN` set to the fetched binary; `testApp({ migrate: true })` applies the migrations to the service database before the first test. One database per job — the tests wipe what they create, not what a neighbour created.
 
 `app.http.post(path, { body })` sends an object as JSON (`content-type: application/json`) and a string byte-for-byte (for signed webhook bodies: sign the string, send the string). Every call returns `{ status, headers, body, text }` — `body` is parsed JSON when the response is JSON.
 
