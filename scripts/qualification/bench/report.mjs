@@ -16,7 +16,17 @@ const classes = {
   E: "transaction",
   F: "auth + DB read",
 };
-const order = ["usai", "node", "node-cluster", "bun", "deno", "rust", "php", "php-tuned", "laravel-fpm"];
+const order = [
+  "usai",
+  "node",
+  "node-cluster",
+  "bun",
+  "deno",
+  "rust",
+  "php",
+  "php-tuned",
+  "laravel-fpm",
+];
 const by = (a, b) => order.indexOf(a.server) - order.indexOf(b.server) || a.clients - b.clients;
 console.log(`# Benchmark suite — ${dir.split("/").pop()}\n`);
 console.log(

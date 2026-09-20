@@ -754,7 +754,8 @@ async fn messages_a_lost_consumer_had_claimed_are_reclaimed() {
         .unwrap();
     let error = dead["last_error"].as_str().unwrap();
     assert!(
-        error.starts_with("consumer lost: claimed by rev9:orders:0 at ") && error.ends_with(" UTC, never completed"),
+        error.starts_with("consumer lost: claimed by rev9:orders:0 at ")
+            && error.ends_with(" UTC, never completed"),
         "{error}"
     );
     assert_eq!(

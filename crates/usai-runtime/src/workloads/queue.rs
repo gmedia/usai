@@ -200,7 +200,9 @@ pub fn start(
                         vec![json!(topic), json!(lost_after_ms), json!(max_attempts)],
                     )
                     .await;
-                    let count = |r: &Result<Value, String>| r.as_ref().ok().and_then(Value::as_u64).unwrap_or(0);
+                    let count = |r: &Result<Value, String>| {
+                        r.as_ref().ok().and_then(Value::as_u64).unwrap_or(0)
+                    };
                     let (retried, dead) = (count(&retried), count(&dead));
                     if retried + dead > 0 {
                         stats.reclaimed.fetch_add(retried + dead, Ordering::SeqCst);
