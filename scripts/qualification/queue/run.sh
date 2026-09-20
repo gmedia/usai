@@ -8,7 +8,8 @@
 #   run.sh all                           # 4/8/16 × 1/2 instances × 20 000 messages, then a report
 #
 # Environment: DATABASE_URL (a throwaway database), USAI (binary), PIN (cpu
-# list), OUT (directory). Ports 4400–4409 (app), 4410–4419 (status).
+# list), OUT (directory), CELL_TAG (suffix for a cell run under other
+# conditions, e.g. synchronous_commit=off). Ports 4400–4409 (app), 4410–4419 (status).
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/../../.." && pwd)"
@@ -43,7 +44,7 @@ prepare() {
 
 cell() {
   local c="$1" n="$2" messages="$3"
-  local name="c$c-i$n-m$messages"
+  local name="c$c-i$n-m$messages${CELL_TAG:+-$CELL_TAG}"
   local dir="$OUT/cell-$name"; mkdir -p "$dir"
   log "== cell $name"
   psql_q "truncate processed; do \$\$ begin if to_regclass('usai_queue') is not null then delete from usai_queue where topic = 'bench.work'; end if; end \$\$;" >/dev/null
