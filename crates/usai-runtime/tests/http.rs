@@ -1488,3 +1488,38 @@ async fn every_request_has_an_id_the_world_sees_and_the_response_carries() {
     assert!(r.headers().get("x-request-id").is_some());
     s.shutdown.cancel();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn application_headers_are_on_every_response_and_a_handler_wins() {
+    let Some(s) = start().await else { return };
+    for path in ["/request-id", "/nowhere"] {
+        let r = s
+            .client
+            .get(format!("{}{path}", s.base))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            r.headers().get("x-content-type-options").unwrap(),
+            "nosniff",
+            "{path}"
+        );
+        assert_eq!(
+            r.headers().get("x-frame-options").unwrap(),
+            "DENY",
+            "{path}"
+        );
+    }
+    let r = s
+        .client
+        .get(format!("{}/framed", s.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.headers().get("x-frame-options").unwrap(), "SAMEORIGIN");
+    assert_eq!(
+        r.headers().get("x-content-type-options").unwrap(),
+        "nosniff"
+    );
+    s.shutdown.cancel();
+}

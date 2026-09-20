@@ -511,6 +511,20 @@ impl HttpHost {
         if !internal && let Ok(v) = HeaderValue::from_str(&request_id) {
             response.headers_mut().insert(REQUEST_ID, v);
         }
+        // The application's own headers (`defineApp({ headers })`) on every
+        // application response, a handler's value of the same name winning.
+        if !internal
+            && response.status() != StatusCode::SWITCHING_PROTOCOLS
+            && let Ok(compiled) = self.compiled()
+            && !compiled.headers.is_empty()
+        {
+            let headers = response.headers_mut();
+            for (name, value) in &compiled.headers {
+                if !headers.contains_key(name) {
+                    headers.insert(name.clone(), value.clone());
+                }
+            }
+        }
         // A 101 hands the connection to the socket pump; everything else
         // closes after this response while the process is on its way out.
         if self.is_draining() && response.status() != StatusCode::SWITCHING_PROTOCOLS {

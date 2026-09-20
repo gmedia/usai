@@ -84,6 +84,9 @@ export const persistent = http.post("/hits", { resources: [hits] }, async (ctx) 
 
 export const me = http.get("/me", { auth: authenticated }, async (ctx) => ctx.auth);
 export const requestId = http.get("/request-id", {}, async (ctx) => ({ id: ctx.requestId }));
+export const framed = http.get("/framed", {}, async () =>
+  http.response(200, { ok: true }, { "x-frame-options": "SAMEORIGIN" }),
+);
 
 // A session cookie: the cookie scheme hands the cookie's value to the
 // resolver and the OpenAPI document says `apiKey in: cookie`; login sets two
@@ -506,6 +509,8 @@ export const passwordRoute = http.post(
 
 export default defineApp({
   name: "http-fixture",
+  // Set on every application response; a handler's own header wins.
+  headers: { "X-Content-Type-Options": "nosniff", "x-frame-options": "DENY" },
   description: "The HTTP test fixture: one of everything the pipeline can serve.",
   modules: [defineModule({ name: "users", workloads: [getUser, createUser, noContent] })],
   workloads: [
@@ -513,6 +518,7 @@ export default defineApp({
     persistent,
     me,
     requestId,
+    framed,
     meByCookie,
     login,
     meOpaque,

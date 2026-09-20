@@ -415,6 +415,10 @@ pub struct Manifest {
     /// `info.description` of the OpenAPI document. Not part of the identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Response headers set on every application response (not `/_usai/*`);
+    /// a handler's own header of the same name wins.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub headers: BTreeMap<String, String>,
     #[serde(default)]
     pub modules: Vec<ModuleSpec>,
     pub workloads: Vec<WorkloadSpec>,
@@ -730,6 +734,7 @@ mod tests {
             manifest_version: MANIFEST_VERSION,
             built_with: None,
             description: None,
+            headers: Default::default(),
             name: "t".into(),
             modules: vec![],
             workloads: vec![WorkloadSpec {

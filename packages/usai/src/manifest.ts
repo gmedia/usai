@@ -72,6 +72,8 @@ export interface Manifest {
   manifestVersion: 1;
   name: string;
   description?: string;
+  /** Response headers set on every application response. */
+  headers?: Record<string, string>;
   modules: Array<{ name: string; migrations: string[]; seeders: string[] }>;
   workloads: ManifestWorkload[];
   resources: Array<{
@@ -218,6 +220,7 @@ export function describe(app: AppDeclaration): Manifest {
     manifestVersion: MANIFEST_VERSION,
     name: app.name,
     ...(app.description !== undefined ? { description: app.description } : {}),
+    ...(app.headers !== undefined ? { headers: { ...app.headers } } : {}),
     modules: app.modules.map((m) => ({
       name: m.name,
       migrations: [...m.migrations],

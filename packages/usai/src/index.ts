@@ -73,6 +73,8 @@ export {
   verifyCookieValue,
 } from "./cookies.ts";
 export { bytes } from "./bytes.ts";
+export { multipart, parseMultipart } from "./multipart.ts";
+export type { MultipartBody, MultipartFile } from "./multipart.ts";
 export type { CookieAttributes } from "./cookies.ts";
 export { task, cron, command, service, dispatches, publishes, seeder } from "./workloads.ts";
 export type { SeederDeclaration, SeederContext } from "./workloads.ts";

@@ -45,6 +45,9 @@ pub struct CompiledRevision {
     pub revision: Arc<Revision>,
     pub router: matchit::Router<Vec<Route>>,
     pub validators: BTreeMap<usize, SlotValidators>,
+    /// `defineApp({ headers })`, parsed once per revision so a response
+    /// costs no parsing (C13).
+    pub headers: Vec<(http::HeaderName, http::HeaderValue)>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -158,10 +161,29 @@ impl CompiledRevision {
                     detail: e.to_string(),
                 })?;
         }
+        let headers = revision
+            .definition
+            .manifest()
+            .headers
+            .iter()
+            .filter_map(|(name, value)| {
+                match (
+                    http::HeaderName::from_bytes(name.as_bytes()),
+                    http::HeaderValue::from_str(value),
+                ) {
+                    (Ok(n), Ok(v)) => Some((n, v)),
+                    _ => {
+                        tracing::warn!(header = %name, "defineApp({{ headers }}): not a valid header; ignored");
+                        None
+                    }
+                }
+            })
+            .collect();
         Ok(Self {
             revision,
             router,
             validators,
+            headers,
         })
     }
 }

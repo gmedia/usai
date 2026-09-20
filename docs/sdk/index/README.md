@@ -58,6 +58,10 @@ Vocabulary used throughout:
 | [RawContext](interfaces/RawContext.md) | The context of a raw request (`http.raw`): no contracts, the exact bytes on `request`. Read the body once. |
 | [RawOptions](interfaces/RawOptions.md) | Options for `http.raw`. |
 | [http](variables/http.md) | Declare HTTP endpoints. Each `http.<method>(path, options, handler)` returns a [Workload](interfaces/Workload.md) to list in `defineApp`/`defineModule`. |
+| [MultipartFile](interfaces/MultipartFile.md) | One file part of a multipart body. |
+| [MultipartBody](interfaces/MultipartBody.md) | A parsed `multipart/form-data` body. |
+| [parseMultipart](functions/parseMultipart.md) | Parses a `multipart/form-data` body. `contentType` is the request's `content-type` header (the boundary is read from it). Throws a `TypeError` on a malformed body — answer 400 with it. |
+| [multipart](variables/multipart.md) | The multipart helper as one object. |
 
 ## Streams and WebSockets
 

@@ -62,6 +62,9 @@ two-replica campaign passed; the 72 h soak is running.
   (`new WebSocket(url, ["bearer", token])`); the runtime echoes
   `Sec-WebSocket-Protocol: bearer`. A 101 is counted as an upgrade, not a 5xx;
   `upgrades` and `streams` counters move.
+- **Uploads and headers**: `multipart.parse(bytes, contentType)` splits a form body into
+  fields and files; `defineApp({ headers })` sets static response headers on every
+  application response (a handler's own wins).
 - **Cron across replicas**: `cron(name, { exclusive: true })` runs each tick on exactly
   one instance — the schedulers claim the tick in PostgreSQL (`usai_cron_ticks`) and
   the others count it as `taken`; refused at install without a postgres resource.

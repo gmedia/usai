@@ -213,6 +213,8 @@ export interface AppDeclaration {
   readonly __usai: "app";
   readonly name: string;
   readonly description?: string;
+  /** Response headers set on every application response (`defineApp({ headers })`). */
+  readonly headers?: Readonly<Record<string, string>>;
   readonly modules: readonly ModuleDeclaration[];
   readonly workloads: readonly Workload[];
   readonly resources: readonly ResourceDeclaration[];
@@ -277,6 +279,12 @@ export interface DefineAppOptions {
    * overview and as `info.description` of the generated OpenAPI document.
    * Plain text (no markup). Not part of the application identity. */
   description?: string;
+  /** Response headers set on every response of the application's routes
+   * (not on `/_usai/*`): the security headers a proxy would otherwise add
+   * (`strict-transport-security`, `x-content-type-options`,
+   * `content-security-policy` …). A handler's own header of the same name
+   * wins. Static values only — anything computed belongs in the handler. */
+  headers?: Record<string, string>;
   modules?: ModuleDeclaration[];
   workloads?: Workload[];
   resources?: ResourceDeclaration[];
@@ -309,6 +317,13 @@ export function defineApp(options: DefineAppOptions = {}): AppDeclaration {
     __usai: "app",
     name: options.name ?? "app",
     ...(options.description ? { description: options.description } : {}),
+    ...(options.headers && Object.keys(options.headers).length
+      ? {
+          headers: Object.fromEntries(
+            Object.entries(options.headers).map(([k, v]) => [k.toLowerCase(), v]),
+          ),
+        }
+      : {}),
     modules: options.modules ?? [],
     workloads: options.workloads ?? [],
     resources: options.resources ?? [],
