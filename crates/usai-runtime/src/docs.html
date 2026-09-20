@@ -715,9 +715,12 @@
     const headers = {};
     for (const p of params.filter((p) => p.in === "header")) { const v = values.header[p.name] ?? String(sample(p.schema || {})); if (v !== "") headers[p.name] = v; }
     const scheme = o.op["x-usai-auth"] && securitySchemes[o.op["x-usai-auth"]];
+    let credentials = "same-origin";
     if (scheme) {
       const stored = authValue(o.op["x-usai-auth"]);
       if (scheme.type === "http") headers.authorization = stored ? `Bearer ${stored}` : "Bearer <token>";
+      else if (scheme.in === "cookie") credentials = "include"; // the browser sends the cookie the login operation set
+      else if (scheme.in === "query") query.push([scheme.name, stored || "<value>"]);
       else headers[scheme.name || "authorization"] = stored || "<value>";
     }
     const bodySchema = o.op.requestBody && o.op.requestBody.content && o.op.requestBody.content["application/json"] && o.op.requestBody.content["application/json"].schema;
@@ -726,18 +729,20 @@
     else if (bodySchema) body = JSON.stringify(sample(bodySchema));
     if (body !== null) headers["content-type"] = "application/json";
     const url = `${values.base}${path}${query.length ? "?" + query.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&") : ""}`;
-    return { method: o.method.toUpperCase(), url, path, query, headers, body };
+    return { method: o.method.toUpperCase(), url, path, query, headers, body, credentials };
   };
   const sh = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
   const snippets = {
     curl(r) {
       const lines = [`curl -X ${r.method} ${sh(r.url)}`];
+      if (r.credentials === "include") lines.push("  -b cookies.txt  # the cookie the login operation set (curl -c cookies.txt … on login)");
       for (const [k, v] of Object.entries(r.headers)) lines.push(`  -H ${sh(`${k}: ${v}`)}`);
       if (r.body !== null) lines.push(`  -d ${sh(r.body)}`);
       return lines.join(" \\\n");
     },
     javascript(r) {
       const init = [`method: ${JSON.stringify(r.method)}`];
+      if (r.credentials === "include") init.push(`credentials: "include"`);
       if (Object.keys(r.headers).length) init.push(`headers: ${JSON.stringify(r.headers, null, 2).replace(/\n/g, "\n  ")}`);
       if (r.body !== null) init.push(`body: JSON.stringify(${prettyOrRaw(r.body).replace(/\n/g, "\n  ")})`);
       return `const res = await fetch(${JSON.stringify(r.url)}, {\n  ${init.join(",\n  ")},\n});\nif (!res.ok) throw new Error(\`\${res.status}: \${await res.text()}\`);\nconst data = await res.json();`;
@@ -809,9 +814,17 @@
     if (schemeName) {
       const input = el("input", { type: "password", value: authValue(schemeName), autocomplete: "off", spellcheck: "false" });
       input.addEventListener("change", () => { store.sset(authKey(schemeName), input.value.trim()); refreshSnippets(); });
-      const what = scheme && scheme.type === "http" ? ["Bearer token (sent as ", el("code", {}, "authorization: Bearer …"), ")"] : [el("code", {}, (scheme && scheme.name) || "authorization"), " header value"];
-      form.append(el("fieldset", {}, el("legend", {}, `Auth: ${schemeName}`), el("label", {}, el("span", {}, ...what), input),
-        el("p", { class: "hint" }, "Remembered for this browser tab and applied to every operation that uses ", el("code", {}, schemeName), ". Closing the tab forgets it.")));
+      if (!scheme) {
+        form.append(el("fieldset", {}, el("legend", {}, `Auth: ${schemeName}`),
+          el("p", { class: "hint" }, "A custom scheme whose resolver reads the request itself; the application did not declare where the credential travels, so the panel sends nothing for it — see the operation's description and add the header or cookie yourself (declaring ", el("code", {}, "credential"), " on ", el("code", {}, "auth.custom"), " makes this panel fill it in).")));
+      } else if (scheme.in === "cookie") {
+        form.append(el("fieldset", {}, el("legend", {}, `Auth: ${schemeName}`),
+          el("p", { class: "hint" }, "Cookie ", el("code", {}, scheme.name), ": your browser sends the cookie the login operation set (the request goes out with ", el("code", {}, "credentials: include"), "); run the login operation first.")));
+      } else {
+        const what = scheme.type === "http" ? ["Bearer token (sent as ", el("code", {}, "authorization: Bearer …"), ")"] : scheme.in === "query" ? [el("code", {}, `?${scheme.name}=`), " query value"] : [el("code", {}, scheme.name || "authorization"), " header value"];
+        form.append(el("fieldset", {}, el("legend", {}, `Auth: ${schemeName}`), el("label", {}, el("span", {}, ...what), input),
+          el("p", { class: "hint" }, "Remembered for this browser tab and applied to every operation that uses ", el("code", {}, schemeName), ". Closing the tab forgets it.")));
+      }
     }
     // Parameters
     const inputs = [];
@@ -858,7 +871,7 @@
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const plan = currentPlan();
-      const init = { method: plan.method, headers: { ...plan.headers } };
+      const init = { method: plan.method, headers: { ...plan.headers }, credentials: plan.credentials };
       if (plan.body !== null) { init.body = plan.body; if (!bodySchema) init.headers["content-type"] = "text/plain"; }
       send.disabled = true; status.replaceChildren(); result.hidden = true;
       const t0 = performance.now();
@@ -1147,7 +1160,7 @@
     if (Object.keys(securitySchemes).length) {
       const sec = el("div", { class: "sec" }, el("h2", {}, "Authentication"), el("p", {}, "Resolved before the handler runs; a rejected credential is a 401 and the handler never runs. Try it remembers one value per scheme for this browser tab."));
       const dl = el("dl", { class: "rows" });
-      for (const [name, s] of Object.entries(securitySchemes)) dl.append(el("dt", {}, el("code", {}, name)), el("dd", {}, s.type === "http" ? [el("code", {}, "authorization: Bearer <token>")] : [el("code", {}, `${s.name || "authorization"}: <value>`), s.description ? ` (${s.description})` : ""]));
+      for (const [name, s] of Object.entries(securitySchemes)) dl.append(el("dt", {}, el("code", {}, name)), el("dd", {}, s.type === "http" ? [el("code", {}, "authorization: Bearer <token>")] : s.in === "cookie" ? [el("code", {}, `cookie: ${s.name}=<value>`), s.description ? ` (${s.description})` : ""] : s.in === "query" ? [el("code", {}, `?${s.name}=<value>`), s.description ? ` (${s.description})` : ""] : [el("code", {}, `${s.name || "authorization"}: <value>`), s.description ? ` (${s.description})` : ""]));
       sec.append(dl); frag.append(sec);
     }
     const contract = el("div", { class: "sec" }, el("h2", {}, "How work enters this application"),

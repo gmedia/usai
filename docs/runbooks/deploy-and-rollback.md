@@ -55,15 +55,16 @@ replicas):
   (Caddy: `health_uri /_usai/ready`, `health_interval 1s`, `lb_try_duration
   5s`, `lb_try_interval 250ms` — `scripts/qualification/p5/Caddyfile.replicas`).
   A request already sent to a replica that dies is not retried (it may not
-  be idempotent): a `kill -9` under load costs the requests in flight on that
-  replica and nothing else (measured: 1 of 40 543).
+  be idempotent): a `kill -9` under load costs at most the requests in flight
+  on that replica (measured: 1 of 40 543 in one run, 0 of 39 320 in another).
 - **Connection-bound worlds** on the restarted replica end at the drain
   bound (WebSocket `1012 server draining`, event streams ended); clients
   reconnect and land on the other replica. Held connections on the other
   replica are untouched.
 
-Result under 8 clients with one restart of each replica: 47 513 requests,
-0 × 502, 0 errors, ready again 1–2 s after each restart.
+Result under 8 clients with one restart of each replica (the final run,
+`2026-09-18-p5-p6-qualification.md` → Two replicas): 40 536 requests, 0 × 502,
+0 errors, ready again 3–4 s after each restart.
 
 ## Status behind a load balancer
 

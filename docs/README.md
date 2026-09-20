@@ -33,9 +33,9 @@ docs/
   ROADMAP.md                phases to production-ready (qualification, not capability)
   ACCEPTANCE-AUDIT.md       living: GOAL.md §53 items vs evidence
   measurements/             dated measurement reports (engineering evidence)
-  GUIDE.md                  developer guide (v0 preview)
+  GUIDE.md                  developer guide
   sdk/                      generated SDK reference (TypeDoc → markdown; never edit by hand)
-  LIFECYCLE-CONTRACTS.md    binding invariants C1–C13
+  LIFECYCLE-CONTRACTS.md    binding invariants C1–C18
   GLOSSARY.md               vocabulary (production + research-era)
   RESEARCH-REFERENCE.md     map to the (private) research evidence
   OPEN-QUESTIONS.md         living: undecided design questions

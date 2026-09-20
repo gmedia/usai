@@ -133,6 +133,7 @@ Vocabulary used throughout:
 | [HeaderOptions](interfaces/HeaderOptions.md) | Options for `auth.header`. |
 | [CustomOptions](interfaces/CustomOptions.md) | Options for `auth.custom`. |
 | [auth](variables/auth.md) | Declare an authentication boundary. Attach it to a workload with `auth: <declaration>`; `resolve` runs before the handler, with the workload's `ctx` (its declared resources) plus `ctx.request`, and the principal it returns is `ctx.auth`, typed. A missing credential or a thrown `errors.unauthorized()` answers 401 and the handler never runs. Authentication (who) lives here; authorization (may they) is business logic in the handler. One declaration is reused by reference across endpoints; its `name` is the OpenAPI security scheme. In v0 the resolver is application code and runs inside the request's world (ADR-0004); the rest of the boundary — routing, decoding, schema validation — runs before any world exists. |
+| [CredentialLocation](interfaces/CredentialLocation.md) | Where a custom scheme's credential travels: `{ in: "cookie", name: "sid" }`, `{ in: "header", name: "x-session" }`, `{ in: "query", name: "token" }`. |
 
 ## Errors
 

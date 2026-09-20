@@ -541,6 +541,7 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
                 ("retried", r.queue.retried),
                 ("dead", r.queue.dead),
                 ("invalid", r.queue.invalid),
+                ("reclaimed", r.queue.reclaimed),
             ]
             .into_iter()
             .map(move |(state, n)| (format!("revision=\"{}\",state=\"{state}\"", r.id), n as f64))

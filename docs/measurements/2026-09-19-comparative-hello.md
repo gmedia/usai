@@ -1,5 +1,10 @@
 # Comparative benchmark: the same hello endpoint on Usai, Node, Bun, Deno (2026-09-19)
 
+> Superseded for the per-request cost: this run predates P8, which halved the
+> hello path (`2026-09-19-p8-parity.md`); its "≈1 ms is the price of the model"
+> framing was wrong and is corrected there. Kept for the concurrency curve and
+> the disclosure.
+
 `scripts/qualification/bench/run.sh` on the research VM (16 × Xeon E5-2680
 v4): `GET /hello/world` answering `{"hello":"world"}` with a 400 for names
 over 40 characters — Usai 0.0.5 release binary serving the `examples/hello`

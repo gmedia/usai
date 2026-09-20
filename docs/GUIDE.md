@@ -1,4 +1,4 @@
-# Usai Developer Guide (v0 preview)
+# Usai Developer Guide (0.0.x)
 
 > Declare work. Declare resources. Write business logic. Run Usai.
 
@@ -136,7 +136,11 @@ export const createUser = http.post("/users", { body: NewUser, response: { 201: 
 - Paths: `:id` declares a parameter; a literal segment always wins over a parameter at the same position (`/invoices/summary` beats `/invoices/:id`, whatever the declaration order); the same method and path twice fails the build; an undeclared path is `404 route_not_found` before any world exists.
 - `summary` (one line) and `description` (a paragraph) on any workload's options feed the reference page and the OpenAPI document; `auth.bearer({ description })` documents the security scheme.
 - Raw endpoints: `http.raw("/webhook", async (ctx) => http.rawResponse(200, "ok"))` — exact bytes via `ctx.request.bytes()`, no contracts, documented as opaque.
-- Auth is a declared boundary: `const authed = auth.bearer({ resolve: async (ctx, token) => … })`, then `http.get("/me", { auth: authed }, async (ctx) => ctx.auth)`.
+- Auth is a declared boundary: `const authed = auth.bearer({ resolve: async (ctx, token) => … })`, then `http.get("/me", { auth: authed }, async (ctx) => ctx.auth)`. Three schemes: `auth.bearer` (`Authorization: Bearer`), `auth.header({ header })` (an API key), `auth.custom({ resolve, credential })` for anything else — the resolver reads `ctx.request` itself.
+- **Cookies.** A session cookie is a custom scheme: `auth.custom({ name: "session", credential: { in: "cookie", name: "sid" }, resolve: async (ctx) => { const sid = cookieValue(ctx.request.headers["cookie"], "sid"); … } })`; login sets it with the headers argument — `http.response(200, body, { "set-cookie": "sid=…; HttpOnly; Secure; SameSite=Lax; Path=/" })` — and logout clears it (`Max-Age=0`). `credential` is what makes the OpenAPI document say `apiKey in: cookie` and the reference's request panel send the browser's cookie (`credentials: include`); without it the document says only that a custom resolver reads the request, and never invents an `Authorization` header a generated client would send for nothing. There is no cookie parser or signer in the SDK (a few lines with `crypto.subtle` HMAC); the headers argument is a `Record<string, string>`, so one `Set-Cookie` per response.
+- **Deadline.** Every finite workload has one: `timeout: "5s"` in its options, **30 s by default**. At the deadline the world is cancelled — a query in flight is cancelled on the PostgreSQL server and its connection quarantined until the server confirms (C5), an open transaction rolls back — and the client gets `504 deadline_exceeded`. `usai_http_responses_total{class="5xx"}` and the world's log line carry it; the reference shows each operation's deadline.
+- **Body size.** The runtime reads at most `USAI_MAX_BODY_BYTES` (1 MiB by default) per request and answers `413 payload_too_large` above it, before any world exists. Raise it for a service that takes uploads on a raw route; keep it small everywhere else.
+- **Uploads.** There is no multipart parser: a file arrives on an `http.raw` route as the exact bytes (`ctx.request.bytes()`), parsed by the application (a `multipart/form-data` body is a few dozen lines) or, better, uploaded by the client straight to object storage with a presigned URL the application mints (HMAC-SHA256 is in `crypto.subtle`). A raw route cannot declare its request content type; the document lists it as opaque.
 
 An auth `resolve` runs **inside the request's world** with the workload's declared `resources` and `env` (`ctx.resources["main"]` works there — ADR-0004): a session lookup is one query, and `usai inspect` shows `auth: <name> (resolved in world)`. The order follows from that: **boundary validation comes first**, then the world, then the resolver — so an unauthenticated request with an invalid body gets the `400` (with its field-level issues), not a `401`, and only a request that passed its contracts costs a world. Both the missing credential (the SDK answers `unauthorized` before calling your resolver) and the wrong one (your resolver's `errors.unauthorized`) are decided in the world, so a `401` costs a world where a `400` does not. If the shape of a contract must not be visible to anonymous callers, put it behind a route whose contract is opaque (a raw endpoint) or accept that validation is public, as it is on any schema-first API.
 
@@ -183,6 +187,7 @@ export default defineApp({ workloads: [listUsers], resources: [db], env: env({ D
 ```
 
 - **Row types.** Rows come back as `Record<string, unknown>`; a typed response contract makes the compiler ask for more. Say what a row is once, from the schema you already have: `type TaskRow = z.infer<typeof Task>; sql.one<TaskRow>(…)`. Column aliases (`total_cents::int as "totalCents"`) shape the row to the contract. `timestamptz`/`timestamp`/`date` columns arrive as ISO-8601 strings (`2026-09-19T05:53:01.781761+00:00`) — do **not** cast them `::text`, which yields PostgreSQL's own form (`2026-09-19 12:53:01.78+07`) that JavaScript's `Date` does not parse reliably. `uuid`, `numeric`, enums and arrays arrive as strings, strings, strings and JSON arrays respectively. Response bodies are serialised with keys in sorted order, whatever order the query selected them in.
+- **Binary columns.** Parameters are JSON-typed at the boundary (there is no `Uint8Array` parameter): pass bytes to `bytea` as hex — `insert … values (decode($1, 'hex'))` with `Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("")` — and read them back with `encode(data, 'hex')`. A 1 MB file is a 2 MB parameter; fine for attachments, not for a media store (which belongs in object storage).
 - **Errors from SQL** arrive as `UsaiOperationError` with `err.usai.code` = `sql_<SQLSTATE>` (`sql_23505` for a unique violation, `sql_23503` foreign key, `sql_40001` serialization failure) and the server's message; connection loss is `connection_closed`, a full pool `resource_exhausted`. Catch by code: `if (isUsaiError(e) && e.usai.code === "sql_23505") throw errors.conflict("email taken")`.
 - `sql.query(text, params)` → rows; `sql.one(...)` → row or null; `sql.execute(...)` → affected count. Parameters are typed from the prepared statement (`$1::int`, uuid, jsonb, timestamptz, arrays, enums …) and encoded by the runtime; every other type (`interval`, `inet`, ranges, domains …) takes a string in its text form, parsed server-side like `'30 days'::interval`. A string that is not a valid uuid/timestamp for its slot is an `invalid_param` error (500) from the handler's point of view — validate boundary input with the schema first (`z.string().uuid()`). Timestamps accept ISO-8601 and PostgreSQL's own text output.
 - `sql.transaction(async (tx) => { … })` pins one connection for the callback: `tx.query/one/execute` run in one transaction, committed when the callback returns, rolled back when it throws (the error is rethrown). A handler that returns with the transaction still open is a lifecycle error — the runtime rolls back on its behalf and says so.
@@ -302,13 +307,47 @@ usai graph                     # workload → resource / dispatch graph
 usai bench --path /users -c 16 -d 30   # engineering load test
 ```
 
-Ctrl-C or SIGTERM first fails readiness and closes connections after their response for `--drain-grace` seconds (`USAI_DRAIN_GRACE`, default 2: a load balancer stops routing here before the listener closes — the zero-502 rolling restart, `docs/runbooks/deploy-and-rollback.md`), then drains in-flight work with a bound (`--drain-timeout <s>` / `USAI_DRAIN_TIMEOUT`, default 30 s; set the orchestrator's grace period above grace + drain — the compose files use 35 s); a second signal skips the grace, a third forces exit. Read `docs/THREAT-MODEL.md` before exposing anything.
+Under `usai run`, Ctrl-C or SIGTERM first fails readiness and closes connections after their response for `--drain-grace` seconds (`USAI_DRAIN_GRACE`, default 2: a load balancer stops routing here before the listener closes — the zero-502 rolling restart, `docs/runbooks/deploy-and-rollback.md`; `usai dev` has no balancer and closes its listener at once), then drains in-flight work with a bound (`--drain-timeout <s>` / `USAI_DRAIN_TIMEOUT`, default 30 s; set the orchestrator's grace period above grace + drain — the compose files use 35 s); a second signal skips the grace, a third forces exit. Read `docs/THREAT-MODEL.md` before exposing anything.
 
 What runs where: an instance started with `usai run` runs the HTTP listener, the cron scheduler, the queue consumers **and every `service()`** of the application, each on every replica unless switched off — `--no-cron` (keep exactly one), `--no-queue` (consumers share work safely; this dedicates replicas), `--no-services` (each instance that runs them has its own copy of every service). **One-shot commands never run services or consumers**: `usai app`, `usai task run`, `usai cron run`, `usai queue run`, `usai db migrate|status|seed` and the test harness's runtime activate the revision for exactly the world they were asked for, so a `db migrate` job does not start your ingest loop against production. `/_usai/status` `scheduler` and the `usai_scheduler{kind}` gauge say which of the three an instance runs.
 
 **What the app listener exposes.** Without `--status`, the application listener serves the application and nothing under `/_usai/`: status, metrics, health and the reference (`/_usai/docs`, `/_usai/openapi.json`) live on the status listener (`--status-addr`). `--status` puts them all on the app listener for development and trusted networks — then anyone who can reach the API can read per-route counters, the process's RSS and the *full* OpenAPI profile (environment variable names, cron schedules, queue message schemas). To publish the API reference to consumers, expose `/_usai/openapi.json?profile=public` through the proxy, or `usai generate openapi --public` into your docs.
 
 Health: `GET /_usai/live` (the process answers) and `GET /_usai/ready` (an active revision exists and every bound resource answers a 1 s probe — PostgreSQL runs `SELECT 1` on a leased connection; 503 names the failing resource; an empty `resources: {}` means every probe passed — only failures are listed). Route traffic on ready, restart on live. A `service()` that has exhausted its restart policy is `failed` in `/_usai/status` and `usai_service{state="failed"}` and logs `service gave up`; it does **not** make the instance unready (HTTP is still served) — alert on the gauge. `usai probe live|ready --addr <status listener>` is the same check as a command with exit code 0/1, for a container `HEALTHCHECK` or a Kubernetes probe in an image without curl.
+
+**What the proxy owns.** Four things an Express or Laravel application does in-process are the reverse proxy's here, on purpose: **CORS** (preflights and `Access-Control-*`, §9), **security headers** (`Strict-Transport-Security`, `X-Content-Type-Options`, `Content-Security-Policy` … — the runtime sets none and has no app-wide response-header hook; `http.response(status, body, headers)` sets them per response), **static files** (a world has no filesystem and the build has no asset loader — `import "./index.html"` fails; serve assets from the proxy or object storage; a small inline HTML string through `http.raw` is the exception) and the **access log** (below). One Caddy block covers all four:
+
+```caddyfile
+api.example.com {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+	@preflight method OPTIONS
+	handle @preflight {
+		header Access-Control-Allow-Origin https://app.example.com
+		header Access-Control-Allow-Methods "GET, POST, PATCH, DELETE"
+		header Access-Control-Allow-Headers "authorization, content-type"
+		header Access-Control-Allow-Credentials true
+		respond 204
+	}
+	header Access-Control-Allow-Origin https://app.example.com
+	header Access-Control-Allow-Credentials true
+	handle_path /assets/* {
+		root * /srv/assets
+		file_server
+	}
+	log {
+		output file /var/log/caddy/api.log
+	}
+	reverse_proxy app:3000 {
+		health_uri /_usai/ready
+		health_interval 1s
+		lb_try_duration 5s
+	}
+}
+```
 
 Per-request logging: there is no access log by design — 2xx and 4xx are counted (`usai_http_responses_total`, per-workload counts in `/_usai/status`), 5xx and lifecycle violations are logged with the workload and world, and `RUST_LOG=usai_runtime=debug` adds a per-world trace line (workload, termination, duration, ops). Put request logging in the proxy in front.
 
@@ -405,4 +444,4 @@ What building it as a user found (and what changed): outbound HTTP, `crypto`, pa
 
 ## 18. Performance note (v0)
 
-Per-world cost on the Wasm substrate is flat with respect to application size: instantiating a world from the pre-initialized image costs ~0.02 ms whatever the bundle contains, and validators declared as contracts are prepared before the image is snapshotted, so a fresh world does not rebuild them. On the research VM a contract-validated hello request is ~1 ms p50 at c=1 and the runtime serves ~13k req/s at c=16 on 16 cores; the numbers and their attribution are in `docs/measurements/`. Handler code runs in an interpreter compiled by Cranelift: CPU-heavy loops are slower than on a JIT; keep hot loops small or move them to the database.
+Per-world cost on the Wasm substrate is flat with respect to application size: instantiating a world from the pre-initialized image costs ~0.02 ms whatever the bundle contains, and validators declared as contracts are prepared before the image is snapshotted, so a fresh world does not rebuild them. Numbers belong with their conditions: a contract-validated hello request is 0.90 ms p50 at c=1 on the qualification VM (release build, pinned core, a soak as co-tenant — `docs/measurements/2026-09-19-p8-parity.md`), and the comparators on the same host are in the same report; quote from there, not from here. Handler code runs in an interpreter compiled by Cranelift: CPU-heavy loops are slower than on a JIT; keep hot loops small or move them to the database.

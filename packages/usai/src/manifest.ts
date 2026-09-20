@@ -81,7 +81,13 @@ export interface Manifest {
     config: Record<string, unknown>;
     env: string[];
   }>;
-  auth: Array<{ name: string; scheme: string; header?: string; description?: string }>;
+  auth: Array<{
+    name: string;
+    scheme: string;
+    header?: string;
+    description?: string;
+    credential?: { in: "header" | "cookie" | "query"; name: string };
+  }>;
   env: Array<{ name: string; kind: string; required: boolean; values: string[] }>;
   codeSha256: string;
   builtWith?: { sdk?: string; runtime?: string; abi?: number };
@@ -167,10 +173,7 @@ function trigger(workload: Workload): ManifestWorkload["trigger"] {
  * @category Build */
 export function describe(app: AppDeclaration): Manifest {
   const { workloads, resources } = flatten(app);
-  const authByName = new Map<
-    string,
-    { name: string; scheme: string; header?: string; description?: string }
-  >();
+  const authByName = new Map<string, Manifest["auth"][number]>();
   const manifestWorkloads: ManifestWorkload[] = workloads.map(({ workload, module }) => {
     if (workload.auth && !authByName.has(workload.auth.name)) {
       authByName.set(workload.auth.name, {
@@ -178,6 +181,7 @@ export function describe(app: AppDeclaration): Manifest {
         scheme: workload.auth.scheme,
         ...(workload.auth.header ? { header: workload.auth.header } : {}),
         ...(workload.auth.description ? { description: workload.auth.description } : {}),
+        ...(workload.auth.credential ? { credential: workload.auth.credential } : {}),
       });
     }
     const timeoutMs = parseDuration(workload.policies.timeout);

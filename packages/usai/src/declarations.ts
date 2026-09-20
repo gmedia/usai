@@ -34,10 +34,25 @@ export interface AuthDeclaration<Principal = unknown> {
   readonly description?: string;
   readonly scheme: "bearer" | "header" | "custom";
   readonly header?: string;
+  /** For a custom scheme: where the credential travels, so the OpenAPI
+   * document and the reference describe it truthfully (a cookie, a query
+   * parameter, a header). Without it the document says only that the
+   * resolver reads the request. */
+  readonly credential?: CredentialLocation;
   readonly resolve: (
     ctx: unknown,
     credential: string | undefined,
   ) => Principal | Promise<Principal>;
+}
+
+/** Where a custom scheme's credential travels: `{ in: "cookie", name: "sid" }`,
+ * `{ in: "header", name: "x-session" }`, `{ in: "query", name: "token" }`.
+ *
+ * @category Authentication
+ */
+export interface CredentialLocation {
+  readonly in: "header" | "cookie" | "query";
+  readonly name: string;
 }
 
 /** What `postgres(...)`, `cache.local(...)` and `httpClient(...)` return.

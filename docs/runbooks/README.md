@@ -2,8 +2,9 @@
 
 One page per incident class, written from the P5 operational campaign on a
 production-shaped deployment (Caddy → `usai run` in the runtime image →
-PostgreSQL 18, 8 load clients, ~1 100 req/s of real queries; evidence in
-`docs/measurements/2026-09-18-p5-operational-qualification.md`). Each says
+PostgreSQL 18, 8 closed-loop load clients: ≈1 000 req/s in the 40 s failure
+windows, ≈400 req/s averaged over the 24 h soak; evidence in
+`docs/measurements/2026-09-18-p5-p6-qualification.md`). Each says
 which metric moves, which log line appears, what the workloads do, and when
 and how recovery happens — without reading Rust.
 
@@ -17,6 +18,8 @@ and how recovery happens — without reading Rust.
 | Invalid configuration at start | [invalid-config.md](invalid-config.md) |
 | Disk full | [disk-full.md](disk-full.md) |
 | Queue messages failing / dead letters | [queue-dead-letter.md](queue-dead-letter.md) |
+| Every metric, its labels, and the alerts to set | [metrics.md](metrics.md) |
+| Running on a VM under systemd (deploy, rolling restart, rollback without Docker) | [systemd.md](systemd.md) |
 
 Where to look, always:
 

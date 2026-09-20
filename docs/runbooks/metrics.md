@@ -1,0 +1,99 @@
+# Metrics reference
+
+Every metric `GET /_usai/metrics` exposes (Prometheus text; the status
+listener, `--status-addr`, or the application listener with `--status`;
+behind `USAI_STATUS_TOKEN` when set). Generated from a running
+`examples/invoicing` on 2026-09-20; when a name here and the exposition
+disagree, the exposition is right and this page is stale.
+
+Two conventions: **levels are gauges, events are counters** (`usai_resource`
+is the pool's current level, `usai_resource_quarantines_total` the number of
+quarantines ever — alert on `increase()` of the second, never on the first
+as if it were cumulative), and **refusals decided before a world existed are
+counted separately** (`usai_http_rejections_total{reason}`) and are *not* in
+`usai_http_request_seconds`: a p99 that improves during a flood of bad
+requests is a trap, read the rejections beside it.
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `usai_scheduler` | gauge | kind | 1 when this instance runs the scheduler of that kind (cron: exactly one replica should) |
+| `usai_worlds_live` | gauge | — | Execution worlds currently alive |
+| `usai_worlds_created_total` | counter | — | Execution worlds created |
+| `usai_guest_cpu_seconds_total` | counter | — | Thread CPU time spent executing guest code, summed over worlds |
+| `usai_ops_live` | gauge | — | External operations with a live owner |
+| `usai_completions_total` | counter | outcome | Operation completions by routing outcome |
+| `usai_detached_work_total` | counter | — | Finite worlds that ended with live asynchronous work |
+| `usai_world_budget` | gauge | kind | Runtime world budget |
+| `usai_revision_in_flight` | gauge | application, revision, state | Work in flight per revision |
+| `usai_queue_messages_total` | counter | revision, state | Queue messages by outcome, per revision |
+| `usai_resource` | gauge | kind, metric, name | Resource manager state (current levels) |
+| `usai_resource_quarantines_total` | counter | kind, name | Connections quarantined because their outcome could not be proven (cumulative) |
+| `usai_tasks` | gauge | state | Dispatched task queue |
+| `usai_build_info` | gauge | version | Usai runtime version (label), always 1 |
+| `usai_process_start_time_seconds` | gauge | — | Unix time the runtime started |
+| `usai_process_resident_memory_bytes` | gauge | — | Resident set size |
+| `usai_process_proportional_memory_bytes` | gauge | — | Proportional set size (shared pages divided among their sharers): the honest per-process footprint |
+| `usai_process_virtual_memory_bytes` | gauge | — | Virtual size (address space reserved per world slot up front; not resident) |
+| `usai_process_resident_memory_peak_bytes` | gauge | — | Peak resident set size since start |
+| `usai_process_page_faults_total` | counter | kind | Page faults since start, by kind |
+| `usai_process_cpu_seconds_total` | counter | — | CPU consumed since start, user + system |
+| `usai_process_threads` | gauge | — | OS threads |
+| `usai_process_open_fds` | gauge | — | Open file descriptors |
+| `usai_http_workload_responses_total` | counter | class, workload | HTTP responses by workload and status class (refusals after routing included) |
+| `usai_http_requests_total` | counter | — | HTTP requests received |
+| `usai_http_responses_total` | counter | class | HTTP responses by status class |
+| `usai_http_rejected_before_world_total` | counter | — | Requests refused before any world existed |
+| `usai_http_rejections_total` | counter | reason | Requests refused before a world existed, by reason |
+| `usai_http_request_seconds` | histogram | le | Time to the response, by bucket |
+| `usai_http_upgrades_total` | counter | — | WebSocket upgrades |
+| `usai_http_streams_total` | counter | — | Streaming responses |
+
+Label values:
+
+- `usai_scheduler{kind}`: `cron`, `queue`, `services` — 1 when this instance
+  runs that scheduler; `sum by (kind) (usai_scheduler{kind="cron"})` across
+  replicas must be 1 (`SUPPORTED.md`: cron ticks on every instance that
+  schedules).
+- `usai_world_budget{kind}`: `in_use`, `max` (`--max-worlds`).
+- `usai_completions_total{outcome}`: `delivered`, `dropped_late`,
+  `rejected_stale` — a completion that arrived after its world ended is
+  dropped or rejected by design (C4), not lost work.
+- `usai_revision_in_flight{state}`: `Installed`, `Active`, `Draining`,
+  `Retired`.
+- `usai_service{state}`: `Starting`, `Running`, `Stopping`, `Stopped`,
+  `Failed` — `Failed` stays 1 when the restart policy is exhausted (log line
+  `service gave up`); it does not make the instance unready.
+- `usai_queue_messages_total{state}`: `claimed`, `done`, `retried`, `dead`,
+  `invalid`, `reclaimed` (claimed by a consumer that died, returned for
+  another attempt or dead-lettered). Per instance and revision, cumulative.
+  **Queue depth is not a metric** (it would cost a query per scrape):
+  `select topic, state, count(*) from usai_queue group by 1, 2` on the
+  backing database is the depth, and `usai_queue` rows in `ready` with an old
+  `available_at` are the lag.
+- `usai_resource{kind,name,metric}`: `kind` = `postgres`, `http.client`,
+  `cache.local`; `metric` = `in_use`, `max`.
+- `usai_tasks{state}`: `queued`, `running`, `completed`, `failed`, `lost`
+  (dispatched in memory and gone with a shutdown — ADR-0010).
+- `usai_http_rejections_total{reason}`: `route`, `validation`, `auth`,
+  `capacity`, `draining`, `other`.
+- `usai_http_responses_total{class}` and
+  `usai_http_workload_responses_total{workload,class}`: `2xx`, `3xx`, `4xx`,
+  `5xx`; a WebSocket upgrade (101) is a success and counts in
+  `usai_http_upgrades_total`, a committed stream in `usai_http_streams_total`.
+- `usai_process_page_faults_total{kind}`: `minor`, `major`.
+
+## Alerts worth setting from this page alone
+
+| Alert | Expression (PromQL shape) | Why |
+|---|---|---|
+| Capacity refusals | `increase(usai_http_rejections_total{reason="capacity"}[5m]) > 0` | the instance is refusing work before a world exists: raise `--max-worlds`, add a replica, or find the slow dependency (`overload.md`) |
+| Pool poisoned / database flapping | `increase(usai_resource_quarantines_total[5m]) > 0` while the database is healthy | a connection's outcome could not be proven (C5); a burst during a failover is expected, a steady trickle is a bug or a network problem (`postgres-down.md`) |
+| Pool saturated | `usai_resource{metric="in_use"} == on (kind,name) usai_resource{metric="max"}` for 1 m | queries wait; size `pool.max` against `--max-worlds` |
+| Detached work | `increase(usai_detached_work_total[1h]) > 0` | an application bug: a handler returned with work in flight (`500 detached_work`) |
+| Service gave up | `usai_service{state="Failed"} == 1` | the restart policy is exhausted; the instance stays ready, the service is down |
+| Cron on two replicas | `sum(usai_scheduler{kind="cron"}) > 1` | the schedule fires on each — start the others with `--no-cron` |
+| Memory drift | `usai_process_resident_memory_bytes` rising while `usai_worlds_live` is flat over hours | the plateau is `base + touched slots × 4 MiB` (`memory-pressure.md`); growth beyond it is a leak — report it with the soak samples |
+| Dead letters | `increase(usai_queue_messages_total{state="dead"}[15m]) > 0` | messages out of attempts (`queue-dead-letter.md`) |
+| Lost consumers | `increase(usai_queue_messages_total{state="reclaimed"}[15m]) > 0` | a consumer died mid-message (a crash, an OOM kill); the message was redelivered — look for the restart |
+| 5xx rate | `rate(usai_http_responses_total{class="5xx"}[5m])` | as for any service; `deadline_exceeded` (504) is in it |
+| Latency | `histogram_quantile(0.99, rate(usai_http_request_seconds_bucket[5m]))` | admitted requests only — read `usai_http_rejections_total` beside it |

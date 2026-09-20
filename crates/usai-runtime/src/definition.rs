@@ -381,6 +381,18 @@ pub struct AuthSpec {
     /// Where the credential comes from, for the OpenAPI security scheme.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// For a custom scheme: where the credential travels (declared by the
+    /// application; the resolver still reads the request itself).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential: Option<CredentialLocation>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CredentialLocation {
+    /// `header`, `cookie` or `query`.
+    #[serde(rename = "in")]
+    pub location: String,
+    pub name: String,
 }
 
 /// The serializable manifest. This is what `usai build` writes and what the

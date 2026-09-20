@@ -373,6 +373,14 @@ async fn serve_until_signal(
                 .and_then(|v| v.parse::<u64>().ok())
                 .map(Duration::from_secs)
                 .unwrap_or(HttpConfig::default().socket_idle_timeout),
+            // The request body bound, before any world exists (413 above it).
+            // 1 MiB by default; a service that takes uploads on a raw route
+            // raises it (USAI_MAX_BODY_BYTES, bytes).
+            max_body_bytes: std::env::var("USAI_MAX_BODY_BYTES")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .filter(|n| *n > 0)
+                .unwrap_or(HttpConfig::default().max_body_bytes),
             // Operator surfaces (status, metrics, docs) take a bearer token
             // when one is configured; the probes stay open.
             status_token: std::env::var("USAI_STATUS_TOKEN")
@@ -387,7 +395,6 @@ async fn serve_until_signal(
                         .collect()
                 })
                 .unwrap_or_default(),
-            ..HttpConfig::default()
         },
     );
     // A harness (`--announce`) wants a silent exit; `dev` narrates like `run`.

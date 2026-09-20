@@ -68,8 +68,8 @@ get → create on `examples/invoicing`), a status sample every 60 s.
 
 | Soak | Window | Result |
 |---|---|---|
-| 1 h | 2026-09-19 | 49 M worlds, 0 errors, RSS +0.9 % |
-| **24 h** | 2026-09-18 22:18 → 2026-09-19 22:19 UTC (86 374 s of load) | **34 978 737 ok, 0 × 4xx, 0 × 5xx, 0 × 503**, 9 client errors in **5 bad seconds** (below); p99 median 273.9 ms; RSS 54.8 → max 58.1 → 56.2 MiB at the end (1 416 samples); 35 007 080 worlds created, `liveWorlds` max 8 and 0 at the end, `detachedWorkDetected` 0, completions dropped late / rejected stale 0; PostgreSQL pool: 89.2 M operations, 3.50 M transactions, 9 cancelled, 6 rolled back for a dying world, **0 quarantined**, 8/8 available at the end |
+| 1 h (different setup: `usai bench -c 16` against the runtime directly, hello, no proxy — `2026-09-18-execution-path-attribution.md` §8) | 2026-09-18 | 49 M requests at 13.6k req/s, 0 errors, RSS +0.9 % |
+| **24 h** | 2026-09-18 22:18 → 2026-09-19 22:19 UTC (86 374 s of load; 8 closed-loop clients ≈ 405 req/s of list → get → create through the proxy) | **34 978 737 ok, 0 × 4xx, 0 × 5xx, 0 × 503**, 9 client errors in **5 bad seconds** (below); p99 median 273.9 ms; RSS 54.8 → max 58.1 → 56.2 MiB at the end (1 416 samples); 35 007 080 worlds created, `liveWorlds` max 8 and 0 at the end, `detachedWorkDetected` 0, completions dropped late / rejected stale 0; PostgreSQL pool: 89.2 M operations, 3.50 M transactions, 9 cancelled, 6 rolled back for a dying world, **0 quarantined**, 8/8 available at the end |
 | 72 h | started 2026-09-19 22:28 UTC → ends 2026-09-22 22:28 UTC | running; appended when it ends |
 
 **The 5 bad seconds** (t = 28 741–28 745 s and 40 325–40 326 s, p99 ≈ 10 001 ms

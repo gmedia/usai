@@ -1,6 +1,6 @@
 # Security policy
 
-Usai is a developer preview (`0.0.x`); see `SUPPORTED.md` for the envelope
+Usai is an alpha (`0.0.x`, production qualification in progress); see `SUPPORTED.md` for the envelope
 inside which reports are actionable and `docs/THREAT-MODEL.md` for what the
 runtime does and does not defend against. Worlds are **semantic isolation**,
 not a sandbox for hostile code (ADR-0008): a report that a malicious

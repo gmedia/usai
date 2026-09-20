@@ -13,7 +13,8 @@ build, and run on Usai without requiring Sakala or another deployment platform.
 
 **Alpha (0.0.x) — production qualification in progress.** Everything that
 exists has acceptance tests and ships from one tag (binaries, npm, Docker);
-a production-shaped deployment has been broken thirteen ways under load,
+a production-shaped deployment has been broken eleven ways under load
+(P5) and campaigned for reliability (P6),
 soaked for 24 hours (35 M requests, no runtime error), and run as two
 replicas behind one proxy — with the findings fixed. Still open: the 72 h
 soak, developers outside the project building from the docs alone
@@ -193,8 +194,8 @@ Three references, one per question:
 | What does `http.get` / `ctx.tasks.dispatch` / `postgres` take and promise? | [`docs/sdk/`](docs/sdk/README.md) — the SDK reference, generated from the source's doc comments |
 | What is *my* application and what happens when a request enters it? | `/_usai/docs` on a running application — the application reference, generated from the definition the runtime executes; `/_usai/openapi.json?profile=public` and `usai generate openapi --public` for the consumer contract |
 
-The developer surface is TypeScript and will change before the first
-developer preview.
+The developer surface is TypeScript; contracts may still change within
+`0.0.x` (`CHANGELOG.md` says what, `SUPPORTED.md` how upgrades work).
 
 ## Current implementation direction
 

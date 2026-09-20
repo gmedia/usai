@@ -10,7 +10,7 @@ the human summary.
 
 ## 0.0.6 — unreleased
 
-Since 0.0.5 (2026-09-19). Alpha, production qualification in progress: the
+Since 0.0.5 (2026-09-18). Alpha, production qualification in progress: the
 24 h soak, the failure campaigns, the connection campaign and the
 two-replica campaign passed; the 72 h soak is running.
 
@@ -62,6 +62,7 @@ two-replica campaign passed; the 72 h soak is running.
   (`new WebSocket(url, ["bearer", token])`); the runtime echoes
   `Sec-WebSocket-Protocol: bearer`. A 101 is counted as an upgrade, not a 5xx;
   `upgrades` and `streams` counters move.
+- **The request body bound is a knob**: `USAI_MAX_BODY_BYTES` (1 MiB default); the 413 names it.
 - **HTTP boundary**: a non-JSON body on a JSON contract is `415
   unsupported_media_type`; `405` carries `Allow`; a 500 whose code is not one of
   the runtime's own (`sql_22003`, a parameter position) is `internal` to the
@@ -95,6 +96,12 @@ two-replica campaign passed; the 72 h soak is running.
   `RawContext.request` documents `bytes()`, `text()`, `json()`.
 - `socket.accept` (sent by the SDK after auth) completes the upgrade; older
   bundles accept implicitly on the first receive/send.
+- `auth.custom({ credential: { in: "cookie" | "header" | "query", name } })`
+  declares where a custom scheme's credential travels: OpenAPI emits an
+  `apiKey` there and the reference's request panel sends it (a cookie via
+  `credentials: include`). Without it the document no longer invents an
+  `Authorization` header for a custom scheme — the operation is described as
+  custom-authenticated and no security scheme is emitted.
 - `usai/test`: `TestResponse.violations`; `app.queue(topic).deliver(message)`
   delivers one message to a consumer directly (the idempotency test).
 - The SDK stamps the guest ABI it speaks (`builtWith.abi`); the runtime
@@ -132,8 +139,16 @@ two-replica campaign passed; the 72 h soak is running.
 - GUIDE: what runs where, browser WebSocket credentials and CORS at the proxy,
   what the app listener exposes, readiness vs services, no access log by
   design, the envelope, `errors.unavailable` for a dependency that is down.
-- Runbooks updated (memory pressure, overload, restart, deploy/rollback);
-  production compose example with the status token, surfaces, `usai probe`.
+- Runbooks updated (memory pressure, overload, restart, deploy/rollback with
+  the rolling-restart contract); new: **metrics reference** (every metric,
+  labels, the alerts to set) and **systemd** (deploy, rolling restart,
+  rollback, runtime upgrade on a plain VM); production compose example with
+  the status token, surfaces, `usai probe`.
+- GUIDE: cookies (a custom scheme with `credential`, `Set-Cookie` through the
+  headers argument), the request body bound, uploads (raw bytes or presigned
+  object storage; no multipart parser), binary columns (hex), the default
+  30 s deadline and `504 deadline_exceeded`, and what the proxy owns — CORS,
+  security headers, static files, the access log — with one Caddy block.
 
 ### Qualification (evidence, not features)
 

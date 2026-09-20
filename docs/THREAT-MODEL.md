@@ -23,10 +23,10 @@
 
 | Threat | Control | Where |
 |---|---|---|
-| Oversized request bodies | `HttpConfig.max_body_bytes` (1 MiB default) → 413 before any world | `http/pipeline.rs` |
+| Oversized request bodies | the request body bound (1 MiB default; `USAI_MAX_BODY_BYTES`) → 413 before any world | `http/pipeline.rs` |
 | Malformed / invalid input reaching application code | JSON Schema validation before the world exists (C6); in-world provider validation otherwise | `http/pipeline.rs`, SDK |
 | Slow / hung handlers | per-invocation deadline (finite work), CPU-slice watchdog for runaway synchronous code | `world.rs` |
-| Memory exhaustion by one world | per-world heap limit (`QuickJsConfig.memory_limit`, 64 MiB default) and stack limit; the world faults, the runtime continues | `engine/quickjs.rs`, `hardening.rs` test |
+| Memory exhaustion by one world | per-world linear-memory bound (`WasmConfig.max_memory_bytes`, 64 MiB default, enforced by the pooling allocator) and the guest's own heap limit; the world faults, the runtime continues. The reference engine has the same bound (`QuickJsConfig.memory_limit`) | `engine/wasm.rs`, `engine/quickjs.rs`, `hardening.rs` test |
 | Unbounded concurrency | hierarchical budgets: runtime → application → workload → resource; refusal is immediate (503), never a queue inside a world | `admission.rs` |
 | Leaked async work extending a request's lifetime | detached-work detection and cancellation at the finite world's terminal state (C3) | `world.rs` |
 | Stale completions reaching a new world | identity-first routing gate; ledger deliverability | `world.rs`, `ownership.rs` |
@@ -45,7 +45,7 @@
 - **CPU is accounted, not scheduled.** Every world's guest CPU time is measured (thread CPU inside guest entries: `WorkResult.cpu`, the world trace's `cpu_us`, `usai_guest_cpu_seconds_total`) and one synchronous run is bounded by the CPU slice; there is no per-workload CPU share or fairness policy yet — a handler that awaits in a tight loop is bounded by its deadline.
 - **No durable tasks.** A crash loses locally dispatched tasks (ADR-0010); the queue substrate is durable because PostgreSQL is.
 - **No rate limiting per client.** Budgets are per workload/resource, not per caller.
-- **The artifact is trusted, including `cache/image.cwasm`.** The precompiled image is native code that `usai run` loads into the process when its digests match `image.json`; a party who can write the artifact directory can already replace `app.js` (which runs sandboxed with the application's full capabilities) and with `image.cwasm` could run native code. Deploy only artifacts you built; `USAI_PRECOMPILED=0` disables loading it; signing is the ADR-0005 follow-up.
+- **The artifact is trusted, including `cache/image.cwasm`.** The precompiled image is native code that `usai run` loads into the process when its digests match `image.json`; a party who can write the artifact directory can already replace `app.js` (which runs sandboxed with the application's full capabilities) and with `image.cwasm` could run native code. Deploy only artifacts you built, or require signatures (`usai build --sign` + `usai run --require-signature`, next section); `USAI_PRECOMPILED=0` disables loading the native image.
 - **No protection against a malicious build step.** `usai build` runs `node` and esbuild from the project's `node_modules`; the supply chain is the project's.
 
 ## Artifact integrity
@@ -75,7 +75,7 @@ application listener, and never publish the control port.
 1. Terminate TLS in front of Usai; use `sslmode=require` to PostgreSQL (with the provider's root in `tls.caFile`) or keep it on a private network.
 2. Do not pass `--status` on public listeners; scrape metrics from a private interface.
 3. Set `DATABASE_URL` and other declared env in the deployment environment; activation fails loudly if they are missing or malformed.
-4. Size `RuntimeConfig.max_worlds` and pool sizes to the host; watch `usai_world_budget` and `usai_resource{metric="quarantined"}`.
+4. Size `RuntimeConfig.max_worlds` and pool sizes to the host; watch `usai_world_budget`, `usai_worlds_live` and `usai_resource_quarantines_total`.
 5. Run `usai db migrate` as a deploy step, never at startup.
 6. Treat lifecycle `detached_work` warnings as application bugs.
 

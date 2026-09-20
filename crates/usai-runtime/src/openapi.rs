@@ -478,20 +478,45 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
                 .entry("401".to_owned())
                 .or_insert_with(|| json!({ "description": "Authentication failed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UsaiError" } } } }));
             if let Some(spec) = definition.auth(auth) {
-                let mut scheme = match spec.scheme.as_str() {
-                    "bearer" => json!({ "type": "http", "scheme": "bearer" }),
-                    "header" => {
-                        json!({ "type": "apiKey", "in": "header", "name": spec.header.clone().unwrap_or_default() })
-                    }
-                    _ => {
-                        json!({ "type": "apiKey", "in": "header", "name": "authorization", "description": "Custom authentication boundary" })
-                    }
+                let scheme = match spec.scheme.as_str() {
+                    "bearer" => Some(json!({ "type": "http", "scheme": "bearer" })),
+                    "header" => Some(
+                        json!({ "type": "apiKey", "in": "header", "name": spec.header.clone().unwrap_or_default() }),
+                    ),
+                    // A custom resolver reads the request itself; the document
+                    // describes the credential only where the application
+                    // declared it (a cookie, a query parameter, a header) and
+                    // never invents an `Authorization` header a generated
+                    // client would send for nothing.
+                    _ => spec
+                        .credential
+                        .as_ref()
+                        .map(|c| json!({ "type": "apiKey", "in": c.location, "name": c.name })),
                 };
-                if let Some(description) = &spec.description {
-                    scheme["description"] = json!(description);
+                match scheme {
+                    Some(mut scheme) => {
+                        if let Some(description) = &spec.description {
+                            scheme["description"] = json!(description);
+                        }
+                        security_schemes.insert(auth.clone(), scheme);
+                        operation["security"] = json!([{ auth: [] }]);
+                    }
+                    None => {
+                        let note = match &spec.description {
+                            Some(d) => format!("Authentication: custom scheme `{auth}` — {d}"),
+                            None => format!(
+                                "Authentication: custom scheme `{auth}`; the application's resolver reads the request itself (declare `credential` on `auth.custom` to document where the credential travels)"
+                            ),
+                        };
+                        let description =
+                            operation["description"].as_str().unwrap_or("").to_owned();
+                        operation["description"] = json!(if description.is_empty() {
+                            note
+                        } else {
+                            format!("{description}\n\n{note}")
+                        });
+                    }
                 }
-                security_schemes.insert(auth.clone(), scheme);
-                operation["security"] = json!([{ auth: [] }]);
             }
         }
         responses

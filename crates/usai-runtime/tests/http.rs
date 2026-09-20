@@ -897,6 +897,27 @@ async fn openapi_is_generated_from_the_definition() {
         doc["components"]["securitySchemes"]["token"]["scheme"],
         "bearer"
     );
+    // A custom scheme that declares its credential is an apiKey there; one
+    // that declares nothing gets no invented header — the operation says so.
+    assert_eq!(
+        doc["components"]["securitySchemes"]["session"],
+        json!({ "type": "apiKey", "in": "cookie", "name": "sid", "description": "the sid cookie set by /login" })
+    );
+    assert_eq!(
+        doc["paths"]["/me/cookie"]["get"]["security"],
+        json!([{ "session": [] }])
+    );
+    assert!(doc["components"]["securitySchemes"].get("opaque").is_none());
+    assert!(doc["paths"]["/me/opaque"]["get"].get("security").is_none());
+    assert!(
+        doc["paths"]["/me/opaque"]["get"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("custom scheme `opaque`"),
+        "{}",
+        doc["paths"]["/me/opaque"]["get"]
+    );
+    assert_eq!(doc["paths"]["/me/opaque"]["get"]["x-usai-auth"], "opaque");
     let webhook = &doc["paths"]["/webhook"]["post"];
     assert_eq!(
         webhook["x-usai-raw"], true,

@@ -34,6 +34,7 @@ export type {
   Workload,
   ResourceDeclaration,
   AuthDeclaration,
+  CredentialLocation,
   DeclaredError,
   Method,
   DefineAppOptions,

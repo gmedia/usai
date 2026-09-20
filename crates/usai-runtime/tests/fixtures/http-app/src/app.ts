@@ -83,6 +83,31 @@ export const persistent = http.post("/hits", { resources: [hits] }, async (ctx) 
 
 export const me = http.get("/me", { auth: authenticated }, async (ctx) => ctx.auth);
 
+// A session cookie: a custom scheme that declares where its credential
+// travels, so the OpenAPI document says `apiKey in: cookie` instead of
+// inventing an Authorization header; and one that declares nothing.
+const session = auth.custom({
+  name: "session",
+  description: "the sid cookie set by /login",
+  credential: { in: "cookie", name: "sid" },
+  resolve: async (ctx) => {
+    const cookie = ctx.request.headers["cookie"] ?? "";
+    const sid = cookie
+      .split(";")
+      .map((c) => c.trim())
+      .find((c) => c.startsWith("sid="))
+      ?.slice(4);
+    if (sid !== "s3ss10n") throw errors.unauthorized("no session");
+    return { userId: "u1" };
+  },
+});
+export const meByCookie = http.get("/me/cookie", { auth: session }, async (ctx) => ctx.auth);
+const opaque = auth.custom({
+  name: "opaque",
+  resolve: async () => ({ userId: "anyone" }),
+});
+export const meOpaque = http.get("/me/opaque", { auth: opaque }, async (ctx) => ctx.auth);
+
 // An operation's own failure surfacing through the handler (the shape a
 // PostgreSQL error has): the SQLSTATE is for the log, the client gets
 // `internal`.
@@ -478,6 +503,8 @@ export default defineApp({
     counter,
     persistent,
     me,
+    meByCookie,
+    meOpaque,
     boom,
     badShape,
     detach,

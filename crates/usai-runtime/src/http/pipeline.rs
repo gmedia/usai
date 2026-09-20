@@ -756,7 +756,10 @@ impl HttpHost {
                     Reply::error(
                         StatusCode::PAYLOAD_TOO_LARGE,
                         "payload_too_large",
-                        format!("body exceeds {} bytes", self.config.max_body_bytes),
+                        format!(
+                            "body exceeds {} bytes (the runtime's request body bound; USAI_MAX_BODY_BYTES raises it)",
+                            self.config.max_body_bytes
+                        ),
                     )
                 })?
                 .to_bytes();
