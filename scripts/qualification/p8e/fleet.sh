@@ -2,7 +2,9 @@
 # P8E — the efficiency envelope (docs/measurements/BENCHMARKS.md, scoreboard 2).
 #
 #   fleet.sh prepare                                  # artifacts, database, base image, node deps
-#   fleet.sh floor <hello|template> <mem_mib> <cpus> <max_worlds>   # one instance in a cgroup box
+#   fleet.sh floor <hello|template|node|php> <mem_mib> <cpus> <max_worlds>   # one instance in a cgroup box
+#                                                     (node: Node + Fastify, max_worlds ignored; php: the tuned
+#                                                     PHP-FPM + nginx compose with the cell's limits, max_worlds = children)
 #   fleet.sh density <usai|node> <n> [minutes]        # n bare processes, mostly idle, one bursting
 #   fleet.sh report <run_dir>                         # tables from the samples
 #
@@ -54,27 +56,54 @@ prepare() {
 floor() {
   local app="$1" mem="$2" cpus="$3" worlds="$4"
   local root port status
-  case "$app" in hello) root="$HELLO";; template) root="$TEMPLATE";; *) echo "floor: hello|template"; exit 2;; esac
+  case "$app" in hello) root="$HELLO";; template) root="$TEMPLATE";; node|php) root="";; *) echo "floor: hello|template|node|php"; exit 2;; esac
   port=3800; status=3801
   local name="p8e-floor" cell="$app-${mem}m-${cpus}c-${worlds}w${USAI_WASM_KEEP_RESIDENT:+-kr$USAI_WASM_KEEP_RESIDENT}"
   local dir="$OUT/floor-$cell"; mkdir -p "$dir"
   PHASES="$dir/phases.jsonl"
   log "== floor $cell"
   docker rm -f "$name" >/dev/null 2>&1 || true
-  # Runs as the invoking user so the sampler may read /proc/<pid>/smaps_rollup
-  # and fd (root-owned processes hide them from it); no compile cache, the
-  # artifact is precompiled and the filesystem is read-only.
-  docker run -d --name "$name" --network host --user "$(id -u):$(id -g)" \
-    --cpus "$cpus" --memory "${mem}m" --memory-swap "${mem}m" ${PIN:+--cpuset-cpus "$PIN"} \
-    -v "$USAI:/usai:ro" -v "$root:/app:ro" -w /app --read-only --tmpfs /tmp \
-    -e HOME=/tmp -e USAI_COMPILE_CACHE=0 -e DATABASE_URL="$DATABASE_URL" -e USAI_MAX_WORLDS="$worlds" \
-    ${USAI_WASM_KEEP_RESIDENT:+-e USAI_WASM_KEEP_RESIDENT="$USAI_WASM_KEEP_RESIDENT"} \
-    "$BASE_IMAGE" /usai run --artifact /app/.usai/build --port "$port" --status-addr "127.0.0.1:$status" --drain-timeout 5 \
-    > "$dir/container.id"
+  # The readiness URL and the sampler label differ per comparator: Usai has a
+  # status listener; Node answers /health on the app port; PHP is a compose
+  # project (fpm master + children + nginx) whose limits come from the cell.
+  local ready_url="http://127.0.0.1:$status/_usai/ready" label="usai"
+  case "$app" in
+    hello|template)
+      # Runs as the invoking user so the sampler may read /proc/<pid>/smaps_rollup
+      # and fd (root-owned processes hide them from it); no compile cache, the
+      # artifact is precompiled and the filesystem is read-only.
+      docker run -d --name "$name" --network host --user "$(id -u):$(id -g)" \
+        --cpus "$cpus" --memory "${mem}m" --memory-swap "${mem}m" ${PIN:+--cpuset-cpus "$PIN"} \
+        -v "$USAI:/usai:ro" -v "$root:/app:ro" -w /app --read-only --tmpfs /tmp \
+        -e HOME=/tmp -e USAI_COMPILE_CACHE=0 -e DATABASE_URL="$DATABASE_URL" -e USAI_MAX_WORLDS="$worlds" \
+        ${USAI_WASM_KEEP_RESIDENT:+-e USAI_WASM_KEEP_RESIDENT="$USAI_WASM_KEEP_RESIDENT"} \
+        "$BASE_IMAGE" /usai run --artifact /app/.usai/build --port "$port" --status-addr "127.0.0.1:$status" --drain-timeout 5 \
+        > "$dir/container.id";;
+    node)
+      # The host's Node (bind-mounted with the bench's node_modules) in the same
+      # box: Fastify + pg pool 4, the template's routes.
+      local node_dir; node_dir="$(cd "$(dirname "$(command -v "$NODE")")/.." && pwd)"
+      ready_url="http://127.0.0.1:$port/health"; label="node+"
+      docker run -d --name "$name" --network host --user "$(id -u):$(id -g)" \
+        --cpus "$cpus" --memory "${mem}m" --memory-swap "${mem}m" ${PIN:+--cpuset-cpus "$PIN"} \
+        -v "$node_dir:/node:ro" -v "$repo/scripts/qualification/bench:/bench:ro" -w /bench --read-only --tmpfs /tmp \
+        -e HOME=/tmp -e DATABASE_URL="$DATABASE_URL" -e PORT="$port" -e POOL_MAX=4 \
+        "$BASE_IMAGE" /node/bin/node baselines/node-fastify/server.mjs \
+        > "$dir/container.id";;
+    php)
+      # The tuned PHP-FPM compose (opcache + JIT, pm=static <worlds> children)
+      # with the cell's memory and cpu limits on the php service; nginx unlimited.
+      ready_url="http://127.0.0.1:3006/health"; label="php+"
+      (cd "$repo/scripts/qualification/bench/baselines/php" && PHP_PROFILE=tuned PHP_CHILDREN="$worlds" PHP_PORT=3006 \
+        PHP_MEM_LIMIT="${mem}m" PHP_CPUS="$cpus" PHP_CPUSET="${PIN:-}" DATABASE_URL="${DATABASE_URL//127.0.0.1/host.docker.internal}" \
+        docker compose up -d --build > "$dir/compose.log" 2>&1)
+      name=$(cd "$repo/scripts/qualification/bench/baselines/php" && docker compose ps -q php)
+      port=3006;;
+  esac
   local started; started=$(date +%s.%N)
   local ready=""
   for _ in $(seq 1 120); do
-    if curl -sf -m 5 "http://127.0.0.1:$status/_usai/ready" >/dev/null 2>&1; then ready=$(date +%s.%N); break; fi
+    if curl -sf -m 5 "$ready_url" >/dev/null 2>&1; then ready=$(date +%s.%N); break; fi
     if [ "$(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null)" != "true" ]; then break; fi
     sleep 0.5
   done
@@ -83,11 +112,17 @@ floor() {
     log "  did not become ready (OOMKilled=$(docker inspect -f '{{.State.OOMKilled}}' "$name" 2>/dev/null))"
     docker logs "$name" > "$dir/server.log" 2>&1 || true
     echo "{\"cell\":\"$cell\",\"pass\":false,\"reason\":\"not ready\"}" > "$dir/result.json"
-    docker rm -f "$name" >/dev/null 2>&1 || true
+    floor_teardown "$app" "$name"
     return 0
   fi
   echo "ready_seconds $(echo "$ready - $started" | bc)" > "$dir/timing.txt"
-  "$here/sample.sh" "$dir/samples.jsonl" "usai:$pid" & local sampler=$!
+  local sampled="$label:$pid"
+  if [ "$app" = php ]; then
+    local nginx; nginx=$(docker inspect -f '{{.State.Pid}}' "$(cd "$repo/scripts/qualification/bench/baselines/php" && docker compose ps -q nginx)" 2>/dev/null || echo 0)
+    sampled="$sampled nginx+:$nginx"
+  fi
+  # shellcheck disable=SC2086
+  "$here/sample.sh" "$dir/samples.jsonl" $sampled & local sampler=$!
   local base="http://127.0.0.1:$port"
   # Phases: idle → load → idle. The template gets the production pattern.
   if [ "$app" = hello ]; then
@@ -104,15 +139,22 @@ floor() {
   # Verdict inputs: OOM, errors, readiness at the end.
   local oom; oom=$(docker inspect -f '{{.State.OOMKilled}}' "$name" 2>/dev/null || echo unknown)
   local running; running=$(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null || echo false)
-  local ready_end=false; curl -sf -m 5 "http://127.0.0.1:$status/_usai/ready" >/dev/null 2>&1 && ready_end=true
-  curl -s -m 5 "http://127.0.0.1:$status/_usai/status" > "$dir/status.json" 2>/dev/null || true
-  curl -s -m 5 "http://127.0.0.1:$status/_usai/metrics" > "$dir/metrics.txt" 2>/dev/null || true
+  local ready_end=false; curl -sf -m 5 "$ready_url" >/dev/null 2>&1 && ready_end=true
+  if [ "$label" = usai ]; then
+    curl -s -m 5 "http://127.0.0.1:$status/_usai/status" > "$dir/status.json" 2>/dev/null || true
+    curl -s -m 5 "http://127.0.0.1:$status/_usai/metrics" > "$dir/metrics.txt" 2>/dev/null || true
+  fi
   kill "$sampler" 2>/dev/null || true; wait "$sampler" 2>/dev/null || true
   docker logs "$name" > "$dir/server.log" 2>&1 || true
-  docker stop -t 10 "$name" >/dev/null 2>&1 || true
-  docker rm -f "$name" >/dev/null 2>&1 || true
+  floor_teardown "$app" "$name"
   echo "{\"cell\":\"$cell\",\"app\":\"$app\",\"memMib\":$mem,\"cpus\":$cpus,\"worlds\":$worlds,\"oomKilled\":$oom,\"runningAtEnd\":$running,\"readyAtEnd\":$ready_end}" > "$dir/result.json"
   log "  done: oom=$oom running=$running ready=$ready_end"
+}
+
+floor_teardown() {
+  if [ "$1" = php ]; then (cd "$repo/scripts/qualification/bench/baselines/php" && docker compose down >/dev/null 2>&1); return; fi
+  docker stop -t 10 "$2" >/dev/null 2>&1 || true
+  docker rm -f "$2" >/dev/null 2>&1 || true
 }
 
 # A phase writes a marker line into the run's phase log so the report can cut

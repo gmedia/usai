@@ -96,9 +96,9 @@ start_server() {
     bun)  pin_server env PORT=$port bun run "$here/baselines/bun-hono/server.ts" > "$logf" 2>&1 & SERVER_PID=$!;;
     deno) pin_server env PORT=$port deno run -A --quiet "$here/baselines/deno-hono/server.ts" > "$logf" 2>&1 & SERVER_PID=$!;;
     rust) pin_server env PORT=$port "$here/baselines/rust-axum/target/release/bench-rust-axum" > "$logf" 2>&1 & SERVER_PID=$!;;
-    php)  (cd "$here/baselines/php" && PHP_PROFILE=shipped PHP_PORT=3005 DATABASE_URL="${DATABASE_URL//127.0.0.1/host.docker.internal}" docker compose up -d --build > "$logf" 2>&1); SERVER_PID="";;
-    php-tuned) (cd "$here/baselines/php" && PHP_PROFILE=tuned PHP_CHILDREN="$PHP_CHILDREN" PHP_PORT=3006 DATABASE_URL="${DATABASE_URL//127.0.0.1/host.docker.internal}" docker compose up -d --build > "$logf" 2>&1); SERVER_PID="";;
-    laravel-fpm) (cd "$here/baselines/laravel" && PHP_CHILDREN="$PHP_CHILDREN" DATABASE_URL="${DATABASE_URL//127.0.0.1/host.docker.internal}" docker compose up -d --build > "$logf" 2>&1); SERVER_PID="";;
+    php)  (cd "$here/baselines/php" && PHP_PROFILE=shipped PHP_PORT=3005 PHP_CPUSET="${PIN_SERVER:-}" DATABASE_URL="${DATABASE_URL//127.0.0.1/host.docker.internal}" docker compose up -d --build > "$logf" 2>&1); SERVER_PID="";;
+    php-tuned) (cd "$here/baselines/php" && PHP_PROFILE=tuned PHP_CHILDREN="$PHP_CHILDREN" PHP_PORT=3006 PHP_CPUSET="${PIN_SERVER:-}" DATABASE_URL="${DATABASE_URL//127.0.0.1/host.docker.internal}" docker compose up -d --build > "$logf" 2>&1); SERVER_PID="";;
+    laravel-fpm) (cd "$here/baselines/laravel" && PHP_CHILDREN="$PHP_CHILDREN" PHP_CPUSET="${PIN_SERVER:-}" DATABASE_URL="${DATABASE_URL//127.0.0.1/host.docker.internal}" docker compose up -d --build > "$logf" 2>&1); SERVER_PID="";;
   esac
   for i in $(seq 1 200); do curl -s -m 1 -o /dev/null "http://127.0.0.1:$port/health" && return 0; sleep 0.1; done
   log "$name did not start (see $logf)"; return 1

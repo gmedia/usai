@@ -11,6 +11,7 @@ services:
       DB_URL: ${DATABASE_URL}
       DATABASE_URL: ${DATABASE_URL}
     extra_hosts: ["host.docker.internal:host-gateway"]
+    cpuset: ${PHP_CPUSET:-}
   nginx:
     image: nginx:1.27-alpine
     ports: ["${LARAVEL_PORT:-3007}:3007"]

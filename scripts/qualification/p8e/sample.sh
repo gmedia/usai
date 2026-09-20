@@ -3,6 +3,9 @@
 #
 #   sample.sh <out.jsonl> <label:pid> [<label:pid> ...]
 #
+# A label ending in `+` (`php+:123`) also covers the pid's descendants at each
+# tick — an FPM master and its children, a Node cluster and its workers.
+#
 # Per process: RSS and PSS (KiB, from /proc/<pid>/status and smaps_rollup —
 # PSS divides shared pages among their sharers and is the honest number when
 # several processes map the same file), VmSize, minor/major faults, CPU
@@ -25,13 +28,26 @@ read_stat() { # pid -> "minflt majflt utime+stime stime"
   echo "$rest" | awk '{print $8, $10, $12+$13, $13}'
 }
 
+descendants() { # pid -> every descendant pid, one per line
+  local kids; kids=$(pgrep -P "$1" 2>/dev/null) || return 0
+  for k in $kids; do echo "$k"; descendants "$k"; done
+}
+
 while :; do
   now=$(date -u +%s.%N)
   avail=$(awk '/MemAvailable/ {print $2}' /proc/meminfo)
   read -r ctxt intr < <(awk '/^ctxt/ {c=$2} /^intr/ {i=$2} END {print c, i}' /proc/stat)
   alive=0
   entries=""
+  expanded=()
   for p in "${procs[@]}"; do
+    label="${p%%:*}"; pid="${p##*:}"
+    expanded+=("$p")
+    if [ "${label%+}" != "$label" ]; then
+      for child in $(descendants "$pid"); do expanded+=("${label%+}:$child"); done
+    fi
+  done
+  for p in "${expanded[@]}"; do
     label="${p%%:*}"; pid="${p##*:}"
     [ -d "/proc/$pid" ] || continue
     alive=$((alive + 1))

@@ -16,6 +16,11 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
     extra_hosts: ["host.docker.internal:host-gateway"]
+    # Limits for the P8E floor cells (fleet.sh floor php …); unlimited by default.
+    mem_limit: ${PHP_MEM_LIMIT:-0}
+    memswap_limit: ${PHP_MEM_LIMIT:-0}
+    cpus: ${PHP_CPUS:-0}
+    cpuset: ${PHP_CPUSET:-}
   nginx:
     image: nginx:1.27-alpine
     ports: ["${PHP_PORT:-3005}:3005"]
