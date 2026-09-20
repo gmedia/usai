@@ -192,11 +192,13 @@ impl ResourceProvider for PostgresProvider {
         Ok(Arc::new(Postgres {
             identity,
             pool,
-            health: Mutex::new(Health {
-                ready: true,
-                last_error: None,
-                since: std::time::Instant::now(),
-            }),
+            health: Health {
+                ready: std::sync::atomic::AtomicBool::new(true),
+                detail: Mutex::new(HealthDetail {
+                    last_error: None,
+                    since: std::time::Instant::now(),
+                }),
+            },
             endpoint,
             user,
             max: max as u32,
@@ -225,7 +227,13 @@ struct Counters {
 /// again after the next successful operation or probe. A per-query error
 /// (a constraint, a syntax error) is the query's, not the database's.
 struct Health {
-    ready: bool,
+    /// Read on every successful call (one atomic load — the hot path never
+    /// takes the lock while the database is fine).
+    ready: std::sync::atomic::AtomicBool,
+    detail: Mutex<HealthDetail>,
+}
+
+struct HealthDetail {
     last_error: Option<String>,
     since: std::time::Instant,
 }
@@ -233,7 +241,7 @@ struct Health {
 pub struct Postgres {
     identity: ResourceIdentity,
     pool: Pool,
-    health: Mutex<Health>,
+    health: Health,
     /// `host:port[, …]` and user, for messages (never the password).
     endpoint: String,
     user: String,
@@ -830,12 +838,13 @@ impl Postgres {
     fn observe<T>(&self, result: &Result<T, ResourceError>) {
         match result {
             Ok(_) => {
-                let mut health = self.health.lock().expect("health poisoned");
-                if !health.ready {
-                    tracing::info!(resource = %self.identity.name, "database reachable again");
-                    health.ready = true;
-                    health.last_error = None;
-                    health.since = std::time::Instant::now();
+                if !self.health.ready.load(Ordering::Relaxed) {
+                    let mut detail = self.health.detail.lock().expect("health poisoned");
+                    if !self.health.ready.swap(true, Ordering::SeqCst) {
+                        tracing::info!(resource = %self.identity.name, "database reachable again");
+                        detail.last_error = None;
+                        detail.since = std::time::Instant::now();
+                    }
                 }
             }
             Err(ResourceError::Operation { code, message, .. }) if connection_level(code) => {
@@ -846,12 +855,11 @@ impl Postgres {
     }
 
     fn mark_unready(&self, error: &str) {
-        let mut health = self.health.lock().expect("health poisoned");
-        if health.ready {
-            health.ready = false;
-            health.since = std::time::Instant::now();
+        let mut detail = self.health.detail.lock().expect("health poisoned");
+        if self.health.ready.swap(false, Ordering::SeqCst) {
+            detail.since = std::time::Instant::now();
         }
-        health.last_error = Some(error.to_owned());
+        detail.last_error = Some(error.to_owned());
     }
 
     async fn call_inner(
@@ -1052,7 +1060,7 @@ impl Postgres {
         detail.insert("available".into(), json!(status.available));
         detail.insert("waiting".into(), json!(status.waiting));
         let ready = {
-            let health = self.health.lock().expect("health poisoned");
+            let health = self.health.detail.lock().expect("health poisoned");
             if let Some(error) = &health.last_error {
                 detail.insert("lastError".into(), json!(error));
                 detail.insert(
@@ -1060,7 +1068,7 @@ impl Postgres {
                     json!(health.since.elapsed().as_secs()),
                 );
             }
-            health.ready
+            self.health.ready.load(Ordering::SeqCst)
         };
         ResourceStatus {
             identity: self.identity.clone(),
