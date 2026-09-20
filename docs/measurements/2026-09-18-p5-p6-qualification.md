@@ -144,6 +144,47 @@ campaign kills the process from the host); and a message redelivered after a
 reclaim is a duplicate the consumer must tolerate — at-least-once was always
 the contract, this is one of the ways it shows.
 
+## Queue throughput (`scripts/qualification/queue/run.sh`, 2026-09-20)
+
+What the PostgreSQL-backed queue does per second. Application: one consumer
+doing the smallest real work (one `INSERT` recording the message), a
+publisher command, a producer route. Host: VM 47, apps pinned to cpus 12–15
+**shared with `bench-postgres`** (PostgreSQL 18 in Docker, `fsync` on, a
+≈12 ms commit on this disk) and the 72 h soak as co-tenant on cpus 0–11.
+Per cell: 20 000 messages published first (32 in flight from one world), then
+the consumers started and the drain timed from launch to the last `done`.
+
+Four runs during the day, each after a fix the previous one exposed:
+
+| Run | Change | c=4 × 1 | c=8 × 1 | c=16 × 1 | c=4 × 2 | c=8 × 2 | c=16 × 2 | publishes/s (32 in flight) |
+|---|---|---|---|---|---|---|---|---|
+| 1 | as it was | 93 | 128 | 205 | — | — | — | 320–370 |
+| 2 | **publish prepared the schema on every call** (`CREATE TABLE IF NOT EXISTS` + `CREATE INDEX IF NOT EXISTS` per message, two DDL statements and their catalog locks) → once per database per process | 96 | 164 | 205 | 157 | 206 | 242 | 1 100–1 500 |
+| 3 | **the claim sorted every ready row** (`ORDER BY id LIMIT 1` over `(topic, available_at)` → 13 ms per claim at 20 000 ready) → `usai_queue_claim (topic, id) WHERE state = 'ready'`, three buffer reads whatever the backlog | 108 | 215 | 388 | 204 | 443 | 658 | 990–1 500 |
+| 4 | **the queue's own marks committed synchronously** (claim, done, retry: two fsyncs per message beside the handler's) → `synchronous_commit = off` for those statements only (a lost mark is one redelivery, which at-least-once already allows); an empty claim retries once before sleeping | **209** | **460** | **712** | **473** | 291 † | **956** | 1 100–1 650 |
+| ceiling | run 4 with `synchronous_commit = off` on the whole database (engineering ceiling, not a recommendation) | — | 1 016 | — | — | — | — | 5 450 |
+
+† one noisy cell (the two instances and PostgreSQL share four cores with
+the load generator); the other five cells of run 4 scale as expected.
+
+Producer route (`POST /enqueue`, one message per request, consumers up):
+10–12 ms per publish for one sequential client — a fresh world plus one
+synchronous commit — and 570–900 publishes/s at 16 clients; 3.5 ms / 1 650
+publishes/s without fsync. Claim-to-run latency in these cells is the backlog
+(everything was published first), not the queue's reaction time; the
+consumers poll every 250 ms when the topic is empty and claim at once while
+it is not.
+
+Reading. The queue is bound by **the database's commit latency times the
+commits per message**, which is now one (the handler's own write) plus
+round trips: on a 12 ms-fsync disk that is ≈45–50 messages per second per
+worker, linear in `concurrency` and in instances; on a disk with a 1 ms
+fsync, expect roughly ten times that. The runtime's own cost per message
+(a fresh world, the claim and the mark) is what the `synchronous_commit =
+off` row measures: ≈8 ms of worker time, ≈1 000 messages/s for eight
+workers on one instance. 5× over the day's first run, all of it in the
+queue's use of the database, none of it in the model.
+
 ## Not done here
 
 Three or more replicas, a replica set across hosts (the queue and the

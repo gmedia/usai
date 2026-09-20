@@ -14,6 +14,7 @@ four scoreboards; a reader who wants one number is reading the wrong document.
 | **hello** (class A) | the runtime tax microscope: what a request costs when the handler does nothing | `suite.sh invoice` / `sweep` |
 | **contracts and PostgreSQL** (classes B–F) | product economics: what the tax is relative to real work | `suite.sh invoice` / `sweep` |
 | **soak, failure, churn** | production trust: what happens over days and under harm | `scripts/qualification/p5`, `p6` (`docs/measurements/2026-09-18-p5-p6-qualification.md`) |
+| **queue** | what the PostgreSQL-backed queue does per second, per consumer concurrency and instance count, and what bounds it | `scripts/qualification/queue` (`2026-09-18-p5-p6-qualification.md` → Queue throughput) |
 | **floors, residency, density** | efficiency: what an application costs when it does mostly nothing, and how small a host runs it | `scripts/qualification/p8e` (`docs/measurements/2026-09-20-p8e-efficiency.md`) |
 
 Hello stays in the suite forever — when the hot path improves, hello is where
