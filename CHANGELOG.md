@@ -346,7 +346,39 @@ two-replica campaign passed; the 72 h soak is running.
   `USAI_DRAIN_GRACE`, `USAI_DIAGNOSTICS`, `USAI_SOCKET_IDLE_TIMEOUT`. One
   default changed: a SIGTERM now takes 2 s longer to close the listener
   (`USAI_DRAIN_GRACE=0` restores the old behaviour); orchestrator grace
-  periods sized as drain + 5 s still cover it.
+  periods sized as drain + 5 s still cover it. `USAI_MAX_BODY_BYTES`,
+  `USAI_CONTROL_TOKEN` and the tuning knobs are listed in `docs/ENVIRONMENT.md`.
+- **Log pipelines**: a 5xx line's error text moved from a second `message`
+  key to `error`; a database outage is one `WARN dependency unavailable` per
+  code per second (with `suppressed`) instead of an `ERROR` per request;
+  `revision retired` now also appears after a timed-out drain (with
+  `cancelled_in_flight`). Application log lines gain `request_id` and
+  `fields`.
+- **Metrics**: state label values of `usai_revision_in_flight` and
+  `usai_service` are lowercase (`active`, `failed`) — alerts written with
+  `Active`/`Failed` match nothing; `usai_http_request_seconds` no longer
+  counts refusals decided before a world (a p99 may rise, honestly);
+  `usai_resource{metric="ready"}`, `usai_cron_ticks_total`,
+  `usai_http_streams_failed_total` and the `reclaimed` queue state are new.
+- **PostgreSQL**: `usai_queue` gains a `request_id` column, added with
+  `ALTER TABLE … ADD COLUMN IF NOT EXISTS` on the first use by a 0.0.6
+  process (a brief exclusive lock, once); `usai_cron_ticks` is created when a
+  schedule is `exclusive`. A 0.0.5 and a 0.0.6 runtime can share the queue
+  table during a rolling upgrade.
+- **OpenAPI consumers**: error responses are `allOf [UsaiError, { error.code
+  enum }]` rather than a bare `$ref` (a generator sees a narrower type, a
+  reader sees the same envelope); descriptions read `Not Found: code
+  not_found` in both profiles (the public profile used to say `Error code:
+  not_found`); `x-usai-validated` has a third value, `both`; a raw `GET` lost
+  its `requestBody`; new components `<OperationId>Incoming/Outgoing` and
+  `<OperationId>Event<Name>` appear when sockets and streams declare them.
+- **Test harness**: the runtime under `testApp` now logs JSON at
+  `RUST_LOG=warn,app=info` (set `RUST_LOG` to change it); its stderr is
+  forwarded as before. `HttpHandlerResult` accepts a bodiless
+  `HttpResponse<null>` — code that narrowed on it may need a type
+  annotation, nothing at runtime.
+- **Auth resolvers** whose `ctx.resources` was cast keep working; declaring
+  `resources` on the scheme removes the cast and the per-route listing.
 
 Draft tag message:
 
