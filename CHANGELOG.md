@@ -62,6 +62,9 @@ two-replica campaign passed; the 72 h soak is running.
   (`new WebSocket(url, ["bearer", token])`); the runtime echoes
   `Sec-WebSocket-Protocol: bearer`. A 101 is counted as an upgrade, not a 5xx;
   `upgrades` and `streams` counters move.
+- **PostgreSQL**: a `bigint` beyond ±2^53 comes back as a string (a JSON number would
+  round it); GUIDE §7 lists what the driver covers and what it does not (COPY,
+  LISTEN/NOTIFY, session state).
 - **Uploads and headers**: `multipart.parse(bytes, contentType)` splits a form body into
   fields and files; `defineApp({ headers })` sets static response headers on every
   application response (a handler's own wins).
@@ -158,7 +161,8 @@ two-replica campaign passed; the 72 h soak is running.
   design, the envelope, `errors.unavailable` for a dependency that is down.
 - Runbooks updated (memory pressure, overload, restart, deploy/rollback with
   the rolling-restart contract); new: **metrics reference** (every metric,
-  labels, the alerts to set) and **systemd** (deploy, rolling restart,
+  labels, the alerts to set), **sizing** (worlds × pool × concurrency × memory ×
+  replicas, with a worked example) and **systemd** (deploy, rolling restart,
   rollback, runtime upgrade on a plain VM); production compose example with
   the status token, surfaces, `usai probe`.
 - GUIDE: cookies (a custom scheme with `credential`, `Set-Cookie` through the
