@@ -1,5 +1,8 @@
 # Bad deployment, rollback, revision replacement
 
+The endpoints, their bodies and every error code are in
+`docs/CONTROL-API.md`; this page is what happens when you use them.
+
 ## A broken artifact
 
 `POST /revisions {"artifact": …}` on the control surface answers **422
