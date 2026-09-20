@@ -1200,6 +1200,7 @@ async fn status_and_metrics_derive_from_runtime_truth() {
     );
     assert!(text.contains("usai_http_responses_total{class=\"2xx\"} 1"));
     assert!(text.contains("usai_resource{kind=\"cache.local\",name=\"hits\",metric=\"max\"}"));
+    assert!(text.contains("usai_resource{kind=\"cache.local\",name=\"hits\",metric=\"ready\"} 1"));
     assert!(
         text.contains("# TYPE usai_resource_quarantines_total counter")
             && text.contains("usai_resource_quarantines_total{kind=\"cache.local\",name=\"hits\"}"),

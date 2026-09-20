@@ -132,7 +132,8 @@ two-replica campaign passed; the 72 h soak is running.
   before a world are counted, not timed); `/_usai/status` →
   `resources[].ready` follows the last contact with the database (false with
   `lastError` on a connection-level failure, true after the next success —
-  it stayed true through an outage); a database outage writes one `WARN
+  it stayed true through an outage) and is exported as
+  `usai_resource{metric="ready"}`; a database outage writes one `WARN
   dependency unavailable … suppressed=<n>` per error code per second instead
   of an `ERROR` and a stack per request, and `INFO database reachable again`
   when it returns; the heap is returned after a password hash and after a

@@ -637,6 +637,12 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
         );
         resources.push((format!("{base},metric=\"in_use\""), r.in_use as f64));
         resources.push((format!("{base},metric=\"max\""), r.max as f64));
+        // What the last contact said (1 = reachable), so an outage is a
+        // gauge to alert on, not only a readiness probe's answer.
+        resources.push((
+            format!("{base},metric=\"ready\""),
+            if r.ready { 1.0 } else { 0.0 },
+        ));
         quarantines.push((base, r.quarantined as f64));
     }
     if !resources.is_empty() {

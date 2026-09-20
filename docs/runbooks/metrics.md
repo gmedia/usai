@@ -28,7 +28,7 @@ requests is a trap, read the rejections beside it.
 | `usai_service` | gauge | revision, service, state | 1 per declared `service()`, at its current state (absent when the application declares none) |
 | `usai_queue_messages_total` | counter | revision, state | Queue messages by outcome, per revision |
 | `usai_cron_ticks_total` | counter | revision, state | Cron ticks per revision: due on this instance, skipped (previous still running), failed, taken by another instance (exclusive schedules) |
-| `usai_resource` | gauge | kind, metric, name | Resource manager state (current levels) |
+| `usai_resource` | gauge | kind, metric, name | Resource manager state (current levels): `in_use`, `max`, `ready` (1 while the last contact with the resource succeeded, 0 after a connection-level failure until the next success) |
 | `usai_resource_quarantines_total` | counter | kind, name | Connections quarantined because their outcome could not be proven (cumulative) |
 | `usai_tasks` | gauge | state | Dispatched task queue |
 | `usai_build_info` | gauge | version | Usai runtime version (label), always 1 |
@@ -104,6 +104,7 @@ Label values:
 | Alert | Expression (PromQL shape) | Why |
 |---|---|---|
 | Capacity refusals | `increase(usai_http_rejections_total{reason="capacity"}[5m]) > 0` | the instance is refusing work before a world exists: raise `--max-worlds`, add a replica, or find the slow dependency (`overload.md`) |
+| Database unreachable | `usai_resource{kind="postgres",metric="ready"} == 0` for 30 s | the last operation or probe failed at the connection level; `/_usai/status` → `resources[].detail.lastError` says how (`postgres-down.md`) |
 | Pool poisoned / database flapping | `increase(usai_resource_quarantines_total[5m]) > 0` while the database is healthy | a connection's outcome could not be proven (C5); a burst during a failover is expected, a steady trickle is a bug or a network problem (`postgres-down.md`) |
 | Pool saturated | `usai_resource{metric="in_use"} == on (kind,name) usai_resource{metric="max"}` for 1 m | queries wait; size `pool.max` against `--max-worlds` |
 | Detached work | `increase(usai_detached_work_total[1h]) > 0` | an application bug: a handler returned with work in flight (`500 detached_work`) |
