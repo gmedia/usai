@@ -1,0 +1,50 @@
+# Two replicas behind one proxy, one PostgreSQL — the topology SUPPORTED.md
+# states. Its own compose project (usai-p6r) so it can run beside the P5/P6
+# deployment; every container is confined to CPUSET (default 12-15).
+#   caddy (:8081, round robin, active health on /_usai/ready, retries a refused
+#   upstream) → app (:3001 status, :3901 control) + app2 (:3002, :3902) → postgres
+# Driven by scripts/qualification/p6/replicas.sh.
+x-app: &app
+  image: usai-p5-app:latest
+  command: ["run", "--artifact", "/app/.usai/build", "--host", "0.0.0.0", "--port", "3000", "--status", "--control", "0.0.0.0:3900", "--drain-timeout", "10"]
+  depends_on:
+    postgres: { condition: service_healthy }
+  read_only: true
+  tmpfs: [/tmp]
+  mem_limit: 512m
+  cpuset: ${CPUSET:-12-15}
+  restart: unless-stopped
+services:
+  postgres:
+    image: postgres:18
+    environment: { POSTGRES_USER: app, POSTGRES_PASSWORD: app, POSTGRES_DB: invoicing }
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U app -d invoicing"], interval: 2s, timeout: 2s, retries: 30 }
+    cpuset: ${CPUSET:-12-15}
+    restart: unless-stopped
+  app:
+    <<: *app
+    environment:
+      DATABASE_URL: postgres://app:app@postgres:5432/invoicing
+      USAI_CONTROL_TOKEN: p5-control-token
+      RUST_LOG: info
+      USAI_MAX_WORLDS: ${USAI_MAX_WORLDS:-48}
+      USAI_SOCKET_IDLE_TIMEOUT: ${USAI_SOCKET_IDLE_TIMEOUT:-300}
+    ports: ["3001:3000", "3901:3900"]
+  app2:
+    <<: *app
+    environment:
+      DATABASE_URL: postgres://app:app@postgres:5432/invoicing
+      USAI_CONTROL_TOKEN: p5-control-token
+      RUST_LOG: info
+      USAI_MAX_WORLDS: ${USAI_MAX_WORLDS:-48}
+      USAI_SOCKET_IDLE_TIMEOUT: ${USAI_SOCKET_IDLE_TIMEOUT:-300}
+      # The scheduler runs on exactly one replica (SUPPORTED.md: cron ticks on
+      # every instance that schedules).
+      USAI_NO_CRON: "1"
+    ports: ["3002:3000", "3902:3900"]
+  caddy:
+    image: caddy:2
+    ports: ["8081:8081"]
+    volumes: ["./Caddyfile.replicas:/etc/caddy/Caddyfile:ro"]
+    cpuset: ${CPUSET:-12-15}
+    depends_on: [app, app2]

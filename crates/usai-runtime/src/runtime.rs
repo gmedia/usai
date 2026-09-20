@@ -289,6 +289,7 @@ pub struct QueueCounters {
     pub retried: u64,
     pub dead: u64,
     pub invalid: u64,
+    pub reclaimed: u64,
 }
 
 pub struct Runtime {
@@ -960,6 +961,7 @@ impl Runtime {
                         retried: q.retried.load(Ordering::Relaxed),
                         dead: q.dead.load(Ordering::Relaxed),
                         invalid: q.invalid.load(Ordering::Relaxed),
+                        reclaimed: q.reclaimed.load(Ordering::Relaxed),
                     }
                 },
             })

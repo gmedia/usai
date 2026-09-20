@@ -220,6 +220,7 @@ pub async fn run(
     no_queue: bool,
     no_services: bool,
     drain_timeout: u64,
+    drain_grace: u64,
     diagnostics: bool,
 ) -> Result<()> {
     let trusted = trusted_signers(&require_signature)?;
@@ -330,6 +331,7 @@ pub async fn run(
         status_addr,
         stop_requested,
         on_ready,
+        Duration::from_secs(drain_grace),
     )
     .await
 }
@@ -350,6 +352,7 @@ async fn serve_until_signal(
     status_addr: Option<String>,
     stop_requested: Option<CancellationToken>,
     on_ready: Option<Box<dyn FnOnce(String) + Send>>,
+    drain_grace: Duration,
 ) -> Result<()> {
     let addr: std::net::SocketAddr = format!("{host}:{port}")
         .parse()
@@ -390,6 +393,7 @@ async fn serve_until_signal(
     // A harness (`--announce`) wants a silent exit; `dev` narrates like `run`.
     let quiet = on_ready.is_some() && !expose_diagnostics;
     let shutdown = CancellationToken::new();
+    let http_for_drain = Arc::clone(&http);
     // The private surfaces on their own listener, when asked.
     let http_for_internal = Arc::clone(&http);
     if let Some(addr) = status_addr {
@@ -478,6 +482,25 @@ async fn serve_until_signal(
     }
     // Under a harness or orchestrator (`--announce`) the shutdown narration
     // is noise in someone else's output; the exit code carries the result.
+    // First the balancer learns: readiness fails and responses close their
+    // connection while the listener still serves, for the grace period. A
+    // proxy that reused an idle keep-alive connection at the instant the
+    // listener closed used to see EOF — a 502 its client never asked for.
+    if !drain_grace.is_zero() {
+        http_for_drain.begin_draining();
+        if !quiet {
+            tracing::info!(
+                grace_seconds = drain_grace.as_secs(),
+                "shutting down: readiness now fails and connections close after their response; the listener closes after the grace period"
+            );
+        }
+        tokio::select! {
+            _ = tokio::time::sleep(drain_grace) => {}
+            _ = async { tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = terminate.recv() => {} } } => {
+                if !quiet { tracing::info!("second signal: closing the listener now"); }
+            }
+        }
+    }
     if !quiet {
         tracing::info!("shutting down: draining in-flight work (a second signal forces the exit)");
     }
@@ -809,6 +832,7 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
             }
             println!("\nwatching for changes (ctrl-c to stop)");
         })),
+        Duration::ZERO,
     )
     .await
 }

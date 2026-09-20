@@ -1,0 +1,20 @@
+:8081 {
+	reverse_proxy app:3000 app2:3000 {
+		lb_policy round_robin
+		# A replica that is draining answers 503 with Retry-After and fails its
+		# readiness probe; the active check takes it out within a second, and a
+		# connection the proxy cannot open (the replica is restarting) is retried
+		# on the other upstream instead of becoming a 502. This is the rolling-
+		# restart contract docs/runbooks/deploy-and-rollback.md documents.
+		health_uri /_usai/ready
+		health_interval 1s
+		health_timeout 2s
+		fail_duration 5s
+		lb_try_duration 5s
+		lb_try_interval 250ms
+		transport http {
+			dial_timeout 2s
+			response_header_timeout 30s
+		}
+	}
+}

@@ -1283,3 +1283,55 @@ async fn the_status_token_guards_the_operator_surfaces_but_not_the_probes() {
     token.cancel();
     s.shutdown.cancel();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_draining_host_fails_readiness_and_closes_connections_while_still_serving() {
+    // The rolling-restart contract: between the stop signal and the
+    // listener closing, a balancer must learn to route elsewhere and must
+    // not reuse an idle keep-alive connection that is about to be closed
+    // under it (the 502 the two-replica campaign measured).
+    let Some(s) = start().await else { return };
+    let host = HttpHost::new(
+        Arc::clone(&s.runtime),
+        HttpConfig {
+            addr: ([127, 0, 0, 1], 0).into(),
+            serve_status: true,
+            ..HttpConfig::default()
+        },
+    );
+    let draining = Arc::clone(&host);
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let token = CancellationToken::new();
+    let t = token.clone();
+    tokio::spawn(async move {
+        serve(host, t, |addr| {
+            let _ = tx.send(addr);
+        })
+        .await
+        .unwrap()
+    });
+    let addr = rx.await.unwrap();
+    let base = format!("http://{addr}");
+    let before = s.client.get(format!("{base}/_usai/ready")).send().await.unwrap();
+    assert_eq!(before.status(), 200);
+    assert_ne!(before.headers().get("connection").map(|v| v.as_bytes()), Some(&b"close"[..]));
+    assert!(!draining.is_draining());
+
+    draining.begin_draining();
+    let ready = s.client.get(format!("{base}/_usai/ready")).send().await.unwrap();
+    assert_eq!(ready.status(), 503);
+    assert_eq!(ready.headers().get("connection").unwrap(), "close");
+    assert_eq!(ready.json::<Value>().await.unwrap()["reason"], "draining");
+    // Liveness and the application keep answering: the listener is open,
+    // only the routing decision changed.
+    let live = s.client.get(format!("{base}/_usai/live")).send().await.unwrap();
+    assert_eq!(live.status(), 200);
+    let app = s.client.get(format!("{base}/counter")).send().await.unwrap();
+    assert_eq!(app.status(), 200);
+    assert_eq!(app.headers().get("connection").unwrap(), "close");
+    let rejected = s.client.get(format!("{base}/nowhere")).send().await.unwrap();
+    assert_eq!(rejected.status(), 404);
+    assert_eq!(rejected.headers().get("connection").unwrap(), "close", "replies decided before a world close too");
+    token.cancel();
+    s.shutdown.cancel();
+}

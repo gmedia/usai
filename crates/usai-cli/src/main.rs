@@ -116,6 +116,13 @@ enum Command {
         /// orchestrator's grace period above this
         #[arg(long, env = "USAI_DRAIN_TIMEOUT", default_value_t = 30)]
         drain_timeout: u64,
+        /// On SIGTERM, keep serving for this many seconds while /_usai/ready
+        /// answers 503 and responses carry `Connection: close`, so a load
+        /// balancer stops routing here before the listener closes; then drain
+        /// (USAI_DRAIN_GRACE). Set it at or above the balancer's health-check
+        /// interval; 0 closes the listener at once
+        #[arg(long, env = "USAI_DRAIN_GRACE", default_value_t = 2)]
+        drain_grace: u64,
         /// Expose diagnostics to clients as `usai dev` does: error details in
         /// 500 bodies and the x-usai-lifecycle / x-usai-server-ms headers.
         /// For tests and trusted networks only (USAI_DIAGNOSTICS=1)
@@ -416,6 +423,7 @@ async fn async_main() {
             no_queue,
             no_services,
             drain_timeout,
+            drain_grace,
             diagnostics,
         } => {
             // The flag and the environment variable are the same setting;
@@ -451,6 +459,7 @@ async fn async_main() {
                 no_queue,
                 no_services,
                 drain_timeout,
+                drain_grace,
                 diagnostics,
             )
             .await

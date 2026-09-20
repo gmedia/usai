@@ -218,6 +218,8 @@ export async function testApp(options: TestAppOptions = {}): Promise<TestApp> {
     env: {
       ...process.env,
       USAI_CONTROL_TOKEN: token,
+      // No load balancer in front of a test runtime: stop at once on SIGINT.
+      USAI_DRAIN_GRACE: "0",
       RUST_LOG: process.env["RUST_LOG"] ?? "warn",
       ...(options.env ?? {}),
     },

@@ -11,6 +11,8 @@
 #   scripts/qualification/p6/run.sh conn-churn       # connection-bound worlds (SSE + WebSocket): 500 cycles, held through a
 #                                                     revision replacement, an app restart and a proxy restart, abrupt client
 #                                                     death, a client that never reads, an idle socket (USAI_SOCKET_IDLE_TIMEOUT)
+#   scripts/qualification/p6/run.sh replicas <cmd>   # two replicas behind one proxy (p6/replicas.sh: up | all | http | queue |
+#                                                     migrate | cron | rolling | kill | down), its own compose project
 # Campaign steps tolerate failing curls (that is the point); only the setup is strict.
 set -uo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -226,7 +228,8 @@ case "${1:-}" in
   overload) overload "${2:-60}" ;;
   idle-burst) idle_burst ;;
   dead-letter) dead_letter ;;
+  replicas) shift; exec "$here/replicas.sh" "$@" ;;
   soak) soak "${2:-3600}" ;;
   conn-churn) conn_churn "${2:-500}" ;;
-  *) echo "usage: $0 churn|db-flap|restart-loop|overload|idle-burst|dead-letter|soak"; exit 2 ;;
+  *) echo "usage: $0 churn|db-flap|restart-loop|overload|idle-burst|dead-letter|soak|conn-churn|replicas"; exit 2 ;;
 esac

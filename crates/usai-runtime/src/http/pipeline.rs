@@ -77,6 +77,14 @@ pub struct HttpHost {
     config: HttpConfig,
     compiled: RwLock<Option<Arc<CompiledRevision>>>,
     pub stats: crate::observability::HttpStats,
+    /// Set when the process has been told to stop and has not yet closed
+    /// its listener: readiness fails and every response asks the peer to
+    /// close, so a proxy stops routing here and stops reusing its idle
+    /// connections *before* the listener goes away. Without this window a
+    /// request written onto a keep-alive connection at the instant the
+    /// server closes it is a 502 at the proxy (measured on the two-replica
+    /// rolling restart: one per restart).
+    draining: std::sync::atomic::AtomicBool,
 }
 
 /// A response decided before (or instead of) application work.
@@ -348,7 +356,21 @@ impl HttpHost {
             config,
             compiled: RwLock::new(None),
             stats: crate::observability::HttpStats::default(),
+            draining: std::sync::atomic::AtomicBool::new(false),
         })
+    }
+
+    /// The process is leaving: from now on `/_usai/ready` answers 503 and
+    /// responses carry `Connection: close`. The listener stays open for the
+    /// grace period the caller chooses, so a load balancer's health check
+    /// sees the change before connections start being refused.
+    pub fn begin_draining(&self) {
+        self.draining
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    pub fn is_draining(&self) -> bool {
+        self.draining.load(std::sync::atomic::Ordering::Acquire)
     }
 
     pub fn config(&self) -> &HttpConfig {
@@ -385,7 +407,7 @@ impl HttpHost {
         // Runtime-owned surfaces are not application traffic.
         let internal = request.uri().path().starts_with("/_usai/");
         let started = std::time::Instant::now();
-        match self.pipeline(request).await {
+        let mut response = match self.pipeline(request).await {
             Ok(mut response) => {
                 if !internal {
                     self.stats.record_with(
@@ -427,7 +449,15 @@ impl HttpHost {
                 }
                 response
             }
+        };
+        // A 101 hands the connection to the socket pump; everything else
+        // closes after this response while the process is on its way out.
+        if self.is_draining() && response.status() != StatusCode::SWITCHING_PROTOCOLS {
+            response
+                .headers_mut()
+                .insert(header::CONNECTION, HeaderValue::from_static("close"));
         }
+        response
     }
 
     pub fn runtime(&self) -> &Arc<Runtime> {
@@ -522,6 +552,12 @@ impl HttpHost {
                     return Some(json_response(StatusCode::OK, &json!({ "live": true })));
                 }
                 "/_usai/ready" => {
+                    if self.is_draining() {
+                        return Some(json_response(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            &json!({ "ready": false, "reason": "draining" }),
+                        ));
+                    }
                     let Ok(revision) = self.runtime.active() else {
                         return Some(json_response(
                             StatusCode::SERVICE_UNAVAILABLE,

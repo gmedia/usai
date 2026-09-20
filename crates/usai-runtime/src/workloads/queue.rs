@@ -27,6 +27,13 @@ use crate::runtime::{Revision, Runtime};
 use crate::world::Termination;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
+/// How often one sweeper per topic looks for messages a consumer claimed
+/// and never finished.
+const SWEEP_INTERVAL: Duration = Duration::from_secs(5);
+/// A live consumer holds a row for at most the message deadline (the world
+/// is cancelled at it and the row written back); a row still `processing`
+/// this long after the deadline belongs to a process that is gone.
+const LOST_MARGIN_MS: u64 = 10_000;
 
 pub const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS usai_queue (
   id bigserial PRIMARY KEY,
@@ -49,6 +56,9 @@ pub struct QueueStats {
     pub retried: AtomicU64,
     pub dead: AtomicU64,
     pub invalid: AtomicU64,
+    /// Messages a vanished consumer had claimed, put back for another
+    /// attempt (or dead-lettered when it was the last one).
+    pub reclaimed: AtomicU64,
 }
 
 fn database_for(revision: &Revision, name: Option<&str>) -> Option<Arc<dyn ResourceManager>> {
@@ -146,6 +156,60 @@ pub fn start(
             .as_ref()
             .and_then(|schema| jsonschema::validator_for(schema).ok())
             .map(Arc::new);
+        // One sweeper per topic: a consumer killed mid-message (SIGKILL, an
+        // OOM kill, a host that died) leaves its rows `processing` with no
+        // one to write them back. Measured on the two-replica campaign;
+        // without this they stayed there forever. The row's `attempts` was
+        // incremented at the claim, so the retry policy the application
+        // declared is honoured: another attempt if any remain, dead
+        // otherwise (ADR-0014 — the retry is the declaration's, not ours).
+        {
+            let stop = stop.clone();
+            let runtime = runtime.clone();
+            let manager = Arc::clone(&manager);
+            let stats = Arc::clone(&stats);
+            let topic = topic.clone();
+            let name = workload.name.clone();
+            let timeout_ms = workload.timeout_ms;
+            let max_attempts = retry.max_attempts.max(1);
+            tokio::spawn(async move {
+                loop {
+                    tokio::select! {
+                        _ = tokio::time::sleep(SWEEP_INTERVAL) => {}
+                        _ = stop.cancelled() => return,
+                    }
+                    let Some(runtime) = runtime.upgrade() else {
+                        return;
+                    };
+                    let lost_after_ms = timeout_ms
+                        .unwrap_or(runtime.config().default_timeout.as_millis() as u64)
+                        + LOST_MARGIN_MS;
+                    drop(runtime);
+                    let reason = "consumer lost: claimed by ' || locked_by || ' at ' || to_char(locked_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI:SS') || ' UTC, never completed";
+                    let retried = sql(
+                        manager.as_ref(),
+                        "execute",
+                        &format!("UPDATE usai_queue SET state = 'ready', available_at = now(), locked_at = NULL, locked_by = NULL, last_error = '{reason}' WHERE topic = $1 AND state = 'processing' AND locked_at < now() - ($2::bigint * interval '1 millisecond') AND attempts < $3"),
+                        vec![json!(topic), json!(lost_after_ms), json!(max_attempts)],
+                    )
+                    .await;
+                    let dead = sql(
+                        manager.as_ref(),
+                        "execute",
+                        &format!("UPDATE usai_queue SET state = 'dead', locked_at = NULL, locked_by = NULL, last_error = '{reason}' WHERE topic = $1 AND state = 'processing' AND locked_at < now() - ($2::bigint * interval '1 millisecond') AND attempts >= $3"),
+                        vec![json!(topic), json!(lost_after_ms), json!(max_attempts)],
+                    )
+                    .await;
+                    let count = |r: &Result<Value, String>| r.as_ref().ok().and_then(Value::as_u64).unwrap_or(0);
+                    let (retried, dead) = (count(&retried), count(&dead));
+                    if retried + dead > 0 {
+                        stats.reclaimed.fetch_add(retried + dead, Ordering::SeqCst);
+                        stats.dead.fetch_add(dead, Ordering::SeqCst);
+                        tracing::warn!(queue = %name, retried, dead, lost_after_ms, "messages a lost consumer had claimed were reclaimed");
+                    }
+                }
+            });
+        }
         for worker in 0..(*concurrency).max(1) {
             let stop = stop.clone();
             let runtime = runtime.clone();

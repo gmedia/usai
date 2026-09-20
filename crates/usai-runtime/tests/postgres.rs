@@ -688,6 +688,86 @@ async fn queue_messages_run_in_fresh_worlds_with_explicit_retry() {
     f.baseline();
 }
 
+/// A consumer killed mid-message (SIGKILL, OOM, a dead host) leaves its
+/// rows `processing` with nobody to write them back. The sweeper puts such
+/// a row back for another attempt when the declared retry policy has one
+/// left, and dead-letters it otherwise — the message is never lost and never
+/// retried beyond what the application declared.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn messages_a_lost_consumer_had_claimed_are_reclaimed() {
+    let Some(f) = fixture_with(true).await else {
+        return;
+    };
+    let rev = f.runtime.active().unwrap();
+    let manager = rev.resources().get("main").cloned().unwrap();
+    let insert = |payload: &str, attempts: i32| {
+        let manager = Arc::clone(&manager);
+        let sql = format!(
+            "INSERT INTO usai_queue (topic, payload, state, attempts, locked_at, locked_by) VALUES ('orders', '{payload}'::jsonb, 'processing', {attempts}, now() - interval '1 hour', 'rev9:orders:0')"
+        );
+        async move {
+            manager
+                .call(
+                    usai_runtime::resource::ResourceCall {
+                        method: "execute".into(),
+                        args: json!({ "sql": sql, "params": [] }),
+                    },
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+        }
+    };
+    // Attempt 1 of 3 was in flight when the consumer died: two remain.
+    insert(r#"{"orderId": "orphan"}"#, 1).await;
+    // The last allowed attempt was in flight: nothing remains.
+    insert(r#"{"orderId": "orphan-final"}"#, 3).await;
+
+    assert_eq!(
+        wait_for(&f, "orders:orphan", 1, Duration::from_secs(12)).await,
+        json!(1),
+        "the reclaimed message ran once more, in a fresh world"
+    );
+    assert_eq!(
+        wait_for(&f, "orders:orphan-final", 0, Duration::from_secs(1))
+            .await
+            .as_u64()
+            .unwrap_or(0),
+        0,
+        "no attempt beyond the declared maximum"
+    );
+    let depth = usai_runtime::workloads::queue::depth(manager.as_ref(), "orders")
+        .await
+        .unwrap();
+    assert_eq!(depth["processing"], 0, "{depth}");
+    assert_eq!(depth["dead"], 1, "{depth}");
+    assert_eq!(depth["done"], 1, "{depth}");
+    let dead = manager
+        .call(
+            usai_runtime::resource::ResourceCall {
+                method: "one".into(),
+                args: json!({ "sql": "SELECT last_error FROM usai_queue WHERE state = 'dead'", "params": [] }),
+            },
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let error = dead["last_error"].as_str().unwrap();
+    assert!(
+        error.starts_with("consumer lost: claimed by rev9:orders:0 at ") && error.ends_with(" UTC, never completed"),
+        "{error}"
+    );
+    assert_eq!(
+        rev.queue_stats
+            .reclaimed
+            .load(std::sync::atomic::Ordering::SeqCst),
+        2
+    );
+    f.runtime.shutdown().await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    f.baseline();
+}
+
 /// `CREATE TABLE IF NOT EXISTS` is not race-free in PostgreSQL: with the
 /// consumers off (fresh database, no table), eight workers preparing the
 /// queue schema at once used to lose three of them to 42P07. Every worker
