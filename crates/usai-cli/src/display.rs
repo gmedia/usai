@@ -117,8 +117,22 @@ pub fn banner(
             }
         );
         for w in cron {
-            if let Trigger::Cron { schedule, .. } = &w.trigger {
-                let _ = writeln!(out, "  {:<16} {schedule}", w.name);
+            if let Trigger::Cron {
+                schedule,
+                exclusive,
+                ..
+            } = &w.trigger
+            {
+                let _ = writeln!(
+                    out,
+                    "  {:<16} {schedule}{}",
+                    w.name,
+                    if *exclusive {
+                        "   (exclusive: one instance per tick, claimed in the database)"
+                    } else {
+                        ""
+                    }
+                );
             }
         }
     }
@@ -227,13 +241,21 @@ pub fn inspect(definition: &ApplicationDefinition) -> String {
                 }
             }
             Trigger::Cron {
-                schedule, overlap, ..
+                schedule,
+                overlap,
+                exclusive,
+                ..
             } => {
                 let _ = writeln!(
                     out,
-                    "  {}\n    schedule: {schedule}\n    overlap: {}",
+                    "  {}\n    schedule: {schedule}\n    overlap: {}{}",
                     w.name,
-                    format!("{overlap:?}").to_lowercase()
+                    format!("{overlap:?}").to_lowercase(),
+                    if *exclusive {
+                        "\n    exclusive: one instance per tick (claimed in usai_cron_ticks)"
+                    } else {
+                        ""
+                    }
                 );
             }
             _ => {

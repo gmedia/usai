@@ -61,7 +61,10 @@ pub struct QueueStats {
     pub reclaimed: AtomicU64,
 }
 
-fn database_for(revision: &Revision, name: Option<&str>) -> Option<Arc<dyn ResourceManager>> {
+pub(crate) fn database_for(
+    revision: &Revision,
+    name: Option<&str>,
+) -> Option<Arc<dyn ResourceManager>> {
     let resources = revision.resources();
     let name = match name {
         Some(n) => n.to_owned(),
@@ -76,7 +79,7 @@ fn database_for(revision: &Revision, name: Option<&str>) -> Option<Arc<dyn Resou
     resources.get(&name).cloned()
 }
 
-async fn sql(
+pub(crate) async fn sql(
     manager: &dyn ResourceManager,
     method: &str,
     sql: &str,

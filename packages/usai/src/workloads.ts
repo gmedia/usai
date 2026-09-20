@@ -11,6 +11,7 @@ import type {
   WorkloadPolicies,
 } from "./declarations.ts";
 import type { BaseContext } from "./runtime/context.ts";
+import type { PostgresDeclaration } from "./resources.ts";
 
 /** Options for {@link task}.
  *
@@ -123,6 +124,13 @@ export interface CronOptions<R extends ResourceDeclaration[] = ResourceDeclarati
   /** What to do when a tick is due while the previous one still runs.
    * `skip` (default) drops the tick; `allow` starts another world. */
   overlap?: "allow" | "skip";
+  /** Exactly one instance runs each tick, however many replicas schedule:
+   * every scheduler claims the tick in PostgreSQL (`usai_cron_ticks`, one
+   * row per schedule and scheduled time) and only the claimant runs the
+   * handler. `true` claims through the application's first `postgres`
+   * resource; `{ database }` names one. Without it every instance that
+   * schedules runs every tick (`SUPPORTED.md`). */
+  exclusive?: boolean | { database: PostgresDeclaration };
   /** Resources the tick leases; `ctx.resources` is typed from this list. */
   resources?: R;
 }
@@ -175,7 +183,14 @@ export function cron<R extends ResourceDeclaration[] = ResourceDeclaration[]>(
     kind: "cron",
     name,
     ...(options.description ? { description: options.description } : {}),
-    trigger: { schedule: options.schedule, overlap: options.overlap ?? "skip" },
+    trigger: {
+      schedule: options.schedule,
+      overlap: options.overlap ?? "skip",
+      ...(options.exclusive ? { exclusive: true } : {}),
+      ...(typeof options.exclusive === "object"
+        ? { database: options.exclusive.database.name }
+        : {}),
+    },
     contracts: {},
     errors: [],
     resources: options.resources ?? [],

@@ -10,6 +10,7 @@ import {
   queue,
   cache,
   bytes,
+  cron,
 } from "@sakaladev/usai";
 import { z } from "zod";
 
@@ -18,6 +19,14 @@ type Db = import("@sakaladev/usai").PostgresHandle;
 const d = (ctx: { resources: Record<string, unknown> }) => ctx.resources["main"] as Db;
 
 const User = z.object({ id: z.number().int(), name: z.string(), email: z.string() });
+
+// An exclusive schedule: with N replicas, one runs each tick (claimed in
+// usai_cron_ticks through this database). Never fires in the tests.
+export const nightly = cron(
+  "nightly",
+  { schedule: "0 3 * * *", exclusive: true, resources: [db] },
+  async (ctx) => ({ scheduledAt: ctx.scheduledAt }),
+);
 
 export const setup = command("setup", { resources: [db] }, async (ctx) => {
   await d(ctx).execute(
@@ -263,6 +272,7 @@ export default defineApp({
     setup,
     getUser,
     listUsers,
+    nightly,
     putBlob,
     getBlob,
     slow,

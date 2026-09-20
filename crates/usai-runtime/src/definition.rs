@@ -72,6 +72,15 @@ pub enum Trigger {
         timeout_ms: Option<u64>,
         #[serde(default = "default_overlap")]
         overlap: OverlapPolicy,
+        /// Exactly one instance runs each tick: the schedulers of every
+        /// replica claim the tick in the database (`usai_cron_ticks`) and
+        /// only the claimant's world runs.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        exclusive: bool,
+        /// The postgres resource the claim goes through (default: the
+        /// application's first).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        database: Option<String>,
     },
     Command,
     Service {

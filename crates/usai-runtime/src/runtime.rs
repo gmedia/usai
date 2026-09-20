@@ -279,6 +279,18 @@ pub struct RevisionStatus {
     /// Queue consumers of this revision: messages claimed, done, retried,
     /// dead-lettered, refused by contract.
     pub queue: QueueCounters,
+    /// Cron schedules of this revision: ticks due, skipped (overlap), failed,
+    /// taken by another instance (exclusive schedules).
+    pub cron: CronCounters,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CronCounters {
+    pub ticks: u64,
+    pub skipped: u64,
+    pub failed: u64,
+    pub taken: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize)]
@@ -955,6 +967,16 @@ impl Runtime {
                 state: r.state(),
                 in_flight: r.in_flight(),
                 services: r.services(),
+                cron: {
+                    use std::sync::atomic::Ordering;
+                    let c = &r.cron_stats;
+                    CronCounters {
+                        ticks: c.ticks.load(Ordering::Relaxed),
+                        skipped: c.skipped.load(Ordering::Relaxed),
+                        failed: c.failed.load(Ordering::Relaxed),
+                        taken: c.taken.load(Ordering::Relaxed),
+                    }
+                },
                 queue: {
                     use std::sync::atomic::Ordering;
                     let q = &r.queue_stats;

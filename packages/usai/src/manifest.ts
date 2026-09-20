@@ -137,6 +137,8 @@ function trigger(workload: Workload): ManifestWorkload["trigger"] {
         schedule: workload.trigger["schedule"],
         overlap: workload.trigger["overlap"] ?? "skip",
         ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+        ...(workload.trigger["exclusive"] ? { exclusive: true } : {}),
+        ...(workload.trigger["database"] ? { database: workload.trigger["database"] } : {}),
       };
     }
     case "queue":

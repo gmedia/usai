@@ -23,4 +23,5 @@ Options for [cron](../functions/cron.md).
 | <a id="description"></a> `description?` | `string` | A paragraph for the reference. | - |
 | <a id="schedule"></a> `schedule` | `string` | Cron expression, UTC: five fields (`minute hour day-of-month month day-of-week`) or six with leading seconds. Validated at install. | - |
 | <a id="overlap"></a> `overlap?` | `"allow"` \| `"skip"` | What to do when a tick is due while the previous one still runs. `skip` (default) drops the tick; `allow` starts another world. | - |
+| <a id="exclusive"></a> `exclusive?` | \| `boolean` \| \{ `database`: [`PostgresDeclaration`](PostgresDeclaration.md); \} | Exactly one instance runs each tick, however many replicas schedule: every scheduler claims the tick in PostgreSQL (`usai_cron_ticks`, one row per schedule and scheduled time) and only the claimant runs the handler. `true` claims through the application's first `postgres` resource; `{ database }` names one. Without it every instance that schedules runs every tick (`SUPPORTED.md`). | - |
 | <a id="resources"></a> `resources?` | `R` | Resources the tick leases; `ctx.resources` is typed from this list. | - |

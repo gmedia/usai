@@ -169,6 +169,61 @@ async fn bytes_bind_to_bytea_and_come_back_as_base64() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_exclusive_cron_tick_is_claimed_once_across_instances() {
+    let Some(f) = fixture().await else { return };
+    let rev = f.runtime.active().unwrap();
+    let (_, nightly) = rev.definition.workload("cron:nightly").unwrap();
+    match &nightly.trigger {
+        usai_runtime::definition::Trigger::Cron {
+            exclusive,
+            database,
+            ..
+        } => {
+            assert!(*exclusive);
+            assert_eq!(*database, None, "the application's first postgres resource");
+        }
+        other => panic!("{other:?}"),
+    }
+    let manager = rev.resources().get("main").cloned().unwrap();
+    let at = chrono::DateTime::parse_from_rfc3339("2026-09-21T03:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    // Two replicas' schedulers reach the same tick: the first inserts the
+    // row (the table is created on first use), the second finds it taken;
+    // the next tick is a new row.
+    let claim = |who: &'static str, at| {
+        let manager = Arc::clone(&manager);
+        async move {
+            usai_runtime::workloads::cron::claim_tick(manager.as_ref(), "nightly", at, who)
+                .await
+                .unwrap()
+        }
+    };
+    assert!(claim("rev1:nightly", at).await);
+    assert!(!claim("rev2:nightly", at).await);
+    assert!(
+        !claim("rev1:nightly", at).await,
+        "not even the claimant twice"
+    );
+    assert!(claim("rev2:nightly", at + chrono::Duration::days(1)).await);
+    let rows = manager
+        .call(
+            usai_runtime::resource::ResourceCall {
+                method: "query".into(),
+                args: json!({ "sql": "SELECT claimed_by FROM usai_cron_ticks WHERE name = 'nightly' ORDER BY scheduled_at", "params": [] }),
+            },
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        rows,
+        json!([{ "claimed_by": "rev1:nightly" }, { "claimed_by": "rev2:nightly" }])
+    );
+    f.baseline();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sql_error_is_terminal_and_the_connection_is_reused() {
     let Some(f) = fixture().await else { return };
     let (status, body) = f.http("GET", "/fail", json!({})).await;

@@ -62,6 +62,10 @@ two-replica campaign passed; the 72 h soak is running.
   (`new WebSocket(url, ["bearer", token])`); the runtime echoes
   `Sec-WebSocket-Protocol: bearer`. A 101 is counted as an upgrade, not a 5xx;
   `upgrades` and `streams` counters move.
+- **Cron across replicas**: `cron(name, { exclusive: true })` runs each tick on exactly
+  one instance — the schedulers claim the tick in PostgreSQL (`usai_cron_ticks`) and
+  the others count it as `taken`; refused at install without a postgres resource.
+  `/_usai/status` and `usai_cron_ticks_total{state}` expose cron counters.
 - **Request ids.** `x-request-id` accepted from the client (sanitized) or minted;
   on the response, on every log line of the world (`request_id`), on outbound
   `httpClient` calls, and `ctx.requestId` in HTTP-shaped handlers.

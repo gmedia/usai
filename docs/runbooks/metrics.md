@@ -26,6 +26,7 @@ requests is a trap, read the rejections beside it.
 | `usai_world_budget` | gauge | kind | Runtime world budget |
 | `usai_revision_in_flight` | gauge | application, revision, state | Work in flight per revision |
 | `usai_queue_messages_total` | counter | revision, state | Queue messages by outcome, per revision |
+| `usai_cron_ticks_total` | counter | revision, state | Cron ticks per revision: due on this instance, skipped (previous still running), failed, taken by another instance (exclusive schedules) |
 | `usai_resource` | gauge | kind, metric, name | Resource manager state (current levels) |
 | `usai_resource_quarantines_total` | counter | kind, name | Connections quarantined because their outcome could not be proven (cumulative) |
 | `usai_tasks` | gauge | state | Dispatched task queue |
@@ -70,6 +71,7 @@ Label values:
   `select topic, state, count(*) from usai_queue group by 1, 2` on the
   backing database is the depth, and `usai_queue` rows in `ready` with an old
   `available_at` are the lag.
+- `usai_cron_ticks_total{state}`: `due` (ticks this instance's scheduler reached), `skipped` (previous invocation still running, `overlap: skip`), `failed`, `taken` (an `exclusive` schedule's tick another instance claimed first). Per revision, cumulative.
 - `usai_resource{kind,name,metric}`: `kind` = `postgres`, `http.client`,
   `cache.local`; `metric` = `in_use`, `max`.
 - `usai_tasks{state}`: `queued`, `running`, `completed`, `failed`, `lost`
@@ -91,7 +93,7 @@ Label values:
 | Pool saturated | `usai_resource{metric="in_use"} == on (kind,name) usai_resource{metric="max"}` for 1 m | queries wait; size `pool.max` against `--max-worlds` |
 | Detached work | `increase(usai_detached_work_total[1h]) > 0` | an application bug: a handler returned with work in flight (`500 detached_work`) |
 | Service gave up | `usai_service{state="Failed"} == 1` | the restart policy is exhausted; the instance stays ready, the service is down |
-| Cron on two replicas | `sum(usai_scheduler{kind="cron"}) > 1` | the schedule fires on each — start the others with `--no-cron` |
+| Cron on two replicas | `sum(usai_scheduler{kind="cron"}) > 1` and the schedule is not `exclusive` | the schedule fires on each — declare it `exclusive: true` or start the others with `--no-cron` |
 | Memory drift | `usai_process_resident_memory_bytes` rising while `usai_worlds_live` is flat over hours | the plateau is `base + touched slots × 4 MiB` (`memory-pressure.md`); growth beyond it is a leak — report it with the soak samples |
 | Dead letters | `increase(usai_queue_messages_total{state="dead"}[15m]) > 0` | messages out of attempts (`queue-dead-letter.md`) |
 | Lost consumers | `increase(usai_queue_messages_total{state="reclaimed"}[15m]) > 0` | a consumer died mid-message (a crash, an OOM kill); the message was redelivered — look for the restart |

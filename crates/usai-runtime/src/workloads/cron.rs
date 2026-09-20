@@ -14,8 +14,69 @@ use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
 use crate::definition::{OverlapPolicy, Trigger};
+use crate::resource::ResourceManager;
 use crate::runtime::{Revision, Runtime};
 use crate::world::Termination;
+
+/// The ledger an `exclusive` schedule claims its ticks in: one row per
+/// (schedule, scheduled time), inserted by whichever replica gets there
+/// first. Rows older than a week are pruned by the claimants.
+pub const TICKS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS usai_cron_ticks (
+  name text NOT NULL,
+  scheduled_at timestamptz NOT NULL,
+  claimed_by text NOT NULL,
+  claimed_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (name, scheduled_at)
+)";
+
+/// Claims one tick for this instance: `true` when this call inserted the
+/// row, `false` when another instance already had. A database error is
+/// reported as `Err` and the caller decides (the scheduler runs the tick —
+/// a flaky database must not silence a schedule on every replica at once).
+pub async fn claim_tick(
+    manager: &dyn ResourceManager,
+    name: &str,
+    scheduled_at: DateTime<Utc>,
+    claimed_by: &str,
+) -> Result<bool, String> {
+    let claimed = super::queue::sql(
+        manager,
+        "execute",
+        "INSERT INTO usai_cron_ticks (name, scheduled_at, claimed_by) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+        vec![json!(name), json!(scheduled_at.to_rfc3339()), json!(claimed_by)],
+    )
+    .await;
+    let claimed = match claimed {
+        Ok(n) => n.as_u64().unwrap_or(0) == 1,
+        // The table may not exist yet on a fresh database: prepare it once
+        // and claim again (CREATE TABLE IF NOT EXISTS races are tolerated
+        // the way the queue's are).
+        Err(e) if e.contains("usai_cron_ticks") || e.contains("42P01") => {
+            let _ = super::queue::sql(manager, "execute", TICKS_SCHEMA, vec![]).await;
+            super::queue::sql(
+                manager,
+                "execute",
+                "INSERT INTO usai_cron_ticks (name, scheduled_at, claimed_by) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+                vec![json!(name), json!(scheduled_at.to_rfc3339()), json!(claimed_by)],
+            )
+            .await?
+            .as_u64()
+            .unwrap_or(0)
+                == 1
+        }
+        Err(e) => return Err(e),
+    };
+    if claimed {
+        let _ = super::queue::sql(
+            manager,
+            "execute",
+            "DELETE FROM usai_cron_ticks WHERE name = $1 AND scheduled_at < now() - interval '7 days'",
+            vec![json!(name)],
+        )
+        .await;
+    }
+    Ok(claimed)
+}
 
 #[derive(Debug, thiserror::Error)]
 #[error("cron `{name}`: invalid schedule {schedule:?}: {detail}")]
@@ -29,12 +90,39 @@ pub struct InvalidSchedule {
 /// bad schedule fails before the revision can serve.
 pub fn validate(revision: &Revision) -> Result<(), InvalidSchedule> {
     for workload in revision.definition.workloads() {
-        if let Trigger::Cron { schedule, .. } = &workload.trigger {
+        if let Trigger::Cron {
+            schedule,
+            exclusive,
+            database,
+            ..
+        } = &workload.trigger
+        {
             Cron::from_str(schedule).map_err(|e| InvalidSchedule {
                 name: workload.name.clone(),
                 schedule: schedule.clone(),
                 detail: e.to_string(),
             })?;
+            // An exclusive schedule claims its ticks through PostgreSQL:
+            // refuse at install when there is nothing to claim through.
+            if *exclusive {
+                let resources = revision.definition.resources();
+                let found = match database {
+                    Some(name) => resources
+                        .iter()
+                        .any(|r| r.kind == "postgres" && r.name == *name),
+                    None => resources.iter().any(|r| r.kind == "postgres"),
+                };
+                if !found {
+                    return Err(InvalidSchedule {
+                        name: workload.name.clone(),
+                        schedule: schedule.clone(),
+                        detail: match database {
+                            Some(name) => format!("exclusive: true names database {name:?}, which is not a postgres resource of this application"),
+                            None => "exclusive: true needs a postgres resource to claim ticks through (declare one, or name it with exclusive: { database })".to_owned(),
+                        },
+                    });
+                }
+            }
         }
     }
     Ok(())
@@ -45,6 +133,8 @@ pub struct CronStats {
     pub ticks: AtomicU64,
     pub skipped: AtomicU64,
     pub failed: AtomicU64,
+    /// Ticks of an `exclusive` schedule another instance claimed first.
+    pub taken: AtomicU64,
 }
 
 /// Starts one scheduler loop per cron workload. Returns the token that
@@ -57,7 +147,11 @@ pub fn start(
     let stop = CancellationToken::new();
     for workload in revision.definition.workloads() {
         let Trigger::Cron {
-            schedule, overlap, ..
+            schedule,
+            overlap,
+            exclusive,
+            database,
+            ..
         } = &workload.trigger
         else {
             continue;
@@ -65,6 +159,18 @@ pub fn start(
         let Ok(cron) = Cron::from_str(schedule) else {
             continue; // validated at install
         };
+        let claim_through = if *exclusive {
+            match super::queue::database_for(&revision, database.as_deref()) {
+                Some(m) => Some(m),
+                None => {
+                    tracing::error!(cron = %workload.name, "exclusive schedule without a postgres resource to claim ticks through; scheduler not started");
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
+        let claimant = format!("{}:{}", revision.id, workload.name);
         let stop = stop.clone();
         let runtime = runtime.clone();
         let revision = Arc::clone(&revision);
@@ -74,6 +180,8 @@ pub fn start(
         let overlap = *overlap;
         tokio::spawn(async move {
             let running = Arc::new(AtomicBool::new(false));
+            let claim_through = claim_through;
+            let claimant = claimant;
             loop {
                 let now = Utc::now();
                 let Ok(next) = cron.find_next_occurrence(&now, false) else {
@@ -90,6 +198,19 @@ pub fn start(
                     stats.skipped.fetch_add(1, Ordering::SeqCst);
                     tracing::info!(cron = %name, scheduled_at = %next, "tick skipped: previous invocation still running");
                     continue;
+                }
+                if let Some(manager) = &claim_through {
+                    match claim_tick(manager.as_ref(), &name, next, &claimant).await {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            stats.taken.fetch_add(1, Ordering::SeqCst);
+                            tracing::debug!(cron = %name, scheduled_at = %next, "tick claimed by another instance");
+                            continue;
+                        }
+                        Err(e) => {
+                            tracing::warn!(cron = %name, scheduled_at = %next, error = %e, "could not claim the tick; running it here (the database is down for every replica alike)");
+                        }
+                    }
                 }
                 let Some(runtime) = runtime.upgrade() else {
                     return;

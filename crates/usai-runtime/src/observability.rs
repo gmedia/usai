@@ -556,6 +556,29 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
             &queue,
         );
     }
+    let cron: Vec<(String, f64)> = status
+        .revisions
+        .iter()
+        .flat_map(|r| {
+            [
+                ("due", r.cron.ticks),
+                ("skipped", r.cron.skipped),
+                ("failed", r.cron.failed),
+                ("taken", r.cron.taken),
+            ]
+            .into_iter()
+            .map(move |(state, n)| (format!("revision=\"{}\",state=\"{state}\"", r.id), n as f64))
+        })
+        .collect();
+    if !cron.is_empty() {
+        metric(
+            &mut out,
+            "usai_cron_ticks_total",
+            "Cron ticks per revision: due on this instance, skipped (previous still running), failed, taken by another instance (exclusive schedules)",
+            "counter",
+            &cron,
+        );
+    }
     // Levels (gauge) and events (counter) are different metrics: the
     // number of quarantines is cumulative, so it is not a `usai_resource`
     // level and must not be alerted on as one.

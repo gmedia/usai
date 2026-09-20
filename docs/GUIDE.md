@@ -164,8 +164,11 @@ A finite world that ends with live asynchronous work (a stray `setTimeout`, an u
 
 ```ts
 export const cleanup = cron("cleanup", { schedule: "0 3 * * *", timeout: "5m", overlap: "skip" }, async (ctx) => { … });
+export const digest = cron("digest", { schedule: "0 7 * * *", exclusive: true, resources: [db] }, async (ctx) => { … });   // one instance per tick, however many replicas
 export const reconcile = command("reconcile", async (ctx) => ({ args: ctx.args }));
 ```
+
+`exclusive: true` is for the deployment with replicas: every instance's scheduler reaches the tick, each tries to insert `(schedule, scheduled time)` into `usai_cron_ticks` on the application's first `postgres` resource (or the one named in `exclusive: { database }`), and only the one whose insert landed runs the handler; the others count it under `cron.taken` in `/_usai/status`. No leader, no election, no clock agreement beyond the schedule itself. If the database is unreachable at the tick, every instance runs it (a flaky database must not silence a schedule everywhere at once) — write exclusive jobs to tolerate the rare double run. An exclusive schedule without a postgres resource is refused at install.
 
 ```bash
 usai cron run cleanup          # one tick, now, without waiting for the clock
@@ -355,7 +358,7 @@ Per-request logging: there is no access log by design — 2xx and 4xx are counte
 
 Where the `/_usai/*` surfaces listen: `--status` puts status, metrics, live, ready and the docs on the **application** listener (development, trusted networks — a public proxy must then deny `/_usai/*`); `--status-addr 127.0.0.1:9090` (`USAI_STATUS_ADDR`) serves them on a **separate** listener instead, which is what production wants (scrape and probe a private port, expose nothing). Both listeners take a **status token** (`USAI_STATUS_TOKEN`; `--status-token` exists but a flag shows in `ps`): with one set, `/_usai/status`, `/_usai/metrics` and `/_usai/openapi.json` answer `401` without `Authorization: Bearer <token>` (Prometheus: `authorization: { credentials: … }` in the scrape config); `/_usai/live` and `/_usai/ready` stay open because probes carry no headers and reveal only "up" and the name of a failing resource, and the `/_usai/docs` shell stays open and asks for the token in the browser. Set it whenever the status listener is reachable by anything other than your scraper and your orchestrator — the pages show the process's memory, per-route counters, the revision identity and the full OpenAPI profile (environment names, cron schedules, queue schemas). And switch off what nobody consumes: `--surfaces-off docs,metrics` (`USAI_SURFACES_OFF`) makes those paths a `404` on both listeners; the names are `status`, `metrics`, `docs` (reference + OpenAPI), `live`, `ready`. A production instance that is only probed and scraped typically runs `--status-addr <private> --surfaces-off docs` with a token.
 
-Several replicas: HTTP and queue consumers share the work without configuration (messages are claimed with `SKIP LOCKED`; migrations serialize on an advisory lock). **Cron ticks on every instance that runs the scheduler** — keep it on one replica and start the others with `usai run --no-cron` (`USAI_NO_CRON=1`); `--no-queue` likewise dedicates replicas. `SUPPORTED.md` has the topology table.
+Several replicas: HTTP and queue consumers share the work without configuration (messages are claimed with `SKIP LOCKED`; migrations serialize on an advisory lock). **A cron schedule runs on every instance that schedules, unless it is declared `exclusive: true`** — then each tick is claimed once in PostgreSQL (`usai_cron_ticks`) and one instance runs it, whichever replica got there first (§6). Schedules without it need the scheduler on one replica: start the others with `usai run --no-cron` (`USAI_NO_CRON=1`); `--no-queue` likewise dedicates replicas. `SUPPORTED.md` has the topology table.
 
 Logs: `--log-format json` (global flag) writes one JSON object per line with `timestamp`, `level` and fields, on stderr; the application's `console.*`/`ctx.log.*` lines carry `target: "app"` and appear at INFO. Results of one-shot commands go to stdout.
 
