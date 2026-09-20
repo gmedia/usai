@@ -21,7 +21,7 @@ Options for `http.stream`.
 | <a id="method"></a> `method?` | [`Method`](../type-aliases/Method.md) | Default `GET`. | - |
 | <a id="summary"></a> `summary?` | `string` | - | - |
 | <a id="description"></a> `description?` | `string` | - | - |
-| <a id="auth"></a> `auth?` | [`AuthDeclaration`](AuthDeclaration.md)\<`unknown`\> | - | - |
+| <a id="auth"></a> `auth?` | [`AuthDeclaration`](AuthDeclaration.md)\<`unknown`, readonly [`ResourceDeclaration`](ResourceDeclaration.md)\<`string`, `unknown`\>[]\> | - | - |
 | <a id="resources"></a> `resources?` | `R` | - | - |
 | <a id="params"></a> `params?` | [`AnySchema`](../type-aliases/AnySchema.md) | - | - |
 | <a id="query"></a> `query?` | [`AnySchema`](../type-aliases/AnySchema.md) | - | - |

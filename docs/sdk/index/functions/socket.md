@@ -4,11 +4,11 @@
 
 ```ts
 function socket<I extends AnySchema | undefined = undefined, O extends AnySchema | undefined = undefined, R extends ResourceDeclaration<string, unknown>[] = ResourceDeclaration<string, unknown>[], A extends 
-  | AuthDeclaration<unknown>
+  | AuthDeclaration<unknown, readonly ResourceDeclaration<string, unknown>[]>
   | undefined = undefined>(
    path: string, 
    options: SocketOptions<I, O, R, A>, 
-   handlers: SocketHandlers<Out<I>, Out<O>, R, A extends AuthDeclaration<P> ? P : undefined>
+   handlers: SocketHandlers<Out<I>, Out<O>, R, A extends AuthDeclaration<P, readonly ResourceDeclaration<string, unknown>[]> ? P : undefined, A>
 ): Workload;
 ```
 
@@ -26,7 +26,7 @@ restart) and `close` runs. `concurrency` bounds open connections.
 | `I` *extends* [`AnySchema`](../type-aliases/AnySchema.md) \| `undefined` | `undefined` |
 | `O` *extends* [`AnySchema`](../type-aliases/AnySchema.md) \| `undefined` | `undefined` |
 | `R` *extends* [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)\<`string`, `unknown`\>[] | [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)\<`string`, `unknown`\>[] |
-| `A` *extends* \| [`AuthDeclaration`](../interfaces/AuthDeclaration.md)\<`unknown`\> \| `undefined` | `undefined` |
+| `A` *extends* \| [`AuthDeclaration`](../interfaces/AuthDeclaration.md)\<`unknown`, readonly [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)\<`string`, `unknown`\>[]\> \| `undefined` | `undefined` |
 
 ## Parameters
 
@@ -34,7 +34,7 @@ restart) and `close` runs. `concurrency` bounds open connections.
 | ------ | ------ |
 | `path` | `string` |
 | `options` | [`SocketOptions`](../interfaces/SocketOptions.md)\<`I`, `O`, `R`, `A`\> |
-| `handlers` | [`SocketHandlers`](../interfaces/SocketHandlers.md)\<`Out`\<`I`\>, `Out`\<`O`\>, `R`, `A` *extends* [`AuthDeclaration`](../interfaces/AuthDeclaration.md)\<`P`\> ? `P` : `undefined`\> |
+| `handlers` | [`SocketHandlers`](../interfaces/SocketHandlers.md)\<`Out`\<`I`\>, `Out`\<`O`\>, `R`, `A` *extends* [`AuthDeclaration`](../interfaces/AuthDeclaration.md)\<`P`, readonly [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)\<`string`, `unknown`\>[]\> ? `P` : `undefined`, `A`\> |
 
 ## Returns
 

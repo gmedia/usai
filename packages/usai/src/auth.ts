@@ -142,29 +142,29 @@ export const auth = {
   /** `Authorization: Bearer <token>`; `resolve` receives the token. */
   bearer<P, const R extends readonly ResourceDeclaration[] = ResourceDeclaration[]>(
     options: BearerOptions<P, R>,
-  ): AuthDeclaration<P> {
+  ): AuthDeclaration<P, R> {
     return {
       __usai: "auth",
       name: options.name ?? `bearer-${++anonymous}`,
       ...(options.description ? { description: options.description } : {}),
       scheme: "bearer",
       header: "authorization",
-      resources: options.resources ?? [],
-      resolve: options.resolve as AuthDeclaration<P>["resolve"],
+      resources: (options.resources ?? []) as R,
+      resolve: options.resolve as AuthDeclaration<P, R>["resolve"],
     };
   },
   /** A credential in the named header (an API key); `resolve` receives its value. */
   header<P, const R extends readonly ResourceDeclaration[] = ResourceDeclaration[]>(
     options: HeaderOptions<P, R>,
-  ): AuthDeclaration<P> {
+  ): AuthDeclaration<P, R> {
     return {
       __usai: "auth",
       name: options.name ?? `header-${++anonymous}`,
       ...(options.description ? { description: options.description } : {}),
       scheme: "header",
       header: options.header.toLowerCase(),
-      resources: options.resources ?? [],
-      resolve: options.resolve as AuthDeclaration<P>["resolve"],
+      resources: (options.resources ?? []) as R,
+      resolve: options.resolve as AuthDeclaration<P, R>["resolve"],
     };
   },
   /** A cookie (`cookie: "sid"`); `resolve` receives its value. A missing
@@ -175,29 +175,32 @@ export const auth = {
    * cookie with `credentials: include`. */
   cookie<P, const R extends readonly ResourceDeclaration[] = ResourceDeclaration[]>(
     options: CookieOptions<P, R>,
-  ): AuthDeclaration<P> {
+  ): AuthDeclaration<P, R> {
     return {
       __usai: "auth",
       name: options.name ?? `cookie-${++anonymous}`,
       ...(options.description ? { description: options.description } : {}),
       scheme: "cookie",
       credential: { in: "cookie", name: options.cookie },
-      resources: options.resources ?? [],
-      resolve: options.resolve as AuthDeclaration<P>["resolve"],
+      resources: (options.resources ?? []) as R,
+      resolve: options.resolve as AuthDeclaration<P, R>["resolve"],
     };
   },
   /** Anything else: `resolve` reads the request itself. */
   custom<P, const R extends readonly ResourceDeclaration[] = ResourceDeclaration[]>(
     options: CustomOptions<P, R>,
-  ): AuthDeclaration<P> {
+  ): AuthDeclaration<P, R> {
     return {
       __usai: "auth",
       name: options.name,
       ...(options.description ? { description: options.description } : {}),
       scheme: "custom",
       ...(options.credential ? { credential: options.credential } : {}),
-      resources: options.resources ?? [],
-      resolve: ((ctx: ResolverContext<R>) => options.resolve(ctx)) as AuthDeclaration<P>["resolve"],
+      resources: (options.resources ?? []) as R,
+      resolve: ((ctx: ResolverContext<R>) => options.resolve(ctx)) as AuthDeclaration<
+        P,
+        R
+      >["resolve"],
     };
   },
 };

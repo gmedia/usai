@@ -5,6 +5,7 @@
 import type { AnySchema, Output } from "./schema.ts";
 import type {
   AuthDeclaration,
+  AuthResourcesOf,
   Method,
   ResourceDeclaration,
   ResourcesOf,
@@ -51,7 +52,7 @@ export interface StreamContext<O extends StreamOptions = StreamOptions> extends 
   /** The request's id (`x-request-id`, the client's or minted). */
   readonly requestId: string;
   /** The declared resources, typed by name from `resources: [...]`. */
-  readonly resources: ResourcesOf<O["resources"]>;
+  readonly resources: ResourcesOf<O["resources"]> & AuthResourcesOf<O["auth"]>;
   readonly method: Method;
   readonly path: string;
   readonly url: string;
@@ -161,11 +162,17 @@ export const streams = { stream };
  *
  * @category Streams and WebSockets
  */
-export interface SocketContext<Incoming, Outgoing, R = ResourceDeclaration[], A = unknown>
-  extends BaseContext {
+export interface SocketContext<
+  Incoming,
+  Outgoing,
+  R = ResourceDeclaration[],
+  A = unknown,
+  D = undefined,
+> extends BaseContext {
   /** The upgrade request's id (`x-request-id`, the client's or minted). */
   readonly requestId: string;
-  readonly resources: ResourcesOf<R>;
+  /** The declared resources, plus the ones the auth scheme (`D`) leases. */
+  readonly resources: ResourcesOf<R> & AuthResourcesOf<D>;
   readonly path: string;
   readonly url: string;
   readonly params: Record<string, string>;
@@ -216,13 +223,13 @@ type Out<S> = S extends AnySchema ? Output<S> : unknown;
  *
  * @category Streams and WebSockets
  */
-export interface SocketHandlers<I, O, R = ResourceDeclaration[], A = unknown> {
+export interface SocketHandlers<I, O, R = ResourceDeclaration[], A = unknown, D = undefined> {
   /** After the upgrade. */
-  open?(ctx: SocketContext<I, O, R, A>): unknown;
+  open?(ctx: SocketContext<I, O, R, A, D>): unknown;
   /** Once per incoming message, in order. */
-  message?(ctx: SocketContext<I, O, R, A>): unknown;
+  message?(ctx: SocketContext<I, O, R, A, D>): unknown;
   /** After the connection closed, whoever closed it. */
-  close?(ctx: SocketContext<I, O, R, A>): unknown;
+  close?(ctx: SocketContext<I, O, R, A, D>): unknown;
 }
 
 /**
@@ -252,7 +259,13 @@ export function socket<
 >(
   path: string,
   options: SocketOptions<I, O, R, A>,
-  handlers: SocketHandlers<Out<I>, Out<O>, R, A extends AuthDeclaration<infer P> ? P : undefined>,
+  handlers: SocketHandlers<
+    Out<I>,
+    Out<O>,
+    R,
+    A extends AuthDeclaration<infer P> ? P : undefined,
+    A
+  >,
 ): Workload {
   const contracts: Workload["contracts"] = {};
   if (options.incoming) contracts.message = options.incoming;

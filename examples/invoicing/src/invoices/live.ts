@@ -4,7 +4,6 @@
 // what the reliability campaign (`scripts/qualification/p6`) churns.
 import { http, socket } from "@sakaladev/usai";
 import { z } from "zod";
-import { db } from "../resources.ts";
 import { session } from "../auth/module.ts";
 
 const Counts = z.object({
@@ -27,9 +26,12 @@ export const live = http.stream(
     summary: "Live counts as server-sent events",
     description:
       "Sends a `counts` event immediately and then every `everyMs` milliseconds until the client disconnects; the world lives as long as the connection.",
+    operationId: "liveCounts",
     auth: session,
     query: z.object({ everyMs: z.coerce.number().int().min(200).max(30_000).default(1000) }),
-    resources: [db],
+    // The event and its payload, validated before each write and typed in
+    // the document as `components.schemas.LiveCountsEventCounts`.
+    events: { counts: Counts },
   },
   async (ctx, stream) => {
     while (!ctx.signal.aborted) {
@@ -57,7 +59,7 @@ export const feed = socket(
     auth: session,
     incoming: Ask,
     outgoing: Answer,
-    resources: [db],
+    // `db` comes with the session scheme; nothing to list here.
   },
   {
     open: async (ctx) => {

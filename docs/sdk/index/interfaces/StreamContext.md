@@ -19,14 +19,14 @@ The context of a streaming request: request facts plus [BaseContext](BaseContext
 | Property | Modifier | Type | Description | Overrides | Inherited from |
 | ------ | ------ | ------ | ------ | ------ | ------ |
 | <a id="requestid"></a> `requestId` | `readonly` | `string` | The request's id (`x-request-id`, the client's or minted). | - | - |
-| <a id="resources"></a> `resources` | `readonly` | [`ResourcesOf`](../type-aliases/ResourcesOf.md)\<`O`\[`"resources"`\]\> | The declared resources, typed by name from `resources: [...]`. | [`BaseContext`](BaseContext.md).[`resources`](BaseContext.md#resources) | - |
+| <a id="resources"></a> `resources` | `readonly` | [`ResourcesOf`](../type-aliases/ResourcesOf.md)\<`O`\[`"resources"`\]\> & `AuthResourcesOf`\<`O`\[`"auth"`\]\> | The declared resources, typed by name from `resources: [...]`. | [`BaseContext`](BaseContext.md).[`resources`](BaseContext.md#resources) | - |
 | <a id="method"></a> `method` | `readonly` | [`Method`](../type-aliases/Method.md) | - | - | - |
 | <a id="path"></a> `path` | `readonly` | `string` | - | - | - |
 | <a id="url"></a> `url` | `readonly` | `string` | - | - | - |
 | <a id="params"></a> `params` | `readonly` | `OutputOf`\<`O`\[`"params"`\], `Record`\<`string`, `string`\>\> | Path parameters, validated against `params` (strings when undeclared). | - | - |
 | <a id="query"></a> `query` | `readonly` | `OutputOf`\<`O`\[`"query"`\], `Record`\<`string`, `string` \| `string`[]\>\> | Query, validated against `query`. | - | - |
 | <a id="headers"></a> `headers` | `readonly` | `Record`\<`string`, `string`\> | - | - | - |
-| <a id="auth"></a> `auth` | `readonly` | `O`\[`"auth"`\] *extends* [`AuthDeclaration`](AuthDeclaration.md)\<`P`\> ? `P` : `undefined` | The principal the `auth` declaration resolved; `undefined` without one. | - | - |
+| <a id="auth"></a> `auth` | `readonly` | `O`\[`"auth"`\] *extends* [`AuthDeclaration`](AuthDeclaration.md)\<`P`, readonly [`ResourceDeclaration`](ResourceDeclaration.md)\<`string`, `unknown`\>[]\> ? `P` : `undefined` | The principal the `auth` declaration resolved; `undefined` without one. | - | - |
 | <a id="tasks"></a> `tasks` | `readonly` | [`TaskHandle`](TaskHandle.md) | Start tasks: owned (`invoke`) or transferred (`dispatch`). | - | [`BaseContext`](BaseContext.md).[`tasks`](BaseContext.md#tasks) |
 | <a id="queue"></a> `queue` | `readonly` | [`QueueHandle`](QueueHandle.md) | Publish to a queue topic; durable once the insert commits. | - | [`BaseContext`](BaseContext.md).[`queue`](BaseContext.md#queue) |
 | <a id="signal"></a> `signal` | `readonly` | [`UsaiAbortSignal`](UsaiAbortSignal.md) | Aborts when this world is cancelled. | - | [`BaseContext`](BaseContext.md).[`signal`](BaseContext.md#signal) |

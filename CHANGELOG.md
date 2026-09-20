@@ -186,8 +186,9 @@ two-replica campaign passed; the 72 h soak is running.
 - **An auth scheme declares its own resources**: `auth.bearer({ resources: [db],
   resolve: async (ctx, token) => ctx.resources.db.one(…) })` — typed on the
   resolver's `ctx.resources`, and every workload that uses the scheme leases
-  them in addition to its own (no more repeating the session table on each
-  route, no more `resource_not_declared` from the one route that forgot).
+  them in addition to its own, typed on the handler's `ctx.resources` as well
+  (no more repeating the session table on each route, no more
+  `resource_not_declared` from the one route that forgot).
 - `TaskContext.requestId` and `QueueContext.requestId`: the id of the request
   that invoked, dispatched or published (empty for cron and `usai task run`).
 - `usai/test`: **`app.logs(filter)`** and **`app.waitForLog(filter, timeoutMs)`**

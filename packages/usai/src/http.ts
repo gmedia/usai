@@ -3,6 +3,7 @@
 import type { AnySchema, Output } from "./schema.ts";
 import type {
   AuthDeclaration,
+  AuthResourcesOf,
   DeclaredError,
   HttpOptions,
   Method,
@@ -98,7 +99,7 @@ export interface HttpContext<O extends HttpOptions = HttpOptions> extends BaseCo
   /** The principal the `auth` declaration resolved; `undefined` without one. */
   readonly auth: O["auth"] extends AuthDeclaration<infer P> ? P : undefined;
   /** The declared resources, typed by name from `resources: [...]`. */
-  readonly resources: ResourcesOf<O["resources"]>;
+  readonly resources: ResourcesOf<O["resources"]> & AuthResourcesOf<O["auth"]>;
 }
 
 /** The context of a raw request (`http.raw`): no contracts, the exact

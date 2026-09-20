@@ -23,7 +23,7 @@ Options for `http.raw`.
 | <a id="method"></a> `method?` | [`Method`](../type-aliases/Method.md) | HTTP method. Default `POST`. | - |
 | <a id="summary"></a> `summary?` | `string` | - | - |
 | <a id="description"></a> `description?` | `string` | - | - |
-| <a id="auth"></a> `auth?` | [`AuthDeclaration`](AuthDeclaration.md)\<`unknown`\> | - | - |
+| <a id="auth"></a> `auth?` | [`AuthDeclaration`](AuthDeclaration.md)\<`unknown`, readonly [`ResourceDeclaration`](ResourceDeclaration.md)\<`string`, `unknown`\>[]\> | - | - |
 | <a id="resources"></a> `resources?` | `R` | - | - |
 | <a id="errors"></a> `errors?` | [`DeclaredError`](DeclaredError.md)[] | Errors the handler answers with (documented in the reference). | - |
 | <a id="responses"></a> `responses?` | `Record`\<`number`, `string`\> | Statuses the handler writes, with a description each — the reference lists them instead of "opaque response". | - |

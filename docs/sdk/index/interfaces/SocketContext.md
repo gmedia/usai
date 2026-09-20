@@ -1,6 +1,6 @@
 [@sakaladev/usai](../../README.md) / [index](../README.md) / SocketContext
 
-# Interface: SocketContext\<Incoming, Outgoing, R = [`ResourceDeclaration`](ResourceDeclaration.md)[], A = `unknown`\>
+# Interface: SocketContext\<Incoming, Outgoing, R = [`ResourceDeclaration`](ResourceDeclaration.md)[], A = `unknown`, D = `undefined`\>
 
 The context of a WebSocket connection, shared by `open`, `message` and
 `close`: request facts, `send`/`close`, connection-local `state`, and
@@ -18,13 +18,14 @@ in `message` the validated incoming `message`.
 | `Outgoing` | - |
 | `R` | [`ResourceDeclaration`](ResourceDeclaration.md)[] |
 | `A` | `unknown` |
+| `D` | `undefined` |
 
 ## Properties
 
 | Property | Modifier | Type | Description | Overrides | Inherited from |
 | ------ | ------ | ------ | ------ | ------ | ------ |
 | <a id="requestid"></a> `requestId` | `readonly` | `string` | The upgrade request's id (`x-request-id`, the client's or minted). | - | - |
-| <a id="resources"></a> `resources` | `readonly` | [`ResourcesOf`](../type-aliases/ResourcesOf.md)\<`R`\> | The declared resources by name, as their in-world handles ([PostgresHandle](PostgresHandle.md), [CacheLocalHandle](CacheLocalHandle.md), [HttpClientHandle](HttpClientHandle.md)). Reading an undeclared name throws `resource_not_declared` with the fix. | [`BaseContext`](BaseContext.md).[`resources`](BaseContext.md#resources) | - |
+| <a id="resources"></a> `resources` | `readonly` | [`ResourcesOf`](../type-aliases/ResourcesOf.md)\<`R`\> & `AuthResourcesOf`\<`D`\> | The declared resources, plus the ones the auth scheme (`D`) leases. | [`BaseContext`](BaseContext.md).[`resources`](BaseContext.md#resources) | - |
 | <a id="path"></a> `path` | `readonly` | `string` | - | - | - |
 | <a id="url"></a> `url` | `readonly` | `string` | - | - | - |
 | <a id="params"></a> `params` | `readonly` | `Record`\<`string`, `string`\> | - | - | - |

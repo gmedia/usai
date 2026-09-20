@@ -26,7 +26,10 @@ export interface DeclaredError {
  *
  * @category Application
  */
-export interface AuthDeclaration<Principal = unknown> {
+export interface AuthDeclaration<
+  Principal = unknown,
+  R extends readonly ResourceDeclaration[] = readonly ResourceDeclaration[],
+> {
   /** @internal */
   readonly __usai: "auth";
   readonly name: string;
@@ -41,8 +44,9 @@ export interface AuthDeclaration<Principal = unknown> {
   readonly credential?: CredentialLocation;
   /** The resources the resolver leases. A workload that uses the scheme
    * gets them in addition to its own (`describe` merges the two lists), so
-   * a route never has to repeat the session table for the resolver's sake. */
-  readonly resources: readonly ResourceDeclaration[];
+   * a route never has to repeat the session table for the resolver's sake;
+   * they are typed on the workload's `ctx.resources` too. */
+  readonly resources: R;
   readonly resolve: (
     ctx: unknown,
     credential: string | undefined,
@@ -463,13 +467,25 @@ export function parseDuration(value: string | number | undefined): number | unde
   }
 }
 
+/** The resources a workload's auth scheme contributes to its `ctx.resources`
+ * type: the scheme's declared list when it has one, nothing when the scheme
+ * left it untyped.
+ *
+ * @category Application */
+export type AuthResourcesOf<A> =
+  A extends AuthDeclaration<unknown, infer R>
+    ? [readonly ResourceDeclaration[]] extends [R]
+      ? Record<never, never>
+      : ResourcesOf<R>
+    : Record<never, never>;
+
 /** A workload's resources plus the ones its auth scheme leases, each
  * declaration once (by name).
  *
  * @internal */
 export function withAuthResources(
   own: readonly ResourceDeclaration[] | undefined,
-  auth: AuthDeclaration<unknown> | undefined,
+  auth: AuthDeclaration<unknown, readonly ResourceDeclaration[]> | undefined,
 ): ResourceDeclaration[] {
   const out: ResourceDeclaration[] = [...(own ?? [])];
   for (const r of auth?.resources ?? []) if (!out.some((o) => o.name === r.name)) out.push(r);
