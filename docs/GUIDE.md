@@ -500,3 +500,35 @@ What building it as a user found (and what changed): outbound HTTP, `crypto`, pa
 ## 18. Performance note (v0)
 
 Per-world cost on the Wasm substrate is flat with respect to application size: instantiating a world from the pre-initialized image costs ~0.02 ms whatever the bundle contains, and validators declared as contracts are prepared before the image is snapshotted, so a fresh world does not rebuild them. Numbers belong with their conditions: a contract-validated hello request is 0.90 ms p50 at c=1 on the qualification VM (release build, pinned core, a soak as co-tenant — `docs/measurements/2026-09-19-p8-parity.md`), and the comparators on the same host are in the same report; quote from there, not from here. Handler code runs in an interpreter compiled by Cranelift: CPU-heavy loops are slower than on a JIT; keep hot loops small or move them to the database.
+
+## 19. Coming from Express, Fastify or Laravel
+
+The same service, piece by piece. Left: what you write today. Right: where it lives in Usai, and the section that says how. "Proxy" means the reverse proxy in front (Caddy, nginx, an ingress) — §14 has one Caddy block that covers every row marked so.
+
+| You have | In Usai | Where |
+|---|---|---|
+| `app.use(express.json())`, `body-parser`, Fastify schemas, `FormRequest` | The route's contracts (`body`, `params`, `query`, `headers` as Standard Schema): validated **before a world exists**, typed on `ctx`, in the OpenAPI document | §4 |
+| Middleware chain / `$middleware` for auth | `auth.bearer` / `auth.header` / `auth.cookie` / `auth.custom`, attached per route as `auth:`; the resolver runs in the world before the handler; `ctx.auth` is the principal | §4 |
+| `cookie-session`, `express-session`, Laravel sessions | `auth.cookie({ cookie: "sid" })` + `cookies.sign/verify` for a signed value, or a sessions table; `Set-Cookie` through the headers argument of `http.response` | §4 |
+| `cors()`, `HandleCors` | The proxy (the runtime answers no preflight) | §9, §14 |
+| `helmet()`, security headers | `defineApp({ headers })` for static headers on every response, or the proxy | §14 |
+| `morgan`, access logs | The proxy's access log; the runtime counts (`/_usai/status`, `usai_http_*`) and logs 5xx and lifecycle violations with `request_id` | §14 |
+| `req.id`, `X-Request-Id` middleware | Built in: `x-request-id` accepted or minted, `ctx.requestId`, on every log line and outbound call | §14 |
+| `multer`, `UploadFile` | `http.raw` + `multipart.parse(bytes, contentType)`; bytes into `bytea` as a `Uint8Array`; `USAI_MAX_BODY_BYTES`; large files → presigned upload to object storage | §4 |
+| `express.static`, `public/` | The proxy or object storage (a world has no filesystem) | §14 |
+| `res.write` / SSE / `StreamingResponse` | `http.stream(path, { contentType })` — SSE by default, CSV/NDJSON declared | §9 |
+| `ws`, Socket.IO, Reverb | `socket(path, { incoming, outgoing })`, one world per connection, browser credential as `["bearer", token]` | §9 |
+| `setImmediate(sendEmail)`, `void promise`, `dispatch()->afterResponse()` | `task()` + `ctx.tasks.dispatch()` (owned hand-off, not durable) or the queue (durable); a forgotten `await` on a write is a `500 detached_work`, not a silent loss | §5, §8 |
+| BullMQ, Sidekiq, Horizon, Celery | `queue.consume(topic, { concurrency, retry })` on PostgreSQL (`SKIP LOCKED`, explicit retry, dead letters, at-least-once); `ctx.queue.publish` | §8 |
+| `node-cron`, Celery beat, `schedule()` with `onOneServer()` | `cron(name, { schedule, exclusive: true })` — one instance per tick across replicas, claimed in the database | §6 |
+| Artisan commands, `manage.py` | `command(name, handler)` → `usai app <name> -- args`; `seeder()` → `usai db seed` | §6, §7 |
+| Knex/Prisma migrations, Alembic | `.sql` files applied in order by `usai db migrate`, checksum-locked, in the artifact | §7 |
+| Prisma, Eloquent, SQLAlchemy | Plain SQL through `ctx.resources.db` (`query/one/execute/transaction`), typed by the schema you already declared; no ORM | §7 |
+| `pg.Pool` per process, `DB::connection()` | `postgres("db", { pool })` declared once, leased per operation, connections never reused without terminal proof | §7 |
+| `axios`/`fetch` to other services | `httpClient("name", { baseUrlEnv })` declared as a resource; `fetch` is not a global | §11 |
+| `dotenv`, `.env` in production | `env({ … })` declared; `usai dev` reads `.env`, `usai run` reads only the process environment and refuses to start without what is declared | §13 |
+| `process.on("SIGTERM", () => server.close())` | Built in: readiness fails, connections close after their response, in-flight work drains within a bound | §14 |
+| PM2 cluster, `pm.max_children`, Gunicorn workers | One process, many worlds in parallel (`--max-worlds`); replicas for redundancy, not for cores | `runbooks/sizing.md` |
+| Supertest, `TestClient`, Pest HTTP tests | `usai/test`: `testApp()` runs the real binary; `app.http.*`, `app.task().invoke`, `app.queue().deliver`, `res.violations` | §15 |
+
+What has no counterpart, on purpose: module-level caches and singletons (a world starts fresh; `cache.local` is the process-wide, non-durable cache), global mutable state between requests, `fs`/`process`, an ORM, and an in-process cron that is silently duplicated by the second replica.
