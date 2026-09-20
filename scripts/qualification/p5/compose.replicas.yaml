@@ -5,7 +5,7 @@
 #   upstream) → app (:3001 status, :3901 control) + app2 (:3002, :3902) → postgres
 # Driven by scripts/qualification/p6/replicas.sh.
 x-app: &app
-  image: usai-p5-app:latest
+  image: ${APP_IMAGE:-usai-p5-app:latest}
   command: ["run", "--artifact", "/app/.usai/build", "--host", "0.0.0.0", "--port", "3000", "--status", "--control", "0.0.0.0:3900", "--drain-timeout", "10"]
   depends_on:
     postgres: { condition: service_healthy }

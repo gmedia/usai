@@ -1,0 +1,71 @@
+name: P7 report (external developer session)
+description: You built the reading-list API from the public docs alone (docs/P7-EXTERNAL-VALIDATION.md). Tell us where it fought you.
+title: "P7 report: "
+labels: ["p7", "docs"]
+body:
+  - type: input
+    id: background
+    attributes:
+      label: Your background
+      description: Stacks you ship APIs with today, OS, Node version, Usai version (`usai --version`).
+      placeholder: "Fastify + Prisma daily; Ubuntu 24.04; Node 24.2; usai 0.0.6"
+    validations:
+      required: true
+  - type: input
+    id: t-hello
+    attributes:
+      label: Minutes to the first 200 (step 1)
+    validations:
+      required: true
+  - type: input
+    id: t-postgres
+    attributes:
+      label: Minutes to the first row from PostgreSQL (step 2)
+  - type: input
+    id: t-prod
+    attributes:
+      label: Minutes to the first production 200 (`usai run --artifact`, step 6)
+  - type: textarea
+    id: steps
+    attributes:
+      label: Per step — done or not, and every hesitation
+      description: What you expected, what you found, what you did instead. Timestamps welcome.
+      value: |
+        1. scaffold + hello:
+        2. migration + POST/GET /books:
+        3. task notifyAdded (dispatch):
+        4. API key on POST:
+        5. usai/test:
+        6. build + run --artifact + /_usai/ready:
+        7. the deliberate mistake — what the runtime said:
+    validations:
+      required: true
+  - type: textarea
+    id: docs
+    attributes:
+      label: Documentation
+      description: The page you opened most; the page you wished existed; anything you had to guess.
+  - type: textarea
+    id: errors
+    attributes:
+      label: Error messages that did not tell you what to do
+      description: Paste them as they appeared.
+  - type: textarea
+    id: model
+    attributes:
+      label: The lifecycle model
+      description: A fresh execution world per request, `invoke` vs `dispatch`, resources declared per workload — natural or in the way? One paragraph.
+    validations:
+      required: true
+  - type: input
+    id: first-change
+    attributes:
+      label: The one thing you would change first
+    validations:
+      required: true
+  - type: checkboxes
+    id: source
+    attributes:
+      label: Did you read the runtime's source?
+      options:
+        - label: "Yes — and I wrote above what I was looking for"

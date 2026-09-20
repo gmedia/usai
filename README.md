@@ -11,13 +11,17 @@ build, and run on Usai without requiring Sakala or another deployment platform.
 
 ## Status
 
-**Developer preview (0.0.x). Not production-ready.** Everything that exists
-has acceptance tests and ships from one tag (binaries, npm, Docker), but the
-gates that make a runtime trustworthy in production — a real application
-built as a user, operational and reliability qualification, external
-developer validation, frozen contracts — are still open. `docs/STATUS.md`
-("Production readiness") says exactly which, and `docs/ROADMAP.md` how they
-close. Use it for development, evaluation and internal tools you can restart.
+**Alpha (0.0.x) — production qualification in progress.** Everything that
+exists has acceptance tests and ships from one tag (binaries, npm, Docker);
+a production-shaped deployment has been broken thirteen ways under load,
+soaked for 24 hours (35 M requests, no runtime error), and run as two
+replicas behind one proxy — with the findings fixed. Still open: the 72 h
+soak, developers outside the project building from the docs alone
+(`docs/P7-EXTERNAL-VALIDATION.md`), and frozen contracts. `docs/STATUS.md`
+("Production readiness") says exactly where each gate stands, and
+`docs/ROADMAP.md` how they close. Use it for development, evaluation and
+internal tools you can restart; put it in front of paying traffic knowing
+those three caveats.
 
 The research phase established enough evidence to justify building a real
 runtime. This repository is the clean production-oriented implementation.

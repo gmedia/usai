@@ -50,7 +50,7 @@ load() { node "$p5/loadgen.mjs" "$BASE" "$TOKEN" "${CLIENTS:-8}" "$1" "$2" > /de
 gateway() { docker network inspect "${COMPOSE_PROJECT_NAME}_default" -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}'; }
 
 up() {
-  log "images: $(docker image inspect usai-p5-app:latest -f '{{.Id}}' | cut -c8-19) (usai-p5-app:latest, built by p5/run.sh build)"
+  log "image: ${APP_IMAGE:-usai-p5-app:latest} $(docker image inspect "${APP_IMAGE:-usai-p5-app:latest}" -f "{{.Id}}" | cut -c8-19)"
   docker compose up -d --wait postgres
   docker compose run --rm --no-deps -T app db migrate --artifact /app/.usai/build
   docker compose up -d
