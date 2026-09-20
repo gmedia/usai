@@ -270,51 +270,8 @@ fn publish(document: &mut Value) {
             _ => {}
         }
     }
-    if let Some(paths) = document.get_mut("paths").and_then(Value::as_object_mut) {
-        for item in paths.values_mut() {
-            let Some(operations) = item.as_object_mut() else {
-                continue;
-            };
-            for operation in operations.values_mut() {
-                // Declared error codes are part of the contract; keep them
-                // where a standard reader looks — the response description.
-                let codes: Vec<(u16, String)> = operation
-                    .get("x-usai-errors")
-                    .and_then(Value::as_array)
-                    .map(|errors| {
-                        errors
-                            .iter()
-                            .filter_map(|e| {
-                                Some((
-                                    e.get("status")?.as_u64()? as u16,
-                                    e.get("code")?.as_str()?.to_owned(),
-                                ))
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                if let Some(responses) = operation
-                    .get_mut("responses")
-                    .and_then(Value::as_object_mut)
-                {
-                    for (status, response) in responses.iter_mut() {
-                        let mine: Vec<&str> = codes
-                            .iter()
-                            .filter(|(s, _)| s.to_string() == *status)
-                            .map(|(_, c)| c.as_str())
-                            .collect();
-                        if !mine.is_empty() {
-                            response["description"] = json!(format!(
-                                "Error code{}: {}",
-                                if mine.len() == 1 { "" } else { "s" },
-                                mine.join(", ")
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-    }
+    // Declared error codes already live in each response's description and
+    // its `error.code` enum; nothing to move before the extensions go.
     strip_extensions(document);
 }
 
@@ -322,6 +279,7 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
     let manifest = definition.manifest();
     let mut paths: Map<String, Value> = Map::new();
     let mut security_schemes: Map<String, Value> = Map::new();
+    let mut socket_schemas: Map<String, Value> = Map::new();
 
     for workload in definition.workloads() {
         let (method, path, raw, lifetime) = match &workload.trigger {
@@ -334,7 +292,7 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
         };
         let (method, path, raw) = (&method, &path, &raw);
         let mut operation = json!({
-            "operationId": operation_id(workload),
+            "operationId": workload.operation_id.clone().unwrap_or_else(|| operation_id(workload)),
             "x-usai-lifetime": lifetime,
         });
         if let Some(summary) = &workload.summary {
@@ -386,6 +344,32 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
                 ),
             );
             operation["x-usai-socket"] = json!({ "incoming": incoming, "outgoing": outgoing });
+            // The message contracts as named components, so a generator
+            // that ignores `x-` extensions (and the public profile, which
+            // strips them) still gets the types: `<OperationId>Incoming`,
+            // `<OperationId>Outgoing`.
+            let base = operation["operationId"]
+                .as_str()
+                .unwrap_or("socket")
+                .to_owned();
+            let pascal = {
+                let mut c = base.chars();
+                c.next()
+                    .map(|f| f.to_uppercase().collect::<String>() + c.as_str())
+                    .unwrap_or_default()
+            };
+            if !incoming.is_null() {
+                socket_schemas.insert(format!("{pascal}Incoming"), incoming.clone());
+            }
+            if !outgoing.is_null() {
+                socket_schemas.insert(format!("{pascal}Outgoing"), outgoing.clone());
+            }
+            note(
+                &mut operation,
+                &format!(
+                    "Message schemas: components.schemas.{pascal}Incoming (client → server), components.schemas.{pascal}Outgoing (server → client)."
+                ),
+            );
         }
         if let Some(module) = &workload.module {
             operation["tags"] = json!([module]);
@@ -722,6 +706,9 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
     }
 
     let mut components = json!({ "schemas": { "UsaiError": error_schema() } });
+    for (name, schema) in socket_schemas {
+        components["schemas"][name] = schema;
+    }
     if !security_schemes.is_empty() {
         components["securitySchemes"] = Value::Object(security_schemes);
     }
@@ -829,6 +816,7 @@ mod tests {
             contracts: Default::default(),
             errors: vec![],
             response_headers: Default::default(),
+            operation_id: None,
             auth: None,
             resources: vec![],
             dispatches: vec![],

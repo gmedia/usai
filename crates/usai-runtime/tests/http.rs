@@ -1017,6 +1017,16 @@ async fn openapi_is_generated_from_the_definition() {
     // The facts a Usai consumer can rely on travel with the operation.
     let order = &doc["paths"]["/orders"]["post"];
     assert_eq!(order["x-usai-validated"]["body"], "before-world");
+    // The application's operationId wins over the derived one; a socket's
+    // message contracts are named components.
+    assert_eq!(doc["paths"]["/users"]["post"]["operationId"], "createUser");
+    assert_eq!(doc["paths"]["/chat"]["get"]["operationId"], "chat");
+    assert_eq!(
+        doc["components"]["schemas"]["ChatIncoming"]["properties"]["text"]["type"], "string",
+        "{}",
+        doc["components"]["schemas"]
+    );
+    assert!(doc["components"]["schemas"]["ChatOutgoing"]["properties"]["echo"].is_object());
     // Documented response headers appear on their status (and `"*"` on every
     // success status), typed as strings for a generated client.
     let created = &doc["paths"]["/users"]["post"]["responses"]["201"];
@@ -1131,7 +1141,13 @@ async fn openapi_is_generated_from_the_definition() {
     assert_eq!(public["info"]["title"], "http-fixture");
     assert_eq!(
         public["paths"]["/users/{id}"]["get"]["responses"]["404"]["description"],
-        "Error code: not_found"
+        "Not Found: code not_found"
+    );
+    // The public profile keeps the socket message components.
+    assert!(
+        public["components"]["schemas"]["ChatIncoming"].is_object(),
+        "{}",
+        public["components"]
     );
     let text = public.to_string();
     assert!(

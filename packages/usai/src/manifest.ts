@@ -56,6 +56,8 @@ export interface ManifestWorkload {
   errors: Array<{ code: string; status: number }>;
   /** Documented response headers, by status (`"201"`, `"*"`). */
   responseHeaders?: Record<string, Record<string, string>>;
+  /** The chosen OpenAPI operationId. */
+  operationId?: string;
   auth?: string;
   resources: string[];
   dispatches: string[];
@@ -212,6 +214,7 @@ export function describe(app: AppDeclaration): Manifest {
       publishes: [...workload.publishes],
     };
     if (module !== undefined) entry.module = module;
+    if (workload.operationId) entry.operationId = workload.operationId;
     if (workload.responseHeaders) {
       const docs: Record<string, Record<string, string>> = {};
       for (const [status, headers] of Object.entries(workload.responseHeaders)) {

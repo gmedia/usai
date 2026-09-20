@@ -167,6 +167,10 @@ export interface HttpOptions extends HttpContracts, WorkloadPolicies {
   /** Response headers the handler sets (`set-cookie`, `location`, `etag`),
    * documented per status. See {@link ResponseHeaderDocs}. */
   responseHeaders?: ResponseHeaderDocs;
+  /** The OpenAPI `operationId` — what a generated client names the method
+   * (`listProducts`). Derived from method and path when absent
+   * (`getProducts`). Unique per application. */
+  operationId?: string;
   /** The authentication boundary; its principal is `ctx.auth`. */
   auth?: AuthDeclaration;
   /** Resources this endpoint leases; only these are on `ctx.resources`. */
@@ -204,6 +208,8 @@ export interface Workload {
   readonly errors: DeclaredError[];
   /** Documented response headers per status (HTTP, raw and stream workloads). */
   readonly responseHeaders?: ResponseHeaderDocs;
+  /** The chosen OpenAPI `operationId`, when the declaration set one. */
+  readonly operationId?: string;
   readonly auth?: AuthDeclaration;
   readonly resources: ResourceDeclaration[];
   readonly dispatches: Workload[];

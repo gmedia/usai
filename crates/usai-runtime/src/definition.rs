@@ -298,6 +298,10 @@ pub struct WorkloadSpec {
     /// the OpenAPI document and the reference list them.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub response_headers: BTreeMap<String, BTreeMap<String, String>>,
+    /// The OpenAPI `operationId` the application chose (a generated client's
+    /// method name); derived from method and path when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
     /// Name of the auth boundary declaration this workload requires, if any.
     #[serde(default)]
     pub auth: Option<String>,
@@ -760,6 +764,7 @@ mod tests {
                 contracts: Contracts::default(),
                 errors: vec![],
                 response_headers: Default::default(),
+                operation_id: None,
                 auth: None,
                 resources: vec![],
                 dispatches: vec![],

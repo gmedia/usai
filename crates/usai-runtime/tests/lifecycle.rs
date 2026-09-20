@@ -83,6 +83,7 @@ fn task(id: &str) -> WorkloadSpec {
         contracts: Contracts::default(),
         errors: vec![],
         response_headers: Default::default(),
+        operation_id: None,
         auth: None,
         resources: vec![],
         dispatches: vec![],

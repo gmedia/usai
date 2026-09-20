@@ -87,6 +87,8 @@ export interface StreamOptions<R extends ResourceDeclaration[] = ResourceDeclara
   contentType?: string;
   /** Response headers the stream sets (`content-disposition` for a download), documented. */
   responseHeaders?: ResponseHeaderDocs;
+  /** The OpenAPI `operationId` (a generated client's method name). */
+  operationId?: string;
 }
 
 /**
@@ -131,6 +133,7 @@ function stream<O extends StreamOptions>(
     contracts,
     errors: [],
     ...(options.responseHeaders ? { responseHeaders: options.responseHeaders } : {}),
+    ...(options.operationId ? { operationId: options.operationId } : {}),
     ...(options.auth ? { auth: options.auth } : {}),
     resources: withAuthResources(options.resources, options.auth),
     dispatches: [],
@@ -191,6 +194,9 @@ export interface SocketOptions<
   incoming?: I;
   /** Schema for messages to the client. */
   outgoing?: O;
+  /** The OpenAPI `operationId`; the message schemas become
+   * `components.schemas.<OperationId>Incoming` / `…Outgoing`. */
+  operationId?: string;
   auth?: A;
   resources?: R;
 }
@@ -253,6 +259,7 @@ export function socket<
     trigger: { path },
     contracts,
     errors: [],
+    ...(options.operationId ? { operationId: options.operationId } : {}),
     ...(options.auth ? { auth: options.auth } : {}),
     resources: withAuthResources(options.resources, options.auth),
     dispatches: [],

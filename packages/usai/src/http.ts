@@ -167,6 +167,7 @@ function declare<O extends HttpOptions>(
     contracts,
     errors: options.errors ?? [],
     ...(options.responseHeaders ? { responseHeaders: options.responseHeaders } : {}),
+    ...(options.operationId ? { operationId: options.operationId } : {}),
     ...(options.auth ? { auth: options.auth } : {}),
     resources: withAuthResources(options.resources, options.auth),
     dispatches: [],
@@ -206,6 +207,8 @@ export interface RawOptions<R extends ResourceDeclaration[] = ResourceDeclaratio
   responses?: Record<number, string>;
   /** Response headers the handler sets, documented per status (`content-disposition`, `etag`). */
   responseHeaders?: ResponseHeaderDocs;
+  /** The OpenAPI `operationId` (a generated client's method name). */
+  operationId?: string;
 }
 
 /** The handler of `http.raw`. */
@@ -241,6 +244,7 @@ function raw(path: string, a: RawOptions | RawHandler, b?: RawHandler): Workload
     contracts: {},
     errors: options.errors ?? [],
     ...(options.responseHeaders ? { responseHeaders: options.responseHeaders } : {}),
+    ...(options.operationId ? { operationId: options.operationId } : {}),
     ...(options.auth ? { auth: options.auth } : {}),
     resources: withAuthResources(options.resources, options.auth),
     dispatches: [],

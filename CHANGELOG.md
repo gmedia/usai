@@ -194,6 +194,11 @@ two-replica campaign passed; the 72 h soak is running.
   by default and forwards the lines to stderr as before.
 - Globals: `KeyUsage`, `CryptoKey`, `HmacImportParams` names, so code written
   against the DOM's WebCrypto types typechecks in a world.
+- `operationId` on `http.*`, `http.raw`, `http.stream` and `socket` names the
+  operation for generated clients; a socket's `incoming`/`outgoing` contracts
+  are `components.schemas.<OperationId>Incoming/Outgoing` (public profile
+  included). Error descriptions read `Not Found: code not_found` in both
+  profiles.
 - `responseHeaders: { 201: { location: "…" }, "*": { etag: "…" } }` on
   `http.*`, `http.raw` and `http.stream` documents the response headers a
   handler sets, per status, in the OpenAPI document (`responses[status].headers`)
