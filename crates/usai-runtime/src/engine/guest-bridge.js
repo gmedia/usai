@@ -773,11 +773,22 @@
   const log = nativeOp
     ? (level, message) => { nextNativeId++; nativeOp(0, "__log\u0000" + level + "\u0000" + message).catch(() => {}); }
     : (level, message) => __usai_host_log(level, message);
+  // `console.info("paid", { invoiceId, cents })`: a trailing plain object is
+  // structured fields — it travels after the message (NUL-separated) and the
+  // host emits it as its own `fields` attribute, so `--log-format json`
+  // carries it as data rather than as text inside the message.
+  const isFields = (v) => v !== null && typeof v === "object" && !Array.isArray(v) && !(v instanceof Error) && Object.getPrototypeOf(v) === Object.prototype;
+  const line = (a) => {
+    if (a.length >= 2 && isFields(a[a.length - 1])) {
+      return fmt(a.slice(0, -1)) + "\u0000" + safeStringify(a[a.length - 1]);
+    }
+    return fmt(a);
+  };
   globalThis.console = {
-    log: (...a) => log("info", fmt(a)),
-    info: (...a) => log("info", fmt(a)),
-    debug: (...a) => log("debug", fmt(a)),
-    warn: (...a) => log("warn", fmt(a)),
-    error: (...a) => log("error", fmt(a)),
+    log: (...a) => log("info", line(a)),
+    info: (...a) => log("info", line(a)),
+    debug: (...a) => log("debug", line(a)),
+    warn: (...a) => log("warn", line(a)),
+    error: (...a) => log("error", line(a)),
   };
 })();

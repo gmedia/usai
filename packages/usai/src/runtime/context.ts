@@ -111,8 +111,10 @@ export interface BaseContext {
    * with `const e = ctx.env as EnvValues<typeof spec>` (the context does
    * not carry the declaration's type). */
   readonly env: Record<string, string | number | boolean | undefined>;
-  /** Structured logging; lines carry the workload and world ids and reach
-   * the runtime's log (`target: "app"`). `console.*` is the same. */
+  /** Structured logging; lines carry the workload, world and request ids
+   * and reach the runtime's log (`target: "app"`). A trailing plain object
+   * is structured `fields` (`ctx.log.info("paid", { invoiceId })`), the rest
+   * is the message. `console.*` is the same. */
   readonly log: Pick<ConsoleLike, "debug" | "info" | "warn" | "error">;
   /** A timer owned by this world (`"500ms"`, `"2s"`, or milliseconds). It
    * resolves early when the world is asked to stop, so a service loop can

@@ -68,6 +68,8 @@ two-replica campaign passed; the 72 h soak is running.
 - **Uploads and headers**: `multipart.parse(bytes, contentType)` splits a form body into
   fields and files; `defineApp({ headers })` sets static response headers on every
   application response (a handler's own wins).
+- **Structured log fields**: a trailing plain object in `ctx.log.*`/`console.*` is its
+  own `fields` attribute (JSON) on the log line, not text in the message.
 - **Drain asks background work to stop before cancelling it**: dispatched tasks, cron
   ticks and queue messages see `ctx.signal.aborted` and their `ctx.sleep` return at
   the start of a drain (services and connections already did); a long task can record

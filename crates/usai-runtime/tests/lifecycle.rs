@@ -383,7 +383,9 @@ async fn console_output_is_captured_per_world() {
     let rt = runtime().await;
     let r = rt.invoke("task:log", json!(null)).await.unwrap();
     assert_eq!(r.logs.len(), 1);
-    assert_eq!(r.logs[0].message, r#"hello {"a":1}"#);
+    // A trailing plain object is structured fields, not text.
+    assert_eq!(r.logs[0].message, "hello");
+    assert_eq!(r.logs[0].fields.as_deref(), Some(r#"{"a":1}"#));
 }
 
 #[tokio::test]

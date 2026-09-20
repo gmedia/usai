@@ -383,7 +383,7 @@ Where the `/_usai/*` surfaces listen: `--status` puts status, metrics, live, rea
 
 Several replicas: HTTP and queue consumers share the work without configuration (messages are claimed with `SKIP LOCKED`; migrations serialize on an advisory lock). **A cron schedule runs on every instance that schedules, unless it is declared `exclusive: true`** — then each tick is claimed once in PostgreSQL (`usai_cron_ticks`) and one instance runs it, whichever replica got there first (§6). Schedules without it need the scheduler on one replica: start the others with `usai run --no-cron` (`USAI_NO_CRON=1`); `--no-queue` likewise dedicates replicas. `SUPPORTED.md` has the topology table.
 
-Logs: `--log-format json` (global flag) writes one JSON object per line with `timestamp`, `level` and fields, on stderr; the application's `console.*`/`ctx.log.*` lines carry `target: "app"` and appear at INFO. Results of one-shot commands go to stdout.
+Logs: `--log-format json` (global flag) writes one JSON object per line with `timestamp`, `level` and fields, on stderr; the application's `console.*`/`ctx.log.*` lines carry `target: "app"`, `workload`, `world`, `request_id` and appear at INFO. **Structured fields**: a trailing plain object is data, not text — `ctx.log.info("invoice paid", { invoiceId, cents })` gives `message: "invoice paid"` and `fields: {"invoiceId":…,"cents":…}` (a JSON string in the JSON line, so a log pipeline can parse it); other arguments are stringified into the message as `console` does. Results of one-shot commands go to stdout.
 
 Deploying with Docker: build the scaffold's `Dockerfile`, run it with
 `DATABASE_URL` and the rest of the declared environment (`usai run` never

@@ -131,6 +131,8 @@ pub struct WorkResult {
 pub struct LogLine {
     pub level: String,
     pub message: String,
+    /// Structured fields the line carried (`console.info("paid", { … })`), as JSON.
+    pub fields: Option<String>,
 }
 
 /// State the guest natives reach through `HostBindings`. Everything here is
@@ -194,11 +196,18 @@ impl HostBindings for WorldShared {
     }
 
     fn log(&self, level: &str, message: &str) {
+        // `message\0{json}`: the guest's structured fields, when it sent some
+        // (`console.info("paid", { invoiceId })`).
+        let (message, fields) = message
+            .split_once('\0')
+            .map(|(m, f)| (m, f))
+            .unwrap_or((message, ""));
         let mut logs = self.logs.lock().expect("logs poisoned");
         if logs.len() < self.max_logs {
             logs.push(LogLine {
                 level: level.to_owned(),
                 message: message.to_owned(),
+                fields: (!fields.is_empty()).then(|| fields.to_owned()),
             });
         }
         // The application's own lines keep their level and carry a target
@@ -208,15 +217,17 @@ impl HostBindings for WorldShared {
         let request_id = self.request_id.as_deref().unwrap_or("");
         match level {
             "error" => {
-                tracing::error!(target: "app", workload, world = %self.id, request_id, "{message}")
+                tracing::error!(target: "app", workload, world = %self.id, request_id, fields, "{message}")
             }
             "warn" => {
-                tracing::warn!(target: "app", workload, world = %self.id, request_id, "{message}")
+                tracing::warn!(target: "app", workload, world = %self.id, request_id, fields, "{message}")
             }
             "debug" => {
-                tracing::debug!(target: "app", workload, world = %self.id, request_id, "{message}")
+                tracing::debug!(target: "app", workload, world = %self.id, request_id, fields, "{message}")
             }
-            _ => tracing::info!(target: "app", workload, world = %self.id, request_id, "{message}"),
+            _ => {
+                tracing::info!(target: "app", workload, world = %self.id, request_id, fields, "{message}")
+            }
         }
     }
 }
