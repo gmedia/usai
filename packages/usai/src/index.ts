@@ -60,6 +60,7 @@ export type { AnySchema, Output } from "./schema.ts";
 export { auth } from "./auth.ts";
 export type {
   AuthRequest,
+  ResolverContext,
   BearerOptions,
   HeaderOptions,
   CookieOptions,

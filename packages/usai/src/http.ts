@@ -11,6 +11,7 @@ import type {
   Workload,
   WorkloadPolicies,
 } from "./declarations.ts";
+import { withAuthResources } from "./declarations.ts";
 import type { BaseContext } from "./runtime/context.ts";
 
 /** Explicit response: status, headers, and a body the runtime encodes.
@@ -162,7 +163,7 @@ function declare<O extends HttpOptions>(
     contracts,
     errors: options.errors ?? [],
     ...(options.auth ? { auth: options.auth } : {}),
-    resources: options.resources ?? [],
+    resources: withAuthResources(options.resources, options.auth),
     dispatches: [],
     publishes: [],
     policies,
@@ -233,7 +234,7 @@ function raw(path: string, a: RawOptions | RawHandler, b?: RawHandler): Workload
     contracts: {},
     errors: options.errors ?? [],
     ...(options.auth ? { auth: options.auth } : {}),
-    resources: options.resources ?? [],
+    resources: withAuthResources(options.resources, options.auth),
     dispatches: [],
     publishes: [],
     policies,

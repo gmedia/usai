@@ -161,6 +161,11 @@ two-replica campaign passed; the 72 h soak is running.
   added, several secrets for rotation, constant-time verify) — verified in
   the resolver without a database hit. Not a JWT; `cookies.sign` stays the
   cookie form.
+- **An auth scheme declares its own resources**: `auth.bearer({ resources: [db],
+  resolve: async (ctx, token) => ctx.resources.db.one(…) })` — typed on the
+  resolver's `ctx.resources`, and every workload that uses the scheme leases
+  them in addition to its own (no more repeating the session table on each
+  route, no more `resource_not_declared` from the one route that forgot).
 - `TaskContext.requestId`: the id of the request that invoked or dispatched
   the task (empty for cron, `usai task run` and queue consumers).
 - `usai/test`: **`app.logs(filter)`** and **`app.waitForLog(filter, timeoutMs)`**

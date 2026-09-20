@@ -101,13 +101,18 @@ export const framed = http.get("/framed", {}, async () =>
 // resolver and the OpenAPI document says `apiKey in: cookie`; login sets two
 // cookies at once (a repeated header); a custom scheme that declares nothing
 // gets no invented security scheme.
+// The scheme leases its own resource: every route that uses it gets
+// `sessions` without listing it, and the resolver's ctx.resources is typed.
+const sessions = cache.local("sessions");
 const session = auth.cookie({
   name: "session",
   description: "the sid cookie set by /login",
   cookie: "sid",
-  resolve: async (_ctx, sid) => {
+  resources: [sessions],
+  resolve: async (ctx, sid) => {
     if (sid !== "s3ss10n") throw errors.unauthorized("no session");
-    return { userId: "u1" };
+    const seen = await ctx.resources.sessions.increment("seen");
+    return { userId: "u1", seen };
   },
 });
 export const meByCookie = http.get("/me/cookie", { auth: session }, async (ctx) => ctx.auth);

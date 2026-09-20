@@ -909,6 +909,13 @@ async fn openapi_is_generated_from_the_definition() {
         doc["paths"]["/me/cookie"]["get"]["security"],
         json!([{ "session": [] }])
     );
+    assert!(
+        doc["paths"]["/me/cookie"]["get"]["x-usai-resources"]
+            .as_array()
+            .is_some_and(|r| r.iter().any(|x| x["name"] == "sessions")),
+        "the scheme's resource is the operation's: {}",
+        doc["paths"]["/me/cookie"]["get"]["x-usai-resources"]
+    );
     assert!(doc["components"]["securitySchemes"].get("opaque").is_none());
     assert!(doc["paths"]["/me/opaque"]["get"].get("security").is_none());
     assert!(
@@ -1455,7 +1462,11 @@ async fn a_cookie_scheme_reads_the_cookie_and_login_sets_two() {
         .await
         .unwrap();
     assert_eq!(r.status(), 200);
-    assert_eq!(r.json::<Value>().await.unwrap()["userId"], "u1");
+    let principal = r.json::<Value>().await.unwrap();
+    assert_eq!(principal["userId"], "u1");
+    // The resolver leased the scheme's own resource (`sessions`), which the
+    // route never listed: the scheme's resources ride along.
+    assert_eq!(principal["seen"], 1, "{principal}");
     let r = s
         .client
         .get(format!("{}/me/cookie", s.base))

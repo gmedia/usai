@@ -39,6 +39,10 @@ export interface AuthDeclaration<Principal = unknown> {
    * parameter, a header). Without it the document says only that the
    * resolver reads the request. */
   readonly credential?: CredentialLocation;
+  /** The resources the resolver leases. A workload that uses the scheme
+   * gets them in addition to its own (`describe` merges the two lists), so
+   * a route never has to repeat the session table for the resolver's sake. */
+  readonly resources: readonly ResourceDeclaration[];
   readonly resolve: (
     ctx: unknown,
     credential: string | undefined,
@@ -429,4 +433,17 @@ export function parseDuration(value: string | number | undefined): number | unde
     default:
       return n;
   }
+}
+
+/** A workload's resources plus the ones its auth scheme leases, each
+ * declaration once (by name).
+ *
+ * @internal */
+export function withAuthResources(
+  own: readonly ResourceDeclaration[] | undefined,
+  auth: AuthDeclaration<unknown> | undefined,
+): ResourceDeclaration[] {
+  const out: ResourceDeclaration[] = [...(own ?? [])];
+  for (const r of auth?.resources ?? []) if (!out.some((o) => o.name === r.name)) out.push(r);
+  return out;
 }

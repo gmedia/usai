@@ -11,6 +11,7 @@ import type {
   Workload,
   WorkloadPolicies,
 } from "./declarations.ts";
+import { withAuthResources } from "./declarations.ts";
 import type { BaseContext } from "./runtime/context.ts";
 import type { HttpContracts } from "./declarations.ts";
 
@@ -115,7 +116,7 @@ function stream<O extends StreamOptions>(
     contracts,
     errors: [],
     ...(options.auth ? { auth: options.auth } : {}),
-    resources: options.resources ?? [],
+    resources: withAuthResources(options.resources, options.auth),
     dispatches: [],
     publishes: [],
     policies,
@@ -237,7 +238,7 @@ export function socket<
     contracts,
     errors: [],
     ...(options.auth ? { auth: options.auth } : {}),
-    resources: options.resources ?? [],
+    resources: withAuthResources(options.resources, options.auth),
     dispatches: [],
     publishes: [],
     policies,
