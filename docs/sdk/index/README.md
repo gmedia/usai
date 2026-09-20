@@ -51,7 +51,6 @@ Vocabulary used throughout:
 
 | Name | Description |
 | ------ | ------ |
-| [bytes](variables/bytes.md) | Base64 ↔ `Uint8Array`. |
 | [RawResponse](interfaces/RawResponse.md) | Raw response for the escape hatch: bytes or text, no contract. |
 | [HttpHandlerResult](type-aliases/HttpHandlerResult.md) | What an HTTP handler may return: the body (encoded as JSON with status 200, or the single declared `response` status), an explicit [HttpResponse](interfaces/HttpResponse.md) from `http.response`/`http.created`/…, or a [RawResponse](interfaces/RawResponse.md). Promises of any of these are awaited. |
 | [HttpContext](interfaces/HttpContext.md) | The context of one HTTP request, typed from the declared contracts: `params`, `query`, `headers` and `body` carry the schemas' output types (already validated at the boundary, before this world existed), `auth` carries the principal the auth declaration resolved. Everything on [BaseContext](interfaces/BaseContext.md) is available too. The world lives for this request only; nothing here survives the response. |
@@ -202,6 +201,7 @@ Vocabulary used throughout:
 
 | Name | Description |
 | ------ | ------ |
+| [bytes](variables/bytes.md) | - |
 | [HttpResponse](interfaces/HttpResponse.md) | - |
 | [RawRequestBody](interfaces/RawRequestBody.md) | The exact bytes of a raw request, decoded on demand: `await ctx.request.bytes()`, `await ctx.request.text()`, or `await ctx.request.json()`. Each is a method (the body is not read until asked for). |
 | [Declare](type-aliases/Declare.md) | The signature of `http.get`/`post`/…. |

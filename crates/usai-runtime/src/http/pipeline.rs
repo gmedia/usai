@@ -1067,11 +1067,28 @@ impl HttpHost {
                     let body = WorldBody { receiver: body_rx, _guard: cancel.drop_guard() };
                     // The world keeps running; its result is observed by the task.
                     let workload = workload.to_owned();
+                    let streams_failed = std::sync::Arc::clone(&self.stats.streams_failed);
                     tokio::spawn(async move {
                         match task.await {
                             Ok(Ok(result)) => {
                                 for v in &result.violations {
                                     tracing::warn!(world = %result.world, workload, code = v.code, "{}", v.message);
+                                }
+                                // The head is out with a 200: a handler that fails now
+                                // cannot change the status, so the failure is loud where
+                                // it can be — the log and a counter — and the body ends
+                                // early (GUIDE §9: end a stream with a sentinel the
+                                // client checks for).
+                                let failed = match (&result.termination, &result.outcome) {
+                                    (crate::world::Termination::Completed, Some(Err(e))) => {
+                                        Some(format!("{}: {}", e.name, e.message))
+                                    }
+                                    (crate::world::Termination::Completed, _) => None,
+                                    (t, _) => Some(format!("{t:?}")),
+                                };
+                                if let Some(error) = failed {
+                                    streams_failed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                    tracing::error!(world = %result.world, workload, error = %error, "stream handler failed after the head was sent; the client received a 200 and a body that ended early");
                                 }
                             }
                             Ok(Err(e)) => tracing::error!(workload, error = %e, "stream world failed"),

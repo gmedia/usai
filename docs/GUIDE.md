@@ -294,6 +294,8 @@ A world is a bare JavaScript engine with exactly these globals, no more: `consol
 Deliberately absent, and why:
 
 - **`fetch`** — outbound HTTP is the `httpClient` resource (§11); the global only explains that.
+- **Bytes and text at speed.** `TextEncoder`/`TextDecoder`, `atob`/`btoa` and the SDK's `bytes.toBase64/fromBase64` are native in the Wasm core (memcpy-speed: 3 MB decodes in ≈0.1 s); a request body of a few MB is fine to decode in one call. What is *not* native is your own loop over the bytes — the interpreter runs ≈0.3–0.5 µs per iteration (§18), so a hand-written CSV parser over 30 000 lines is seconds, and belongs either in SQL (`unnest`, `copy`-shaped inserts) or in blocks with an `await` between them.
+- **The synchronous CPU slice.** One uninterrupted synchronous run of guest code is bounded at **5 s** (a `while (true) {}` cannot hold a core forever); the world faults with `runtime_fault` and the log names it (`guest exceeded the synchronous CPU slice`). Any `await` of a host operation (`ctx.sleep(0)` will do) ends the run and starts a new slice; the request's deadline (30 s by default) still bounds the whole. The slice is not configurable.
 - **`process`, `fs`, `require`** — there is no filesystem or process in a world; declare what you need as a resource, read configuration from `ctx.env`.
 - **`crypto.subtle` beyond digests and HMAC** (RSA, ECDSA, AES) — not yet; ask with the use case.
 

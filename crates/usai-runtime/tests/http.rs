@@ -73,6 +73,8 @@ async fn start() -> Option<Server> {
         HttpConfig {
             addr: ([127, 0, 0, 1], 0).into(),
             expose_diagnostics: false,
+            // The decode test posts 3 MB (the default bound is 1 MiB).
+            max_body_bytes: 8 * 1024 * 1024,
             ..HttpConfig::default()
         },
     );
@@ -1520,6 +1522,34 @@ async fn application_headers_are_on_every_response_and_a_handler_wins() {
     assert_eq!(
         r.headers().get("x-content-type-options").unwrap(),
         "nosniff"
+    );
+    s.shutdown.cancel();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_multi_megabyte_body_decodes_within_the_cpu_slice() {
+    let Some(s) = start().await else { return };
+    // 3 MB of mixed ASCII and two-byte UTF-8, one decode + one base64
+    // round trip in the guest; used to fault on the 5 s synchronous slice.
+    let text: String = "ab\u{e9}".repeat(600_000);
+    let started = std::time::Instant::now();
+    let r = s
+        .client
+        .post(format!("{}/decode", s.base))
+        .header("content-type", "application/octet-stream")
+        .body(text.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200, "{}", r.text().await.unwrap());
+    let body = r.json::<Value>().await.unwrap();
+    assert_eq!(body["bytes"], text.len());
+    assert_eq!(body["chars"], text.chars().count());
+    assert_eq!(body["roundtrip"], 1_000_000);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(4),
+        "{:?}",
+        started.elapsed()
     );
     s.shutdown.cancel();
 }

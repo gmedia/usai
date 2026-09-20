@@ -1,0 +1,147 @@
+--- a/c/interface.c
++++ b/c/interface.c
+@@ -542,6 +542,136 @@
+     return JS_NewRuntime2(&qjs_wasi_malloc_funcs, NULL);
+ }
+ 
++
++/* ---- Usai native codecs ----
++ *
++ * The byte↔text conversions every request with a body touches, as native
++ * functions on `globalThis.__usai_native`: UTF-8 and base64 in both
++ * directions, on Uint8Arrays. In the interpreter they cost ≈0.4 µs per byte
++ * (a 1 MB upload spent seconds in them); here they are memcpy-speed. The
++ * bridge's `TextEncoder`/`TextDecoder` and the SDK's `bytes` helpers use
++ * them when present and fall back to JavaScript. (`atob`/`btoa` are
++ * QuickJS-ng intrinsics already — the bridge must not shadow them.) */
++
++static const char USAI_B64[] =
++    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
++
++static int usai_b64_value(unsigned char c)
++{
++    if (c >= 'A' && c <= 'Z') return c - 'A';
++    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
++    if (c >= '0' && c <= '9') return c - '0' + 52;
++    if (c == '+' || c == '-') return 62;
++    if (c == '/' || c == '_') return 63;
++    return -1;
++}
++
++/* Base64 text of `len` bytes; the caller frees. */
++static char *usai_b64_encode(const uint8_t *in, size_t len, size_t *out_len)
++{
++    size_t n = ((len + 2) / 3) * 4;
++    char *out = malloc(n + 1);
++    if (!out) return NULL;
++    size_t o = 0;
++    for (size_t i = 0; i < len; i += 3) {
++        uint32_t v = (uint32_t)in[i] << 16;
++        if (i + 1 < len) v |= (uint32_t)in[i + 1] << 8;
++        if (i + 2 < len) v |= in[i + 2];
++        out[o++] = USAI_B64[(v >> 18) & 63];
++        out[o++] = USAI_B64[(v >> 12) & 63];
++        out[o++] = i + 1 < len ? USAI_B64[(v >> 6) & 63] : '=';
++        out[o++] = i + 2 < len ? USAI_B64[v & 63] : '=';
++    }
++    out[o] = 0;
++    *out_len = o;
++    return out;
++}
++
++/* Bytes of base64 text (whitespace skipped, padding optional, both
++ * alphabets); NULL on an invalid character. The caller frees. */
++static uint8_t *usai_b64_decode(const char *in, size_t len, size_t *out_len)
++{
++    uint8_t *out = malloc(len / 4 * 3 + 3);
++    if (!out) return NULL;
++    size_t o = 0;
++    uint32_t acc = 0;
++    int bits = 0;
++    for (size_t i = 0; i < len; i++) {
++        unsigned char c = (unsigned char)in[i];
++        if (c == ' ' || c == '\n' || c == '\r' || c == '\t' || c == '=') continue;
++        int v = usai_b64_value(c);
++        if (v < 0) {
++            free(out);
++            return NULL;
++        }
++        acc = (acc << 6) | (uint32_t)v;
++        bits += 6;
++        if (bits >= 8) {
++            bits -= 8;
++            out[o++] = (uint8_t)((acc >> bits) & 255);
++        }
++    }
++    *out_len = o;
++    return out;
++}
++
++static JSValue usai_native_utf8dec(JSContext *c, JSValueConst this_val, int argc, JSValueConst *argv)
++{
++    size_t len = 0;
++    uint8_t *buf = argc > 0 ? JS_GetUint8Array(c, &len, argv[0]) : NULL;
++    if (!buf) return JS_ThrowTypeError(c, "utf8dec expects a Uint8Array");
++    return JS_NewStringLen(c, (const char *)buf, len);
++}
++
++static JSValue usai_native_utf8enc(JSContext *c, JSValueConst this_val, int argc, JSValueConst *argv)
++{
++    size_t len = 0;
++    const char *text = argc > 0 ? JS_ToCStringLen2(c, &len, argv[0], false) : NULL;
++    if (!text) return JS_EXCEPTION;
++    JSValue out = JS_NewUint8ArrayCopy(c, (const uint8_t *)text, len);
++    JS_FreeCString(c, text);
++    return out;
++}
++
++static JSValue usai_native_b64enc(JSContext *c, JSValueConst this_val, int argc, JSValueConst *argv)
++{
++    size_t len = 0;
++    uint8_t *buf = argc > 0 ? JS_GetUint8Array(c, &len, argv[0]) : NULL;
++    if (!buf) return JS_ThrowTypeError(c, "b64enc expects a Uint8Array");
++    size_t out_len = 0;
++    char *out = usai_b64_encode(buf, len, &out_len);
++    if (!out) return JS_ThrowOutOfMemory(c);
++    JSValue s = JS_NewStringLen(c, out, out_len);
++    free(out);
++    return s;
++}
++
++static JSValue usai_native_b64dec(JSContext *c, JSValueConst this_val, int argc, JSValueConst *argv)
++{
++    size_t len = 0;
++    const char *text = argc > 0 ? JS_ToCStringLen2(c, &len, argv[0], false) : NULL;
++    if (!text) return JS_EXCEPTION;
++    size_t out_len = 0;
++    uint8_t *out = usai_b64_decode(text, len, &out_len);
++    JS_FreeCString(c, text);
++    if (!out) return JS_ThrowTypeError(c, "atob: invalid character");
++    JSValue arr = JS_NewUint8ArrayCopy(c, out, out_len);
++    free(out);
++    return arr;
++}
++
++static void usai_install_native(JSContext *c)
++{
++    JSValue global = JS_GetGlobalObject(c);
++    JSValue native = JS_NewObject(c);
++    JS_SetPropertyStr(c, native, "utf8dec", JS_NewCFunction(c, usai_native_utf8dec, "utf8dec", 1));
++    JS_SetPropertyStr(c, native, "utf8enc", JS_NewCFunction(c, usai_native_utf8enc, "utf8enc", 1));
++    JS_SetPropertyStr(c, native, "b64enc", JS_NewCFunction(c, usai_native_b64enc, "b64enc", 1));
++    JS_SetPropertyStr(c, native, "b64dec", JS_NewCFunction(c, usai_native_b64dec, "b64dec", 1));
++    JS_SetPropertyStr(c, global, "__usai_native", native);
++    JS_FreeValue(c, global);
++}
++
+ __attribute__((export_name("qjs_init")))
+ int qjs_init(void) {
+     if (rt) return -1; /* already initialized */
+@@ -555,6 +685,7 @@
+         rt = NULL;
+         return -1;
+     }
++    usai_install_native(ctx);
+ 
+     return 0;
+ }

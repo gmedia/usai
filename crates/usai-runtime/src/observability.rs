@@ -73,6 +73,10 @@ pub struct HttpStats {
     pub rejected_before_world: AtomicU64,
     pub upgrades: AtomicU64,
     pub streams: AtomicU64,
+    /// Streams whose handler failed after the head was committed: the client
+    /// got a 200 and a body that ends early. Shared with the task that
+    /// observes the world after the response left.
+    pub streams_failed: std::sync::Arc<AtomicU64>,
     /// Counts per `LATENCY_BUCKETS` entry (non-cumulative), plus overflow.
     pub latency_buckets: [AtomicU64; 15],
     /// Sum of observed latencies, in microseconds.
@@ -93,6 +97,7 @@ pub struct HttpSnapshot {
     pub rejected_before_world: u64,
     pub upgrades: u64,
     pub streams: u64,
+    pub streams_failed: u64,
     /// Cumulative counts per `LATENCY_BUCKETS` entry, then `+Inf`. Serialised
     /// as `{ "le": [bounds…, "+Inf"], "count": […] }` so the JSON names its
     /// bucket bounds.
@@ -226,6 +231,7 @@ impl HttpStats {
             rejected_before_world: self.rejected_before_world.load(Ordering::Relaxed),
             upgrades: self.upgrades.load(Ordering::Relaxed),
             streams: self.streams.load(Ordering::Relaxed),
+            streams_failed: self.streams_failed.load(Ordering::Relaxed),
             latency_cumulative: {
                 let mut total = 0;
                 self.latency_buckets
@@ -726,6 +732,13 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
             "Streaming responses",
             "counter",
             &[(String::new(), h.streams as f64)],
+        );
+        metric(
+            &mut out,
+            "usai_http_streams_failed_total",
+            "Streaming responses whose handler failed after the head was sent (the client saw a 200 and a body that ended early)",
+            "counter",
+            &[(String::new(), h.streams_failed as f64)],
         );
     }
     out

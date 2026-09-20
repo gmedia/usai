@@ -47,7 +47,7 @@ checkout "$src" "$QUICKJS_WASI_URL" "$QUICKJS_WASI_COMMIT"
 checkout "$ng" "$QUICKJS_NG_URL" "$QUICKJS_NG_COMMIT"
 
 for patch in exp011a-entropy-quickjs-ng.patch; do git -C "$ng" apply "$here/patches/$patch"; done
-for patch in exp011a-entropy-quickjs-wasi.patch exp011c-quickjs-wasi-async-bridge.patch usai-direct-call.patch; do git -C "$src" apply "$here/patches/$patch"; done
+for patch in exp011a-entropy-quickjs-wasi.patch exp011c-quickjs-wasi-async-bridge.patch usai-direct-call.patch usai-native-codecs.patch; do git -C "$src" apply "$here/patches/$patch"; done
 
 make -C "$src" WASI_SDK="$sdk" clean >/dev/null
 make -C "$src" WASI_SDK="$sdk" OPT="$opt" quickjs.wasm

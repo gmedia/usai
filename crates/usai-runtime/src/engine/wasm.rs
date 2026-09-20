@@ -34,7 +34,7 @@ use crate::definition::Code;
 
 /// The sealed core (`guest/PROVENANCE.md`).
 pub const CORE: &[u8] = include_bytes!("../../guest/quickjs-async.wasm");
-pub const CORE_SHA256: &str = "d9e9d7b53077995b9fab145873a13ba4aced5073dee27a881bb0d42c1a9dfccd";
+pub const CORE_SHA256: &str = "91f178dff664c187c0c8aa9d83ca1ab2a67bad6c78c946aa1329031a02167502";
 
 const MAX_PAYLOAD: usize = 8 * 1024 * 1024;
 

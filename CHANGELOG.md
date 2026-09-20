@@ -68,6 +68,11 @@ two-replica campaign passed; the 72 h soak is running.
 - **Uploads and headers**: `multipart.parse(bytes, contentType)` splits a form body into
   fields and files; `defineApp({ headers })` sets static response headers on every
   application response (a handler's own wins).
+- **Bytes and text are native in the core.** `TextDecoder`/`TextEncoder` and the SDK's
+  `bytes` helpers call C codecs installed in the guest core (`__usai_native`); `atob`/
+  `btoa` are QuickJS-ng's own (the bridge used to shadow them with a quadratic
+  JavaScript version). A 3 MB body decode went from a CPU-slice fault to 0.2 s. New
+  core `91f178df…` (`guest/PROVENANCE.md`); `GUEST_ABI` unchanged.
 - **Queue publish no longer prepares the schema on every call.** `CREATE TABLE IF NOT
   EXISTS` + `CREATE INDEX IF NOT EXISTS` ran per publish (two DDL statements and their
   locks); now once per database per process, retried once if the table vanished.

@@ -284,33 +284,54 @@
     Promise.resolve().then(fn);
   };
 
-  // Web-standard encoding primitives QuickJS does not ship (ADR-0013).
+  // Web-standard encoding primitives (ADR-0013). QuickJS-ng ships `atob`/
+  // `btoa` natively (never shadow them); UTF-8 goes through the core's native
+  // codecs (`__usai_native`, C in the core) when the core has them, and
+  // through JavaScript otherwise — built in blocks, since QuickJS has no
+  // ropes and `out += ch` per character is quadratic.
+  const native = globalThis.__usai_native;
   const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  globalThis.btoa = function (data) {
-    const s = String(data);
-    let out = "";
-    for (let i = 0; i < s.length; i += 3) {
-      const a = s.charCodeAt(i), b = s.charCodeAt(i + 1), c = s.charCodeAt(i + 2);
-      if (a > 255 || b > 255 || c > 255) throw new Error("btoa: character out of Latin1 range");
-      const n = (a << 16) | ((b || 0) << 8) | (c || 0);
-      out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (i + 1 < s.length ? B64[(n >> 6) & 63] : "=") + (i + 2 < s.length ? B64[n & 63] : "=");
-    }
-    return out;
+  const BLOCK = 8192;
+  const fromUnits = (units, parts) => {
+    if (units.length) { parts.push(String.fromCharCode.apply(null, units)); units.length = 0; }
   };
-  globalThis.atob = function (data) {
-    const s = String(data).replace(/[\s=]+$/g, "").replace(/\s+/g, "");
-    let out = "", bits = 0, acc = 0;
-    for (let i = 0; i < s.length; i++) {
-      const v = B64.indexOf(s[i]);
-      if (v < 0) throw new Error("atob: invalid character");
-      acc = (acc << 6) | v; bits += 6;
-      if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); }
-    }
-    return out;
-  };
+  if (typeof globalThis.btoa !== "function") {
+    globalThis.btoa = function (data) {
+      const s = String(data);
+      const parts = [], units = [];
+      for (let i = 0; i < s.length; i += 3) {
+        const a = s.charCodeAt(i), b = s.charCodeAt(i + 1), c = s.charCodeAt(i + 2);
+        if (a > 255 || b > 255 || c > 255) throw new Error("btoa: character out of Latin1 range");
+        const n = (a << 16) | ((b || 0) << 8) | (c || 0);
+        units.push(B64.charCodeAt((n >> 18) & 63), B64.charCodeAt((n >> 12) & 63), i + 1 < s.length ? B64.charCodeAt((n >> 6) & 63) : 61, i + 2 < s.length ? B64.charCodeAt(n & 63) : 61);
+        if (units.length >= BLOCK) fromUnits(units, parts);
+      }
+      fromUnits(units, parts);
+      return parts.join("");
+    };
+  }
+  if (typeof globalThis.atob !== "function") {
+    const B64V = new Int16Array(128).fill(-1);
+    for (let i = 0; i < 64; i++) B64V[B64.charCodeAt(i)] = i;
+    globalThis.atob = function (data) {
+      const s = String(data).replace(/[\s=]+$/g, "").replace(/\s+/g, "");
+      const parts = [], units = [];
+      let bits = 0, acc = 0;
+      for (let i = 0; i < s.length; i++) {
+        const code = s.charCodeAt(i);
+        const v = code < 128 ? B64V[code] : -1;
+        if (v < 0) throw new Error("atob: invalid character");
+        acc = ((acc << 6) | v) & 0xffffff; bits += 6;
+        if (bits >= 8) { bits -= 8; units.push((acc >> bits) & 255); if (units.length >= BLOCK) fromUnits(units, parts); }
+      }
+      fromUnits(units, parts);
+      return parts.join("");
+    };
+  }
   globalThis.TextEncoder = class TextEncoder {
     encode(input) {
       const s = input === undefined ? "" : String(input);
+      if (native) return native.utf8enc(s);
       const bytes = [];
       for (let i = 0; i < s.length; i++) {
         let c = s.codePointAt(i);
@@ -328,7 +349,8 @@
     decode(input) {
       if (input === undefined) return "";
       const b = input instanceof Uint8Array ? input : new Uint8Array(input.buffer || input);
-      let out = "";
+      if (native) return native.utf8dec(b);
+      const parts = [], units = [];
       for (let i = 0; i < b.length;) {
         const x = b[i];
         let cp, n;
@@ -337,10 +359,13 @@
         else if ((x & 0xf0) === 0xe0) { cp = x & 15; n = 3; }
         else { cp = x & 7; n = 4; }
         for (let j = 1; j < n; j++) cp = (cp << 6) | (b[i + j] & 63);
-        out += String.fromCodePoint(cp);
+        if (cp > 0xffff) { cp -= 0x10000; units.push(0xd800 + (cp >> 10), 0xdc00 + (cp & 0x3ff)); }
+        else units.push(cp);
+        if (units.length >= BLOCK) fromUnits(units, parts);
         i += n;
       }
-      return out;
+      fromUnits(units, parts);
+      return parts.join("");
     }
   };
 

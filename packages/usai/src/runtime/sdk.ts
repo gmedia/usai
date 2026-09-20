@@ -6,6 +6,7 @@ import { type AppDeclaration, type Workload, flatten } from "../declarations.ts"
 import { type Finalizer, REPARSE, hostFinal, prepareSchema, structuralSample } from "./prepare.ts";
 import { UsaiError, isUsaiError } from "../errors.ts";
 import { parseCookies } from "../cookies.ts";
+import { bytes } from "../bytes.ts";
 import { type ResponseHeaders, isHttpResponse, isRawResponse } from "../http.ts";
 import { type AnySchema, validateWith } from "../schema.ts";
 import { type BaseContext, makeBase, op, setRequestId } from "./context.ts";
@@ -151,18 +152,10 @@ function parseValidated<S extends AnySchema>(
   return out;
 }
 
-function bytesFromBase64(b64: string): Uint8Array {
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
-function base64FromBytes(bytes: Uint8Array): string {
-  let bin = "";
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!);
-  return btoa(bin);
-}
+// Bodies cross the boundary as base64: the core's native codec when it has
+// one, the JavaScript path otherwise (`bytes` in ../bytes.ts).
+const bytesFromBase64 = (b64: string): Uint8Array => bytes.fromBase64(b64);
+const base64FromBytes = (data: Uint8Array): string => bytes.toBase64(data);
 
 function decodeBody(body: HttpInput["request"]["body"]): unknown {
   if (body === null) return undefined;

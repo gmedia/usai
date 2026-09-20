@@ -165,6 +165,19 @@ export const echoQuery = http.get("/echo", {}, async (ctx) => ({
   headers: { "x-a": ctx.headers["x-a"] },
 }));
 
+// Decode a large body in one call: the bridge's TextDecoder/atob/btoa build
+// strings in blocks (a 2 MB decode used to exceed the CPU slice).
+export const decodeBig = http.raw("/decode", { method: "POST" }, async (ctx) => {
+  const bytes = await ctx.request.bytes();
+  const text = new TextDecoder().decode(bytes);
+  const b64 = btoa(text.slice(0, 1_000_000));
+  const back = atob(b64);
+  return http.rawResponse(
+    200,
+    JSON.stringify({ bytes: bytes.length, chars: text.length, roundtrip: back.length }),
+    { "content-type": "application/json" },
+  );
+});
 export const webhook = http.raw(
   "/webhook",
   { responses: { 200: "echo of the body length", 401: "bad signature" } },
@@ -519,6 +532,7 @@ export default defineApp({
     me,
     requestId,
     framed,
+    decodeBig,
     meByCookie,
     login,
     meOpaque,

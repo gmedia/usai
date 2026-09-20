@@ -9,8 +9,6 @@ const bytes: {
 };
 ```
 
-Base64 ↔ `Uint8Array`.
-
 ## Type Declaration
 
 | Name | Type |
