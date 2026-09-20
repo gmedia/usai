@@ -25,6 +25,7 @@ and nothing is promised.
 | Outbound HTTP | http/1.1 and h2 to any http(s) origin the application declares |
 | Inbound HTTP | HTTP/1.1 behind a reverse proxy that terminates TLS (Caddy, nginx, an ingress) |
 | WebSocket / SSE | ✓ through the same proxy; idle WebSockets are closed with 1008 after `USAI_SOCKET_IDLE_TIMEOUT` (300 s); qualified by the P6 `conn-churn` campaign (cycles, held through replacement/restart/proxy restart, abrupt client death, unread streams) |
+| Browser clients (SPA, mobile web) | ✓ cookie sessions (`auth.cookie`, `Secure; HttpOnly; SameSite=Lax` by default), bearer tokens as the second WebSocket subprotocol, `EventSource` resume via `last-event-id`; **CORS is not a runtime feature** — the proxy answers preflights, or the application declares `http.options("/*any")` and `defineApp({ headers })` (GUIDE §4, §9; THREAT-MODEL → browser posture) |
 
 ## Deployment topology
 
