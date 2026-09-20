@@ -1,0 +1,18 @@
+# Laravel + PHP-FPM + nginx comparator (port 3007). DATABASE_URL is rewritten by
+# the suite to host.docker.internal; see ../php/compose.yaml for the caveat.
+services:
+  php:
+    build:
+      context: .
+      args:
+        PHP_CHILDREN: ${PHP_CHILDREN:-32}
+        DB_URL: ${DATABASE_URL}
+    environment:
+      DB_URL: ${DATABASE_URL}
+      DATABASE_URL: ${DATABASE_URL}
+    extra_hosts: ["host.docker.internal:host-gateway"]
+  nginx:
+    image: nginx:1.27-alpine
+    ports: ["${LARAVEL_PORT:-3007}:3007"]
+    volumes: ["./nginx.conf:/etc/nginx/nginx.conf:ro"]
+    depends_on: [php]

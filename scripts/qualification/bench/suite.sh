@@ -13,7 +13,8 @@
 # (required; the suite drops and recreates the public schema), SERVERS
 # (default "usai node rust bun deno"; "php" is docker, as shipped, c=1 only;
 # "php-tuned" is docker with opcache + JIT + pm=static, c ≤ PHP_CHILDREN;
-# "node-cluster" is Node with one worker per cpu of PIN_SERVER),
+# "node-cluster" is Node with one worker per cpu of PIN_SERVER; "laravel-fpm"
+# is Laravel 12 on a tuned FPM, docker, composer at image build, c ≤ PHP_CHILDREN),
 # CONCS (default "1 2 4 8 16 32 64"), DUR (seconds per cell, default 10),
 # PIN_SERVER / PIN_CLIENT (cpu lists for taskset; unset = no pinning),
 # POOL_MAX (default 64), OUT (default out/<timestamp>).
@@ -62,8 +63,10 @@ prepare() {
 }
 
 # ---- servers ----------------------------------------------------------------
-port_of() { case "$1" in usai) echo 3460;; node) echo 3461;; bun) echo 3462;; deno) echo 3463;; rust) echo 3464;; node-cluster) echo 3465;; php) echo 3005;; php-tuned) echo 3006;; esac; }
-is_php() { [ "$1" = php ] || [ "$1" = php-tuned ]; }
+port_of() { case "$1" in usai) echo 3460;; node) echo 3461;; bun) echo 3462;; deno) echo 3463;; rust) echo 3464;; node-cluster) echo 3465;; php) echo 3005;; php-tuned) echo 3006;; laravel-fpm) echo 3007;; esac; }
+is_php() { [ "$1" = php ] || [ "$1" = php-tuned ] || [ "$1" = laravel-fpm ]; }
+# The compose directory of a docker comparator.
+compose_dir() { if [ "$1" = laravel-fpm ]; then echo "$here/baselines/laravel"; else echo "$here/baselines/php"; fi; }
 # Installed, or one of the servers that need no binary on PATH.
 available() { command -v "${1%%-*}" >/dev/null 2>&1 || [ "$1" = usai ] || [ "$1" = rust ] || is_php "$1"; }
 # Workers for the Node cluster: one per cpu the server is pinned to.
@@ -78,6 +81,7 @@ version_of() {
     rust) rustc --version | awk '{print $2}';;
     php) echo "8.4-fpm as shipped";;
     php-tuned) echo "8.4-fpm opcache+jit pm=static $PHP_CHILDREN";;
+    laravel-fpm) echo "laravel 12 on 8.4-fpm opcache+jit pm=static $PHP_CHILDREN, config/route cached";;
   esac
 }
 SERVER_PID=""
@@ -94,13 +98,14 @@ start_server() {
     rust) pin_server env PORT=$port "$here/baselines/rust-axum/target/release/bench-rust-axum" > "$logf" 2>&1 & SERVER_PID=$!;;
     php)  (cd "$here/baselines/php" && PHP_PROFILE=shipped PHP_PORT=3005 DATABASE_URL="${DATABASE_URL//127.0.0.1/host.docker.internal}" docker compose up -d --build > "$logf" 2>&1); SERVER_PID="";;
     php-tuned) (cd "$here/baselines/php" && PHP_PROFILE=tuned PHP_CHILDREN="$PHP_CHILDREN" PHP_PORT=3006 DATABASE_URL="${DATABASE_URL//127.0.0.1/host.docker.internal}" docker compose up -d --build > "$logf" 2>&1); SERVER_PID="";;
+    laravel-fpm) (cd "$here/baselines/laravel" && PHP_CHILDREN="$PHP_CHILDREN" DATABASE_URL="${DATABASE_URL//127.0.0.1/host.docker.internal}" docker compose up -d --build > "$logf" 2>&1); SERVER_PID="";;
   esac
   for i in $(seq 1 200); do curl -s -m 1 -o /dev/null "http://127.0.0.1:$port/health" && return 0; sleep 0.1; done
   log "$name did not start (see $logf)"; return 1
 }
 stop_server() {
   local name="$1"
-  if is_php "$name"; then (cd "$here/baselines/php" && docker compose down >/dev/null 2>&1); return; fi
+  if is_php "$name"; then (cd "$(compose_dir "$name")" && docker compose down >/dev/null 2>&1); return; fi
   [ -n "$SERVER_PID" ] && { kill "$SERVER_PID" 2>/dev/null; wait "$SERVER_PID" 2>/dev/null; }
   SERVER_PID=""
 }
@@ -110,7 +115,7 @@ cpu_seconds() {
   local name="$1"
   if is_php "$name"; then
     local total=0
-    for c in $(docker compose -f "$here/baselines/php/compose.yaml" ps -q 2>/dev/null); do
+    for c in $(docker compose -f "$(compose_dir "$name")/compose.yaml" ps -q 2>/dev/null); do
       local usec; usec=$(docker exec "$c" cat /sys/fs/cgroup/cpu.stat 2>/dev/null | awk '/usage_usec/ {print $2}'); total=$((total + ${usec:-0}))
     done
     echo "scale=3; $total / 1000000" | bc
@@ -190,7 +195,7 @@ sweep() {
     conformant "$name" || { stop_server "$name"; continue; }
     local concs="$CONCS"
     # As shipped, FPM has five children: c=1 only. Tuned, up to its pool size.
-    if [ "$name" = php ]; then concs="1"; elif [ "$name" = php-tuned ]; then concs=$(for c in $CONCS; do [ "$c" -le "$PHP_CHILDREN" ] && echo "$c"; done | tr '\n' ' '); fi
+    if [ "$name" = php ]; then concs="1"; elif is_php "$name"; then concs=$(for c in $CONCS; do [ "$c" -le "$PHP_CHILDREN" ] && echo "$c"; done | tr '\n' ' '); fi
     for cls in A B C D E F; do for c in $concs; do cell "$name" "$cls" "$c"; done; done
     stop_server "$name"
   done

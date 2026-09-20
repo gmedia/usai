@@ -100,7 +100,52 @@ same deployment with `--max-worlds 48` and `USAI_SOCKET_IDLE_TIMEOUT=20`:
 | a client that never reads: 10 SSE connections unread for 30 s | RSS 89.7 → 96.7 MiB (+0.7 MiB per unread stream: the bounded send buffer), live worlds 0 afterwards |
 | idle socket, nothing sent | closed by the server with `1008 idle timeout` after 20 s, as documented |
 
+## Two replicas (`p6/replicas.sh`, 2026-09-20 02:04–02:40 UTC)
+
+The topology `SUPPORTED.md` states, campaigned: Caddy (round robin, active
+health check on `/_usai/ready` every 1 s, a refused connection retried on the
+other upstream for up to 5 s) → `app` + `app2` (`app2` with `USAI_NO_CRON=1`,
+both `--max-worlds 48 --drain-timeout 10`) → one PostgreSQL, one compose
+project (`scripts/qualification/p5/compose.replicas.yaml`,
+`Caddyfile.replicas`) pinned to cpus 12–15 beside the running 72 h soak
+(disclosed co-tenant, cpus 0–11). Application: `examples/invoicing`. Load:
+8 closed-loop clients through the proxy. The first run used the soak's image
+(0.0.5 + fixes at `615dc4e`); the final run a box built from `ubuntu:26.04`
+with the host-built binary at `d3f3c88` and the same artifact (the runtime
+image is bookworm and the fixes needed a rebuild the soak forbade).
+
+| Scenario | Pass rule | Result |
+|---|---|---|
+| HTTP sharing, 60 s | 0 × 5xx, both replicas served | 37 988 ok, 0 errors; worlds created **19 005 / 19 005** |
+| Queue sharing: 1 000 invoices issued → 1 000 webhook deliveries | delivered exactly 1 000 times in total, both replicas consumed, 0 dead, 0 pending | **1 000 deliveries (sink saw 1 000)**, done by app 497 / app2 503, dead 0 |
+| Two `migrate` jobs at once on a fresh database | both exit 0, three files applied once | exit 0/0, `usai_migrations` 3 rows |
+| Cron on one replica | `scheduler.cron` true on app, false on app2 | as expected; `usai_scheduler{kind="cron"}` 1/0. Through the proxy, `/_usai/status` alternates between the two answers — status behind a balancer is one replica's (runbook) |
+| Rolling restart under load (app2 at t=10, app at t=35; 20 SSE/WS held) | 0 × 502, held connections on the restarted replica closed `1012`/ended, none `1006` | **first run: 1 × 502** (Caddy `EOF`: a request written onto an idle keep-alive connection at the instant the listener closed) → fixed with the drain grace (below) → **final run: 40 536 ok, 0 × 5xx, 0 errors**, ready again 3–4 s after each restart, closes 10 × `1012` + 10 × SSE ended, probes never failed |
+| One replica `kill -9` under load with deliveries mid-flight (endpoint 2 s per call) | ≤ 16 × 5xx (requests in flight on the dead replica), every message delivered, nothing left pending | **first run: 4 messages stuck `processing` forever** (claimed by the dead replica's four workers; nothing reclaimed them) → fixed (below) → **final run: 0 × 5xx**, 4 messages reclaimed 25 s after the kill and delivered (300 deliveries, sink saw 304 — at-least-once, as declared), nothing pending, the replica back in 1 s (`restart: unless-stopped`) |
+
+Two fixes came out of it, both in `d12d44f`:
+
+- **`usai run --drain-grace <s>`** (`USAI_DRAIN_GRACE`, default 2). On
+  SIGTERM the listener stays open while `/_usai/ready` answers 503
+  `draining` and every response carries `Connection: close`; the listener
+  closes and the drain starts after the grace. A balancer with an active
+  health check learns, and stops reusing idle connections, *before* they are
+  refused.
+- **Lost-consumer reclaim.** One sweeper per topic returns a message whose
+  claim is older than the message deadline + 10 s to `ready` when the
+  declared retry policy has attempts left (the claim had already counted
+  one), or dead-letters it with `consumer lost: claimed by <replica:topic:
+  worker> at <time>, never completed`. `/_usai/status` counts them
+  (`queue.reclaimed`).
+
+Two things the campaign taught that are not bugs: `docker kill` counts as a
+manual stop and the restart policy does not bring the container back (the
+campaign kills the process from the host); and a message redelivered after a
+reclaim is a duplicate the consumer must tolerate — at-least-once was always
+the contract, this is one of the ways it shows.
+
 ## Not done here
 
-Multi-instance deployments (two replicas behind one proxy, one PostgreSQL:
-the topology `SUPPORTED.md` states but has not campaigned).
+Three or more replicas, a replica set across hosts (the queue and the
+migration lock are PostgreSQL-side and do not care; the proxy configuration
+does), and the 72 h soak (running).
