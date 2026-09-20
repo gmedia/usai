@@ -44,6 +44,18 @@ two-replica campaign passed; the 72 h soak is running.
   `db migrate` job used to run the application's `service()` loops).
 - **Migrations serialize on an advisory lock**: N concurrent `migrate` jobs
   apply each file exactly once; the queue table's creation no longer races.
+- **A queue message claimed by a consumer that died is reclaimed.** A replica
+  killed mid-message (SIGKILL, OOM) used to leave its rows `processing`
+  forever. One sweeper per topic puts such a row back for another attempt when
+  the declared retry policy has one left, or dead-letters it with `consumer
+  lost: claimed by <who> at <when>, never completed`; `/_usai/status` counts
+  them (`queue.reclaimed`).
+- **Rolling restarts without a 502.** `usai run --drain-grace <s>`
+  (`USAI_DRAIN_GRACE`, default 2): on SIGTERM the listener stays open while
+  `/_usai/ready` answers 503 `draining` and every response carries
+  `Connection: close`, so a load balancer stops routing here and stops reusing
+  idle connections before the listener closes; then the drain proceeds. A
+  second signal skips the grace. `usai dev` and the test harness use 0.
 - **WebSocket authentication happens before the 101.** A failing auth
   resolver answers 401 as any request would (before: a 101 followed by a bare
   close frame). Browsers pass the token as the second subprotocol
@@ -144,13 +156,17 @@ two-replica campaign passed; the 72 h soak is running.
   named, as before.
 - New environment variables: `USAI_STATUS_TOKEN`, `USAI_SURFACES_OFF`,
   `USAI_NO_CRON`, `USAI_NO_QUEUE`, `USAI_NO_SERVICES`, `USAI_DRAIN_TIMEOUT`,
-  `USAI_DIAGNOSTICS`, `USAI_SOCKET_IDLE_TIMEOUT`. No default changed.
+  `USAI_DRAIN_GRACE`, `USAI_DIAGNOSTICS`, `USAI_SOCKET_IDLE_TIMEOUT`. One
+  default changed: a SIGTERM now takes 2 s longer to close the listener
+  (`USAI_DRAIN_GRACE=0` restores the old behaviour); orchestrator grace
+  periods sized as drain + 5 s still cover it.
 
 Draft tag message:
 
 > 0.0.6: hot path halved (direct-call guest ABI, validate once), zero idle
 > cost, status token and surface switches, replica flags (--no-cron/--no-queue/
-> --no-services), WebSocket auth before the upgrade, typed ctx.resources, the
+> --no-services), drain grace for zero-502 rolling restarts, lost-consumer
+> queue reclaim, WebSocket auth before the upgrade, typed ctx.resources, the
 > Application Reference and generated SDK reference, P5/P6/P8/P8E qualified
 > (24 h soak, connection and two-replica campaigns)
 

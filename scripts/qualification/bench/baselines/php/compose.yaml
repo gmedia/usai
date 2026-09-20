@@ -3,15 +3,21 @@
 # docker gateway), so a PostgreSQL published only on 127.0.0.1 is NOT
 # reachable — publish it on the gateway too (`-p 172.17.0.1:54330:5432`)
 # or on all interfaces of a throwaway host.
+# PHP_PROFILE=shipped|tuned (Dockerfile), PHP_CHILDREN (tuned pool size),
+# PHP_PORT (host port; the suite uses 3005 for shipped, 3006 for tuned).
 services:
   php:
-    build: .
+    build:
+      context: .
+      args:
+        PHP_PROFILE: ${PHP_PROFILE:-shipped}
+        PHP_CHILDREN: ${PHP_CHILDREN:-32}
     volumes: ["./public:/var/www/public:ro"]
     environment:
       DATABASE_URL: ${DATABASE_URL}
     extra_hosts: ["host.docker.internal:host-gateway"]
   nginx:
     image: nginx:1.27-alpine
-    ports: ["3005:3005"]
+    ports: ["${PHP_PORT:-3005}:3005"]
     volumes: ["./nginx.conf:/etc/nginx/nginx.conf:ro", "./public:/var/www/public:ro"]
     depends_on: [php]

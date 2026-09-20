@@ -11,7 +11,9 @@
 #
 # Environment: USAI (binary; default target/release/usai), DATABASE_URL
 # (required; the suite drops and recreates the public schema), SERVERS
-# (default "usai node rust bun deno"; "php" is docker and c=1 only),
+# (default "usai node rust bun deno"; "php" is docker, as shipped, c=1 only;
+# "php-tuned" is docker with opcache + JIT + pm=static, c ≤ PHP_CHILDREN;
+# "node-cluster" is Node with one worker per cpu of PIN_SERVER),
 # CONCS (default "1 2 4 8 16 32 64"), DUR (seconds per cell, default 10),
 # PIN_SERVER / PIN_CLIENT (cpu lists for taskset; unset = no pinning),
 # POOL_MAX (default 64), OUT (default out/<timestamp>).
@@ -23,6 +25,7 @@ SERVERS="${SERVERS:-usai node rust bun deno}"
 CONCS="${CONCS:-1 2 4 8 16 32 64}"
 DUR="${DUR:-10}"
 POOL_MAX="${POOL_MAX:-64}"
+PHP_CHILDREN="${PHP_CHILDREN:-32}"
 OUT="${OUT:-$here/out/$(date -u +%Y%m%dT%H%M%SZ)}"
 mkdir -p "$OUT"
 : "${DATABASE_URL:?DATABASE_URL is required (a throwaway database: the suite resets its public schema)}"
@@ -59,15 +62,22 @@ prepare() {
 }
 
 # ---- servers ----------------------------------------------------------------
-port_of() { case "$1" in usai) echo 3460;; node) echo 3461;; bun) echo 3462;; deno) echo 3463;; rust) echo 3464;; php) echo 3005;; esac; }
+port_of() { case "$1" in usai) echo 3460;; node) echo 3461;; bun) echo 3462;; deno) echo 3463;; rust) echo 3464;; node-cluster) echo 3465;; php) echo 3005;; php-tuned) echo 3006;; esac; }
+is_php() { [ "$1" = php ] || [ "$1" = php-tuned ]; }
+# Installed, or one of the servers that need no binary on PATH.
+available() { command -v "${1%%-*}" >/dev/null 2>&1 || [ "$1" = usai ] || [ "$1" = rust ] || is_php "$1"; }
+# Workers for the Node cluster: one per cpu the server is pinned to.
+cluster_size() { if [ -n "${PIN_SERVER:-}" ]; then taskset -c "$PIN_SERVER" nproc; else nproc; fi; }
 version_of() {
   case "$1" in
     usai) "$USAI" --version | awk '{print $2}';;
     node) node --version;;
+    node-cluster) echo "$(node --version) × $(cluster_size)";;
     bun) bun --version;;
     deno) deno --version | head -1 | awk '{print $2}';;
     rust) rustc --version | awk '{print $2}';;
-    php) echo "8.4-fpm";;
+    php) echo "8.4-fpm as shipped";;
+    php-tuned) echo "8.4-fpm opcache+jit pm=static $PHP_CHILDREN";;
   esac
 }
 SERVER_PID=""
@@ -78,17 +88,19 @@ start_server() {
   case "$name" in
     usai) pin_server env USAI_MAX_WORLDS=256 ${USAI_PROFILE:+USAI_PROFILE=$USAI_PROFILE} "$USAI" --root "$here/app" run --artifact "$here/app/.usai/build" --port "$port" --status > "$logf" 2>&1 & SERVER_PID=$!;;
     node) pin_server env PORT=$port node "$here/baselines/node-fastify/server.mjs" > "$logf" 2>&1 & SERVER_PID=$!;;
+    node-cluster) pin_server env PORT=$port CLUSTER=$(cluster_size) node "$here/baselines/node-fastify/server.mjs" > "$logf" 2>&1 & SERVER_PID=$!;;
     bun)  pin_server env PORT=$port bun run "$here/baselines/bun-hono/server.ts" > "$logf" 2>&1 & SERVER_PID=$!;;
     deno) pin_server env PORT=$port deno run -A --quiet "$here/baselines/deno-hono/server.ts" > "$logf" 2>&1 & SERVER_PID=$!;;
     rust) pin_server env PORT=$port "$here/baselines/rust-axum/target/release/bench-rust-axum" > "$logf" 2>&1 & SERVER_PID=$!;;
-    php)  (cd "$here/baselines/php" && DATABASE_URL="${DATABASE_URL//127.0.0.1/host.docker.internal}" docker compose up -d --build > "$logf" 2>&1); SERVER_PID="";;
+    php)  (cd "$here/baselines/php" && PHP_PROFILE=shipped PHP_PORT=3005 DATABASE_URL="${DATABASE_URL//127.0.0.1/host.docker.internal}" docker compose up -d --build > "$logf" 2>&1); SERVER_PID="";;
+    php-tuned) (cd "$here/baselines/php" && PHP_PROFILE=tuned PHP_CHILDREN="$PHP_CHILDREN" PHP_PORT=3006 DATABASE_URL="${DATABASE_URL//127.0.0.1/host.docker.internal}" docker compose up -d --build > "$logf" 2>&1); SERVER_PID="";;
   esac
   for i in $(seq 1 200); do curl -s -m 1 -o /dev/null "http://127.0.0.1:$port/health" && return 0; sleep 0.1; done
   log "$name did not start (see $logf)"; return 1
 }
 stop_server() {
   local name="$1"
-  if [ "$name" = php ]; then (cd "$here/baselines/php" && docker compose down >/dev/null 2>&1); return; fi
+  if is_php "$name"; then (cd "$here/baselines/php" && docker compose down >/dev/null 2>&1); return; fi
   [ -n "$SERVER_PID" ] && { kill "$SERVER_PID" 2>/dev/null; wait "$SERVER_PID" 2>/dev/null; }
   SERVER_PID=""
 }
@@ -96,7 +108,7 @@ stop_server() {
 # php containers' cgroup).
 cpu_seconds() {
   local name="$1"
-  if [ "$name" = php ]; then
+  if is_php "$name"; then
     local total=0
     for c in $(docker compose -f "$here/baselines/php/compose.yaml" ps -q 2>/dev/null); do
       local usec; usec=$(docker exec "$c" cat /sys/fs/cgroup/cpu.stat 2>/dev/null | awk '/usage_usec/ {print $2}'); total=$((total + ${usec:-0}))
@@ -110,8 +122,9 @@ cpu_seconds() {
     echo "scale=3; $ticks / $(getconf CLK_TCK)" | bc
   fi
 }
+# RSS of the process tree (a Node cluster is a primary plus its workers).
 rss_mib() {
-  if [ "$1" = php ]; then docker stats --no-stream --format "{{.MemUsage}}" 2>/dev/null | awk -F'[ /]' '{s += $1} END {printf "%d", s}'; else ps -o rss= -p "$SERVER_PID" 2>/dev/null | awk '{printf "%d", $1/1024}'; fi
+  if is_php "$1"; then docker stats --no-stream --format "{{.MemUsage}}" 2>/dev/null | awk -F'[ /]' '{s += $1} END {printf "%d", s}'; else ps -o rss= -p "$SERVER_PID" $(pgrep -P "$SERVER_PID" 2>/dev/null) 2>/dev/null | awk '{s += $1} END {printf "%d", s/1024}'; fi
 }
 
 # ---- one cell ---------------------------------------------------------------
@@ -160,7 +173,7 @@ conformant() {
 
 invoice() {
   for name in ${1:-$SERVERS}; do
-    command -v "$name" >/dev/null 2>&1 || [ "$name" = usai ] || [ "$name" = rust ] || [ "$name" = php ] || { log "$name: not installed, skipped"; continue; }
+    available "$name" || { log "$name: not installed, skipped"; continue; }
     log "== $name $(version_of "$name") — invoice (c=1${PIN_SERVER:+, server on cpu $PIN_SERVER}${PIN_CLIENT:+, client on cpu $PIN_CLIENT})"
     USAI_PROFILE=$([ "$name" = usai ] && echo 1 || echo "") start_server "$name" || continue
     conformant "$name" || { stop_server "$name"; continue; }
@@ -171,11 +184,13 @@ invoice() {
 
 sweep() {
   for name in ${1:-$SERVERS}; do
-    command -v "$name" >/dev/null 2>&1 || [ "$name" = usai ] || [ "$name" = rust ] || [ "$name" = php ] || { log "$name: not installed, skipped"; continue; }
+    available "$name" || { log "$name: not installed, skipped"; continue; }
     log "== $name $(version_of "$name") — sweep"
     start_server "$name" || continue
     conformant "$name" || { stop_server "$name"; continue; }
-    local concs="$CONCS"; [ "$name" = php ] && concs="1"
+    local concs="$CONCS"
+    # As shipped, FPM has five children: c=1 only. Tuned, up to its pool size.
+    if [ "$name" = php ]; then concs="1"; elif [ "$name" = php-tuned ]; then concs=$(for c in $CONCS; do [ "$c" -le "$PHP_CHILDREN" ] && echo "$c"; done | tr '\n' ' '); fi
     for cls in A B C D E F; do for c in $concs; do cell "$name" "$cls" "$c"; done; done
     stop_server "$name"
   done
@@ -183,7 +198,7 @@ sweep() {
 
 leak() {
   for name in ${1:-$SERVERS}; do
-    command -v "$name" >/dev/null 2>&1 || [ "$name" = usai ] || [ "$name" = rust ] || [ "$name" = php ] || continue
+    available "$name" || continue
     log "== $name — correctness probes"
     start_server "$name" || continue
     local port; port=$(port_of "$name"); local base="http://127.0.0.1:$port"

@@ -86,6 +86,7 @@ queue() {
   curl -s -X PUT "$BASE/tenant/webhook" -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' -d "{\"url\":\"http://$sink:18998/hook\",\"secret\":\"replicas-secret-1234\"}" > /dev/null
   local q1 q2; q1=$(queue_done "$APP1"); q2=$(queue_done "$APP2")
   local before; before=$("${PG[@]}" "select count(*) from webhook_deliveries where status = 200")
+  local since; since=$("${PG[@]}" "select coalesce(max(id), 0) from usai_queue")
   node -e '
     const [base, token, n] = process.argv.slice(1); const headers={authorization:`Bearer ${token}`,"content-type":"application/json"};
     let next=0, failed=0;
@@ -96,13 +97,13 @@ queue() {
   ' "$BASE" "$TOKEN" "$n"
   log "waiting for the topic to drain"
   for _ in $(seq 1 120); do
-    local pend; pend=$("${PG[@]}" "select count(*) from usai_queue where topic = 'webhook.deliver' and state in ('ready','processing')")
+    local pend; pend=$("${PG[@]}" "select count(*) from usai_queue where topic = 'webhook.deliver' and state in ('ready','processing') and id > $since")
     [ "${pend:-1}" = 0 ] && break; sleep 1
   done
   sleep 1
   local rows; rows=$("${PG[@]}" "select count(*) from webhook_deliveries where status = 200")
-  local dead; dead=$("${PG[@]}" "select count(*) from usai_queue where topic = 'webhook.deliver' and state = 'dead'")
-  local stuck; stuck=$("${PG[@]}" "select count(*) from usai_queue where topic = 'webhook.deliver' and state in ('ready','processing')")
+  local dead; dead=$("${PG[@]}" "select count(*) from usai_queue where topic = 'webhook.deliver' and state = 'dead' and id > $since")
+  local stuck; stuck=$("${PG[@]}" "select count(*) from usai_queue where topic = 'webhook.deliver' and state in ('ready','processing') and id > $since")
   local d1=$(( $(queue_done "$APP1") - q1 )) d2=$(( $(queue_done "$APP2") - q2 ))
   kill -TERM $spid; wait $spid 2>/dev/null; local hits; hits=$(cat "$OUT/replicas.sink.count")
   local delivered=$(( rows - before ))
@@ -166,6 +167,7 @@ kill_one() {
   local spid=$!; sleep 1
   curl -s -X PUT "$BASE/tenant/webhook" -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' -d "{\"url\":\"http://$sink:18997/hook\",\"secret\":\"replicas-secret-1234\"}" > /dev/null
   local before; before=$("${PG[@]}" "select count(*) from webhook_deliveries where status = 200")
+  local since; since=$("${PG[@]}" "select coalesce(max(id), 0) from usai_queue")
   local out="$OUT/replicas.kill.jsonl"; rm -f "$out"
   load 60 "$out"; local lp=$LOAD_PID
   node -e '
@@ -190,15 +192,16 @@ kill_one() {
   local s; s=$(summarize "$out"); echo "load: $s"
   log "waiting up to 150 s for the topic to drain"
   for _ in $(seq 1 150); do
-    local pend; pend=$("${PG[@]}" "select count(*) from usai_queue where topic = 'webhook.deliver' and state in ('ready','processing')")
+    local pend; pend=$("${PG[@]}" "select count(*) from usai_queue where topic = 'webhook.deliver' and state in ('ready','processing') and id > $since")
     [ "${pend:-1}" = 0 ] && break; sleep 1
   done
-  local stuck; stuck=$("${PG[@]}" "select state, count(*) from usai_queue where topic = 'webhook.deliver' and state <> 'done' group by state" | tr '\n' ' ')
+  local stuck; stuck=$("${PG[@]}" "select state, count(*) from usai_queue where topic = 'webhook.deliver' and state <> 'done' and id > $since group by state" | tr '\n' ' ')
+  local reclaimed; reclaimed=$("${PG[@]}" "select count(*) from usai_queue where topic = 'webhook.deliver' and id > $since and last_error like 'consumer lost%'")
   local delivered=$(( $("${PG[@]}" "select count(*) from webhook_deliveries where status = 200") - before ))
   kill -TERM $spid; wait $spid 2>/dev/null; local hits; hits=$(cat "$OUT/replicas.kill.sink")
   local bad; bad=$(echo "$s" | grep -o '"s5xx":[0-9]*' | cut -d: -f2)
-  local ok=1; [ "${bad:-1}" -le 16 ] || ok=0; [ -z "$stuck" ] || ok=0
-  verdict kill "$ok" "5xx during the kill: $bad (in-flight requests of the killed replica; bound 16 = 2 × clients); processing on the killed replica at the kill: $processing_at_kill; deliveries $delivered of 300 (sink $hits); not done afterwards: ${stuck:-none}"
+  local ok=1; [ "${bad:-1}" -le 16 ] || ok=0; [ -z "$stuck" ] || ok=0; [ "$delivered" -ge 300 ] || ok=0
+  verdict kill "$ok" "5xx during the kill: $bad (in-flight requests of the killed replica; bound 16 = 2 × clients); processing (both replicas) at the kill: $processing_at_kill; reclaimed from the dead replica: $reclaimed; deliveries $delivered of 300 (sink $hits — the reclaimed ones delivered twice, at-least-once); not done afterwards: ${stuck:-none}"
   curl -s -X PUT "$BASE/tenant/webhook" -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"url":"http://127.0.0.1:9/","secret":"replicas-secret-1234"}' > /dev/null
 }
 
