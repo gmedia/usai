@@ -19,20 +19,31 @@ export const work = queue.consume(
   async (ctx) => {
     await ctx.resources.db.execute(
       "insert into processed (id, consumer) values ($1, $2) on conflict do nothing",
-      [ctx.message.n, ctx.id],
+      [ctx.message.n, String(ctx.env["INSTANCE_NAME"] ?? "?")],
     );
     return { n: ctx.message.n };
   },
 );
 
-// `usai app publish -- <count> <batch>`: publishes count messages from one
-// world (each publish is an owned operation: one INSERT into usai_queue).
-export const publish = command("publish", { resources: [db] }, async (ctx) => {
+// `usai app publish -- <count> <batch> [parallel]`: publishes count messages
+// from one world, `parallel` at a time (each publish is an owned operation:
+// one INSERT into usai_queue, one commit — the database's commit latency is
+// the floor, which is why they go out in parallel).
+export const publish = command("publish", { resources: [db], timeout: "30m" }, async (ctx) => {
   const count = Number(ctx.args[0] ?? 1000);
   const batch = String(ctx.args[1] ?? Date.now());
+  const parallel = Number(ctx.args[2] ?? 32);
   const started = Date.now();
-  for (let n = 0; n < count; n++) await ctx.queue.publish("bench.work", { n, batch });
-  return { published: count, ms: Date.now() - started };
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: parallel }, async () => {
+      while (next < count) {
+        const n = next++;
+        await ctx.queue.publish("bench.work", { n, batch });
+      }
+    }),
+  );
+  return { published: count, ms: Date.now() - started, parallel };
 });
 
 // One message per request: what a producer route costs.
@@ -58,5 +69,5 @@ export default defineApp({
   name: "queue-bench",
   workloads: [work, publish, enqueue, health],
   resources: [db],
-  env: env({ DATABASE_URL: env.url() }),
+  env: env({ DATABASE_URL: env.url(), INSTANCE_NAME: env.optional(env.string()) }),
 });
