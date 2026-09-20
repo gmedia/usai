@@ -1,0 +1,17 @@
+{
+  "name": "@usai-qualification/queue-app",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "The queue throughput campaign's application: one consumer doing one UPDATE per message, a publisher command, a publisher route.",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@sakaladev/usai": "workspace:*",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

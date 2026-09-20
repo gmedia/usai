@@ -4,5 +4,6 @@ packages:
   - crates/usai-runtime/tests/fixtures/*
   - scripts/qualification/bench/app
   - scripts/qualification/p8e/template
+  - scripts/qualification/queue/app
 allowBuilds:
   esbuild: true
