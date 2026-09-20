@@ -256,6 +256,11 @@ pub struct Contracts {
     /// the default status for a plain return.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub response: BTreeMap<u16, serde_json::Value>,
+    /// The events a stream emits (`http.stream({ events })`), by name: the
+    /// schema of each `data:` payload, validated in the world before it is
+    /// written and documented as `components.schemas.<OperationId>Event<Name>`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub events: BTreeMap<String, serde_json::Value>,
     /// Input slots the SDK proved final at the boundary: the schema's output
     /// is its input, so the world applies no second parse to what the host
     /// validated (the host reports the validated slots in the request).

@@ -39,6 +39,8 @@ export interface ManifestContracts {
   input?: Record<string, unknown>;
   message?: Record<string, unknown>;
   response?: Record<string, Record<string, unknown>>;
+  /** A stream's events by name, each the JSON Schema of its `data:` payload. */
+  events?: Record<string, Record<string, unknown>>;
   inWorldOnly?: string[];
   /** Input slots validated once, at the boundary: the schema's output is
    * provably its input, so the world does not parse them again. */
@@ -123,6 +125,15 @@ function describeContracts(workload: Workload): ManifestContracts {
       else inWorldOnly.push(`response.${status}`);
     }
     if (Object.keys(response).length > 0) out.response = response;
+  }
+  if (workload.contracts.events) {
+    const events: Record<string, Record<string, unknown>> = {};
+    for (const [name, schema] of Object.entries(workload.contracts.events)) {
+      const json = jsonSchemaOf(schema, "output");
+      if (json) events[name] = json;
+      else inWorldOnly.push(`events.${name}`);
+    }
+    if (Object.keys(events).length > 0) out.events = events;
   }
   if (inWorldOnly.length > 0) out.inWorldOnly = inWorldOnly;
   if (boundaryFinal.length > 0) out.boundaryFinal = boundaryFinal;

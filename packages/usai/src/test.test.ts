@@ -129,6 +129,13 @@ test("the harness opens event streams and WebSockets the way a browser would", {
       [],
       "a client leaving is not a failure",
     );
+    // A declared event that does not match its schema ends the stream early
+    // and is a failed stream with the event named in the log.
+    const bad = await app.stream("/bad-event");
+    assert.deepEqual((await bad.next())?.json, { i: 1 });
+    assert.equal(await bad.next(), null, "the stream ended at the violation");
+    const failure = await app.waitForLog({ message: "stream handler failed" });
+    assert.match(String(failure["error"]), /event_contract_violation|event tick does not match/);
   } finally {
     await app.close();
   }

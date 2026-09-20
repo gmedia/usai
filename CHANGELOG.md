@@ -207,6 +207,11 @@ two-replica campaign passed; the 72 h soak is running.
   `http.*`, `http.raw` and `http.stream` documents the response headers a
   handler sets, per status, in the OpenAPI document (`responses[status].headers`)
   and the reference.
+- `http.stream({ events: { tick: schema } })` declares a stream's events:
+  `stream.event("tick", data)` validates the payload in the world
+  (`event_contract_violation` ends the stream and names the event) and the
+  document lists the events on the response with each payload typed as
+  `components.schemas.<OperationId>Event<Name>`.
 - `stream.event(name, data, { id, retry })` writes `id:`/`retry:` so a
   browser's `EventSource` resumes (`ctx.headers["last-event-id"]`); multi-line
   data becomes several `data:` lines.

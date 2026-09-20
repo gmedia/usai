@@ -310,6 +310,39 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
                 ),
             );
             operation["x-usai-stream"] = json!(true);
+            // Declared events: named components (`<OperationId>Event<Name>`)
+            // a client can type its `addEventListener` handlers from.
+            if !workload.contracts.events.is_empty() {
+                let base = operation["operationId"]
+                    .as_str()
+                    .unwrap_or("stream")
+                    .to_owned();
+                let pascal = |s: &str| {
+                    let mut c = s.chars();
+                    c.next()
+                        .map(|f| f.to_uppercase().collect::<String>() + c.as_str())
+                        .unwrap_or_default()
+                };
+                let mut listed = Vec::new();
+                let mut events = Map::new();
+                for (name, schema) in &workload.contracts.events {
+                    let component = format!("{}Event{}", pascal(&base), pascal(name));
+                    socket_schemas.insert(component.clone(), clean(schema));
+                    events.insert(
+                        name.clone(),
+                        json!({ "$ref": format!("#/components/schemas/{component}") }),
+                    );
+                    listed.push(format!("`{name}` → components.schemas.{component}"));
+                }
+                operation["x-usai-events"] = Value::Object(events);
+                note(
+                    &mut operation,
+                    &format!(
+                        "Events (`event:` name → `data:` schema): {}.",
+                        listed.join("; ")
+                    ),
+                );
+            }
         }
         if lifetime == "connection" {
             let c = &workload.contracts;
@@ -541,9 +574,26 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
             if lifetime == "stream" {
                 // The response is the stream itself, not a JSON body.
                 let media = stream_media_type(workload);
+                let description = if media != "text/event-stream" {
+                    "Streamed response; the connection stays open until the handler returns"
+                        .to_owned()
+                } else if workload.contracts.events.is_empty() {
+                    "Event stream; the connection stays open until the handler returns".to_owned()
+                } else {
+                    format!(
+                        "Event stream (events: {}); the connection stays open until the handler returns",
+                        workload
+                            .contracts
+                            .events
+                            .keys()
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                };
                 responses.insert(
                     "200".into(),
-                    json!({ "description": if media == "text/event-stream" { "Event stream; the connection stays open until the handler returns" } else { "Streamed response; the connection stays open until the handler returns" }, "content": { media: { "schema": { "type": "string" } } } }),
+                    json!({ "description": description, "content": { media: { "schema": { "type": "string" } } } }),
                 );
             } else if c.response.is_empty() {
                 responses.insert(

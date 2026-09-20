@@ -89,6 +89,14 @@ export interface StreamOptions<R extends ResourceDeclaration[] = ResourceDeclara
   responseHeaders?: ResponseHeaderDocs;
   /** The OpenAPI `operationId` (a generated client's method name). */
   operationId?: string;
+  /** The server-sent events this stream emits, by name, with the schema of
+   * each `data:` payload: `events: { tick: z.object({ i: z.number() }) }`.
+   * `stream.event("tick", data)` validates `data` against it (a mismatch is
+   * a `500 event_contract_violation` — the stream ends early and the log
+   * says which event), and the OpenAPI document names them as
+   * `components.schemas.<OperationId>EventTick` with the event list in the
+   * response description, so a client knows what to `addEventListener` for. */
+  events?: Record<string, AnySchema>;
 }
 
 /**
@@ -120,6 +128,7 @@ function stream<O extends StreamOptions>(
   const contracts: Workload["contracts"] = {};
   if (options.params) contracts.params = options.params;
   if (options.query) contracts.query = options.query;
+  if (options.events) contracts.events = options.events;
   const policies: WorkloadPolicies = {};
   if (options.timeout !== undefined) policies.timeout = options.timeout;
   if (options.concurrency !== undefined) policies.concurrency = options.concurrency;

@@ -433,7 +433,11 @@ import { socket } from "@sakaladev/usai";
 
 export const events = http.stream(
   "/events",
-  { query: z.object({ n: z.coerce.number().int().min(1).max(100).default(3) }) },
+  {
+    operationId: "events",
+    query: z.object({ n: z.coerce.number().int().min(1).max(100).default(3) }),
+    events: { tick: z.object({ i: z.number().int() }), done: z.object({ total: z.number() }) },
+  },
   async (ctx, stream) => {
     await stream.start({ headers: { "x-stream": "yes" } });
     for (let i = 1; i <= (ctx.query as unknown as { n: number }).n; i++) {
@@ -465,6 +469,16 @@ export const endless = http.stream("/endless", {}, async (ctx, stream) => {
 });
 
 export const plainStream = http.stream("/no-send", {}, async () => ({ nothing: "sent" }));
+// An event that does not match its declared schema is a contract violation
+// inside the world: the stream ends early and the log names the event.
+export const badEvent = http.stream(
+  "/bad-event",
+  { events: { tick: z.object({ i: z.number() }) } },
+  async (_ctx, stream) => {
+    await stream.event("tick", { i: 1 });
+    await stream.event("tick", { i: "two" });
+  },
+);
 
 // An authenticated socket: the resolver runs before the upgrade completes,
 // so a refusal is a 401, and a browser passes the token as the second
@@ -686,6 +700,7 @@ export default defineApp({
     endless,
     csvExport,
     plainStream,
+    badEvent,
     chat,
     socketLocalRead,
     memoryHog,

@@ -17,7 +17,7 @@ routes to it, `inspect`/`graph`/the reference page render it.
 | <a id="summary"></a> `summary?` | `readonly` | `string` | One line about the workload, for the reference and the OpenAPI `summary`. |
 | <a id="description"></a> `description?` | `readonly` | `string` | A paragraph about the workload, for the reference and the OpenAPI `description`. |
 | <a id="trigger"></a> `trigger` | `readonly` | `Record`\<`string`, `unknown`\> | Kind-specific facts (method and path, schedule, topic, …), as the manifest carries them. |
-| <a id="contracts"></a> `contracts` | `readonly` | \{ `params?`: [`AnySchema`](../type-aliases/AnySchema.md); `query?`: [`AnySchema`](../type-aliases/AnySchema.md); `headers?`: [`AnySchema`](../type-aliases/AnySchema.md); `body?`: [`AnySchema`](../type-aliases/AnySchema.md); `input?`: [`AnySchema`](../type-aliases/AnySchema.md); `message?`: [`AnySchema`](../type-aliases/AnySchema.md); `response?`: `Record`\<`number`, [`AnySchema`](../type-aliases/AnySchema.md)\>; \} | - |
+| <a id="contracts"></a> `contracts` | `readonly` | \{ `params?`: [`AnySchema`](../type-aliases/AnySchema.md); `query?`: [`AnySchema`](../type-aliases/AnySchema.md); `headers?`: [`AnySchema`](../type-aliases/AnySchema.md); `body?`: [`AnySchema`](../type-aliases/AnySchema.md); `input?`: [`AnySchema`](../type-aliases/AnySchema.md); `message?`: [`AnySchema`](../type-aliases/AnySchema.md); `response?`: `Record`\<`number`, [`AnySchema`](../type-aliases/AnySchema.md)\>; `events?`: `Record`\<`string`, [`AnySchema`](../type-aliases/AnySchema.md)\>; \} | - |
 | `contracts.params?` | `public` | [`AnySchema`](../type-aliases/AnySchema.md) | - |
 | `contracts.query?` | `public` | [`AnySchema`](../type-aliases/AnySchema.md) | - |
 | `contracts.headers?` | `public` | [`AnySchema`](../type-aliases/AnySchema.md) | - |
@@ -25,6 +25,7 @@ routes to it, `inspect`/`graph`/the reference page render it.
 | `contracts.input?` | `public` | [`AnySchema`](../type-aliases/AnySchema.md) | - |
 | `contracts.message?` | `public` | [`AnySchema`](../type-aliases/AnySchema.md) | - |
 | `contracts.response?` | `public` | `Record`\<`number`, [`AnySchema`](../type-aliases/AnySchema.md)\> | - |
+| `contracts.events?` | `public` | `Record`\<`string`, [`AnySchema`](../type-aliases/AnySchema.md)\> | A stream's events by name (`http.stream({ events })`). |
 | <a id="errors"></a> `errors` | `readonly` | [`DeclaredError`](DeclaredError.md)[] | - |
 | <a id="responseheaders"></a> `responseHeaders?` | `readonly` | [`ResponseHeaderDocs`](../type-aliases/ResponseHeaderDocs.md) | Documented response headers per status (HTTP, raw and stream workloads). |
 | <a id="operationid"></a> `operationId?` | `readonly` | `string` | The chosen OpenAPI `operationId`, when the declaration set one. |

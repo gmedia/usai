@@ -1017,6 +1017,24 @@ async fn openapi_is_generated_from_the_definition() {
     // The facts a Usai consumer can rely on travel with the operation.
     let order = &doc["paths"]["/orders"]["post"];
     assert_eq!(order["x-usai-validated"]["body"], "before-world");
+    // A stream's declared events are named components and listed on the
+    // response, so a client knows what to listen for and what arrives.
+    let events = &doc["paths"]["/events"]["get"];
+    assert_eq!(
+        events["x-usai-events"]["tick"]["$ref"], "#/components/schemas/EventsEventTick",
+        "{events}"
+    );
+    assert_eq!(
+        doc["components"]["schemas"]["EventsEventTick"]["properties"]["i"]["type"],
+        "integer"
+    );
+    assert!(
+        events["responses"]["200"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("events: done, tick"),
+        "{events}"
+    );
     // The application's operationId wins over the derived one; a socket's
     // message contracts are named components.
     assert_eq!(doc["paths"]["/users"]["post"]["operationId"], "createUser");

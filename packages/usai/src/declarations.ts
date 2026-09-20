@@ -204,6 +204,8 @@ export interface Workload {
     input?: AnySchema;
     message?: AnySchema;
     response?: Record<number, AnySchema>;
+    /** A stream's events by name (`http.stream({ events })`). */
+    events?: Record<string, AnySchema>;
   };
   readonly errors: DeclaredError[];
   /** Documented response headers per status (HTTP, raw and stream workloads). */

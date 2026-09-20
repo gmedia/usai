@@ -396,6 +396,18 @@ async function runStream(workload: Workload, input: StreamInput): Promise<unknow
       data: unknown,
       options?: { id?: string | number; retry?: number },
     ) => {
+      const declared = workload.contracts.events?.[name];
+      if (declared) {
+        const checked = validateWith(declared, data);
+        if (!checked.ok)
+          throw new UsaiError(
+            "event_contract_violation",
+            500,
+            `event ${name} does not match its declared schema`,
+            { event: name, issues: checked.issues },
+          );
+        data = checked.value;
+      }
       const payload = typeof data === "string" ? data : JSON.stringify(data);
       // Multi-line data is several `data:` lines (the wire format), so a
       // string with newlines reaches the client intact.
