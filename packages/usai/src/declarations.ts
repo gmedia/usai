@@ -137,6 +137,21 @@ export interface HttpContracts {
   response?: AnySchema | Record<number, AnySchema>;
 }
 
+/** Response headers an endpoint sets, documented per status for the
+ * reference and the OpenAPI document (`responses[status].headers`): the
+ * key is the status (`201`, `200`, or `"*"` for every status), the value
+ * maps a header name to one line about it. Descriptive — the runtime does
+ * not validate them; a generated client learns they exist.
+ *
+ * @example
+ * ```ts
+ * responseHeaders: { 201: { location: "URL of the new user" }, "*": { etag: "Version of the resource" } }
+ * ```
+ *
+ * @category Application
+ */
+export type ResponseHeaderDocs = Record<number | "*", Record<string, string>>;
+
 /** Options of `http.get`/`post`/…: contracts, policies, errors, auth, resources.
  *
  * @category Application
@@ -149,6 +164,9 @@ export interface HttpOptions extends HttpContracts, WorkloadPolicies {
   description?: string;
   /** Errors the handler throws, for the reference and the OpenAPI document. */
   errors?: DeclaredError[];
+  /** Response headers the handler sets (`set-cookie`, `location`, `etag`),
+   * documented per status. See {@link ResponseHeaderDocs}. */
+  responseHeaders?: ResponseHeaderDocs;
   /** The authentication boundary; its principal is `ctx.auth`. */
   auth?: AuthDeclaration;
   /** Resources this endpoint leases; only these are on `ctx.resources`. */
@@ -184,6 +202,8 @@ export interface Workload {
     response?: Record<number, AnySchema>;
   };
   readonly errors: DeclaredError[];
+  /** Documented response headers per status (HTTP, raw and stream workloads). */
+  readonly responseHeaders?: ResponseHeaderDocs;
   readonly auth?: AuthDeclaration;
   readonly resources: ResourceDeclaration[];
   readonly dispatches: Workload[];

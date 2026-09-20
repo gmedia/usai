@@ -8,6 +8,7 @@ import type {
   Method,
   ResourceDeclaration,
   ResourcesOf,
+  ResponseHeaderDocs,
   Workload,
   WorkloadPolicies,
 } from "./declarations.ts";
@@ -165,6 +166,7 @@ function declare<O extends HttpOptions>(
     trigger: { method, path, raw: false },
     contracts,
     errors: options.errors ?? [],
+    ...(options.responseHeaders ? { responseHeaders: options.responseHeaders } : {}),
     ...(options.auth ? { auth: options.auth } : {}),
     resources: withAuthResources(options.resources, options.auth),
     dispatches: [],
@@ -202,6 +204,8 @@ export interface RawOptions<R extends ResourceDeclaration[] = ResourceDeclaratio
   /** Statuses the handler writes, with a description each — the reference
    * lists them instead of "opaque response". */
   responses?: Record<number, string>;
+  /** Response headers the handler sets, documented per status (`content-disposition`, `etag`). */
+  responseHeaders?: ResponseHeaderDocs;
 }
 
 /** The handler of `http.raw`. */
@@ -236,6 +240,7 @@ function raw(path: string, a: RawOptions | RawHandler, b?: RawHandler): Workload
     },
     contracts: {},
     errors: options.errors ?? [],
+    ...(options.responseHeaders ? { responseHeaders: options.responseHeaders } : {}),
     ...(options.auth ? { auth: options.auth } : {}),
     resources: withAuthResources(options.resources, options.auth),
     dispatches: [],

@@ -8,6 +8,7 @@ import type {
   Method,
   ResourceDeclaration,
   ResourcesOf,
+  ResponseHeaderDocs,
   Workload,
   WorkloadPolicies,
 } from "./declarations.ts";
@@ -84,6 +85,8 @@ export interface StreamOptions<R extends ResourceDeclaration[] = ResourceDeclara
    * `content-type` unless `stream.start({ headers })` says otherwise, and is
    * what the OpenAPI document and the reference say the endpoint streams. */
   contentType?: string;
+  /** Response headers the stream sets (`content-disposition` for a download), documented. */
+  responseHeaders?: ResponseHeaderDocs;
 }
 
 /**
@@ -127,6 +130,7 @@ function stream<O extends StreamOptions>(
     trigger: { method, path, ...(options.contentType ? { contentType: options.contentType } : {}) },
     contracts,
     errors: [],
+    ...(options.responseHeaders ? { responseHeaders: options.responseHeaders } : {}),
     ...(options.auth ? { auth: options.auth } : {}),
     resources: withAuthResources(options.resources, options.auth),
     dispatches: [],

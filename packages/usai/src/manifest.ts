@@ -54,6 +54,8 @@ export interface ManifestWorkload {
   trigger: Record<string, unknown> & { kind: string };
   contracts: ManifestContracts;
   errors: Array<{ code: string; status: number }>;
+  /** Documented response headers, by status (`"201"`, `"*"`). */
+  responseHeaders?: Record<string, Record<string, string>>;
   auth?: string;
   resources: string[];
   dispatches: string[];
@@ -210,6 +212,15 @@ export function describe(app: AppDeclaration): Manifest {
       publishes: [...workload.publishes],
     };
     if (module !== undefined) entry.module = module;
+    if (workload.responseHeaders) {
+      const docs: Record<string, Record<string, string>> = {};
+      for (const [status, headers] of Object.entries(workload.responseHeaders)) {
+        const lower: Record<string, string> = {};
+        for (const [name, text] of Object.entries(headers)) lower[name.toLowerCase()] = text;
+        docs[String(status)] = lower;
+      }
+      entry.responseHeaders = docs;
+    }
     if (workload.summary !== undefined) entry.summary = workload.summary;
     if (workload.description !== undefined) entry.description = workload.description;
     if (workload.auth) entry.auth = workload.auth.name;

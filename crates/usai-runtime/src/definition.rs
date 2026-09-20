@@ -293,6 +293,11 @@ pub struct WorkloadSpec {
     pub contracts: Contracts,
     #[serde(default)]
     pub errors: Vec<DeclaredError>,
+    /// Response headers the handler sets, documented per status (`"201"`,
+    /// `"*"` for every status): header name → one line. Descriptive only;
+    /// the OpenAPI document and the reference list them.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub response_headers: BTreeMap<String, BTreeMap<String, String>>,
     /// Name of the auth boundary declaration this workload requires, if any.
     #[serde(default)]
     pub auth: Option<String>,
@@ -754,6 +759,7 @@ mod tests {
                 },
                 contracts: Contracts::default(),
                 errors: vec![],
+                response_headers: Default::default(),
                 auth: None,
                 resources: vec![],
                 dispatches: vec![],

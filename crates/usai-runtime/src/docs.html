@@ -947,7 +947,11 @@
       const otherMedia = r.content && Object.keys(r.content).find((m) => m !== "application/json" && m !== "text/event-stream");
       const isRaw = op["x-usai-raw"];
       const bodiless = ["204", "205", "304"].includes(String(status)) || (!r.content && !isRaw);
-      const node = el("div", {}, el("p", { class: "resp-desc" }, r.description || ""),
+      const headerNames = r.headers && Object.keys(r.headers);
+      const headersNode = headerNames && headerNames.length
+        ? el("p", { class: "note" }, "Headers: ", ...joinNodes(headerNames.map((h) => el("span", {}, el("code", {}, h), r.headers[h].description ? ` — ${r.headers[h].description}` : ""))))
+        : null;
+      const node = el("div", {}, el("p", { class: "resp-desc" }, r.description || ""), headersNode,
         isStream ? el("p", { class: "note" }, "Server-sent events (", el("code", {}, "text/event-stream"), "): ", el("code", {}, "event:"), " and ", el("code", {}, "data:"), " lines per ", el("code", {}, "stream.event(name, data)"), "; the body ends when the handler returns.")
           : otherMedia ? el("p", { class: "note" }, "Streamed ", el("code", {}, otherMedia), " body: the handler writes it chunk by chunk (", el("code", {}, "stream.send"), "); the body ends when the handler returns.")
           : isEnvelope ? el("p", { class: "note" }, "Error envelope ", el("code", {}, `{ "error": { "code", "message", "details?" } }`), "; ", ...errorCodes(op, status))

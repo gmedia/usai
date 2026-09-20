@@ -27,3 +27,4 @@ Options for `http.raw`.
 | <a id="resources"></a> `resources?` | `R` | - | - |
 | <a id="errors"></a> `errors?` | [`DeclaredError`](DeclaredError.md)[] | Errors the handler answers with (documented in the reference). | - |
 | <a id="responses"></a> `responses?` | `Record`\<`number`, `string`\> | Statuses the handler writes, with a description each — the reference lists them instead of "opaque response". | - |
+| <a id="responseheaders"></a> `responseHeaders?` | [`ResponseHeaderDocs`](../type-aliases/ResponseHeaderDocs.md) | Response headers the handler sets, documented per status (`content-disposition`, `etag`). | - |

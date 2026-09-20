@@ -672,6 +672,47 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
                 .entry("504".to_owned())
                 .or_insert_with(|| json!({ "description": "Deadline exceeded: deadline_exceeded", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UsaiError" } } } }));
         }
+        // Documented response headers: on the status they were declared
+        // for, or on every declared status for `"*"` (a generated client
+        // learns that `location`, `etag` or `set-cookie` exist).
+        if !workload.response_headers.is_empty() {
+            let statuses: Vec<String> = responses.keys().cloned().collect();
+            for (status, headers) in &workload.response_headers {
+                let targets: Vec<&String> = if status == "*" {
+                    statuses
+                        .iter()
+                        .filter(|s| s.starts_with(['2', '3']))
+                        .collect()
+                } else {
+                    statuses.iter().filter(|s| *s == status).collect()
+                };
+                for target in targets {
+                    let response = responses.get_mut(target).expect("listed status");
+                    let slot = response
+                        .as_object_mut()
+                        .expect("response object")
+                        .entry("headers")
+                        .or_insert_with(|| json!({}));
+                    for (name, description) in headers {
+                        slot[name] =
+                            json!({ "description": description, "schema": { "type": "string" } });
+                    }
+                }
+                if status != "*" && !responses.contains_key(status) {
+                    // A header documented for a status the operation never
+                    // declared: list the status so the header is not lost.
+                    let mut slot = json!({});
+                    for (name, description) in headers {
+                        slot[name] =
+                            json!({ "description": description, "schema": { "type": "string" } });
+                    }
+                    responses.insert(
+                        status.clone(),
+                        json!({ "description": reason(status.parse().unwrap_or(200)), "headers": slot }),
+                    );
+                }
+            }
+        }
         operation["responses"] = Value::Object(responses);
 
         let entry = paths
@@ -787,6 +828,7 @@ mod tests {
             },
             contracts: Default::default(),
             errors: vec![],
+            response_headers: Default::default(),
             auth: None,
             resources: vec![],
             dispatches: vec![],

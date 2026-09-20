@@ -1017,6 +1017,24 @@ async fn openapi_is_generated_from_the_definition() {
     // The facts a Usai consumer can rely on travel with the operation.
     let order = &doc["paths"]["/orders"]["post"];
     assert_eq!(order["x-usai-validated"]["body"], "before-world");
+    // Documented response headers appear on their status (and `"*"` on every
+    // success status), typed as strings for a generated client.
+    let created = &doc["paths"]["/users"]["post"]["responses"]["201"];
+    assert_eq!(
+        created["headers"]["location"]["description"], "URL of the new user",
+        "{created}"
+    );
+    assert_eq!(created["headers"]["location"]["schema"]["type"], "string");
+    assert_eq!(
+        created["headers"]["etag"]["description"], "Version of the user",
+        "{created}"
+    );
+    assert!(
+        doc["paths"]["/users"]["post"]["responses"]["400"]
+            .get("headers")
+            .is_none(),
+        "`*` covers the success statuses, not the errors"
+    );
     // Declared errors are typed: the code is an enum a generated client can
     // switch on, and the description is the status's reason phrase.
     let not_found = &doc["paths"]["/users/{id}"]["get"]["responses"]["404"];

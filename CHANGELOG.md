@@ -194,6 +194,10 @@ two-replica campaign passed; the 72 h soak is running.
   by default and forwards the lines to stderr as before.
 - Globals: `KeyUsage`, `CryptoKey`, `HmacImportParams` names, so code written
   against the DOM's WebCrypto types typechecks in a world.
+- `responseHeaders: { 201: { location: "…" }, "*": { etag: "…" } }` on
+  `http.*`, `http.raw` and `http.stream` documents the response headers a
+  handler sets, per status, in the OpenAPI document (`responses[status].headers`)
+  and the reference.
 - `stream.event(name, data, { id, retry })` writes `id:`/`retry:` so a
   browser's `EventSource` resumes (`ctx.headers["last-event-id"]`); multi-line
   data becomes several `data:` lines.

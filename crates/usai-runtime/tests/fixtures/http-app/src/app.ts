@@ -52,7 +52,14 @@ export const getUser = http.get(
 
 export const createUser = http.post(
   "/users",
-  { body: Body, response: { 201: User } },
+  {
+    body: Body,
+    response: { 201: User },
+    responseHeaders: {
+      201: { location: "URL of the new user" },
+      "*": { etag: "Version of the user" },
+    },
+  },
   async (ctx) => http.created({ id: "6f1a2b3c-4d5e-4f60-8a71-92b3c4d5e6f7", ...ctx.body }),
 );
 

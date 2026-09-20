@@ -82,6 +82,7 @@ fn task(id: &str) -> WorkloadSpec {
         trigger: Trigger::Task,
         contracts: Contracts::default(),
         errors: vec![],
+        response_headers: Default::default(),
         auth: None,
         resources: vec![],
         dispatches: vec![],

@@ -36,6 +36,7 @@ export type {
   AuthDeclaration,
   CredentialLocation,
   DeclaredError,
+  ResponseHeaderDocs,
   Method,
   DefineAppOptions,
   DefineModuleOptions,
