@@ -643,10 +643,23 @@ fn column_to_json(row: &Row, index: usize, ty: &Type) -> Result<Value, tokio_pos
             row.try_get::<_, Option<$t>>(index).map(|v| json!(v))
         };
     }
+    // A bigint beyond ±2^53 cannot survive a JSON number (the guest's Number
+    // would round it): those travel as strings, like numeric does; ids and
+    // counts in the safe range stay numbers.
+    fn safe_i64(n: i64) -> Value {
+        const SAFE: i64 = 9_007_199_254_740_992;
+        if (-SAFE..=SAFE).contains(&n) {
+            json!(n)
+        } else {
+            json!(n.to_string())
+        }
+    }
     match *ty {
         Type::INT2 => get!(i16),
         Type::INT4 => get!(i32),
-        Type::INT8 => get!(i64),
+        Type::INT8 => row
+            .try_get::<_, Option<i64>>(index)
+            .map(|v| v.map(safe_i64).unwrap_or(Value::Null)),
         Type::OID => get!(u32),
         Type::FLOAT4 => get!(f32),
         Type::FLOAT8 => get!(f64),
@@ -675,7 +688,10 @@ fn column_to_json(row: &Row, index: usize, ty: &Type) -> Result<Value, tokio_pos
         }),
         Type::TEXT_ARRAY | Type::VARCHAR_ARRAY => get!(Vec<String>),
         Type::INT4_ARRAY => get!(Vec<i32>),
-        Type::INT8_ARRAY => get!(Vec<i64>),
+        Type::INT8_ARRAY => row.try_get::<_, Option<Vec<i64>>>(index).map(|v| {
+            v.map(|a| Value::Array(a.into_iter().map(safe_i64).collect()))
+                .unwrap_or(Value::Null)
+        }),
         Type::VOID => Ok(Value::Null),
         _ if matches!(ty.kind(), Kind::Enum(_)) => row
             .try_get::<_, Option<EnumLabelOut>>(index)

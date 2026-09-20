@@ -224,6 +224,34 @@ async fn an_exclusive_cron_tick_is_claimed_once_across_instances() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn bigints_beyond_the_safe_range_travel_as_strings() {
+    let Some(f) = fixture().await else { return };
+    let manager = f
+        .runtime
+        .active()
+        .unwrap()
+        .resources()
+        .get("main")
+        .cloned()
+        .unwrap();
+    let row = manager
+        .call(
+            usai_runtime::resource::ResourceCall {
+                method: "one".into(),
+                args: json!({ "sql": "select 5::bigint as small, -9007199254740992::bigint as edge, 9007199254740993::bigint as big, array[1::bigint, 9007199254740993::bigint] as arr", "params": [] }),
+            },
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        row,
+        json!({ "small": 5, "edge": -9007199254740992i64, "big": "9007199254740993", "arr": [1, "9007199254740993"] })
+    );
+    f.baseline();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sql_error_is_terminal_and_the_connection_is_reused() {
     let Some(f) = fixture().await else { return };
     let (status, body) = f.http("GET", "/fail", json!({})).await;

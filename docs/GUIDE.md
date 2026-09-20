@@ -199,6 +199,23 @@ export default defineApp({ workloads: [listUsers], resources: [db], env: env({ D
 - Migrations: SQL files found by `usai.config.ts` includes and module globs, applied in file-name order by `usai db migrate`, recorded in `usai_migrations`, never run at startup. `usai db status` shows them. `usai build` copies them into the artifact (`.usai/build/migrations/`), so a production image applies them without a source tree: `usai db migrate --artifact /app/.usai/build` (the scaffold's image: `docker run --rm -e DATABASE_URL=… my-app db migrate --artifact /app/.usai/build`).
 - Seeders: a file exporting `seeder({ resources: [db] }, async (ctx) => { … })`, run by `usai db seed [name]` in its own world; its return value is printed like a command's. Seeders are **not tracked** (unlike migrations there is no ledger; running one twice runs it twice — write `insert … on conflict do nothing`) and are **not part of the artifact** (they are source, built on demand): seed from a checkout or from the dev image, not from the runtime image. A module glob that matches no file is a WARN (`globs are root-relative`).
 
+**What the driver covers** (probed 2026-09-20 against PostgreSQL 18 through `sql.*`; everything is a prepared statement on a pooled connection, results in binary format):
+
+| Works | Note |
+|---|---|
+| Parameters: text, int2/4/8, float, numeric (as string), bool, uuid, json/jsonb (as values), timestamptz/timestamp/date (ISO strings), `bytea` (`Uint8Array`), text[]/int4[]/int8[], enums by label | anything else (`interval`, `inet`, ranges, `money`, composites, domains) is sent in **text form** from a string and parsed by the server as `'…'::type` would |
+| Results: the same types back; `numeric` as a string; `bigint` as a number within ±2^53 and **as a string beyond it** (a JSON number would round it); `bytea` as base64 | a result column of an exotic type fails with *unsupported column type; cast it in SQL* — `select started - finished as elapsed::text`, `ip::text`, `range::text` |
+| `sql.transaction`: `SET LOCAL`, savepoints (`savepoint s1` / `rollback to savepoint s1`), `DECLARE … CURSOR` + `FETCH`, temp tables (`on commit drop`), advisory locks (`pg_try_advisory_xact_lock`) | all statements on the pinned connection; `SET LOCAL` and xact-scoped locks end with the transaction, which is what you want on a pool |
+| `statement_timeout` | arrives as `sql_57014`; the world's own deadline cancels the query server-side the same way (C5) |
+| One statement per call | `select 1; select 2` is `sql_42601` (prepared statements take one command) — two calls, or one transaction |
+
+| Does not work | Instead |
+|---|---|
+| `COPY … TO STDOUT` / `FROM STDIN` | no COPY protocol on the wire (`postgres_error: unexpected message from server`); `insert … select` / `unnest($1::text[])` for bulk rows, or `psql \copy` from a job outside the runtime |
+| `LISTEN` / `NOTIFY` as a delivery path | `listen` is accepted but nothing reads the notifications — and it pins them to a pooled connection nobody owns; use the queue (§8) for work, or poll |
+| Session-level state across calls (`SET` without `LOCAL`, session advisory locks, `PREPARE`) | every call leases a connection and gives it back — only `sql.transaction` keeps one; session state would leak to the next lessee |
+| A `Uint8Array` result | `bytea` arrives as base64 (`bytes.fromBase64`) |
+
 ## 8. Queue
 
 ```ts

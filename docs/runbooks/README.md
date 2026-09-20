@@ -19,6 +19,7 @@ and how recovery happens — without reading Rust.
 | Disk full | [disk-full.md](disk-full.md) |
 | Queue messages failing / dead letters | [queue-dead-letter.md](queue-dead-letter.md) |
 | Every metric, its labels, and the alerts to set | [metrics.md](metrics.md) |
+| Sizing: `--max-worlds`, `pool.max`, `concurrency`, memory, CPU, replicas | [sizing.md](sizing.md) |
 | Running on a VM under systemd (deploy, rolling restart, rollback without Docker) | [systemd.md](systemd.md) |
 
 Where to look, always:
