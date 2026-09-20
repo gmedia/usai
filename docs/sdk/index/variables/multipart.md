@@ -5,6 +5,10 @@
 ```ts
 const multipart: {
   parse: (body: Uint8Array, contentType: string | undefined) => MultipartBody;
+  encode: (parts: readonly MultipartPart[], boundary: string) => {
+     body: Uint8Array;
+     contentType: string;
+  };
 };
 ```
 
@@ -17,3 +21,4 @@ The multipart helper as one object.
 | Name | Type | Default value |
 | ------ | ------ | ------ |
 | <a id="property-parse"></a> `parse()` | (`body`: `Uint8Array`, `contentType`: `string` \| `undefined`) => [`MultipartBody`](../interfaces/MultipartBody.md) | `parseMultipart` |
+| <a id="property-encode"></a> `encode()` | (`parts`: readonly [`MultipartPart`](../type-aliases/MultipartPart.md)[], `boundary`: `string`) => \{ `body`: `Uint8Array`; `contentType`: `string`; \} | `encodeMultipart` |

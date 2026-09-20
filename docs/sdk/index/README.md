@@ -61,6 +61,8 @@ Vocabulary used throughout:
 | [MultipartBody](interfaces/MultipartBody.md) | A parsed `multipart/form-data` body. |
 | [parseMultipart](functions/parseMultipart.md) | Parses a `multipart/form-data` body. `contentType` is the request's `content-type` header (the boundary is read from it). Throws a `TypeError` on a malformed body — answer 400 with it. |
 | [multipart](variables/multipart.md) | The multipart helper as one object. |
+| [MultipartPart](type-aliases/MultipartPart.md) | One part to encode: a text field, or a file with its bytes. |
+| [encodeMultipart](functions/encodeMultipart.md) | Encodes a `multipart/form-data` body — what a browser form or `curl -F` sends — for a test or an outbound call: `const { body, contentType } = multipart.encode([{ name: "file", filename: "a.csv", data }])`, then `app.http.post("/imports", { body, headers: { "content-type": contentType } })`. |
 
 ## Streams and WebSockets
 

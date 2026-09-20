@@ -124,4 +124,57 @@ export function parseMultipart(body: Uint8Array, contentType: string | undefined
  *
  * @category HTTP
  */
-export const multipart = { parse: parseMultipart };
+export const multipart = { parse: parseMultipart, encode: encodeMultipart };
+
+/** One part to encode: a text field, or a file with its bytes.
+ *
+ * @category HTTP
+ */
+export type MultipartPart =
+  | { name: string; value: string }
+  | { name: string; filename: string; contentType?: string; data: Uint8Array };
+
+/** Encodes a `multipart/form-data` body — what a browser form or `curl -F`
+ * sends — for a test or an outbound call: `const { body, contentType } =
+ * multipart.encode([{ name: "file", filename: "a.csv", data }])`, then
+ * `app.http.post("/imports", { body, headers: { "content-type": contentType } })`.
+ *
+ * @category HTTP
+ */
+export function encodeMultipart(
+  parts: readonly MultipartPart[],
+  boundary = `usai-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`,
+): { body: Uint8Array; contentType: string } {
+  const enc = new TextEncoder();
+  const chunks: Uint8Array[] = [];
+  for (const part of parts) {
+    if (!NAME_SAFE.test(part.name))
+      throw new TypeError(`invalid field name: ${JSON.stringify(part.name)}`);
+    if ("data" in part) {
+      chunks.push(
+        enc.encode(
+          `--${boundary}\r\nContent-Disposition: form-data; name="${part.name}"; filename="${part.filename.replace(/["\\]/g, "_")}"\r\nContent-Type: ${part.contentType ?? "application/octet-stream"}\r\n\r\n`,
+        ),
+        part.data,
+        enc.encode("\r\n"),
+      );
+    } else {
+      chunks.push(
+        enc.encode(
+          `--${boundary}\r\nContent-Disposition: form-data; name="${part.name}"\r\n\r\n${part.value}\r\n`,
+        ),
+      );
+    }
+  }
+  chunks.push(enc.encode(`--${boundary}--\r\n`));
+  const total = chunks.reduce((n, c) => n + c.length, 0);
+  const body = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) {
+    body.set(c, at);
+    at += c.length;
+  }
+  return { body, contentType: `multipart/form-data; boundary=${boundary}` };
+}
+
+const NAME_SAFE = /^[^"\r\n;=]+$/;

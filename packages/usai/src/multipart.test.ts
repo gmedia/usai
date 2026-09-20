@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseMultipart } from "./multipart.ts";
+import { encodeMultipart, parseMultipart } from "./multipart.ts";
 
 const body = (boundary: string, parts: string[]) =>
   new TextEncoder().encode(
@@ -69,4 +69,18 @@ test("parseMultipart: malformed input is a TypeError, not a hang or a partial re
       ),
     /closing boundary/,
   );
+});
+
+test("encodeMultipart round-trips through parseMultipart", () => {
+  const data = new Uint8Array([0, 255, 13, 10, 7]);
+  const { body, contentType } = encodeMultipart([
+    { name: "title", value: "hello" },
+    { name: "file", filename: 'q"uote.bin', contentType: "application/x-test", data },
+  ]);
+  const form = parseMultipart(body, contentType);
+  assert.deepEqual(form.fields, { title: "hello" });
+  assert.equal(form.files[0]!.filename, "q_uote.bin");
+  assert.equal(form.files[0]!.contentType, "application/x-test");
+  assert.deepEqual(Array.from(form.files[0]!.data), [0, 255, 13, 10, 7]);
+  assert.throws(() => encodeMultipart([{ name: "a;b", value: "x" }]), TypeError);
 });
