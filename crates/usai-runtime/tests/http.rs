@@ -1553,3 +1553,35 @@ async fn a_multi_megabyte_body_decodes_within_the_cpu_slice() {
     );
     s.shutdown.cancel();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_stream_declares_its_media_type() {
+    let Some(s) = start().await else { return };
+    let r = s
+        .client
+        .get(format!("{}/export.csv", s.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(r.headers().get("content-type").unwrap(), "text/csv");
+    assert_eq!(r.text().await.unwrap(), "id,name\n1,Ayu\n");
+    let doc = usai_runtime::openapi::generate_with(
+        &s.runtime.active().unwrap().definition,
+        s.runtime.config(),
+        usai_runtime::openapi::Profile::Internal,
+    );
+    let op = &doc["paths"]["/export.csv"]["get"];
+    assert!(
+        op["responses"]["200"]["content"].get("text/csv").is_some(),
+        "{op}"
+    );
+    assert!(
+        op["description"]
+            .as_str()
+            .unwrap()
+            .contains("Chunks are text/csv"),
+        "{op}"
+    );
+    s.shutdown.cancel();
+}

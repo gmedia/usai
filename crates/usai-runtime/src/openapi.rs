@@ -78,6 +78,17 @@ fn error_schema() -> Value {
 
 /// Appends a runtime note to an operation's description, after whatever
 /// the developer wrote.
+/// The declared media type of a stream endpoint, `text/event-stream` by default.
+fn stream_media_type(workload: &WorkloadSpec) -> &str {
+    match &workload.trigger {
+        Trigger::Stream {
+            content_type: Some(ct),
+            ..
+        } => ct.as_str(),
+        _ => "text/event-stream",
+    }
+}
+
 fn note(operation: &mut Value, text: &str) {
     let existing = operation
         .get("description")
@@ -251,7 +262,7 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
             Trigger::Http {
                 method, path, raw, ..
             } => (method.clone(), path.clone(), *raw, "request"),
-            Trigger::Stream { method, path } => (method.clone(), path.clone(), false, "stream"),
+            Trigger::Stream { method, path, .. } => (method.clone(), path.clone(), false, "stream"),
             Trigger::Socket { path } => ("GET".to_owned(), path.clone(), true, "connection"),
             _ => continue,
         };
@@ -267,9 +278,12 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
             operation["description"] = json!(description);
         }
         if lifetime == "stream" {
+            let media = stream_media_type(workload);
             note(
                 &mut operation,
-                "Streaming response: the connection stays open until the handler returns. Chunks are text/event-stream by default.",
+                &format!(
+                    "Streaming response: the connection stays open until the handler returns. Chunks are {media}."
+                ),
             );
             operation["x-usai-stream"] = json!(true);
         }
@@ -445,9 +459,10 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
             }
             if lifetime == "stream" {
                 // The response is the stream itself, not a JSON body.
+                let media = stream_media_type(workload);
                 responses.insert(
                     "200".into(),
-                    json!({ "description": "Event stream; the connection stays open until the handler returns", "content": { "text/event-stream": { "schema": { "type": "string" } } } }),
+                    json!({ "description": if media == "text/event-stream" { "Event stream; the connection stays open until the handler returns" } else { "Streamed response; the connection stays open until the handler returns" }, "content": { media: { "schema": { "type": "string" } } } }),
                 );
             } else if c.response.is_empty() {
                 responses.insert(

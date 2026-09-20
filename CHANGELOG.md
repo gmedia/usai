@@ -68,6 +68,13 @@ two-replica campaign passed; the 72 h soak is running.
 - **Uploads and headers**: `multipart.parse(bytes, contentType)` splits a form body into
   fields and files; `defineApp({ headers })` sets static response headers on every
   application response (a handler's own wins).
+- `http.stream(path, { contentType })` declares a non-SSE stream (CSV, NDJSON): the
+  response's `content-type` and the OpenAPI document follow it. A stream handler that
+  fails after the head is logged and counted (`usai_http_streams_failed_total`).
+- Integer SQL parameters accept a numeric string (a `bigint` that came back as a string
+  binds again as it came); `usai_cron_ticks.claimed_by` names the instance (`host:pid`);
+  a task cancelled by a drain is logged as `cancelled: <reason>` (was `faulted / no
+  outcome`); `/_usai/*` on a listener without the surfaces says where they live.
 - **Bytes and text are native in the core.** `TextDecoder`/`TextEncoder` and the SDK's
   `bytes` helpers call C codecs installed in the guest core (`__usai_native`); `atob`/
   `btoa` are QuickJS-ng's own (the bridge used to shadow them with a quadratic

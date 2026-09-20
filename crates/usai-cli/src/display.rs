@@ -63,7 +63,7 @@ pub fn banner(
             let _ = writeln!(out, "\n{title}");
             for w in items {
                 match &w.trigger {
-                    Trigger::Stream { method, path } => {
+                    Trigger::Stream { method, path, .. } => {
                         let _ = writeln!(out, "  {method:<6} {path}");
                     }
                     Trigger::Socket { path } => {

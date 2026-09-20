@@ -345,6 +345,17 @@ export const events = http.stream(
   },
 );
 
+// A stream that is not SSE: the declared media type is the response's
+// content-type and what the OpenAPI document says.
+export const csvExport = http.stream(
+  "/export.csv",
+  { contentType: "text/csv" },
+  async (_ctx, stream) => {
+    await stream.send("id,name\n");
+    await stream.send("1,Ayu\n");
+  },
+);
+
 export const endless = http.stream("/endless", {}, async (ctx, stream) => {
   let i = 0;
   while (!ctx.signal.aborted) {
@@ -563,6 +574,7 @@ export default defineApp({
     serviceLocalRead,
     events,
     endless,
+    csvExport,
     plainStream,
     chat,
     socketLocalRead,

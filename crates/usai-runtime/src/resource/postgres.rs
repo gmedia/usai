@@ -453,6 +453,12 @@ fn param_error(index: usize, ty: &Type, detail: impl std::fmt::Display) -> Resou
 }
 
 /// Converts one JSON parameter to the type the prepared statement expects.
+fn int_param(value: &Value) -> Option<i64> {
+    value
+        .as_i64()
+        .or_else(|| value.as_str().and_then(|s| s.trim().parse::<i64>().ok()))
+}
+
 fn to_sql(
     index: usize,
     ty: &Type,
@@ -470,9 +476,12 @@ fn to_sql(
         }};
     }
     match *ty {
-        Type::INT2 => typed!(i16, value.as_i64().and_then(|n| i16::try_from(n).ok())),
-        Type::INT4 => typed!(i32, value.as_i64().and_then(|n| i32::try_from(n).ok())),
-        Type::INT8 => typed!(i64, value.as_i64()),
+        // Integers arrive as JSON numbers, or as strings when the guest kept
+        // them exact (a bigint result beyond 2^53 comes back as a string and
+        // must bind again as it came).
+        Type::INT2 => typed!(i16, int_param(value).and_then(|n| i16::try_from(n).ok())),
+        Type::INT4 => typed!(i32, int_param(value).and_then(|n| i32::try_from(n).ok())),
+        Type::INT8 => typed!(i64, int_param(value)),
         Type::FLOAT4 => typed!(f32, value.as_f64().map(|f| f as f32)),
         Type::FLOAT8 => typed!(f64, value.as_f64()),
         Type::NUMERIC => typed!(

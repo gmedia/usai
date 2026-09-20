@@ -237,20 +237,24 @@ impl TaskQueue {
                             }
                             (termination, outcome) => {
                                 queue.failed.fetch_add(1, Ordering::SeqCst);
-                                let termination = serde_json::to_value(termination)
-                                    .ok()
-                                    .and_then(|v| {
-                                        v.as_str().map(str::to_owned).or_else(|| {
-                                            v.get("detail")
-                                                .and_then(|d| d.as_str())
-                                                .map(str::to_owned)
-                                        })
-                                    })
-                                    .unwrap_or_else(|| "faulted".to_owned());
-                                let error = outcome
-                                    .as_ref()
-                                    .and_then(|o| o.as_ref().err().map(|e| e.message.clone()))
-                                    .unwrap_or_else(|| "no outcome".to_owned());
+                                // Name what happened: a drain or a shutdown cancelled the
+                                // world ("cancelled: shutdown"), the deadline fired, the
+                                // engine faulted, or the handler threw.
+                                let (termination, error) = match (termination, outcome) {
+                                    (Termination::Cancelled { reason }, _) => (
+                                        format!("cancelled: {reason}"),
+                                        "the world was cancelled before the handler finished (a drain bound or a shutdown); the task is counted as lost, not retried (ADR-0010)".to_owned(),
+                                    ),
+                                    (Termination::DeadlineExceeded, _) => (
+                                        "deadline-exceeded".to_owned(),
+                                        "the task's timeout elapsed".to_owned(),
+                                    ),
+                                    (Termination::Faulted { detail }, _) => ("faulted".to_owned(), detail.clone()),
+                                    (Termination::Completed, Some(Err(e))) => {
+                                        ("completed".to_owned(), format!("{}: {}", e.name, e.message))
+                                    }
+                                    (Termination::Completed, _) => ("completed".to_owned(), "no outcome".to_owned()),
+                                };
                                 tracing::warn!(task = %id, world = %result.world, %termination, %error, "task failed");
                             }
                         },

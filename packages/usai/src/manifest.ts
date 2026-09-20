@@ -156,7 +156,14 @@ function trigger(workload: Workload): ManifestWorkload["trigger"] {
     case "socket":
       return { kind: "socket", path: workload.trigger["path"] };
     case "stream":
-      return { kind: "stream", method: workload.trigger["method"], path: workload.trigger["path"] };
+      return {
+        kind: "stream",
+        method: workload.trigger["method"],
+        path: workload.trigger["path"],
+        ...(workload.trigger["contentType"]
+          ? { content_type: workload.trigger["contentType"] }
+          : {}),
+      };
     case "service":
       return {
         kind: "service",

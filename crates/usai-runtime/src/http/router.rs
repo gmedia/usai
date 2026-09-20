@@ -118,7 +118,7 @@ impl CompiledRevision {
                     raw: false,
                     ..
                 } => (method.as_str(), path.as_str(), RouteKind::Contract),
-                Trigger::Stream { method, path } => {
+                Trigger::Stream { method, path, .. } => {
                     (method.as_str(), path.as_str(), RouteKind::Stream)
                 }
                 Trigger::Socket { path } => ("GET", path.as_str(), RouteKind::Socket),

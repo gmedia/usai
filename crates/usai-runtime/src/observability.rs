@@ -760,7 +760,7 @@ pub fn render_graph(definition: &crate::definition::ApplicationDefinition) -> St
         Trigger::Stream { .. } => "stream",
     };
     let display = |w: &crate::definition::WorkloadSpec| match &w.trigger {
-        Trigger::Http { method, path, .. } | Trigger::Stream { method, path } => {
+        Trigger::Http { method, path, .. } | Trigger::Stream { method, path, .. } => {
             format!("{method} {path}")
         }
         Trigger::Socket { path } => path.clone(),

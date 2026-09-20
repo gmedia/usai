@@ -754,6 +754,19 @@ impl HttpHost {
             return Ok(response);
         }
 
+        // A runtime surface asked of a listener that does not serve it: say
+        // where it lives instead of a bare 404.
+        if path.starts_with("/_usai/") && !self.config.serve_status && !self.config.serve_docs {
+            return Err(Reply::error(
+                StatusCode::NOT_FOUND,
+                "route_not_found",
+                format!(
+                    "no route matches {} {path}: the runtime's surfaces (status, metrics, live, ready, docs) are not served on this listener — start with --status to put them here, or --status-addr for their own listener",
+                    parts.method
+                ),
+            ));
+        }
+
         // 1. route
         let matched = compiled.router.at(&path).map_err(|_| {
             Reply::error(
@@ -959,7 +972,16 @@ impl HttpHost {
             });
             if route.kind == RouteKind::Stream {
                 return self
-                    .run_stream(admission, &workload.id, compiled.clone(), request)
+                    .run_stream(
+                        admission,
+                        &workload.id,
+                        match &workload.trigger {
+                            crate::definition::Trigger::Stream { content_type: Some(ct), .. } => ct.clone(),
+                            _ => "text/event-stream".to_owned(),
+                        },
+                        compiled.clone(),
+                        request,
+                    )
                     .await;
             }
             let input = json!({ "kind": "http", "env": env, "request": request });
@@ -1026,10 +1048,11 @@ impl HttpHost {
         &self,
         admission: crate::runtime::Admission,
         workload: &str,
+        content_type: String,
         compiled: Arc<CompiledRevision>,
         request: Value,
     ) -> Result<HttpResponse, Reply> {
-        let (sink, head_rx, body_rx) = StreamSink::new("text/event-stream");
+        let (sink, head_rx, body_rx) = StreamSink::new(&content_type);
         let cancel = CancellationToken::new();
         let stop = compiled.revision.connections_stop();
         let runtime = Arc::clone(&self.runtime);

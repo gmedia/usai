@@ -29,6 +29,17 @@ pub const TICKS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS usai_cron_ticks (
   PRIMARY KEY (name, scheduled_at)
 )";
 
+fn hostname() -> Option<String> {
+    let mut buf = [0u8; 256];
+    // SAFETY: gethostname writes at most `buf.len()` bytes into a buffer we own.
+    let rc = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) };
+    if rc != 0 {
+        return None;
+    }
+    let end = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
+    String::from_utf8(buf[..end].to_vec()).ok()
+}
+
 /// Claims one tick for this instance: `true` when this call inserted the
 /// row, `false` when another instance already had. A database error is
 /// reported as `Err` and the caller decides (the scheduler runs the tick —
@@ -170,7 +181,15 @@ pub fn start(
         } else {
             None
         };
-        let claimant = format!("{}:{}", revision.id, workload.name);
+        // Who claimed: revision, schedule, and the instance (host:pid), so the
+        // ledger tells replicas apart.
+        let claimant = format!(
+            "{}:{}@{}:{}",
+            revision.id,
+            workload.name,
+            hostname().unwrap_or_else(|| "?".into()),
+            std::process::id()
+        );
         let stop = stop.clone();
         let runtime = runtime.clone();
         let revision = Arc::clone(&revision);

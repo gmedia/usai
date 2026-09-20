@@ -68,6 +68,11 @@ export interface StreamOptions<R extends ResourceDeclaration[] = ResourceDeclara
   resources?: R;
   params?: HttpContracts["params"];
   query?: HttpContracts["query"];
+  /** The stream's media type: `text/event-stream` (default; an SSE
+   * endpoint), `text/csv`, `application/x-ndjson`, … Sets the response
+   * `content-type` unless `stream.start({ headers })` says otherwise, and is
+   * what the OpenAPI document and the reference say the endpoint streams. */
+  contentType?: string;
 }
 
 /**
@@ -106,7 +111,7 @@ function stream<O extends StreamOptions>(
     name: `${method} ${path}`,
     ...(options.summary ? { summary: options.summary } : {}),
     ...(options.description ? { description: options.description } : {}),
-    trigger: { method, path },
+    trigger: { method, path, ...(options.contentType ? { contentType: options.contentType } : {}) },
     contracts,
     errors: [],
     ...(options.auth ? { auth: options.auth } : {}),

@@ -103,6 +103,9 @@ pub enum Trigger {
     Stream {
         method: String,
         path: String,
+        /// The stream's media type; `text/event-stream` when absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        content_type: Option<String>,
     },
 }
 
