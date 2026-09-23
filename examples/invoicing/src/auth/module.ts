@@ -2,9 +2,6 @@ import { auth, defineModule, errors, http, password, type PostgresHandle } from 
 import { z } from "zod";
 import { db } from "../resources.ts";
 
-const sql = (ctx: { resources: Record<string, unknown> }) =>
-  ctx.resources["main"] as PostgresHandle;
-
 export interface Principal {
   userId: string;
   tenantId: string;
@@ -66,14 +63,16 @@ export const session = auth.bearer({
   },
 });
 
+// A helper takes the handles it uses, typed: `PostgresHandle` is exported
+// for exactly this, and nothing in an application needs a cast.
 async function openSession(
-  ctx: { resources: Record<string, unknown>; env: Record<string, unknown> },
+  ctx: { resources: { main: PostgresHandle }; env: Record<string, unknown> },
   userId: string,
 ) {
   const token = hex(crypto.getRandomValues(new Uint8Array(32)));
   const ttlHours =
     typeof ctx.env["SESSION_TTL_HOURS"] === "number" ? ctx.env["SESSION_TTL_HOURS"] : 24 * 7;
-  const row = await sql(ctx).one<{ expiresAt: string }>(
+  const row = await ctx.resources.main.one<{ expiresAt: string }>(
     `insert into sessions (token_hash, user_id, expires_at) values ($1, $2, now() + ($3::int * interval '1 hour')) returning expires_at as "expiresAt"`,
     [await sha256(token), userId, ttlHours],
   );
@@ -91,7 +90,7 @@ export const signup = http.post(
   async (ctx) => {
     const hash = await password.hash(ctx.body.password);
     // Tenant and first user are one unit: no tenant without an owner.
-    const userId = await sql(ctx).transaction(async (tx) => {
+    const userId = await ctx.resources.main.transaction(async (tx) => {
       const exists = await tx.one(`select 1 from tenants where slug = $1`, [ctx.body.tenant]);
       if (exists) throw errors.conflict(`tenant ${ctx.body.tenant} already exists`);
       const tenant = await tx.one<{ id: string }>(
@@ -117,7 +116,7 @@ export const login = http.post(
     resources: [db],
   },
   async (ctx) => {
-    const user = await sql(ctx).one<{ id: string; passwordHash: string }>(
+    const user = await ctx.resources.main.one<{ id: string; passwordHash: string }>(
       `select u.id, u.password_hash as "passwordHash" from users u join tenants t on t.id = u.tenant_id where t.slug = $1 and u.email = $2`,
       [ctx.body.tenant, ctx.body.email.toLowerCase()],
     );
@@ -135,7 +134,9 @@ export const logout = http.post(
   { auth: session, response: { 204: z.null() }, resources: [db] },
   async (ctx) => {
     const raw = /^Bearer\s+(.+)$/i.exec(ctx.headers["authorization"] ?? "")?.[1]?.trim() ?? "";
-    await sql(ctx).execute(`delete from sessions where token_hash = $1`, [await sha256(raw)]);
+    await ctx.resources.main.execute(`delete from sessions where token_hash = $1`, [
+      await sha256(raw),
+    ]);
     return http.noContent();
   },
 );
@@ -144,7 +145,7 @@ export const me = http.get(
   "/me",
   { auth: session, response: { 200: Me }, resources: [db] },
   async (ctx) => {
-    const row = await sql(ctx).one<{ slug: string; name: string }>(
+    const row = await ctx.resources.main.one<{ slug: string; name: string }>(
       `select slug, name from tenants where id = $1`,
       [ctx.auth.tenantId],
     );
@@ -156,7 +157,7 @@ export const setWebhook = http.put(
   "/tenant/webhook",
   { auth: session, body: Webhook, response: { 200: WebhookSet }, resources: [db] },
   async (ctx) => {
-    await sql(ctx).execute(
+    await ctx.resources.main.execute(
       `update tenants set webhook_url = $1, webhook_secret = $2 where id = $3`,
       [ctx.body.url, ctx.body.secret, ctx.auth.tenantId],
     );

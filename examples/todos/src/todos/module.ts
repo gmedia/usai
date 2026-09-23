@@ -1,12 +1,4 @@
-import {
-  defineModule,
-  http,
-  cron,
-  command,
-  dispatches,
-  errors,
-  type PostgresHandle,
-} from "@sakaladev/usai";
+import { defineModule, http, cron, command, dispatches, errors } from "@sakaladev/usai";
 import { z } from "zod";
 import { db } from "../resources.ts";
 import { record } from "../activity/module.ts";
@@ -26,8 +18,6 @@ const ListQuery = z.object({
 });
 type TodoRow = z.infer<typeof Todo>;
 
-const sql = (ctx: { resources: Record<string, unknown> }) =>
-  ctx.resources["main"] as PostgresHandle;
 const columns = `id, title, done, created_at as "createdAt", completed_at as "completedAt"`;
 
 export const list = http.get(
@@ -35,9 +25,10 @@ export const list = http.get(
   { query: ListQuery, response: { 200: z.array(Todo) }, resources: [db] },
   async (ctx) => {
     const where = ctx.query.done === undefined ? "" : `where done = ${ctx.query.done === "true"}`;
-    return sql(ctx).query<TodoRow>(`select ${columns} from todos ${where} order by id limit $1`, [
-      ctx.query.limit,
-    ]);
+    return ctx.resources.main.query<TodoRow>(
+      `select ${columns} from todos ${where} order by id limit $1`,
+      [ctx.query.limit],
+    );
   },
 );
 
@@ -45,9 +36,10 @@ export const get = http.get(
   "/todos/:id",
   { params: Id, response: { 200: Todo }, resources: [db] },
   async (ctx) => {
-    const row = await sql(ctx).one<TodoRow>(`select ${columns} from todos where id = $1`, [
-      ctx.params.id,
-    ]);
+    const row = await ctx.resources.main.one<TodoRow>(
+      `select ${columns} from todos where id = $1`,
+      [ctx.params.id],
+    );
     if (!row) throw errors.notFound(`todo ${ctx.params.id} does not exist`);
     return row;
   },
@@ -56,7 +48,7 @@ export const get = http.get(
 // `dispatches(...)` records the hand-off for `usai graph` and the API docs.
 export const create = dispatches(
   http.post("/todos", { body: NewTodo, response: { 201: Todo }, resources: [db] }, async (ctx) => {
-    const row = await sql(ctx).one<TodoRow>(
+    const row = await ctx.resources.main.one<TodoRow>(
       `insert into todos (title) values ($1) returning ${columns}`,
       [ctx.body.title],
     );
@@ -74,7 +66,7 @@ export const complete = dispatches(
     "/todos/:id/complete",
     { params: Id, response: { 200: Todo }, resources: [db] },
     async (ctx) => {
-      const row = await sql(ctx).one<TodoRow>(
+      const row = await ctx.resources.main.one<TodoRow>(
         `update todos set done = true, completed_at = now() where id = $1 and done = false returning ${columns}`,
         [ctx.params.id],
       );
@@ -89,7 +81,7 @@ export const complete = dispatches(
 // `dispatches(...)` records the hand-off for `usai graph` and the API docs.
 export const remove = dispatches(
   http.delete("/todos/:id", { params: Id, resources: [db] }, async (ctx) => {
-    const n = await sql(ctx).execute(`delete from todos where id = $1`, [ctx.params.id]);
+    const n = await ctx.resources.main.execute(`delete from todos where id = $1`, [ctx.params.id]);
     if (n === 0) throw errors.notFound(`todo ${ctx.params.id} does not exist`);
     await ctx.tasks.dispatch(record, { todoId: ctx.params.id, event: "deleted" });
     return http.noContent();
@@ -103,7 +95,7 @@ export const purge = cron(
   "purge-completed",
   { schedule: "0 3 * * *", resources: [db] },
   async (ctx) => {
-    const n = await sql(ctx).execute(
+    const n = await ctx.resources.main.execute(
       `delete from todos where done and completed_at < now() - interval '30 days'`,
     );
     return { purged: n };
@@ -112,7 +104,7 @@ export const purge = cron(
 
 // `usai app stats` — a finite world, no server needed.
 export const stats = command("stats", { resources: [db] }, async (ctx) => {
-  const row = await sql(ctx).one<{ total: number; done: number }>(
+  const row = await ctx.resources.main.one<{ total: number; done: number }>(
     `select count(*)::int as total, count(*) filter (where done)::int as done from todos`,
   );
   return row;

@@ -6,7 +6,7 @@
   "description": "A realistic Usai application: modules, migrations, seeders, typed env, tasks, cron, a command, and tests.",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
-    "test": "node --conditions=usai --test test/**/*.test.ts"
+    "test": "usai test"
   },
   "dependencies": {
     "@sakaladev/usai": "workspace:*",

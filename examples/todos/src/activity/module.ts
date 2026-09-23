@@ -1,4 +1,4 @@
-import { defineModule, task, type PostgresHandle } from "@sakaladev/usai";
+import { defineModule, task } from "@sakaladev/usai";
 import { z } from "zod";
 import { db } from "../resources.ts";
 
@@ -14,8 +14,7 @@ export const record = task(
     resources: [db],
   },
   async (ctx) => {
-    const sql = ctx.resources["main"] as PostgresHandle;
-    await sql.execute(`insert into activity (todo_id, event) values ($1, $2)`, [
+    await ctx.resources.main.execute(`insert into activity (todo_id, event) values ($1, $2)`, [
       ctx.input.todoId,
       ctx.input.event,
     ]);

@@ -1,20 +1,18 @@
 import {
+  type PostgresHandle,
+  type SqlParam,
   command,
   cron,
   defineModule,
   errors,
   http,
   publishes,
-  type PostgresHandle,
   type SqlExecutor,
 } from "@sakaladev/usai";
 import { z } from "zod";
 import { db } from "../resources.ts";
 import { session } from "../auth/module.ts";
 import { feed, live } from "./live.ts";
-
-const sql = (ctx: { resources: Record<string, unknown> }) =>
-  ctx.resources["main"] as PostgresHandle;
 
 const Item = z.object({
   description: z.string().min(1).max(200),
@@ -82,7 +80,7 @@ export const create = http.post(
   async (ctx) => {
     const total = ctx.body.items.reduce((sum, i) => sum + i.quantity * i.unitCents, 0);
     // Number, header and items commit together or not at all.
-    const id = await sql(ctx).transaction(async (tx) => {
+    const id = await ctx.resources.main.transaction(async (tx) => {
       const seq = await tx.one<{ n: number }>(
         `update tenants set invoice_seq = invoice_seq + 1 where id = $1 returning invoice_seq as n`,
         [ctx.auth.tenantId],
@@ -99,7 +97,7 @@ export const create = http.post(
       }
       return row!.id;
     });
-    return http.created(await load(sql(ctx), ctx.auth.tenantId, id));
+    return http.created(await load(ctx.resources.main, ctx.auth.tenantId, id));
   },
 );
 
@@ -131,7 +129,7 @@ export const get = http.get(
     errors: [{ code: "not_found", status: 404 }],
     resources: [db],
   },
-  async (ctx) => load(sql(ctx), ctx.auth.tenantId, ctx.params.id),
+  async (ctx) => load(ctx.resources.main, ctx.auth.tenantId, ctx.params.id),
 );
 
 // Keyset pagination on (created_at, id): stable under inserts, no OFFSET.
@@ -146,7 +144,7 @@ export const list = http.get(
     resources: [db],
   },
   async (ctx) => {
-    const params: unknown[] = [ctx.auth.tenantId, ctx.query.limit + 1];
+    const params: SqlParam[] = [ctx.auth.tenantId, ctx.query.limit + 1];
     let where = `tenant_id = $1`;
     if (ctx.query.status) {
       params.push(ctx.query.status);
@@ -158,9 +156,9 @@ export const list = http.get(
       params.push(createdAt, id);
       where += ` and (created_at, id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`;
     }
-    const rows = await sql(ctx).query<InvoiceRow>(
+    const rows = await ctx.resources.main.query<InvoiceRow>(
       `select ${columns} from invoices where ${where} order by created_at desc, id desc limit $2`,
-      params as never,
+      params,
     );
     const items = rows.slice(0, ctx.query.limit);
     const last = items[items.length - 1];
@@ -173,17 +171,17 @@ export const list = http.get(
 );
 
 async function transition(
-  ctx: { resources: Record<string, unknown>; auth: { tenantId: string }; params: { id: string } },
+  ctx: { resources: { main: PostgresHandle }; auth: { tenantId: string }; params: { id: string } },
   from: string[],
   to: string,
   stamp: string,
 ) {
-  const row = await sql(ctx).one<InvoiceRow>(
+  const row = await ctx.resources.main.one<InvoiceRow>(
     `update invoices set status = $3::invoice_status, ${stamp} = now() where tenant_id = $1 and id = $2 and status = any($4::invoice_status[]) returning ${columns}`,
     [ctx.auth.tenantId, ctx.params.id, to, from],
   );
   if (!row) {
-    const exists = await sql(ctx).one<{ status: string }>(
+    const exists = await ctx.resources.main.one<{ status: string }>(
       `select status from invoices where tenant_id = $1 and id = $2`,
       [ctx.auth.tenantId, ctx.params.id],
     );
@@ -277,15 +275,15 @@ export const remove = http.delete(
     resources: [db],
   },
   async (ctx) => {
-    const gone = await sql(ctx).execute(
+    const gone = await ctx.resources.main.execute(
       `delete from invoices where tenant_id = $1 and id = $2 and status = 'draft'`,
       [ctx.auth.tenantId, ctx.params.id],
     );
     if (gone === 0) {
-      const exists = await sql(ctx).one(`select 1 from invoices where tenant_id = $1 and id = $2`, [
-        ctx.auth.tenantId,
-        ctx.params.id,
-      ]);
+      const exists = await ctx.resources.main.one(
+        `select 1 from invoices where tenant_id = $1 and id = $2`,
+        [ctx.auth.tenantId, ctx.params.id],
+      );
       if (!exists) throw errors.notFound(`invoice ${ctx.params.id} does not exist`);
       throw errors.conflict(
         "only drafts can be deleted; void it instead (POST /invoices/{id}/void)",
@@ -302,7 +300,7 @@ export const markOverdue = publishes(
     "mark-overdue",
     { schedule: "15 0 * * *", overlap: "skip", timeout: "5m", resources: [db] },
     async (ctx) => {
-      const rows = await sql(ctx).query<{ id: string; tenantId: string }>(
+      const rows = await ctx.resources.main.query<{ id: string; tenantId: string }>(
         `update invoices set status = 'overdue' where status = 'issued' and due_date < current_date returning id, tenant_id as "tenantId"`,
       );
       for (const row of rows) await publish(ctx, row.tenantId, row.id, "invoice.overdue");
@@ -315,7 +313,7 @@ export const markOverdue = publishes(
 // `usai app invoices:stats [tenant-slug]`
 export const stats = command("invoices:stats", { resources: [db] }, async (ctx) => {
   const slug = ctx.args[0];
-  const rows = await sql(ctx).query<{
+  const rows = await ctx.resources.main.query<{
     tenant: string;
     status: string;
     count: number;

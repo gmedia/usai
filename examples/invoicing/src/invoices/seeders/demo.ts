@@ -1,14 +1,13 @@
-import { password, seeder, type PostgresHandle } from "@sakaladev/usai";
+import { password, seeder } from "@sakaladev/usai";
 import { db } from "../../resources.ts";
 
 // `usai db seed demo`: a tenant, a user (password: "demo-demo-demo-demo") and
 // three invoices in different states. Idempotent.
 export default seeder({ resources: [db] }, async (ctx) => {
-  const sql = ctx.resources["main"] as PostgresHandle;
-  const existing = await sql.one(`select id from tenants where slug = 'demo'`);
+  const existing = await ctx.resources.main.one(`select id from tenants where slug = 'demo'`);
   if (existing) return { seeded: false };
   const hash = await password.hash("demo-demo-demo-demo");
-  await sql.transaction(async (tx) => {
+  await ctx.resources.main.transaction(async (tx) => {
     const tenant = await tx.one<{ id: string }>(
       `insert into tenants (slug, name, invoice_seq) values ('demo', 'Demo Co', 3) returning id`,
     );

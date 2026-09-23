@@ -1,10 +1,4 @@
-import {
-  defineModule,
-  errors,
-  queue,
-  type HttpClientHandle,
-  type PostgresHandle,
-} from "@sakaladev/usai";
+import { defineModule, errors, queue } from "@sakaladev/usai";
 import { z } from "zod";
 import { db, webhooks } from "../resources.ts";
 
@@ -31,14 +25,12 @@ export const deliver = queue.consume(
     resources: [db, webhooks],
   },
   async (ctx) => {
-    const sql = ctx.resources["main"] as PostgresHandle;
-    const client = ctx.resources["webhooks"] as HttpClientHandle;
-    const tenant = await sql.one<{ url: string | null; secret: string | null }>(
+    const tenant = await ctx.resources.main.one<{ url: string | null; secret: string | null }>(
       `select webhook_url as url, webhook_secret as secret from tenants where id = $1`,
       [ctx.message.tenantId],
     );
     if (!tenant?.url || !tenant.secret) return { skipped: "no webhook configured" };
-    const invoice = await sql.one(
+    const invoice = await ctx.resources.main.one(
       `select id, number, customer, currency, status, total_cents::int as "totalCents", due_date::text as "dueDate" from invoices where id = $1 and tenant_id = $2`,
       [ctx.message.invoiceId, ctx.message.tenantId],
     );
@@ -62,7 +54,7 @@ export const deliver = queue.consume(
     let status: number | null = null;
     let error: string | null = null;
     try {
-      const res = await client.fetch(tenant.url, {
+      const res = await ctx.resources.webhooks.fetch(tenant.url, {
         method: "POST",
         body: payload,
         headers: {
@@ -76,7 +68,7 @@ export const deliver = queue.consume(
     } catch (e) {
       error = (e as Error).message;
     }
-    await sql.execute(
+    await ctx.resources.main.execute(
       `insert into webhook_deliveries (tenant_id, event, invoice_id, attempt, status, error) values ($1, $2, $3, $4, $5, $6)`,
       [ctx.message.tenantId, ctx.message.event, ctx.message.invoiceId, ctx.attempt, status, error],
     );

@@ -6,7 +6,7 @@
   "description": "The P4 application: tenants, users and sessions, invoices with transactions and pagination, signed webhooks over outbound HTTP through a retrying queue, a cron, a command, migrations, seeders and tests.",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
-    "test": "node --conditions=usai --test test/**/*.test.ts"
+    "test": "usai test"
   },
   "dependencies": {
     "@sakaladev/usai": "workspace:*",
