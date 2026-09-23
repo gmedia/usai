@@ -1,5 +1,7 @@
 :8081 {
-	reverse_proxy app:3000 app2:3000 {
+	# app3 is only up under the `three` profile; an upstream that does not
+	# resolve is failed by the health check and never receives traffic.
+	reverse_proxy app:3000 app2:3000 app3:3000 {
 		lb_policy round_robin
 		# A replica that is draining answers 503 with Retry-After and fails its
 		# readiness probe; the active check takes it out within a second, and a

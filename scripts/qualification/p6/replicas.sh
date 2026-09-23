@@ -5,7 +5,7 @@
 #
 #   scripts/qualification/p6/replicas.sh up            # postgres, migrate once, app + app2, caddy; a tenant token
 #   scripts/qualification/p6/replicas.sh all           # every scenario below, evidence under out/replicas.*
-#   scripts/qualification/p6/replicas.sh <scenario>    # http | queue | migrate | cron | rolling | kill
+#   scripts/qualification/p6/replicas.sh <scenario>    # http | queue | migrate | cron | rolling | kill | three
 #   scripts/qualification/p6/replicas.sh down
 #
 # Pass rules are stated before each scenario runs and checked by the script;
@@ -206,11 +206,102 @@ kill_one() {
 }
 
 all() {
-  http; queue 1000; migrate; cron; rolling; kill_one
+  http; queue 1000; migrate; cron; rolling; kill_one; three 600
   echo; echo "== $FAILED scenario(s) failed"
   for a in "$APP1" "$APP2"; do status_of "$a" > "$OUT/replicas.status.$(basename "$a" | tr -d :).json"; done
   docker compose logs --no-color app app2 2>/dev/null | grep -E "WARN|ERROR" | sed 's/^[^|]*| //' | sort | uniq -c | sort -rn | head -20 > "$OUT/replicas.warnings.txt"
   echo "warnings/errors in the two replicas' logs: $(wc -l < "$OUT/replicas.warnings.txt") distinct lines (out/replicas.warnings.txt)"
+}
+
+# 7. Three replicas: SUPPORTED.md claims N behind a balancer, and every
+# campaign before this one had run exactly two — so "N" rested on an
+# induction from a single step. The third replica joins through a compose
+# profile; the properties that N > 2 could break are the shared ones.
+three() {
+  local n="${1:-600}"
+  log "== three: app3 joins, then HTTP, the queue and a rolling restart across all three"
+  APP3="http://127.0.0.1:3003"
+  docker compose --profile three up -d app3 >/dev/null 2>&1
+  wait_ready "$APP3" 120 || { echo "app3 not ready"; docker compose logs app3 | tail -20; FAILED=$((FAILED + 1)); return; }
+  # Caddy learns the third upstream through its own health check.
+  sleep 3
+  log "  app3 ready (schedules cron: $(schedules_cron "$APP3"))"
+
+  # HTTP across three
+  local out="$OUT/replicas.three.http.jsonl"; rm -f "$out"
+  local w1 w2 w3; w1=$(worlds_created "$APP1"); w2=$(worlds_created "$APP2"); w3=$(worlds_created "$APP3")
+  load 45 "$out"; wait "$LOAD_PID" 2>/dev/null || true
+  local s; s=$(summarize "$out")
+  local d1=$(( $(worlds_created "$APP1") - w1 )) d2=$(( $(worlds_created "$APP2") - w2 )) d3=$(( $(worlds_created "$APP3") - w3 ))
+  local ok=1; echo "$s" | grep -q '"s5xx":0,"s503":0,"errors":0' || ok=0
+  [ "$d1" -gt 0 ] && [ "$d2" -gt 0 ] && [ "$d3" -gt 0 ] || ok=0
+  verdict three-http "$ok" "worlds created app $d1 / app2 $d2 / app3 $d3; $s"
+
+  # The queue, consumed exactly once across three consumers
+  local sink; sink=$(gateway)
+  node -e 'let n=0;require("http").createServer((q,r)=>{n++;r.writeHead(200);r.end("ok");}).listen(18997,"0.0.0.0");process.on("SIGTERM",()=>{console.log(n);process.exit(0)})' > "$OUT/replicas.three.sink.count" &
+  local spid=$!; sleep 1
+  curl -s -X PUT "$BASE/tenant/webhook" -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' -d "{\"url\":\"http://$sink:18997/hook\",\"secret\":\"replicas-secret-1234\"}" > /dev/null
+  local q1 q2 q3; q1=$(queue_done "$APP1"); q2=$(queue_done "$APP2"); q3=$(queue_done "$APP3")
+  local before; before=$("${PG[@]}" "select count(*) from webhook_deliveries where status = 200")
+  local since; since=$("${PG[@]}" "select coalesce(max(id), 0) from usai_queue")
+  node -e '
+    const [base, token, n] = process.argv.slice(1); const headers={authorization:`Bearer ${token}`,"content-type":"application/json"};
+    let next=0, failed=0;
+    async function worker(){ while(next<Number(n)){ next++; try {
+      const r=await fetch(`${base}/invoices`,{method:"POST",headers,body:JSON.stringify({customer:`t-${next}`,currency:"USD",dueDate:"2030-01-01",items:[{description:"x",quantity:1,unitCents:100}]})});
+      const {id}=await r.json(); const i=await fetch(`${base}/invoices/${id}/issue`,{method:"POST",headers}); if(i.status>=300) failed++; } catch { failed++; } } }
+    Promise.all(Array.from({length:16},worker)).then(()=>console.log(JSON.stringify({issued:Number(n)-failed,failed})));
+  ' "$BASE" "$TOKEN" "$n"
+  for _ in $(seq 1 120); do
+    local pend; pend=$("${PG[@]}" "select count(*) from usai_queue where topic = 'webhook.deliver' and state in ('ready','processing') and id > $since")
+    [ "${pend:-1}" = 0 ] && break; sleep 1
+  done
+  sleep 1
+  local rows dead stuck
+  rows=$("${PG[@]}" "select count(*) from webhook_deliveries where status = 200")
+  dead=$("${PG[@]}" "select count(*) from usai_queue where topic = 'webhook.deliver' and state = 'dead' and id > $since")
+  stuck=$("${PG[@]}" "select count(*) from usai_queue where topic = 'webhook.deliver' and state in ('ready','processing') and id > $since")
+  local c1=$(( $(queue_done "$APP1") - q1 )) c2=$(( $(queue_done "$APP2") - q2 )) c3=$(( $(queue_done "$APP3") - q3 ))
+  kill -TERM $spid; wait $spid 2>/dev/null; local hits; hits=$(cat "$OUT/replicas.three.sink.count")
+  local delivered=$(( rows - before ))
+  ok=1; [ "$delivered" = "$n" ] && [ "$hits" = "$n" ] && [ "$dead" = 0 ] && [ "$stuck" = 0 ] || ok=0
+  [ "$c1" -gt 0 ] && [ "$c2" -gt 0 ] && [ "$c3" -gt 0 ] || ok=0
+  verdict three-queue "$ok" "deliveries $delivered (sink saw $hits), done by app $c1 / app2 $c2 / app3 $c3, dead $dead, pending $stuck"
+  curl -s -X PUT "$BASE/tenant/webhook" -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"url":"http://127.0.0.1:9/","secret":"replicas-secret-1234"}' > /dev/null
+
+  # A rolling restart across three, one at a time: still zero 502
+  local rout="$OUT/replicas.three.rolling.jsonl"; rm -f "$rout"
+  load 90 "$rout"
+  sleep 8; docker compose restart -t 15 app3 >/dev/null 2>&1; wait_ready "$APP3" 60
+  sleep 5; docker compose restart -t 15 app2 >/dev/null 2>&1; wait_ready "$APP2" 60
+  sleep 5; docker compose restart -t 15 app >/dev/null 2>&1; wait_ready "$APP1" 60
+  wait "$LOAD_PID" 2>/dev/null || true
+  local rs; rs=$(summarize "$rout")
+  ok=1; echo "$rs" | grep -q '"s5xx":0,"s503":0,"errors":0' || ok=0
+  verdict three-rolling "$ok" "restarted all three under load; $rs"
+
+  # Three concurrent migrators on a fresh database
+  "${PG[@]}" "drop database if exists invoicing_three" >/dev/null
+  "${PG[@]}" "create database invoicing_three" >/dev/null
+  local url="postgres://app:app@postgres:5432/invoicing_three"
+  local pids=()
+  for i in 1 2 3; do
+    docker compose run --rm --no-deps -T -e DATABASE_URL="$url" app db migrate --artifact /app/.usai/build \
+      > "$OUT/replicas.three.migrate$i.log" 2>&1 &
+    pids+=($!)
+  done
+  local failed_migrations=0
+  for pid in "${pids[@]}"; do wait "$pid" || failed_migrations=$((failed_migrations + 1)); done
+  local applied
+  applied=$(docker compose exec -T postgres psql -U app -d invoicing_three -tAc "select count(*) from usai_migrations")
+  local dupes
+  dupes=$(docker compose exec -T postgres psql -U app -d invoicing_three -tAc "select count(*) from (select name from usai_migrations group by name having count(*) > 1) x")
+  ok=1; [ "$failed_migrations" = 0 ] && [ "${dupes:-1}" = 0 ] && [ "${applied:-0}" -gt 0 ] || ok=0
+  verdict three-migrate "$ok" "three concurrent jobs, $failed_migrations failed, $applied migrations applied, $dupes applied twice"
+
+  docker compose --profile three stop app3 >/dev/null 2>&1
+  docker compose --profile three rm -f app3 >/dev/null 2>&1
 }
 
 case "${1:-}" in
@@ -223,5 +314,6 @@ case "${1:-}" in
   cron) cron ;;
   rolling) rolling ;;
   kill) kill_one ;;
+  three) three "${2:-600}" ;;
   *) sed -n 2,12p "$0"; exit 2 ;;
 esac

@@ -42,9 +42,24 @@ services:
       # every instance that schedules).
       USAI_NO_CRON: "1"
     ports: ["3002:3000", "3902:3900"]
+  app3:
+    # The third replica: SUPPORTED.md claims N behind a balancer and the
+    # qualification had only ever run two, so "N" rested on an induction
+    # nobody had checked. Cron off here too — one scheduler, whatever N is.
+    <<: *app
+    environment:
+      DATABASE_URL: postgres://app:app@postgres:5432/invoicing
+      USAI_CONTROL_TOKEN: p5-control-token
+      RUST_LOG: info
+      USAI_MAX_WORLDS: ${USAI_MAX_WORLDS:-48}
+      USAI_SOCKET_IDLE_TIMEOUT: ${USAI_SOCKET_IDLE_TIMEOUT:-300}
+      USAI_NO_CRON: "1"
+    ports: ["3003:3000", "3903:3900"]
+    profiles: ["three"]
   caddy:
     image: caddy:2
     ports: ["8081:8081"]
     volumes: ["./Caddyfile.replicas:/etc/caddy/Caddyfile:ro"]
     cpuset: ${CPUSET:-12-15}
     depends_on: [app, app2]
+    # app3 joins through its profile; Caddy resolves it when it is up.
