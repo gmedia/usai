@@ -82,6 +82,28 @@ TLS, `prefer` is the default).
 - A private CA is a file the process must be able to read: in a container it
   is a mount, and a read-only filesystem is fine.
 
+## Pruning is not free
+
+Whatever keeps a table bounded — `usai queue prune` on a schedule, your own
+`delete from …` for the application's rows — deletes rows, and deleted rows
+are work for autovacuum. Measured on a 24 h soak that prunes every minute
+(`docs/measurements/2026-09-24-bounded-soak.md`): **about one autovacuum per
+minute per churned table** (364 in six hours on each of two tables, 3.19 M
+rows deleted), against 73 checkpoints in the same window. Throughput over an
+hour is flat, but a few per cent of individual seconds serve noticeably
+fewer requests.
+
+None of that is the runtime — it never deletes a row by itself — but it is
+the cost of the retention policy, and it is worth choosing deliberately:
+
+- **Prune less often and in bigger batches** if the dips matter more than
+  the table size. A nightly prune has one busy window instead of 1 440 small
+  ones.
+- **Watch `n_dead_tup`** (`pg_stat_user_tables`) rather than guessing;
+  `autovacuum_count` tells you how often the table is being cleaned.
+- **Do not turn autovacuum off** to make the dips go away. The bloat that
+  follows is worse and arrives later.
+
 ## What this runtime does not do
 
 No backups, no failover, no connection proxying, no read replicas. One
