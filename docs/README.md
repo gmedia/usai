@@ -50,3 +50,5 @@ docs/
 ```
 
 Developer-facing documentation is split three ways: the guide (`GUIDE.md`, how to build), the SDK reference (`sdk/`, what each export takes and promises, generated), and the application reference (`/_usai/docs` on a running application, what *this* application is and what happens when work enters it, generated from the definition the runtime executes). Do not write tutorials for features that do not exist.
+
+- [CONTRACT-FREEZE.md](CONTRACT-FREEZE.md) — what 1.0 would freeze, surface by surface.
