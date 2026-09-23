@@ -171,6 +171,9 @@ floor() {
   local name="p8e-floor" cell="$app-${mem}m-${cpus}c-${worlds}w${USAI_WASM_KEEP_RESIDENT:+-kr$USAI_WASM_KEEP_RESIDENT}"
   local dir="$OUT/floor-$cell"; mkdir -p "$dir"
   PHASES="$dir/phases.jsonl"
+  # Per cell, not per run: the php branch never drops a cache, and a stale
+  # `true` from the previous cell would have claimed one that never happened.
+  COLD=false
   log "== floor $cell"
   # One box at a time. Two runs of this script share the container name and
   # the ports, and the second one silently takes the first one's box away:
