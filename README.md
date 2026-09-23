@@ -208,6 +208,7 @@ Three references, one per question:
 | How do I build with this? | [`docs/GUIDE.md`](docs/GUIDE.md) — every workload kind (HTTP, tasks, cron, commands, PostgreSQL, queue, streams, WebSockets, services), configuration, operations, testing |
 | What does `http.get` / `ctx.tasks.dispatch` / `postgres` take and promise? | [`docs/sdk/`](docs/sdk/README.md) — the SDK reference, generated from the source's doc comments |
 | What is *my* application and what happens when a request enters it? | `/_usai/docs` on a running application — the application reference, generated from the definition the runtime executes; `/_usai/openapi.json?profile=public` and `usai generate openapi --public` for the consumer contract |
+| How do I deploy and run it? | [`docs/deploy/compose.production.yaml`](docs/deploy/compose.production.yaml) (Docker), [`docs/runbooks/systemd.md`](docs/runbooks/systemd.md) (a plain VM), [`docs/deploy/k8s/`](docs/deploy/k8s/README.md) (Kubernetes) — and [`docs/runbooks/`](docs/runbooks/README.md) for what to do when something goes wrong, one page per incident |
 
 The developer surface is TypeScript; contracts may still change within
 `0.0.x` (`CHANGELOG.md` says what, `SUPPORTED.md` how upgrades work).
