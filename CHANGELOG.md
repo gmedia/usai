@@ -215,6 +215,20 @@ should read before rolling:
   created worlds — are all satisfied by refusals. Every load-driven verdict
   now requires that something was served.
 
+> 0.0.9: an operator deployed 0.0.8 from the published artifacts for the
+> first time and would run it in production; both of the serious things they
+> found were deployment guidance rather than the runtime, and both are fixed
+> here — the multi-replica proxy configuration is published in full, and what
+> health-checking /_usai/ready couples is stated everywhere a health check is
+> configured (with USAI_READY_REQUIRES_RESOURCES to decouple it). A listener
+> that does not serve a surface answers 404 rather than 401, a readiness
+> probe that hangs now marks the resource unready, a database that accepts
+> the connection and then says nothing no longer hangs activation, and the
+> queue table has operator verbs. Three of our own campaigns turned out to be
+> measuring nothing: every floor this project published is void until it is
+> re-measured, and the three-replica campaign passed 11 of 11 only after the
+> run before it passed on refusals. Read Compatibility before rolling.
+
 ## 0.0.8 — 2026-09-23
 
 Three usability rounds on 0.0.7 — a developer joining an existing codebase, an
