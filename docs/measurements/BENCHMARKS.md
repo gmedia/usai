@@ -77,6 +77,27 @@ difference is the subject. The `counter` probe makes it visible: Usai
 answers `1` every time, the others answer the request number. Neither is a
 bug.
 
+## The host the numbers come from
+
+Every comparator needs one PostgreSQL that is not the thing being measured,
+pinned away from the server and the client. On the qualification VM it is one
+container, and this is the whole of it — it was tribal knowledge until it was
+pruned by accident and had to be rebuilt:
+
+```bash
+docker run -d --name bench-postgres --cpuset-cpus 12-13 --restart unless-stopped \
+  -p 127.0.0.1:54330:5432 -p 172.17.0.1:54330:5432 \
+  -e POSTGRES_USER=bench -e POSTGRES_PASSWORD=bench -e POSTGRES_DB=bench \
+  postgres:18 -c max_connections=400
+```
+
+The second published address is the Docker gateway: the PHP and Laravel
+baselines run in containers and reach the database as
+`host.docker.internal`, which a `127.0.0.1`-only publication does not serve.
+`max_connections=400` covers a Node cluster's eight pools plus PHP's 64
+children. The data is seeded by `suite.sh prepare`, so the container is
+disposable — deleting it costs a re-seed, not a measurement.
+
 ## Modes
 
 - `suite.sh invoice` — c=1, `DUR` seconds per class, the server pinned to one
