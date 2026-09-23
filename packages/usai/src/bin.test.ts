@@ -154,3 +154,45 @@ test("under `pnpm usai` the wrapper is itself on PATH and must not probe itself"
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /fetching|ECONNREFUSED|fetch failed/);
 });
+
+test("a fetched binary that cannot start is explained and not cached", async () => {
+  const triple = target(process.platform, process.arch);
+  if (!triple || spawnSync("tar", ["--version"]).status !== 0) return;
+  const dir = mkdtempSync(join(tmpdir(), "usai-glibc-"));
+  const name = `usai-v${version}-${triple}`;
+  mkdirSync(join(dir, name));
+  // What the dynamic loader does when the binary asks for a newer glibc.
+  writeFileSync(
+    join(dir, name, "usai"),
+    `#!/bin/sh\necho "usai: /lib/x86_64-linux-gnu/libc.so.6: version \\\`GLIBC_2.39' not found (required by usai)" >&2\nexit 1\n`,
+  );
+  execFileSync("tar", ["-C", dir, "-czf", join(dir, `${name}.tar.gz`), name]);
+  const tarball = readFileSync(join(dir, `${name}.tar.gz`));
+  const sum = createHash("sha256").update(tarball).digest("hex");
+  const server = createServer((req, res) => {
+    if (req.url?.endsWith(".sha256")) res.end(`${sum}  ${name}.tar.gz\n`);
+    else if (req.url?.endsWith(".tar.gz")) res.end(tarball);
+    else res.writeHead(404).end();
+  });
+  await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+  const port = (server.address() as { port: number }).port;
+  try {
+    const r = await run({
+      ...process.env,
+      USAI_BIN: "",
+      PATH: "/usr/bin:/bin",
+      USAI_CACHE_DIR: join(dir, "cache"),
+      USAI_RELEASE_BASE: `http://127.0.0.1:${port}`,
+    });
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /did not start/);
+    assert.match(r.stderr, /glibc 2\.36 or newer/);
+    assert.ok(
+      !existsSync(join(dir, "cache", version, "usai")),
+      "a binary that does not run is not left in the cache",
+    );
+  } finally {
+    server.closeAllConnections();
+    server.close();
+  }
+});

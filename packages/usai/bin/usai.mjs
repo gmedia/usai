@@ -31,6 +31,9 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const { version } = JSON.parse(readFileSync(join(here, "..", "package.json"), "utf8"));
 const REPO = "gmedia/usai";
+// What the Linux binaries are built for (SUPPORTED.md); used only in the
+// diagnostic when the loader refuses one.
+const GLIBC_FLOOR = "2.36";
 
 /** Release target triple for this platform, or null when there is no binary. */
 export function target(platform = process.platform, arch = process.arch) {
@@ -110,6 +113,22 @@ async function download(triple) {
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
+  // A binary that cannot start on this machine must not be cached, and the
+  // loader's message ("version `GLIBC_2.39' not found") is not something a
+  // developer should have to translate.
+  const probe = spawnSync(bin, ["--version"], { encoding: "utf8" });
+  if (probe.status !== 0) {
+    rmSync(bin, { force: true });
+    const detail = (probe.stderr || probe.error?.message || `exit ${probe.status}`).trim();
+    throw new Error(
+      `${name} did not start: ${detail}` +
+        (/GLIBC/.test(detail)
+          ? `\nusai: this release needs glibc ${GLIBC_FLOOR} or newer (Debian 12, Ubuntu 24.04 and later). ` +
+            `On an older distribution run the Docker image (ghcr.io/gmedia/usai) or build the binary ` +
+            `(\`cargo build --release -p usai-cli\`) and point USAI_BIN at it.`
+          : ""),
+    );
+  }
   return bin;
 }
 
@@ -157,7 +176,15 @@ async function main() {
     }
   }, 1000);
   watch.unref();
-  child.on("exit", (code, signal) => process.exit(code ?? (signal ? 128 + 1 : 1)));
+  child.on("exit", (code, signal) => {
+    // The dynamic loader exits 127 after printing why; say what to do about it.
+    if (code === 127 && process.platform === "linux")
+      process.stderr.write(
+        `usai: ${bin} did not start. The release binaries need glibc ${GLIBC_FLOOR} or newer; ` +
+          `on an older distribution use the Docker image or set USAI_BIN to a binary built here.\n`,
+      );
+    process.exit(code ?? (signal ? 128 + 1 : 1));
+  });
   child.on("error", (error) => {
     process.stderr.write(`usai: ${error.message}\n`);
     process.exit(1);

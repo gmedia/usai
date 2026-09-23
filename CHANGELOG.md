@@ -8,6 +8,16 @@ runtime of that version and the next (`SUPPORTED.md` → Versioning). Within
 GitHub releases carry the auto-generated commit list as well; this file is
 the human summary.
 
+## 0.0.8 — Unreleased
+
+### CLI
+
+- **The npm launcher explains a binary that will not start.** It verifies the
+  binary it just fetched, does not leave one in the cache that cannot run, and
+  turns the dynamic loader's `version 'GLIBC_2.x' not found` into the floor,
+  the distributions that meet it and the two ways out (the Docker image, or
+  `USAI_BIN` pointing at a binary built locally).
+
 ## 0.0.7 — 2026-09-23
 
 A fix release: **0.0.6's Linux binaries and Docker images do not start on
