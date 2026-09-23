@@ -41,7 +41,7 @@ refusals and *falls* while a bad-traffic flood rises. Volume is
 | `usai_process_start_time_seconds` | gauge | — | Unix time the runtime started |
 | `usai_process_resident_memory_bytes` | gauge | — | Resident set size |
 | `usai_process_proportional_memory_bytes` | gauge | — | Proportional set size (shared pages divided among their sharers): the honest per-process footprint |
-| `usai_process_memory_limit_bytes` | gauge | — | The cgroup memory limit the process runs under. Published only when there is one |
+| `usai_process_memory_limit_bytes` | gauge | — | The cgroup memory limit the process runs under. Published only when there is one — and when there is, all four cgroup series are published, zeros included, so `ceiling_hits 0` means *measured and zero*. In `/_usai/status` the same fields are omitted when they are zero, so **`memoryLimitBytes` being present is what says the group was measured** |
 | `usai_process_memory_charged_bytes` | gauge | — | What the cgroup is charged (`memory.current`): resident memory **plus the page cache this container faulted in**, which is what the limit actually bounds |
 | `usai_process_memory_ceiling_hits_total` | counter | — | Times the cgroup hit its limit and had to reclaim (`memory.events` `max`). **Alert on this**: climbing means the container is at its ceiling and thrashing on its own pages — no OOM kill, no log line, and throughput collapses (`memory-pressure.md`) |
 | `usai_process_memory_oom_kills_total` | counter | — | OOM kills inside this cgroup. Normally 0 — a kill of the runtime takes the metric with it — so a non-zero value means a child process was killed |

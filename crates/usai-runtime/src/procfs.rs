@@ -30,8 +30,10 @@ pub struct ProcessStatus {
     pub open_fds: u64,
     /// The memory limit this process runs under (cgroup v2 `memory.max`),
     /// bytes; 0 when there is none or the file is unreadable.
+    #[serde(skip_serializing_if = "is_zero")]
     pub memory_limit_bytes: u64,
     /// What the cgroup is charged right now (`memory.current`), bytes.
+    #[serde(skip_serializing_if = "is_zero")]
     pub memory_charged_bytes: u64,
     /// How many times the cgroup has hit its limit and had to reclaim
     /// (`memory.events` `max`). **This is the number that identifies the
@@ -41,11 +43,21 @@ pub struct ProcessStatus {
     /// logged, and throughput collapses. Measured at 1.5 M hits on a
     /// deliberately undersized box that served one request per second
     /// (`docs/runbooks/memory-pressure.md`).
+    #[serde(skip_serializing_if = "is_zero")]
     pub memory_ceiling_hits: u64,
     /// OOM kills inside this cgroup (`memory.events` `oom_kill`) — normally
     /// 0, because the kill takes this process with it; non-zero means a
     /// *child* was killed.
+    #[serde(skip_serializing_if = "is_zero")]
     pub memory_oom_kills: u64,
+}
+
+/// `/_usai/metrics` publishes the cgroup series only when there is a limit;
+/// the status document has to agree, or a dashboard reading
+/// `process.memoryCeilingHits` sees a healthy `0` where the truth is "not
+/// measured" — and `memoryChargedBytes: 0` is simply false.
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 #[cfg(target_os = "linux")]

@@ -32,6 +32,21 @@ the human summary.
 
 ### Runtime
 
+- **A cron tick is for a scheduled time, not for the moment the timer woke
+  up.** A `*/1 * * * *` schedule fired **twice for the same minute** — once
+  ~0.4 s early and once at the boundary, two real runs of the handler —
+  because a sleep computed from the wall clock can end early and the
+  scheduler took that as the tick, then recomputed the same occurrence. It
+  waits out the difference now and refuses to fire a scheduled time twice.
+  Present in every version before this one; `exclusive: true` schedules were
+  protected by their claim row, every other schedule sent twice.
+- **`resource opened` is logged after the resource opens.** It was logged
+  before, so a failed activation printed an INFO `resource opened` directly
+  above its own fatal error.
+- **The cgroup fields are absent from `/_usai/status` when there is no
+  limit**, as the metrics endpoint already was: `memoryChargedBytes: 0` was
+  simply false, and a dashboard could not tell "no ceiling hits" from "not
+  measured".
 - **The start-up memory check is a floor, not a forecast.** It used the full
   4 MiB per world slot and therefore fired at the 192 MiB envelope
   `SUPPORTED.md` tells operators to deploy on — training people to ignore a

@@ -232,13 +232,16 @@ impl ResourceRegistry {
         // fingerprint is the only way an operator can see that happen —
         // "reused" after a deployment means the same resource, "opened" means
         // a new one, and two `opened` for one name means the config moved.
+        let manager = provider.open(spec, identity.clone(), env).await?;
+        // *After* it opened. Logging the line first meant an INFO
+        // "resource opened" immediately above a fatal "failed to start",
+        // which is a line an operator greps for and is misled by.
         tracing::info!(
             kind = %identity.kind,
             name = %identity.name,
             fingerprint = %identity.fingerprint,
             "resource opened"
         );
-        let manager = provider.open(spec, identity.clone(), env).await?;
         self.managers
             .write()
             .expect("managers poisoned")
