@@ -67,8 +67,17 @@ jobs:
             tar xzf usai-*.tar.gz
             echo "USAI_PREVIOUS_BIN=$(find /tmp/previous -type f -name usai | head -1)" >> "$GITHUB_ENV"
             /tmp/previous/*/usai --version
+            # The third axis: the SDK that release published, from the registry.
+            v=$(/tmp/previous/*/usai --version | awk '{print $2}')
+            echo "USAI_PREVIOUS_SDK=$v" >> "$GITHUB_ENV"
+          elif [ -n "$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1)" ]; then
+            # A release exists and we could not fetch it: the matrix would
+            # skip silently and the job would look green without testing
+            # anything. It is the gate's whole point, so fail instead.
+            echo "::error::a release exists but its binary could not be downloaded; the compatibility matrix would have skipped"
+            exit 1
           else
-            echo "no previous release; the matrix test skips"
+            echo "no previous release yet; the matrix test skips"
           fi
       - run: make test
 
