@@ -191,6 +191,12 @@ should read before rolling:
 
 ### Qualification (evidence, not features)
 
+- **What a box does at its ceiling, when it is charged for it.** A 48 MiB
+  `hello` cell was never OOM-killed, answered every request — and served one
+  per second at a p50 of 4.7 s, with 1.5 million `memory.events.max`: it
+  spent the cell reclaiming and re-faulting its own text. Its resident set
+  was *smaller* than the cells with room to breathe. Under the old
+  accounting that cell passed with "≈2 MiB of headroom".
 - **Every floor this project has published is void until it is re-measured.**
   The boxed cells bind-mounted the binary they were measuring, and page cache
   is charged to the cgroup that first faults it in — the host had already run
