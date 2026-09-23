@@ -1,11 +1,38 @@
 # Upstreaming the Wasmtime pagemap reset patch
 
-Status (2026-09-19): **PR open** —
+Status (2026-09-23): **PR open, first review answered** —
 <https://github.com/bytecodealliance/wasmtime/pull/14357> (fork
 `HasanH47/wasmtime`, branch `pagemap-reset-complete-traversal`: the patch
 plus three unit tests in `pagemap.rs`, on upstream `main` at `7ad2e73`).
 Review feedback is applied on that branch; the vendored patch follows what
-lands. Upstream `main` still has both behaviours this repository patches (`crates/wasmtime/src/runtime/vm/sys/unix/pagemap.rs`:
+lands.
+
+`alexcrichton` reviewed on 2026-09-21: "the performance boost and fix here
+both seem reasonable to me", and classed the paged-out-dirty-page hole as a
+bugfix rather than a CVE because it needs an off-by-default, explicitly
+unsupported option. Five comments, all answered on 2026-09-22 (`a327688`):
+a stray `pagemap.rs.orig` removed; the documented scan criteria updated (the
+list no longer claims `PRESENT`, and the `WRITTEN` bullet carries the
+swapped-out case); `remaining_budget` and `pages_found` folded into one
+`budget` local the regions spend. The sixth point was a question — whether a
+different buffer size or a dynamically allocated one would be better — and
+the answer measured on Linux 6.18 (4 KiB pages, an 8 MiB region, a complete
+traversal at several capacities against the cost of resetting the same
+bytes):
+
+| dirty set | cap 16 | 32 | 64 | 128 | 512 | resetting the same pages |
+|---|---|---|---|---|---|---|
+| 2048 contiguous pages (1 region) | 1 ioctl, 76 µs | 1, 70 µs | 1, 70 µs | 1, 70 µs | 1, 75 µs | 420 µs |
+| every 2nd page (1024 regions) | 64 ioctl, 174 µs | 32, 95 µs | 16, 67 µs | 8, 53 µs | 2, 44 µs | 86 µs |
+| every 16th page (128 regions) | 8 ioctl, 26 µs | 4, 18 µs | 2, 14 µs | 1, 9 µs | 1, 14 µs | 9 µs |
+
+An ioctl costs ≈2 µs; a contiguous dirty set is one call at any capacity and
+the scan is ≈6× cheaper than the memcpy that resets it. Capacity matters only
+for a fragmented set, and even at the every-other-page extreme 32 → 64 saves
+≈28 µs against 86 µs of resets, while 64 → 512 saves ≈22 µs more for 12 KiB
+of stack (a `page_region` is 24 bytes). With the resume loop the capacity is
+a throughput knob, not a correctness one — which is why it stays a fixed
+stack buffer of 64. Upstream `main` still has both behaviours this repository patches (`crates/wasmtime/src/runtime/vm/sys/unix/pagemap.rs`:
 `MAX_REGIONS = 32` with `walk_end` treated as the end, and a category mask
 requiring `PRESENT`). Latest release: v48.0.2, the version vendored here.
 Nothing to rebase yet; the patch applies to `main` as is.
