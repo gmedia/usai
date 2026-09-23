@@ -59,6 +59,10 @@ turned out to be measuring nothing, which is the other half of this release.
   rather than go live broken); `0` keeps resource-free routes serving and
   reports the failing resource in the body instead. Draining fails readiness
   either way.
+- **`usai run` warns when the memory limit is below what `--max-worlds` can
+  need.** Only the process knows both numbers, so only the process can check
+  them against each other; the line names the limit, the worlds and the
+  arithmetic from `docs/runbooks/sizing.md`.
 - **The runtime can see its own memory ceiling.** `/_usai/status` and
   `/_usai/metrics` read the process's cgroup when asked and publish the
   limit, the charge, the **ceiling hits** (`memory.events` `max`) and the OOM
