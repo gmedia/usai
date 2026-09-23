@@ -457,6 +457,19 @@ async fn serve_until_signal(
                         .collect()
                 })
                 .unwrap_or_default(),
+            // On by default: a replica that cannot reach a bound resource
+            // asks to be taken out of rotation. Off (`0`, `false`, `no`,
+            // `off`) keeps resource-free routes serving through a shared
+            // outage instead — the trade-off is in
+            // docs/runbooks/postgres-down.md.
+            ready_requires_resources: std::env::var("USAI_READY_REQUIRES_RESOURCES")
+                .map(|v| {
+                    !matches!(
+                        v.trim().to_ascii_lowercase().as_str(),
+                        "" | "0" | "false" | "no" | "off"
+                    )
+                })
+                .unwrap_or(true),
         },
     );
     // A harness (`--announce`) wants a silent exit; `dev` narrates like `run`.
@@ -468,9 +481,12 @@ async fn serve_until_signal(
     if let Some(addr) = status_addr {
         let addr: std::net::SocketAddr = addr.parse().context("invalid --status-addr")?;
         let token = shutdown.clone();
+        // What this listener will actually answer, not what it could: a
+        // surface removed with USAI_SURFACES_OFF is not announced.
+        let surfaces = http_for_internal.internal_surfaces().join(", ");
         tokio::spawn(async move {
             if let Err(e) = usai_runtime::http::serve_internal(http_for_internal, addr, token, |bound| {
-                tracing::info!(%bound, "status listener: /_usai/status, /_usai/metrics, /_usai/live, /_usai/ready, /_usai/docs");
+                tracing::info!(%bound, "status listener: {surfaces}");
             })
             .await
             {

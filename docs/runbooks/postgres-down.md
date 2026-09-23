@@ -4,7 +4,8 @@
 
 - Responses: **503** with `{"error":{"code":"pool_error" | "sql_57p01" |
   "connection_closed", …}}` for every workload that leases the database;
-  workloads without the resource keep answering 200. Refusals are fast: the
+  workloads without the resource keep answering 200 **from the runtime** —
+  see the box below before you believe that through your proxy. Refusals are fast: the
   campaign measured ~1 400 refusals/s at p99 < 15 ms — nothing queues behind
   the dead database. Which code depends on where the request caught the
   outage: `sql_57p01` (`terminating connection due to administrator
@@ -15,10 +16,28 @@
   the server is unreachable — the same wording as the activation-time
   failure. Clients see the status and the code; they do not need to tell
   them apart.
+> **Through a proxy that health-checks `/_usai/ready`, this is a total
+> outage, not a partial one.** Readiness fails when any bound resource fails
+> its probe, a proxy removes an unready upstream from rotation, and every
+> replica shares the database — so the proxy runs out of upstreams and
+> answers 503 for *every* route, including the ones that never touch
+> PostgreSQL. Measured directly against a replica: `hello` 200, `notes` 503.
+> Through the documented Caddy block at the same instant: both 503. This is
+> the default because a replica that cannot reach its database cannot serve
+> most of the application, and because it stops a rollout from going live
+> broken. If you would rather keep resource-free routes answering, set
+> `USAI_READY_REQUIRES_RESOURCES=0` on every replica: `/_usai/ready` then
+> answers 200 and still names the failing resource in `resources`, so the
+> alert below is unchanged, and draining still fails readiness (the rolling
+> restart is unaffected). Decide this before the outage, not during it.
+
 - `/_usai/status` → `resources[].ready` is **false** from the first
   connection-level failure (with `detail.lastError` and
   `detail.unreadyForSeconds`) and true again after the first successful
-  query or probe; `GET /_usai/ready` answers 503 with
+  query or probe. The probe is bounded inside the resource, so a database
+  that has stopped answering at all — the usual shape of an unreachable
+  host — flips `ready` within a second of the first failed probe, without
+  waiting for a real query to come along (it did wait, before 0.0.9); `GET /_usai/ready` answers 503 with
   `resources: { main: "no connection: …" }` throughout.
 - Metrics: `usai_http_responses_total{class="5xx"}` and
   `usai_http_workload_responses_total{workload,class="5xx"}` rise for the

@@ -99,6 +99,13 @@ pub async fn serve_internal(
 ) -> std::io::Result<()> {
     let listener = TcpListener::bind(addr).await?;
     on_bound(listener.local_addr()?);
+    // Said once, not per request: which surfaces this listener answers, with
+    // USAI_SURFACES_OFF already taken out. The 404 that quotes it is read by
+    // an operator who just got a path wrong.
+    let serves = Arc::new(format!(
+        r#"{{"error":{{"code":"route_not_found","message":"this listener serves {} and /_usai/openapi.json"}}}}"#,
+        host.internal_surfaces().join(", ")
+    ));
     let tracker = TaskTracker::new();
     loop {
         let (stream, _peer) = tokio::select! {
@@ -109,12 +116,14 @@ pub async fn serve_internal(
             _ = shutdown.cancelled() => break,
         };
         let host = Arc::clone(&host);
+        let serves = Arc::clone(&serves);
         tracker.spawn(async move {
             let _ = http1::Builder::new()
                 .serve_connection(
                     TokioIo::new(stream),
                     service_fn(move |request: hyper::Request<hyper::body::Incoming>| {
                         let host = Arc::clone(&host);
+                        let serves = Arc::clone(&serves);
                         async move {
                             let (parts, _) = request.into_parts();
                             let response = if parts.method == hyper::Method::GET {
@@ -127,9 +136,7 @@ pub async fn serve_internal(
                                     .status(hyper::StatusCode::NOT_FOUND)
                                     .header(hyper::header::CONTENT_TYPE, "application/json")
                                     .body(
-                                        http_body_util::BodyExt::boxed(http_body_util::Full::new(bytes::Bytes::from_static(
-                                            br#"{"error":{"code":"route_not_found","message":"this listener serves /_usai/status, /_usai/metrics, /_usai/live, /_usai/ready, /_usai/docs and /_usai/openapi.json"}}"#,
-                                        ))),
+                                        http_body_util::BodyExt::boxed(http_body_util::Full::new(bytes::Bytes::from(serves.to_string()))),
                                     )
                                     .expect("static response")
                             }))

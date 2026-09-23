@@ -876,8 +876,21 @@ impl ResourceManager for Postgres {
 
     /// `SELECT 1` on a leased connection: the pool can hand one out and the
     /// server answers. Failures name the reason.
+    ///
+    /// The bound is here, not in the caller. When `/_usai/ready` held the
+    /// timeout, a probe that hung was *cancelled* — so it never reached the
+    /// fold below, `usai_resource{metric="ready"}` stayed at 1, and the
+    /// documented database-down alert did not fire until some real request
+    /// happened to hit the pool. On a quiet service that is minutes.
     async fn probe(&self) -> Result<(), String> {
-        let result = self.probe_inner().await;
+        let result =
+            match tokio::time::timeout(PROBE_TIMEOUT, self.probe_inner()).await {
+                Ok(result) => result,
+                Err(_) => Err(format!(
+                    "probe timed out after {} s",
+                    PROBE_TIMEOUT.as_secs()
+                )),
+            };
         match &result {
             Ok(()) => self.observe::<()>(&Ok(())),
             Err(e) => self.mark_unready(e),
@@ -893,6 +906,12 @@ impl ResourceManager for Postgres {
         self
     }
 }
+
+/// How long a readiness probe may take before the resource is called unready.
+/// One second: `/_usai/ready` is polled by an orchestrator every few seconds,
+/// and a database that cannot answer `SELECT 1` in a second is not ready by
+/// any definition an operator would accept.
+const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
 impl Postgres {
     /// Folds one outcome into `Health`: a connection-level failure makes the
@@ -1613,4 +1632,80 @@ const MIGRATION_LOCK: i64 = 0x7573_6169_6d69_6772; // "usaimigr"
 
 fn quote_literal(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::definition::ResourceSpec;
+
+    /// A readiness probe that hangs must make the resource unready.
+    ///
+    /// Round 16 (an operator deploying 0.0.8) caught the opposite: with the
+    /// database gone, `/_usai/ready` already named the failing resource while
+    /// `/_usai/status` and `usai_resource{metric="ready"}` still said 1,
+    /// because the timeout lived in the caller and cancelled the probe before
+    /// it could record anything. The alert the runbook tells operators to set
+    /// therefore waited for the next real query.
+    ///
+    /// The server here accepts the connection and then says nothing, which is
+    /// what a database behind a dropped route looks like: the handshake never
+    /// completes, so nothing fails — it hangs.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_readiness_probe_that_hangs_makes_the_resource_unready() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        std::thread::spawn(move || {
+            // Hold every accepted connection open and answer nothing.
+            let mut held = Vec::new();
+            while let Ok((stream, _)) = listener.accept() {
+                held.push(stream);
+            }
+        });
+        let url = format!("postgres://someone:secret@127.0.0.1:{port}/whatever");
+        let spec = ResourceSpec {
+            name: "db".into(),
+            kind: "postgres".into(),
+            module: None,
+            config: serde_json::json!({}),
+            env: vec!["DATABASE_URL".into()],
+        };
+        let identity = ResourceIdentity {
+            kind: "postgres".into(),
+            name: "db".into(),
+            fingerprint: "test".into(),
+            compat: 1,
+        };
+        let manager = PostgresProvider
+            .open(&spec, identity, &move |name| {
+                (name == "DATABASE_URL").then(|| url.clone())
+            })
+            .await
+            .expect("open is lazy: nothing has connected yet");
+
+        let started = std::time::Instant::now();
+        let reason = manager.probe().await.expect_err("the server never answers");
+        assert!(
+            reason.contains("timed out"),
+            "the probe should give up, not wait for the connect timeout: {reason}"
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(3),
+            "the probe took {:?}",
+            started.elapsed()
+        );
+        // The point of the test: the fold happened, so everything an operator
+        // reads agrees with the probe.
+        let status = manager.status();
+        assert!(!status.ready, "the resource is still calling itself ready");
+        assert!(
+            status
+                .detail
+                .get("lastError")
+                .and_then(|v| v.as_str())
+                .is_some_and(|e| e.contains("timed out")),
+            "no lastError for the operator to read: {:?}",
+            status.detail
+        );
+    }
 }

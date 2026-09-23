@@ -1478,6 +1478,61 @@ async fn the_status_token_guards_the_operator_surfaces_but_not_the_probes() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_public_listener_does_not_admit_that_a_protected_surface_exists() {
+    // Production shape: the surfaces live on their own listener
+    // (`--status-addr`) and a status token is set. The public listener then
+    // serves none of them — and must say so the same way for all of them.
+    // It used to answer 401 for /_usai/status and /_usai/metrics (the token
+    // check ran before the listener's own routing) and 404 for the probes,
+    // which told an unauthenticated caller both that this is a Usai runtime
+    // and that there is an operator surface to come back for.
+    let Some(s) = start().await else { return };
+    let host = HttpHost::new(
+        Arc::clone(&s.runtime),
+        HttpConfig {
+            addr: ([127, 0, 0, 1], 0).into(),
+            serve_status: false,
+            serve_docs: false,
+            status_token: Some("s3cret".into()),
+            ..HttpConfig::default()
+        },
+    );
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let token = CancellationToken::new();
+    let t = token.clone();
+    tokio::spawn(async move {
+        serve(host, t, |addr| {
+            let _ = tx.send(addr);
+        })
+        .await
+        .unwrap()
+    });
+    let addr = rx.await.unwrap();
+    let base = format!("http://{addr}");
+    for path in [
+        "/_usai/status",
+        "/_usai/metrics",
+        "/_usai/live",
+        "/_usai/ready",
+        "/_usai/docs",
+        "/_usai/openapi.json",
+    ] {
+        for auth in [None, Some("Bearer s3cret")] {
+            let mut r = s.client.get(format!("{base}{path}"));
+            if let Some(a) = auth {
+                r = r.header("authorization", a);
+            }
+            let r = r.send().await.unwrap();
+            assert_eq!(r.status(), 404, "{path} (auth: {auth:?})");
+            let body = r.text().await.unwrap();
+            assert!(!body.contains("USAI_STATUS_TOKEN"), "{path}: {body}");
+        }
+    }
+    token.cancel();
+    s.shutdown.cancel();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_draining_host_fails_readiness_and_closes_connections_while_still_serving() {
     // The rolling-restart contract: between the stop signal and the
     // listener closing, a balancer must learn to route elsewhere and must

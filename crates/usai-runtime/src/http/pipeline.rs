@@ -55,6 +55,18 @@ pub struct HttpConfig {
     /// listeners; a switched-off surface answers 404 like any unknown
     /// `/_usai/` path. Production rarely wants all of them.
     pub surfaces_off: Vec<String>,
+    /// Whether a bound resource that fails its probe makes `/_usai/ready`
+    /// answer 503 (the default) or merely report it while the replica keeps
+    /// asking for traffic (`USAI_READY_REQUIRES_RESOURCES=0`).
+    ///
+    /// It is a deployment decision, not a runtime one. A proxy removes an
+    /// unready upstream from rotation, so with the default a database
+    /// outage takes out *every* route on every replica that shares that
+    /// database — including routes that never touch it. With it off, those
+    /// routes keep serving and the database-backed ones answer 503 on their
+    /// own. Draining is unaffected either way: a draining replica always
+    /// fails readiness, which is what the rolling restart depends on.
+    pub ready_requires_resources: bool,
 }
 
 impl Default for HttpConfig {
@@ -68,6 +80,7 @@ impl Default for HttpConfig {
             socket_idle_timeout: std::time::Duration::from_secs(300),
             status_token: None,
             surfaces_off: Vec::new(),
+            ready_requires_resources: true,
         }
     }
 }
@@ -572,6 +585,25 @@ impl HttpHost {
         &self.runtime
     }
 
+    /// The `/_usai/` paths a dedicated status listener actually serves, in
+    /// the order an operator reads them. `USAI_SURFACES_OFF` removes them
+    /// from here too: the startup banner is the first thing read when
+    /// verifying a hardened deployment, and it used to advertise a surface
+    /// that answered 404.
+    pub fn internal_surfaces(&self) -> Vec<&'static str> {
+        [
+            ("status", "/_usai/status"),
+            ("metrics", "/_usai/metrics"),
+            ("live", "/_usai/live"),
+            ("ready", "/_usai/ready"),
+            ("docs", "/_usai/docs"),
+        ]
+        .into_iter()
+        .filter(|(surface, _)| !self.config.surfaces_off.iter().any(|s| s == surface))
+        .map(|(_, path)| path)
+        .collect()
+    }
+
     /// The runtime-owned surfaces under `/_usai/`: status, metrics,
     /// liveness, readiness (when `status` is on) and the API reference (when
     /// `docs` is on). `None` for any other path. Served on the application
@@ -596,7 +628,21 @@ impl HttpHost {
             "/_usai/docs" | "/_usai/docs/" | "/_usai/openapi.json" => "docs",
             _ => "",
         };
-        if !surface.is_empty() && self.config.surfaces_off.iter().any(|s| s == surface) {
+        // Whether *this* listener serves it at all is decided before anything
+        // else: a public listener that answered 401 for `/_usai/status` would
+        // be telling the world there is a protected operator surface here,
+        // while `/_usai/live` on the same listener says 404. One answer, and
+        // it is the one a listener that does not serve the surface owes:
+        // nothing is here.
+        let served = match surface {
+            "status" | "metrics" | "live" | "ready" => status,
+            "docs" => docs,
+            _ => false,
+        };
+        if !served {
+            return None;
+        }
+        if self.config.surfaces_off.iter().any(|s| s == surface) {
             return Some(json_response(
                 StatusCode::NOT_FOUND,
                 &json!({ "error": { "code": "route_not_found", "message": format!("no route matches GET {path}") } }),
@@ -675,18 +721,29 @@ impl HttpHost {
                     let resources = revision.resources();
                     let mut failed = serde_json::Map::new();
                     for name in resources.names() {
+                        // A resource bounds its own probe (and folds the
+                        // result into its health, which is what the
+                        // `ready` gauge and the alert read). This is the
+                        // backstop for one that does not: it answers the
+                        // orchestrator, but it cannot tell the resource
+                        // anything, so it is deliberately looser.
                         if let Some(manager) = resources.get(name)
                             && let Err(reason) = tokio::time::timeout(
-                                std::time::Duration::from_secs(1),
+                                std::time::Duration::from_secs(3),
                                 manager.probe(),
                             )
                             .await
-                            .unwrap_or_else(|_| Err("probe timed out after 1 s".into()))
+                            .unwrap_or_else(|_| {
+                                Err("probe did not answer within 3 s".into())
+                            })
                         {
                             failed.insert(name.to_owned(), Value::String(reason));
                         }
                     }
-                    let ready = failed.is_empty();
+                    // `resources` names what failed its probe either way;
+                    // whether that makes this replica unready is the
+                    // deployment's call (`ready_requires_resources`).
+                    let ready = failed.is_empty() || !self.config.ready_requires_resources;
                     return Some(json_response(
                         if ready {
                             StatusCode::OK

@@ -47,6 +47,14 @@ summarize() {
   ' "$1"
 }
 load() { node "$p5/loadgen.mjs" "$BASE" "$TOKEN" "${CLIENTS:-8}" "$1" "$2" > /dev/null & LOAD_PID=$!; }
+# A load summary is evidence only if something was served. Every rule below
+# used to be "no 5xx, no errors, both replicas created worlds", all of which a
+# run of pure 401s satisfies: on 2026-09-23 the tenant token came back empty,
+# 1.5 M requests were refused at the door, and four scenarios reported PASS.
+served() { echo "$1" | sed -n 's/.*"ok":\([0-9]*\).*/\1/p'; }
+require_token() {
+  [ -n "${TOKEN:-}" ] || { echo "no tenant token in $TOKEN_FILE - run 'replicas.sh up' first"; exit 1; }
+}
 gateway() { docker network inspect "${COMPOSE_PROJECT_NAME}_default" -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}'; }
 
 up() {
@@ -56,10 +64,29 @@ up() {
   docker compose up -d
   wait_ready "$APP1" || { echo "app not ready"; docker compose logs app | tail -20; exit 1; }
   wait_ready "$APP2" || { echo "app2 not ready"; docker compose logs app2 | tail -20; exit 1; }
-  local body
-  body=$(curl -s -X POST "$BASE/signup" -H 'content-type: application/json' -d '{"tenant":"replicas","email":"replicas@example.test","password":"replicas-test-password-1"}')
-  echo "$body" | grep -q token || body=$(curl -s -X POST "$BASE/login" -H 'content-type: application/json' -d '{"tenant":"replicas","email":"replicas@example.test","password":"replicas-test-password-1"}')
-  echo "$body" | sed 's/.*"token":"\([^"]*\)".*/\1/' > "$TOKEN_FILE"; TOKEN=$(cat "$TOKEN_FILE")
+  # The proxy may still be arranging its health checks when the replicas are
+  # already up, so this retries; and a body without a token is a failure, not
+  # a token. (`sed s/…/\1/` without -n prints the whole body when it does not
+  # match, which is how an error page once became the bearer token.)
+  local body="" creds='{"tenant":"replicas","email":"replicas@example.test","password":"replicas-test-password-1"}'
+  TOKEN=""
+  local attempt
+  local route
+  for attempt in $(seq 1 30); do
+    for route in signup login; do
+      body=$(curl -s -m 5 -X POST "$BASE/$route" -H 'content-type: application/json' -d "$creds")
+      TOKEN=$(printf '%s' "$body" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+      [ -n "$TOKEN" ] && break
+    done
+    [ -n "$TOKEN" ] && break
+    sleep 1
+  done
+  if [ -z "$TOKEN" ]; then
+    echo "no tenant token after $attempt attempts; the last answer from $BASE was: $(printf '%s' "$body" | head -c 300)"
+    docker compose logs caddy | tail -10
+    exit 1
+  fi
+  printf '%s' "$TOKEN" > "$TOKEN_FILE"
   log "up: $BASE → app ($APP1, schedules cron: $(schedules_cron "$APP1")) + app2 ($APP2, schedules cron: $(schedules_cron "$APP2"))"
 }
 down() { docker compose down -v --remove-orphans; }
@@ -73,6 +100,7 @@ http() {
   local s; s=$(summarize "$out"); echo "load: $s"
   local d1=$(( $(worlds_created "$APP1") - w1 )) d2=$(( $(worlds_created "$APP2") - w2 ))
   local ok=1; echo "$s" | grep -q '"s5xx":0,"s503":0,"errors":0' || ok=0; [ "$d1" -gt 0 ] && [ "$d2" -gt 0 ] || ok=0
+  [ "$(served "$s")" -gt 0 ] || ok=0
   verdict http "$ok" "worlds created app $d1 / app2 $d2; $s"
 }
 
@@ -154,6 +182,7 @@ rolling() {
   local s; s=$(summarize "$out"); echo "load: $s"
   local conn; conn=$(cat "$OUT/replicas.rolling.conn.json"); echo "held: $conn"
   local ok=1; echo "$s" | grep -q '"s5xx":0' || ok=0; echo "$s" | grep -q '"errors":0' || ok=0
+  [ "$(served "$s")" -gt 0 ] || ok=0
   echo "$conn" | grep -q '"serverCloses":20' || ok=0; echo "$conn" | grep -qv '1006' || ok=0
   verdict rolling "$ok" "restart → ready: app2 ${g2}s, app ${g1}s; $s; closes $(echo "$conn" | grep -o '"byReason":{[^}]*}')"
 }
@@ -206,6 +235,7 @@ kill_one() {
 }
 
 all() {
+  require_token
   http; queue 1000; migrate; cron; rolling; kill_one; three 600
   echo; echo "== $FAILED scenario(s) failed"
   for a in "$APP1" "$APP2"; do status_of "$a" > "$OUT/replicas.status.$(basename "$a" | tr -d :).json"; done
@@ -235,6 +265,7 @@ three() {
   local d1=$(( $(worlds_created "$APP1") - w1 )) d2=$(( $(worlds_created "$APP2") - w2 )) d3=$(( $(worlds_created "$APP3") - w3 ))
   local ok=1; echo "$s" | grep -q '"s5xx":0,"s503":0,"errors":0' || ok=0
   [ "$d1" -gt 0 ] && [ "$d2" -gt 0 ] && [ "$d3" -gt 0 ] || ok=0
+  [ "$(served "$s")" -gt 0 ] || ok=0
   verdict three-http "$ok" "worlds created app $d1 / app2 $d2 / app3 $d3; $s"
 
   # The queue, consumed exactly once across three consumers
@@ -279,6 +310,7 @@ three() {
   wait "$LOAD_PID" 2>/dev/null || true
   local rs; rs=$(summarize "$rout")
   ok=1; echo "$rs" | grep -q '"s5xx":0,"s503":0,"errors":0' || ok=0
+  [ "$(served "$rs")" -gt 0 ] || ok=0
   verdict three-rolling "$ok" "restarted all three under load; $rs"
 
   # Three concurrent migrators on a fresh database
