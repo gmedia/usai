@@ -8,6 +8,18 @@ runtime of that version and the next (`SUPPORTED.md` → Versioning). Within
 GitHub releases carry the auto-generated commit list as well; this file is
 the human summary.
 
+## 0.0.10 — Unreleased
+
+### CI
+
+- The secret scan failed on its own arguments (the action passes `--fail`,
+  so passing it again is an error) — a job that fails on a flag looks exactly
+  like a job that found a secret.
+- A readiness test pointed its relay at the server's default database instead
+  of the throwaway one its fixture had created, so the fixture's migrations
+  ran into the database CI shares with the example suites and both example
+  test runs failed on `relation "users" already exists`.
+
 ## 0.0.9 — 2026-09-23
 
 A platform engineer deployed 0.0.8 from the published artifacts for the first
