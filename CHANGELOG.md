@@ -40,6 +40,9 @@ the human summary.
   waits out the difference now and refuses to fire a scheduled time twice.
   Present in every version before this one; `exclusive: true` schedules were
   protected by their claim row, every other schedule sent twice.
+- **The status listener's 404 no longer names `/_usai/openapi.json` when
+  `USAI_SURFACES_OFF=docs` removed it.** 0.0.9 fixed the banner and the same
+  list one path further along was left behind.
 - **`resource opened` is logged after the resource opens.** It was logged
   before, so a failed activation printed an INFO `resource opened` directly
   above its own fatal error.

@@ -102,9 +102,16 @@ pub async fn serve_internal(
     // Said once, not per request: which surfaces this listener answers, with
     // USAI_SURFACES_OFF already taken out. The 404 that quotes it is read by
     // an operator who just got a path wrong.
+    // `/_usai/openapi.json` is the `docs` surface too, so it goes when
+    // `USAI_SURFACES_OFF=docs` does — naming it in the 404 was the same bug
+    // the banner had, one path further along.
+    let mut served = host.internal_surfaces();
+    if served.contains(&"/_usai/docs") {
+        served.push("/_usai/openapi.json");
+    }
     let serves = Arc::new(format!(
-        r#"{{"error":{{"code":"route_not_found","message":"this listener serves {} and /_usai/openapi.json"}}}}"#,
-        host.internal_surfaces().join(", ")
+        r#"{{"error":{{"code":"route_not_found","message":"this listener serves {}"}}}}"#,
+        served.join(", ")
     ));
     let tracker = TaskTracker::new();
     loop {
