@@ -541,6 +541,14 @@ impl WorldDriver {
                     return Termination::Completed;
                 }
                 Ok(_) => {}
+                // The same rule as at the invoke site and in the routing
+                // branch below: once the deadline has passed, an error from
+                // the guest is the watchdog's interrupt reaching us, not a
+                // fault of the application. Reporting it as a fault answered
+                // a timed-out request with 500 instead of 504 (seen once
+                // under a loaded `make check`, where the interrupt landed
+                // between two iterations of this loop).
+                Err(_) if self.deadline_elapsed() => return self.deadline_interrupted().await,
                 Err(e) => {
                     return Termination::Faulted {
                         detail: e.to_string(),
@@ -564,7 +572,13 @@ impl WorldDriver {
                 _ = async { match deadline.as_mut().as_pin_mut() { Some(d) => d.await, None => std::future::pending().await } } => {
                     return match self.cancel_world("deadline exceeded").await {
                         Ok(_) => Termination::DeadlineExceeded,
-                        Err(e) => Termination::Faulted { detail: e.to_string() },
+                        // The unwind itself failed after the deadline: the
+                        // world still ended because of its deadline, and the
+                        // interrupted path releases what the unwind did not.
+                        Err(e) => {
+                            tracing::debug!(world = %self.id, detail = %e, "the guest could not unwind at the deadline");
+                            self.deadline_interrupted().await
+                        }
                     };
                 }
                 completion = self.completions.recv() => {

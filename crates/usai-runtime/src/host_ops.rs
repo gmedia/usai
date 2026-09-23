@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use serde_json::json;
@@ -139,7 +139,11 @@ pub trait OpHandler: Send + Sync {
 /// Kinds the runtime itself understands. Extensions may add more.
 pub fn start_builtin(kind: &str, ctx: OpContext, payload: String) -> Result<OpFuture, OpOutcome> {
     match kind {
-        "timer" => Ok(Box::pin(timer(ctx, payload))),
+        // The deadline is taken here, where the application asked for it,
+        // not inside the future: a future's first poll can be far later than
+        // its creation on a starved runtime, and two timers started in the
+        // same guest turn would then expire out of order.
+        "timer" => Ok(Box::pin(timer(ctx, payload, Instant::now()))),
         "resource" => Ok(Box::pin(resource(ctx, payload))),
         "crypto" => Ok(Box::pin(crypto(ctx, payload))),
         other => match ctx.extensions.handlers.get(other) {
@@ -153,7 +157,7 @@ pub fn start_builtin(kind: &str, ctx: OpContext, payload: String) -> Result<OpFu
     }
 }
 
-async fn timer(ctx: OpContext, payload: String) -> OpOutcome {
+async fn timer(ctx: OpContext, payload: String, asked_at: Instant) -> OpOutcome {
     let ms: u64 = payload.trim().parse().unwrap_or(0);
     if ms == 0 {
         // A zero-delay timer means "later, not now": it stays asynchronous
@@ -168,7 +172,7 @@ async fn timer(ctx: OpContext, payload: String) -> OpOutcome {
         return OpOutcome::ok(&serde_json::Value::Null);
     }
     tokio::select! {
-        _ = tokio::time::sleep(Duration::from_millis(ms)) => OpOutcome::ok(&serde_json::Value::Null),
+        _ = tokio::time::sleep_until((asked_at + Duration::from_millis(ms)).into()) => OpOutcome::ok(&serde_json::Value::Null),
         _ = ctx.cancel.cancelled() => OpOutcome::err("cancelled", 499, "timer cancelled with its world"),
     }
 }

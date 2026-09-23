@@ -43,9 +43,9 @@ const workloads = {
   "task:timer-zero-order": async () => {
     // A zero-delay timer is asynchronous ("later"), runs after microtasks
     // queued in the same turn, and keeps its order against longer timers.
-    // The long one is 100 ms, not 5: timers fire by expiry, and a test
-    // process descheduled for a few ms between the two calls would
-    // legitimately see the short one expire first.
+    // Both deadlines are taken where the application asks for them, so this
+    // order holds even when the process is descheduled between the two
+    // calls or before either timer's future is first polled.
     const order = [];
     const done = new Promise((resolve) => {
       setTimeout(() => { order.push("t5"); resolve(); }, 100);
