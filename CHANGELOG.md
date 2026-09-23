@@ -12,6 +12,14 @@ the human summary.
 
 ### CLI
 
+- **The JSON log line starts with `timestamp` again, at microsecond
+  precision.** 0.0.9's formatter built the line in a sorted map, so the keys
+  came out alphabetically — a line beginning `{"application"` breaks any
+  shipper stage anchored on a prefix — and it rounded the timestamp to the
+  millisecond, which made two lines in the same millisecond unorderable (a
+  task and the request that invoked it, for instance). The order is
+  deliberate now: `timestamp`, `level`, `message`, `target`, then the
+  event's own fields. `fields` stays the object 0.0.9 made it.
 - **`usai queue prune` counts unless you pass `--yes`.** Its defaults are
   `--state done --older-than 7d`, and a bare `usai queue prune` applied them
   immediately with no confirmation — a destructive default on a command

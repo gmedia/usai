@@ -87,47 +87,67 @@ where
         let mut fields = Fields::default();
         event.record(&mut fields);
 
-        let mut line = Map::new();
-        line.insert(
-            "timestamp".into(),
-            Value::String(
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| {
-                        // RFC 3339 in UTC, to the millisecond, without pulling
-                        // a date library into the CLI.
-                        let secs = d.as_secs() as i64;
-                        let ms = d.subsec_millis();
-                        let days = secs.div_euclid(86_400);
-                        let sod = secs.rem_euclid(86_400);
-                        let (y, m, dd) = civil_from_days(days);
-                        format!(
-                            "{y:04}-{m:02}-{dd:02}T{:02}:{:02}:{:02}.{ms:03}Z",
-                            sod / 3600,
-                            (sod % 3600) / 60,
-                            sod % 60
-                        )
-                    })
-                    .unwrap_or_default(),
-            ),
+        // Written key by key, in a deliberate order, because `serde_json`'s
+        // map is sorted and a line that begins `{"application"` is not the
+        // one shippers were configured against: 0.0.9 moved `timestamp` out
+        // of first position, which breaks any pipeline that anchors on a
+        // line prefix. Timestamp, level, message, target, then everything
+        // the event carried — the shape 0.0.8 had.
+        let mut out = String::with_capacity(256);
+        out.push('{');
+        out.push_str("\"timestamp\":");
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| {
+                // RFC 3339 in UTC, to the microsecond (0.0.8's precision:
+                // two lines in the same millisecond have to stay orderable),
+                // without pulling a date library into the CLI.
+                let secs = d.as_secs() as i64;
+                let us = d.subsec_micros();
+                let days = secs.div_euclid(86_400);
+                let sod = secs.rem_euclid(86_400);
+                let (y, m, dd) = civil_from_days(days);
+                format!(
+                    "{y:04}-{m:02}-{dd:02}T{:02}:{:02}:{:02}.{us:06}Z",
+                    sod / 3600,
+                    (sod % 3600) / 60,
+                    sod % 60
+                )
+            })
+            .unwrap_or_default();
+        out.push_str(&Value::String(stamp).to_string());
+        let put = |key: &str, value: &Value, out: &mut String| {
+            out.push(',');
+            out.push_str(&Value::String(key.to_owned()).to_string());
+            out.push(':');
+            out.push_str(&value.to_string());
+        };
+        put(
+            "level",
+            &Value::String(meta.level().as_str().to_owned()),
+            &mut out,
         );
-        line.insert(
-            "level".into(),
-            Value::String(meta.level().as_str().to_owned()),
-        );
-        line.insert("target".into(), Value::String(meta.target().to_owned()));
+        // `message` is the event's own text; it is in `fields` under that
+        // name, and it belongs next to the level rather than wherever the
+        // alphabet puts it.
+        let mut rest = fields.map;
+        if let Some(message) = rest.remove("message") {
+            put("message", &message, &mut out);
+        }
+        put("target", &Value::String(meta.target().to_owned()), &mut out);
         // Spans: the runtime creates none of its own (every fact a line needs
         // is on the event), and a dependency's span name is worth more than a
         // half-parsed rendering of its fields.
         if let Some(span) = ctx.lookup_current()
             && span.metadata().target() != meta.target()
         {
-            line.insert("span".into(), Value::String(span.name().to_owned()));
+            put("span", &Value::String(span.name().to_owned()), &mut out);
         }
-        for (k, v) in fields.map {
-            line.insert(k, v);
+        for (k, v) in &rest {
+            put(k, v, &mut out);
         }
-        writeln!(writer, "{}", Value::Object(line))
+        out.push('}');
+        writeln!(writer, "{out}")
     }
 }
 
