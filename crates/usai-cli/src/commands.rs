@@ -278,15 +278,30 @@ pub async fn run(
         && p.memory_limit_bytes > 0
     {
         let limit_mib = p.memory_limit_bytes / (1024 * 1024);
-        // The sizing runbook's arithmetic: base + touched slots + one held
-        // revision, at the lower end of the per-slot range.
-        let wants_mib = 40 + u64::from(max_worlds.max(1)) * 4 + 30;
-        if limit_mib < wants_mib {
+        // A **floor**, not a forecast. Sizing an instance properly is the
+        // runbook's arithmetic (40 MiB + peak concurrency × 4…8 + 30 for a
+        // held revision) and needs the application's own peak concurrency,
+        // which this process cannot know at start. What it can know is the
+        // point below which the box cannot hold the runtime, one held
+        // revision and the *unique* memory of its slots at all — ≈1 MiB per
+        // slot, measured (P8E: ≈1.5 MiB PSS per touched slot, the rest is
+        // image pages every slot shares).
+        //
+        // The first version of this check used the full 4 MiB per slot and
+        // fired at the envelope `SUPPORTED.md` tells operators to deploy on
+        // (192 MiB at 48 worlds), which trains people to ignore it — and the
+        // failure it guards against is the one Kubernetes cannot see. The
+        // cells behind the threshold: 128 MiB / 48 worlds runs the production
+        // shape with **zero** reclaim events, 64 MiB / 16 worlds runs hello
+        // with 94, and 48 MiB / 16 worlds thrashes at 1.4 million
+        // (`docs/measurements/2026-09-23-floor-accounting.md`).
+        let floor_mib = 40 + 30 + u64::from(max_worlds.max(1));
+        if limit_mib < floor_mib {
             tracing::warn!(
                 limit_mib,
                 max_worlds = max_worlds.max(1),
-                wants_mib,
-                "the memory limit is below what this --max-worlds can need at full concurrency: at the limit the process reclaims the pages it executes from instead of failing, so it slows down rather than restarting (docs/runbooks/sizing.md)"
+                floor_mib,
+                "the memory limit is below the floor for this --max-worlds: at the limit the process reclaims the pages it executes from instead of failing, so it slows to a crawl without being killed or logging anything. Raise the limit or lower --max-worlds (docs/runbooks/sizing.md); watch usai_process_memory_ceiling_hits_total"
             );
         }
     }

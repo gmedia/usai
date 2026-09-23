@@ -74,12 +74,17 @@ mem_limit / MemoryMax  ≥  40 + peak_concurrency × (4…8) + 30   (MiB)
 48 worlds → ≥ 262 MiB; the compose file uses 512 MiB; 192 MiB is the supported floor, re-measured 2026-09-23 on a box charged for its own page cache (128 MiB serves the same shape with zero reclaim but leaves nothing for a held revision — `docs/measurements/2026-09-23-floor-accounting.md`)
 ```
 
-The runtime checks this arithmetic against its own cgroup at start and warns
-when the limit is below it (`the memory limit is below what this
---max-worlds can need at full concurrency`, with both numbers). It is a
-warning, not a refusal: an instance that never reaches full concurrency is
-fine, and a deliberately small box — a floor measurement, a sidecar — is a
-choice. Lower `--max-worlds` to silence it honestly.
+The runtime checks its own cgroup at start, but against a **floor**, not
+against this arithmetic: `40 + 30 + max_worlds × 1` MiB, the point below
+which the box cannot hold the runtime, one held revision and the *unique*
+memory of its slots at all (48 worlds → 118 MiB). Below that it warns —
+`the memory limit is below the floor for this --max-worlds`, with both
+numbers. It deliberately stays quiet at the envelope `SUPPORTED.md` tells you
+to deploy on: a warning that fires on every correct deployment is one
+operators learn to ignore, and the failure it guards against is the one an
+orchestrator cannot see. Sizing above the floor is the arithmetic above, and
+the signal that you got it wrong is
+`usai_process_memory_ceiling_hits_total` climbing.
 
 **The limit also has to cover the binary the container reads.** A cgroup is
 charged for the page cache the container faults in, and that includes the

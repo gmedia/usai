@@ -12,6 +12,13 @@ the human summary.
 
 ### Runtime
 
+- **The start-up memory check is a floor, not a forecast.** It used the full
+  4 MiB per world slot and therefore fired at the 192 MiB envelope
+  `SUPPORTED.md` tells operators to deploy on — training people to ignore a
+  warning whose failure mode an orchestrator cannot see. It now warns below
+  `40 + 30 + max_worlds` MiB (48 worlds → 118), which the measured cells
+  agree with: 128 MiB runs the production shape with zero reclaim, 64 MiB
+  runs hello with 94 events, 48 MiB thrashes at 1.4 million.
 - **A refused signature says what to do about it.** "signed by X, which this
   runtime does not trust" now names both ways out (trust that key, or re-sign
   with the one the runtime was started with), and "does not verify" says the
