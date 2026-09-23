@@ -71,8 +71,15 @@ the answer is a resource — an existing one, or a case for a new kind.
 
 - `0.0.x` (now): contracts may change between versions; each release note
   says what. Runtime and SDK are released together and must be at the same
-  version; the runtime refuses an artifact of another manifest format before
-  serving, with a message that names both versions.
+  version; the runtime refuses an artifact of another **manifest format or
+  guest ABI** before serving, with a message that names both versions.
+  **That check is on the format, not on the version stamp**: an artifact
+  built by a *newer* SDK than the runtime serves without complaint whenever
+  the format did not change — 0.0.9's artifact runs on the 0.0.8 runtime
+  today, unsupported and silent. Shipping the artifact before the binary is
+  the commonest rolling-deploy mistake, and nothing will tell you; the
+  manifest records `builtWith`, so a deploy script that compares it against
+  `usai --version` is worth the three lines.
 - **`@sakaladev/create-usai` has its own version line** and is deliberately
   ahead (0.0.11 while the runtime and SDK were at 0.0.8): it is a scaffolder,
   not part of the runtime contract, and a fix to the template it writes does
