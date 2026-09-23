@@ -1288,7 +1288,9 @@ async fn a_database_that_stops_answering_makes_the_resource_unready() {
         tokio_postgres::config::Host::Tcp(h) => h.clone(),
         #[cfg(unix)]
         tokio_postgres::config::Host::Unix(_) => {
-            eprintln!("skipping: the database is on a unix socket, which this relay does not speak");
+            eprintln!(
+                "skipping: the database is on a unix socket, which this relay does not speak"
+            );
             return;
         }
     };

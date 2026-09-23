@@ -733,9 +733,7 @@ impl HttpHost {
                                 manager.probe(),
                             )
                             .await
-                            .unwrap_or_else(|_| {
-                                Err("probe did not answer within 3 s".into())
-                            })
+                            .unwrap_or_else(|_| Err("probe did not answer within 3 s".into()))
                         {
                             failed.insert(name.to_owned(), Value::String(reason));
                         }

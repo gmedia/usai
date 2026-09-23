@@ -182,3 +182,34 @@ Every report names the host (`docs/measurements/2026-09-18-p5-p6-qualification.m
 describes VM 47), the pinning, what else ran on the machine (a soak sharing
 the VM cost the 2026-09-19 hello run ≈1.7× throughput at c=16), the versions
 of every runtime, and the commit of this repository.
+
+## Three ways a measurement lies, and the rule each one bought
+
+Every one of these was found by distrusting a clean result, and each cost a
+campaign that had to be thrown away and re-run. They are written down because
+the next harness will be tempted by all three.
+
+1. **A pass rule that refusals satisfy.** The three-replica campaign passed
+   three scenarios in which every request was a `401`: the rules asked for no
+   5xx, no errors and worlds created on both replicas, and a rejected request
+   creates a world too. **Rule: every load-driven verdict must assert that
+   something was served** — a positive count of successful responses, not
+   only the absence of failures.
+2. **A probe that would pass against a runtime that does nothing.** The
+   threat suite checked "no world was created" by comparing a gauge that was
+   still 0, and checked a signature by matching the word "refus" on an error
+   it had caused itself. **Rule: a probe must first prove the thing it
+   watches can move** (the counter goes 1 → 2 on a served request) before it
+   asserts that it did not.
+3. **A cost somebody else already paid.** A floor cell bind-mounted the
+   binary it was measuring, and page cache is charged to the cgroup that
+   faults it in first — so a 48 MiB box held 88 MiB and was never killed.
+   **Rule: a resource claim is read from what the process holds (RSS/PSS,
+   measured the same way for every comparator), not from the absence of a
+   kill**, and the harness says whether the cache was cold
+   (`docs/measurements/2026-09-23-floor-accounting.md`).
+
+The general form: *a result that could not have come out any other way is not
+a result.* Before publishing one, ask what the number would look like if the
+system under test did nothing at all — and if the answer is "the same", the
+instrument is what needs fixing.

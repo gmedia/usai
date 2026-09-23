@@ -135,9 +135,11 @@ pub async fn serve_internal(
                                 hyper::Response::builder()
                                     .status(hyper::StatusCode::NOT_FOUND)
                                     .header(hyper::header::CONTENT_TYPE, "application/json")
-                                    .body(
-                                        http_body_util::BodyExt::boxed(http_body_util::Full::new(bytes::Bytes::from(serves.to_string()))),
-                                    )
+                                    .body(http_body_util::BodyExt::boxed(
+                                        http_body_util::Full::new(bytes::Bytes::from(
+                                            serves.to_string(),
+                                        )),
+                                    ))
                                     .expect("static response")
                             }))
                         }

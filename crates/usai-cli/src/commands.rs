@@ -485,10 +485,11 @@ async fn serve_until_signal(
         // surface removed with USAI_SURFACES_OFF is not announced.
         let surfaces = http_for_internal.internal_surfaces().join(", ");
         tokio::spawn(async move {
-            if let Err(e) = usai_runtime::http::serve_internal(http_for_internal, addr, token, |bound| {
-                tracing::info!(%bound, "status listener: {surfaces}");
-            })
-            .await
+            if let Err(e) =
+                usai_runtime::http::serve_internal(http_for_internal, addr, token, |bound| {
+                    tracing::info!(%bound, "status listener: {surfaces}");
+                })
+                .await
             {
                 tracing::error!(error = %e, "status listener failed");
             }

@@ -907,14 +907,13 @@ impl ResourceManager for Postgres {
     /// documented database-down alert did not fire until some real request
     /// happened to hit the pool. On a quiet service that is minutes.
     async fn probe(&self) -> Result<(), String> {
-        let result =
-            match tokio::time::timeout(PROBE_TIMEOUT, self.probe_inner()).await {
-                Ok(result) => result,
-                Err(_) => Err(format!(
-                    "probe timed out after {} s",
-                    PROBE_TIMEOUT.as_secs()
-                )),
-            };
+        let result = match tokio::time::timeout(PROBE_TIMEOUT, self.probe_inner()).await {
+            Ok(result) => result,
+            Err(_) => Err(format!(
+                "probe timed out after {} s",
+                PROBE_TIMEOUT.as_secs()
+            )),
+        };
         match &result {
             Ok(()) => self.observe::<()>(&Ok(())),
             Err(e) => self.mark_unready(e),

@@ -93,6 +93,32 @@ lives in an image layer that cannot be evicted without root, so a php floor
 is measured warm and says so (`coldCache: false`). It is recorded rather than
 claimed.
 
+## And the part that cannot be evicted
+
+Dropping the binary's cache moved the charge from 8.7 MB to 18.9 MB against
+42 MB resident. Better, and still 23 MB the box was not billed for: it maps
+its libc and friends from the base image, and those pages live in a layer an
+unprivileged process cannot evict — with Docker's containerd image store
+there is not even a layer path to aim at (`GraphDriver` inspects as `null`).
+The whole page cache *can* be dropped, with root, and that is the complete
+method (`DROP_CACHES=1`); but it is a host-wide I/O event, and the 72 h
+soak's only bad seconds were caused by exactly that, so it is opt-in and
+never runs beside another measurement.
+
+Which forces the honest reading of a floor, and it is not the one the
+campaign had been using:
+
+> **A floor is read from the resident set, not from the absence of an OOM
+> kill.** "It did not get killed at 48 MiB" is only as true as the charging,
+> and the charging is optimistic whenever anything else on the host has
+> touched the same files. "It held 42 MiB at its peak" is measured directly,
+> the same way for every runtime in the comparison, and an operator sizing a
+> limit wants that number plus headroom anyway.
+
+So each cell reports `coldCache: full | true | partial` beside its peak, and
+a floor is `peak RSS + headroom`. The OOM result stays in the table as a
+secondary signal, with its caveat attached.
+
 ## Status
 
 **The floors of 2026-09-20 and 2026-09-23 are void**, and so is the first
