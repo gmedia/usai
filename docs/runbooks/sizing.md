@@ -74,6 +74,16 @@ mem_limit / MemoryMax  ≥  40 + peak_concurrency × (4…8) + 30   (MiB)
 48 worlds → ≥ 262 MiB; the compose file uses 512 MiB; 192 MiB is the supported floor measured with 48 worlds and a 16-client burst (**under re-measurement**, 2026-09-23: the floor cells were not charged for the runtime's own text, so the published number can only be too small — `docs/measurements/2026-09-23-floor-accounting.md`)
 ```
 
+**The limit also has to cover the binary the container reads.** A cgroup is
+charged for the page cache the container faults in, and that includes the
+runtime's own text — ~35 MB of `usai` on disk, of which the working set is
+tens of MiB. It is already inside the measured plateau above, but it is the
+reason a limit that looks generous against RSS can still be too small: when
+the charge reaches the ceiling the kernel reclaims those pages and the
+process faults them straight back in, without an OOM kill and without a log
+line. Watch `usai_process_memory_ceiling_hits_total` after a sizing change;
+`memory-pressure.md` has the symptom and the measurement.
+
 **Per-slot is 4 MiB for a small application and up to 8 for a real one.**
 P8E measured ≈4 MiB RSS per touched slot on the hello application; the
 concurrency sweep's application — PostgreSQL, contracts on six routes,
