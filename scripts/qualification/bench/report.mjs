@@ -27,6 +27,24 @@ const order = [
   "php-tuned",
   "laravel-fpm",
 ];
+// `oha` counts the requests it had in flight when the time window closed as
+// errors — one per connection, so a clean run reads `errors = c`. They are the
+// client's own bookkeeping: no response was read, the server answered nothing
+// wrong. Shown as `c aborted` so a real failure is still visible next to them.
+const DEADLINE = /deadline|timeout of the benchmark|aborted/i;
+const errorsOf = (r) => {
+  const kinds = r.errorKinds ?? null;
+  if (!r.errors) return 0;
+  if (!kinds) return `${r.errors}${r.errors === r.clients ? " (aborted at the deadline?)" : ""}`;
+  let aborted = 0;
+  let real = 0;
+  for (const [kind, n] of Object.entries(kinds)) DEADLINE.test(kind) ? (aborted += n) : (real += n);
+  const parts = [];
+  if (real) parts.push(String(real));
+  if (aborted) parts.push(`${aborted} aborted`);
+  return parts.join(" + ") || 0;
+};
+
 const by = (a, b) => order.indexOf(a.server) - order.indexOf(b.server) || a.clients - b.clients;
 console.log(`# Benchmark suite — ${dir.split("/").pop()}\n`);
 console.log(
@@ -42,7 +60,7 @@ for (const [cls, title] of Object.entries(classes)) {
   console.log("|---|---|---|---|---|---|---|---|---|---|---|");
   for (const r of rows)
     console.log(
-      `| ${r.server} | ${r.clients} | ${r.rps} | ${r.p50} | ${r.p95} | ${r.p99} | ${r.cpuMsPerRequest ?? "—"} | ${r.rssMiB} | ${r.s4xx} | ${r.s5xx} | ${r.errors} |`,
+      `| ${r.server} | ${r.clients} | ${r.rps} | ${r.p50} | ${r.p95} | ${r.p99} | ${r.cpuMsPerRequest ?? "—"} | ${r.rssMiB} | ${r.s4xx} | ${r.s5xx} | ${errorsOf(r)} |`,
     );
   console.log();
   const inv = rows.find((r) => r.server === "usai" && r.invoice);

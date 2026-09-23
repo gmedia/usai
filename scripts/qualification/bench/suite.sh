@@ -154,7 +154,7 @@ cell() {
     json=$(pin_client oha "${args[@]}" 2>/dev/null | node -e '
       const o = JSON.parse(require("fs").readFileSync(0, "utf8")); const codes = o.statusCodeDistribution || {};
       const sum = (f) => Object.entries(codes).filter(([k]) => f(Number(k))).reduce((a, [, v]) => a + v, 0);
-      console.log(JSON.stringify({ class: process.argv[1], clients: Number(process.argv[2]), seconds: o.summary.total, requests: o.summary.successRate ? Math.round(o.summary.requestsPerSec * o.summary.total) : 0, rps: +o.summary.requestsPerSec.toFixed(0), p50: +o.metrics.latency_ms.p50.toFixed(3), p95: +o.metrics.latency_ms.p95.toFixed(3), p99: +o.metrics.latency_ms.p99.toFixed(3), ok: sum((s) => s < 300), s4xx: sum((s) => s >= 400 && s < 500), s5xx: sum((s) => s >= 500), errors: Object.values(o.errorDistribution || {}).reduce((a, b) => a + b, 0) }));
+      console.log(JSON.stringify({ class: process.argv[1], clients: Number(process.argv[2]), seconds: o.summary.total, requests: o.summary.successRate ? Math.round(o.summary.requestsPerSec * o.summary.total) : 0, rps: +o.summary.requestsPerSec.toFixed(0), p50: +o.metrics.latency_ms.p50.toFixed(3), p95: +o.metrics.latency_ms.p95.toFixed(3), p99: +o.metrics.latency_ms.p99.toFixed(3), ok: sum((s) => s < 300), s4xx: sum((s) => s >= 400 && s < 500), s5xx: sum((s) => s >= 500), errors: Object.values(o.errorDistribution || {}).reduce((a, b) => a + b, 0), errorKinds: o.errorDistribution || {} }));
     ' "$cls" "$c")
   fi
   cpu1=$(cpu_seconds "$name")

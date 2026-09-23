@@ -77,7 +77,13 @@ bug.
   P8 gate: before and after every hot-path change.
 - `suite.sh sweep` — c ∈ `CONCS` (1…64), every class, every comparator;
   oha for the read classes at c > 4, the suite's own closed-loop client
-  (`load.mjs`) for writes and small c. PHP at c=1 only.
+  (`load.mjs`) for writes and small c. PHP at c=1 only. **Reading the
+  `errors` column**: oha counts the requests it still had in flight when the
+  time window closed — one per connection — as errors, so a clean cell reads
+  `errors = c` (the suite's own client awaits them instead, which is why
+  c ≤ 4 reads 0). The cells record the kinds verbatim (`errorKinds`) and the
+  report renders them as `N aborted`; anything else in that column is a real
+  failure.
 - `suite.sh leak` — the correctness probes: counter over ten requests,
   twenty aborted slow requests then health (and Usai's live worlds), RSS
   before/after ten seconds of class C.
