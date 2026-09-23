@@ -1,0 +1,90 @@
+# The instance that schedules — cron ticks and `service()` workloads that must
+# not run once per replica. Read docs/deploy/k8s/README.md first: if every
+# schedule is `exclusive: true`, you do not need this file at all.
+#
+#   kubectl apply -f usai-singletons.yaml
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: usai-app-singleton
+  namespace: usai
+data:
+  USAI_STATUS_ADDR: "0.0.0.0:9090"
+  USAI_SURFACES_OFF: "docs"
+  # Fewer worlds: this instance takes no HTTP traffic, only ticks and
+  # services. The memory floor follows it (40 + 30 + max_worlds).
+  USAI_MAX_WORLDS: "8"
+  USAI_DRAIN_GRACE: "2"
+  USAI_DRAIN_TIMEOUT: "30"
+  # Nothing here: this is the instance that *does* schedule.
+  USAI_NO_QUEUE: "1"                 # let the web replicas consume the queue
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: usai-app-singleton
+  namespace: usai
+  labels: { app.kubernetes.io/name: usai-app-singleton }
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate: a surge would briefly run two schedulers,
+  # which is what `sum(usai_scheduler{kind="cron"}) > 1` alerts on
+  # [doc: runbooks/metrics.md]. The cost is a gap with no scheduler, and a
+  # tick in that gap is lost rather than replayed [doc: GUIDE §6] — deploy
+  # this one away from a tick, or make the schedules `exclusive: true` and
+  # delete this Deployment.
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app.kubernetes.io/name: usai-app-singleton }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: usai-app-singleton }
+    spec:
+      terminationGracePeriodSeconds: 40      # grace 2 + timeout 30 + margin
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: usai
+          image: my-registry/my-app:0.1.0
+          args: ["run", "--artifact", "/app/.usai/build",
+                 "--host", "0.0.0.0", "--port", "3000",
+                 "--log-format", "json"]
+          ports:
+            - { name: http,   containerPort: 3000 }
+            - { name: status, containerPort: 9090 }
+          envFrom:
+            - configMapRef: { name: usai-app-singleton }
+            - secretRef:    { name: usai-app }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+          startupProbe:
+            httpGet: { path: /_usai/live, port: status }
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            # This pod is behind no Service, but readiness still gates the
+            # rollout: a Recreate waits for it before calling the deploy done.
+            httpGet: { path: /_usai/ready, port: status }
+            periodSeconds: 5
+            timeoutSeconds: 4
+          livenessProbe:
+            httpGet: { path: /_usai/live, port: status }
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests: { cpu: "200m", memory: 128Mi }
+            limits:   { memory: 192Mi }
+      volumes:
+        - { name: tmp, emptyDir: {} }
+---
+# No Service: nothing routes to this pod. Scrape it through the pod-level
+# ServiceMonitor or a PodMonitor if you want its metrics — `usai_scheduler`
+# on this pod is the one that should read 1.

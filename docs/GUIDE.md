@@ -527,7 +527,11 @@ reads `.env`), `--read-only --tmpfs /tmp` works; `docker stop` sends SIGTERM,
 which drains with the same bound as Ctrl-C. A production compose file (PostgreSQL, a one-shot
 `migrate` service, the app with `--status-addr`, a proxy) is
 `docs/deploy/compose.production.yaml`; the scaffold's `compose.yaml` is the
-development path.
+development path. **On Kubernetes**, `docs/deploy/k8s/` has the Deployment,
+the probes, the migration Job, the PodDisruptionBudget and the scrape target,
+with the three decisions the platform forces you to take written out: where
+the scheduler runs when every pod has the same PodSpec, when migrations run,
+and what a PDB means while the database is down.
 
 How much host to give it: one instance of a production-shaped application (PostgreSQL pool, a task, a cron, status + metrics on, `--max-worlds 48`) idles at ≈40 MiB RSS / 35 MiB PSS and 0.00 % CPU, becomes ready in ≈0.6 s, and peaks near 100 MiB under a 16-client burst — **192 MiB and 1 vCPU** is the supported envelope (`SUPPORTED.md`): re-measured 2026-09-23 on a box charged for its own page cache, the production shape peaks at 106 MiB resident / 93 MiB charged whatever the box, and 128 MiB serves it without the kernel reclaiming once — 192 MiB is what covers the extra revision a rolling deployment holds. **64 MiB** runs a hello-only application; 48 MiB does not, whatever the old numbers said (it is charged to its ceiling, thrashes on its own text and serves one request per second without ever being killed — `docs/measurements/2026-09-23-floor-accounting.md`). Memory follows the peak number of concurrently used worlds (≈4 MiB RSS per touched slot, kept resident so the next world does not fault the image back in; `USAI_WASM_KEEP_RESIDENT=0` returns it after a burst at half the throughput), not the request count, so `--max-worlds` is the memory knob and `mem_limit` should cover `40 MiB + max_worlds × 4 MiB`. A fractional vCPU works; its burst p99 is the CFS throttle. Fifty mostly-idle instances on one host cost ≈30 MiB PSS each and no idle CPU (`docs/measurements/2026-09-20-p8e-efficiency.md`).
 

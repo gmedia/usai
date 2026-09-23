@@ -1,0 +1,221 @@
+# Usai on Kubernetes — the web Deployment and everything around it.
+# Read docs/deploy/k8s/README.md first: it explains the three decisions this
+# file takes (where the scheduler runs, when migrations run, what a PDB means
+# during a database outage).
+#
+# Every value below cites what it rests on:
+#   [doc]      a published document says so
+#   [measured] measured on 0.0.9, VM 47 or a developer box
+#   [yours]    nothing in this project decides it — your cluster does
+#
+#   kubectl apply -f usai-app.yaml
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: usai
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: usai-app
+  namespace: usai
+data:
+  # The surfaces on their own listener, reachable by the kubelet and the
+  # scraper and by nothing else. It must be 0.0.0.0 (or the pod IP): the
+  # kubelet probes the pod's address, not its loopback. [doc: ENVIRONMENT.md]
+  USAI_STATUS_ADDR: "0.0.0.0:9090"
+  # `usai probe` reads the same variable, so an exec probe needs no flags.
+  USAI_SURFACES_OFF: "docs"          # nothing consumes the reference here [doc: ENVIRONMENT.md]
+  USAI_MAX_WORLDS: "48"              # the published envelope [doc: SUPPORTED.md]
+  USAI_DRAIN_GRACE: "10"             # see terminationGracePeriodSeconds below
+  USAI_DRAIN_TIMEOUT: "30"           # [doc: runbooks/deploy-and-rollback.md]
+  # This Deployment serves HTTP only; schedules and services live in
+  # usai-singletons.yaml. Drop both if every schedule is `exclusive: true`.
+  USAI_NO_CRON: "1"                  # [doc: SUPPORTED.md, GUIDE §14]
+  USAI_NO_SERVICES: "1"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: usai-app
+  namespace: usai
+type: Opaque
+stringData:
+  # Activation fails loudly if a declared variable is missing or malformed —
+  # it does not start and serve 500s. [doc: THREAT-MODEL.md #3]
+  DATABASE_URL: "postgres://app:CHANGE-ME@postgres:5432/app?sslmode=require"
+  # Guards /_usai/status, /_usai/metrics and /_usai/openapi.json on both
+  # listeners; /_usai/live and /_usai/ready stay open for the kubelet.
+  # [doc: GUIDE §14]
+  USAI_STATUS_TOKEN: "CHANGE-ME"
+---
+# Migrations as a deploy step. A bare Job has no ordering relationship to the
+# rollout — make it a Helm `pre-upgrade` hook, an Argo `PreSync` wave, or
+# apply it and `kubectl wait --for=condition=complete` before the Deployment.
+# The alternative that needs no ordering at all is an initContainer on every
+# replica: several migrators serialize on an advisory lock and apply each
+# file exactly once [doc: SUPPORTED.md, measured with three].
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: usai-app-migrate
+  namespace: usai
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsUser: 10001            # the image's user [doc: THREAT-MODEL.md]
+        runAsGroup: 10001
+        runAsNonRoot: true
+      containers:
+        - name: migrate
+          image: my-registry/my-app:0.1.0
+          args: ["db", "migrate", "--artifact", "/app/.usai/build"]
+          envFrom:
+            - secretRef: { name: usai-app }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { memory: 256Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: usai-app
+  namespace: usai
+  labels: { app.kubernetes.io/name: usai-app }
+spec:
+  replicas: 2                       # [doc: runbooks/sizing.md §6]
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+      # A surge means three pods for a moment, so PostgreSQL sees
+      # 3 × pool.max connections, not 2 × [doc: runbooks/sizing.md §2].
+  selector:
+    matchLabels: { app.kubernetes.io/name: usai-app }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: usai-app }
+    spec:
+      # SIGTERM → exit is USAI_DRAIN_GRACE + USAI_DRAIN_TIMEOUT plus
+      # milliseconds [measured: grace 2 + timeout 5 → 7 014 ms]. 10 + 30 + a
+      # margin. The orchestrator's grace must exceed the sum [doc:
+      # ENVIRONMENT.md].
+      terminationGracePeriodSeconds: 45
+      # No preStop hook: the drain grace already is one. On SIGTERM readiness
+      # fails within ~16 ms while the listener keeps accepting and answering
+      # 200 with `connection: close` [measured].
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: usai
+          image: my-registry/my-app:0.1.0
+          args: ["run", "--artifact", "/app/.usai/build",
+                 "--host", "0.0.0.0", "--port", "3000",
+                 "--log-format", "json"]
+          # --log-format json keeps stdout empty and writes one object per
+          # line on stderr [doc: runbooks/systemd.md].
+          ports:
+            - { name: http,   containerPort: 3000 }
+            - { name: status, containerPort: 9090 }
+          envFrom:
+            - configMapRef: { name: usai-app }
+            - secretRef:    { name: usai-app }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true      # the runtime writes nothing [doc: THREAT-MODEL.md]
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+          # The status listener binds *after* activation, so a probe during a
+          # cold start gets connection-refused rather than a 503. Let the
+          # startup probe absorb that [measured: ~130 ms warm].
+          startupProbe:
+            httpGet: { path: /_usai/live, port: status }
+            periodSeconds: 2
+            failureThreshold: 30            # 60 s for a cold image and a slow pool
+          readinessProbe:
+            httpGet: { path: /_usai/ready, port: status }
+            periodSeconds: 2
+            timeoutSeconds: 4               # the resource probe's own bound is 1 s [doc: GUIDE §14]
+            failureThreshold: 2
+          livenessProbe:
+            # /_usai/live stays 200 through a drain and through a database
+            # outage [measured] — restart only a process that stopped
+            # answering.
+            httpGet: { path: /_usai/live, port: status }
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            # 40 MiB base + peak concurrency × 4…8 + 30 for a held revision
+            # [doc: runbooks/sizing.md §4]. The published envelope is 192 MiB
+            # for this shape; a limit is also the OOM boundary for a burst,
+            # so this asks for more.
+            requests: { cpu: "500m", memory: 256Mi }
+            limits:   { memory: 320Mi }
+            # Do NOT add an address-space limit: ~200 GB of virtual memory is
+            # reserved per pool by design [doc: runbooks/metrics.md].
+      volumes:
+        - { name: tmp, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: usai-app
+  namespace: usai
+spec:
+  selector: { app.kubernetes.io/name: usai-app }
+  ports:
+    - { name: http, port: 80, targetPort: http }
+  # Only the application port. Nothing under /_usai/ is served here while the
+  # surfaces are on --status-addr [measured: all six paths 404].
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: usai-app-status
+  namespace: usai
+  labels: { app.kubernetes.io/name: usai-app }
+spec:
+  clusterIP: None
+  selector: { app.kubernetes.io/name: usai-app }
+  ports:
+    - { name: status, port: 9090, targetPort: status }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: usai-app
+  namespace: usai
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: usai-app }
+  # A PDB counts *ready* pods. With the default readiness policy a shared
+  # PostgreSQL outage makes every replica unready at once, and this budget
+  # then blocks every voluntary eviction until the database returns. See the
+  # README and USAI_READY_REQUIRES_RESOURCES.
+---
+# Prometheus Operator. Without it, annotate the pods instead.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: usai-app
+  namespace: usai
+spec:
+  selector:
+    matchLabels: { app.kubernetes.io/name: usai-app }
+  endpoints:
+    - port: status
+      path: /_usai/metrics
+      interval: 15s
+      # /_usai/metrics takes the status token; the probes do not.
+      bearerTokenSecret: { name: usai-app, key: USAI_STATUS_TOKEN }

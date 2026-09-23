@@ -24,6 +24,7 @@ and how recovery happens — without reading Rust.
 | Every metric, its labels, and the alerts to set | [metrics.md](metrics.md) |
 | Sizing: `--max-worlds`, `pool.max`, `concurrency`, memory, CPU, replicas | [sizing.md](sizing.md) |
 | Running on a VM under systemd (deploy, rolling restart, rollback without Docker) | [systemd.md](systemd.md) |
+| Running on Kubernetes (manifests, probes, the singleton scheduler, PDB × readiness) | [../deploy/k8s/README.md](../deploy/k8s/README.md) |
 | Cutting a release (the three versions, the gate, the tag, what the workflow does) | [release.md](release.md) |
 
 References the pages lean on: [`../ENVIRONMENT.md`](../ENVIRONMENT.md)
