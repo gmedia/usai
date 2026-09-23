@@ -71,7 +71,7 @@ image (one during a replacement, bounded).
 
 ```text
 mem_limit / MemoryMax  ≥  40 + peak_concurrency × (4…8) + 30   (MiB)
-48 worlds → ≥ 262 MiB; the compose file uses 512 MiB; 192 MiB is the supported floor measured with 48 worlds and a 16-client burst (**under re-measurement**, 2026-09-23: the floor cells were not charged for the runtime's own text, so the published number can only be too small — `docs/measurements/2026-09-23-floor-accounting.md`)
+48 worlds → ≥ 262 MiB; the compose file uses 512 MiB; 192 MiB is the supported floor, re-measured 2026-09-23 on a box charged for its own page cache (128 MiB serves the same shape with zero reclaim but leaves nothing for a held revision — `docs/measurements/2026-09-23-floor-accounting.md`)
 ```
 
 The runtime checks this arithmetic against its own cgroup at start and warns
