@@ -83,3 +83,20 @@ back) and the honest upstream version is ~30 lines in a file this project has
 already contributed to — `bytecodealliance/wasmtime#14357` was merged on
 2026-09-23. Opening the second PR is cheap; shipping a private patch for it
 would re-create the vendor we are about to delete.
+
+## How to open it
+
+The decision is the maintainer's (it commits this project to an upstream
+conversation and to the measurement that follows). When it is taken, this
+document **is** the issue — it states the observation, the measurement, why
+the embedder cannot do it, and the shape of the change:
+
+```bash
+gh issue create --repo bytecodealliance/wasmtime \
+  --title "pooling allocator: release a slot's kept-resident memory when it goes idle" \
+  --body-file docs/upstream/wasmtime-idle-decommit.md
+```
+
+Trim the first paragraph (it is addressed to this repository's readers) and
+say in one line that the numbers come from an embedder running one instance
+per application. Link the merged #14357 as context for who is asking.
