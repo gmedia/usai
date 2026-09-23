@@ -67,6 +67,12 @@ prepare() {
   ')
   "$USAI" --root "$TEMPLATE" db migrate >/dev/null
   if docker info >/dev/null 2>&1; then log "base image $BASE_IMAGE"; docker pull -q "$BASE_IMAGE" >/dev/null; fi
+  # A floor cell that cannot drop the page cache measures a warm machine and
+  # says so, but the campaign should find that out here rather than in the
+  # first result.json.
+  if ! python3 -c "import mmap, os" >/dev/null 2>&1; then
+    log "  WARNING: python3 is missing, so no cell can drop the page cache - every floor will be measured warm"
+  fi
   log "prepared"
 }
 
