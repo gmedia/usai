@@ -44,6 +44,7 @@ claim() { say ""; say "$1"; }
 
 code() { curl -s -o /dev/null -w '%{http_code}' -m 20 "$@"; }
 body() { curl -s -m 20 "$@"; }
+heads() { curl -s -o /dev/null -D- -m 20 "$@"; }
 
 cleanup() {
   [ -n "${SERVER_PID:-}" ] && kill "$SERVER_PID" 2>/dev/null
@@ -121,6 +122,15 @@ got=$(code "$base/hog")
 b=$(body "$base/hog")
 echo "$b" | grep -q "runtime_fault\|internal" && ok "the client is told nothing more than a fault" || bad "the fault is sanitized" "$b"
 [ "$(code "$base/alive")" = "200" ] && ok "the runtime keeps serving afterwards" || bad "the runtime keeps serving afterwards"
+
+claim "A response tells the client nothing about the server unless asked"
+h=$(heads "$base/alive")
+echo "$h" | grep -qi "^server-timing:" && bad "Server-Timing is on without --server-timing" "$h" ||
+  ok "no Server-Timing (it is opt-in: --server-timing / USAI_SERVER_TIMING)"
+echo "$h" | grep -qi "^x-usai-" && bad "an x-usai-* header is exposed by default" "$h" ||
+  ok "no x-usai-* header (those are --diagnostics and USAI_PROFILE)"
+echo "$h" | grep -qi "^x-request-id:" && ok "x-request-id comes back, which is the one thing it should say" ||
+  bad "x-request-id comes back" "$h"
 
 claim "Internal detail does not leak in error responses"
 b=$(body "$base/boom")

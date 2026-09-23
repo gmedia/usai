@@ -170,6 +170,13 @@ the human summary.
 
 ### CI
 
+- **The threat suite is 42 probes** (from 39). `--server-timing` is a new
+  thing a response can say about the server, so three probes now assert what
+  an ordinary response says without it: no `Server-Timing`, no `x-usai-*`
+  (those belong to `--diagnostics` and `USAI_PROFILE`), and `x-request-id`
+  returned, which is the one thing it should say. `docs/THREAT-MODEL.md`
+  gained the matching entry — including that response timing is a side
+  channel on a route whose body is careful not to be one.
 - The secret scan failed on its own arguments (the action passes `--fail`,
   so passing it again is an error) — a job that fails on a flag looks exactly
   like a job that found a secret.

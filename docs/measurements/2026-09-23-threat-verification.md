@@ -4,7 +4,7 @@
 them from outside the process, one probe per claim, on the tree at
 `20e9477` (0.0.8 unreleased, debug build, this dev box).
 
-**Result: 39 probes, 39 passed, 0 failed** (37 on 2026-09-23 morning; two more the same evening, after round 16 found the runtime telling an unauthenticated caller that an operator surface exists). The two findings of the day are
+**Result: 39 probes, 39 passed, 0 failed** (37 on 2026-09-23 morning; two more the same evening, after round 16 found the runtime telling an unauthenticated caller that an operator surface exists). **Re-run 2026-09-24 with three probes added for `--server-timing`: 42 probes, 42 passed, 0 failed.** The new ones assert what an ordinary response says about the server — no `Server-Timing` unless `--server-timing` asked for it, no `x-usai-*` (those are `--diagnostics` and `USAI_PROFILE`), and `x-request-id` returned, which is the one thing it should say. The two findings of the day are
 not runtime bugs — they are bugs in the *instrument*, found by distrusting a
 clean first result (below).
 
