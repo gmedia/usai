@@ -115,6 +115,13 @@ Label values:
   with that in mind.
 - `usai_process_page_faults_total{kind}`: `minor`, `major`.
 
+A **Grafana dashboard built from this page** is
+`docs/deploy/grafana-dashboard.json` — import it, pick the datasource and the
+job. Sixteen panels, every query taken from the table above, including the
+two things nothing else shows you: what the cgroup is charged against its
+limit, and the ceiling hits that mean the container is reclaiming the pages
+it executes from.
+
 ## Alerts worth setting from this page alone
 
 | Alert | Expression (PromQL shape) | Why |

@@ -105,6 +105,16 @@ throughput, and `docs/measurements/` is where performance numbers live):
   503. Give `startupProbe` enough `failureThreshold` to cover a cold start
   (measured: ~130 ms warm, seconds on a cold image pull).
 
+## Dashboards and alerts
+
+`../grafana-dashboard.json` is a dashboard built from
+`../../runbooks/metrics.md` — import it, pick the datasource and the job
+label. The alert table on that page transcribes into a `PrometheusRule`
+almost verbatim; the one alert that only exists here is
+`usai_process_memory_ceiling_hits_total`, because a container reclaiming the
+pages it executes from is invisible to Kubernetes: no OOM kill, no restart,
+no event.
+
 ## Sizing
 
 `../../runbooks/sizing.md` has the arithmetic; the short version for a
