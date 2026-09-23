@@ -35,7 +35,8 @@ const DEADLINE = /deadline|timeout of the benchmark|aborted/i;
 const errorsOf = (r) => {
   const kinds = r.errorKinds ?? null;
   if (!r.errors) return 0;
-  if (!kinds) return `${r.errors}${r.errors === r.clients ? " (aborted at the deadline?)" : ""}`;
+  if (!kinds)
+    return `${r.errors}${r.errors <= r.clients ? " (≤ c: in flight at the deadline?)" : ""}`;
   let aborted = 0;
   let real = 0;
   for (const [kind, n] of Object.entries(kinds)) DEADLINE.test(kind) ? (aborted += n) : (real += n);
