@@ -152,9 +152,16 @@ the symlink and restart.
 ## Upgrading the runtime binary
 
 Runtime and SDK ship together; an artifact built by version N runs on the
-runtime of N and N+1 (`SUPPORTED.md`). Order: install the new binary,
-restart the replicas one at a time (they now run the old artifact on the new
-runtime), then deploy the artifact built with the new SDK the same way. A
+runtime of N and N+1 (`SUPPORTED.md`). Order: **install the new binary**
+first, then — if the release notes mention new queue indexes — run
+`usai --root /srv/app queue prepare` with it while the old version keeps
+serving (the subcommand only exists on the version that needs it, so this
+step is impossible before the binary is installed), then **restart the
+replicas one at a time** (they now run the old artifact on the new runtime),
+then **deploy the artifact** built with the new SDK the same way. The other
+order — artifact first — is the common mistake, and it serves silently
+whenever the manifest format did not change; since 0.0.10 the runtime warns
+when the artifact was built by a newer SDK than itself. A
 0.0.5 and a 0.0.6 runtime can serve behind one proxy during the roll
 (measured: `docs/measurements/2026-09-18-p5-p6-qualification.md` → Mixed
 versions); they share nothing but PostgreSQL. The migration ledger is stable
