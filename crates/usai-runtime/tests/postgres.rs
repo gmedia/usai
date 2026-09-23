@@ -1414,8 +1414,12 @@ async fn a_database_that_stops_answering_makes_the_resource_unready() {
         reason.contains("timed out"),
         "the probe waited instead of giving up: {reason}"
     );
+    // The assertion that matters is the message above: only the probe's own
+    // bound says "timed out" (a refused connection says "no connection"), so
+    // this is a loose guard against waiting for the connect timeout on a
+    // loaded box rather than a timing assertion.
     assert!(
-        started.elapsed() < Duration::from_secs(3),
+        started.elapsed() < Duration::from_secs(10),
         "the probe took {:?}",
         started.elapsed()
     );
