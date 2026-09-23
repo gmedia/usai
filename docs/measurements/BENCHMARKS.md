@@ -112,7 +112,9 @@ counts. `report.mjs` renders the tables.
    route and disappears into PostgreSQL on the classes an application is
    made of; one Usai process beats one Node process from c=8 up and is 2×
    behind an eight-worker cluster on the database classes, at 0.5 GiB of
-   memory for 64 concurrent requests).
+   memory for 64 concurrent requests; ahead of bare tuned PHP-FPM wherever
+   PostgreSQL is involved and behind it on pure validation; ahead of
+   Laravel 12 on every class by 1.8× to 7×).
 2. **Efficiency** — RSS and PSS idle and under load, what returns after a
    burst, the floors a cgroup box will run one application in, and density
    (N mostly-idle applications per host against Node + Fastify): the P8E
