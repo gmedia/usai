@@ -252,6 +252,15 @@ async fn cron_scheduler_ticks_and_skips_overlap() {
         "overlap=skip should have skipped a tick"
     );
     assert!(audit(&rt, "cron:overlapping").await.as_u64().unwrap_or(0) <= 2);
+    // One tick per second, and no second tick for a second already fired.
+    // A sleep computed from the wall clock can end early; the scheduler used
+    // to treat that as the tick and then fire the same occurrence again when
+    // it recomputed it (measured on a `*/1 * * * *` schedule: 59.6 s *and*
+    // 00.0 s, two real runs of a job that is not idempotent).
+    assert!(
+        ticks <= 4,
+        "3.2 s of a one-second schedule fired {ticks} times: an early wake is being counted as a tick"
+    );
     // Draining stops the scheduler; no new ticks after.
     let b = rt.install(Arc::clone(&rev.definition)).await.unwrap();
     rt.activate(b.id).await.unwrap();

@@ -201,6 +201,11 @@ pub fn start(
             let running = Arc::new(AtomicBool::new(false));
             let claim_through = claim_through;
             let claimant = claimant;
+            // The last scheduled time this scheduler fired. A tick is for a
+            // *scheduled time*, not for a moment the timer woke up, and
+            // firing one twice is a double send for anything that is not
+            // idempotent.
+            let mut last_fired: Option<DateTime<Utc>> = None;
             loop {
                 let now = Utc::now();
                 let Ok(next) = cron.find_next_occurrence(&now, false) else {
@@ -212,6 +217,31 @@ pub fn start(
                     _ = tokio::time::sleep(wait) => {}
                     _ = stop.cancelled() => return,
                 }
+                // A sleep computed from the wall clock and served by the
+                // monotonic one can end early — measured at ~0.4 s before
+                // the boundary on a `*/1 * * * *` schedule, which then fired
+                // at 59.6 s *and* at 00.0 s: the loop recomputed the same
+                // occurrence and slept the remainder. Wait out the
+                // difference instead of treating an early wake as the tick.
+                loop {
+                    let short_by = next - Utc::now();
+                    match short_by.to_std() {
+                        Ok(remaining) if !remaining.is_zero() => {
+                            tokio::select! {
+                                _ = tokio::time::sleep(remaining) => {}
+                                _ = stop.cancelled() => return,
+                            }
+                        }
+                        _ => break,
+                    }
+                }
+                // And never the same scheduled time twice, whatever the
+                // clock did in between (a step backwards is a real thing on
+                // a virtualised host).
+                if last_fired == Some(next) {
+                    continue;
+                }
+                last_fired = Some(next);
                 stats.ticks.fetch_add(1, Ordering::SeqCst);
                 if overlap == OverlapPolicy::Skip && running.load(Ordering::SeqCst) {
                     stats.skipped.fetch_add(1, Ordering::SeqCst);
