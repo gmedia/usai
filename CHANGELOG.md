@@ -12,7 +12,8 @@ the human summary.
 
 Since 0.0.5 (2026-09-18). Alpha, production qualification in progress: the
 24 h soak, the failure campaigns, the connection campaign and the
-two-replica campaign passed; the 72 h soak is running.
+two-replica campaign and the 72 h soak all passed (73.6 M requests, 0 × 5xx,
+0 quarantined, flat memory).
 
 ### Runtime
 

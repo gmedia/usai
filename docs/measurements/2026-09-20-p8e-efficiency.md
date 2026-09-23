@@ -325,8 +325,8 @@ internal-tools, per-tenant-process shape — the envelope is already
 favourable and a hot-path P9 would not change the operator's bill. For a
 host that runs **one busy application**, CPU per request is the bill, and
 Usai pays ≈1.7× Node on trivial routes (much less on PostgreSQL routes,
-where the query dominates: P8 classes C–F). The concurrency sweep after the
-72 h soak (idle VM) is the third number the P9 decision needs; the
+where the query dominates: P8 classes C–F). The concurrency sweep on the idle VM (started 2026-09-23, after the 72 h
+soak) is the third number the P9 decision needs; the
 recommendation so far is: **P9 is worth opening only for the "one busy
 application" case, and only on the two levers that are not the model
 itself** — the boundary JSON (a typed encoding in place of one JSON parse
