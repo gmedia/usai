@@ -59,7 +59,7 @@ update usai_queue set state = 'ready', attempts = 0, last_error = null
 Then keep the table from growing forever — the runtime never prunes it:
 
 ```bash
-usai --root /srv/app queue prune --state done --older-than 30d
+usai --root /srv/app queue prune --state done --older-than 30d --yes
 usai --root /srv/app queue prune --state dead --older-than 90d --dry-run
 ```
 

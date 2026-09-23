@@ -167,7 +167,7 @@ version keeps serving, with
 ```bash
 usai --root /srv/app queue prepare        # CREATE INDEX CONCURRENTLY, repeatable
 usai --root /srv/app queue status         # rows per topic and state, oldest wait
-usai --root /srv/app queue prune --state done --older-than 30d   # the table is yours
+usai --root /srv/app queue prune --state done --older-than 30d --yes   # the table is yours
 ```
 
 `prepare` is safe to run at any time and as often as you like; the runtime's

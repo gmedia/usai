@@ -1281,7 +1281,7 @@ pub async fn queue_prune(
                 })
                 .unwrap_or(0);
             println!(
-                "dry run: up to {n} row(s) in state {} would be considered; the age filter (older than {older_than}) is applied by the delete itself",
+                "dry run: up to {n} row(s) in state {} would be considered; the age filter (older than {older_than}) is applied by the delete itself\n  nothing was deleted — add --yes to delete",
                 states.join("/")
             );
             return Ok(());

@@ -293,7 +293,7 @@ enum QueueAction {
     },
     /// Delete finished rows. The runtime never prunes by itself: a `dead`
     /// row is a message your application failed, and only you know whether
-    /// it is still evidence
+    /// it is still evidence. Counts by default and needs `--yes` to delete
     Prune {
         /// `done`, `dead` or `all`
         #[arg(long, default_value = "done")]
@@ -306,9 +306,14 @@ enum QueueAction {
         topic: Option<String>,
         #[arg(long)]
         resource: Option<String>,
-        /// Count what would go, delete nothing
+        /// Count what would go, delete nothing (the default)
         #[arg(long)]
         dry_run: bool,
+        /// Actually delete. Without it `prune` counts and says what it
+        /// would have removed: a bare `usai queue prune` used to delete
+        /// `done` rows older than a week with no confirmation
+        #[arg(long)]
+        yes: bool,
     },
     /// Create the queue's indexes with CREATE INDEX CONCURRENTLY, before an
     /// upgrade builds them under a write-blocking lock. Safe to run while
@@ -547,6 +552,7 @@ async fn async_main() {
                     topic,
                     resource,
                     dry_run,
+                    yes,
                 },
         } => {
             commands::queue_prune(
@@ -555,7 +561,9 @@ async fn async_main() {
                 &older_than,
                 topic.as_deref(),
                 resource.as_deref(),
-                dry_run,
+                // Counting is the default; deleting is the thing you ask
+                // for. `--dry-run` stays because scripts already pass it.
+                dry_run || !yes,
             )
             .await
         }

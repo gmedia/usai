@@ -12,6 +12,11 @@ the human summary.
 
 ### CLI
 
+- **`usai queue prune` counts unless you pass `--yes`.** Its defaults are
+  `--state done --older-than 7d`, and a bare `usai queue prune` applied them
+  immediately with no confirmation — a destructive default on a command
+  whose own help says the runtime never prunes by itself. It now prints what
+  it would remove and deletes nothing without `--yes`.
 - **`usai probe --timeout <seconds>`** (3 by default, as before). An `exec`
   probe's own timeout has to be above the command's, or the supervisor kills
   the check instead of reading its answer — and until now the command's was
