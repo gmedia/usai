@@ -14,9 +14,13 @@ Production substrate        Wasm image + pooling/COW (ADR-0016); attributed and 
                             (hello 1.01 ms p50 at c=1; 13.6k req/s at c=16 on 16 cores with `usai bench`, no proxy, no co-tenant — the
                             2026-09-18 attribution report; the 2026-09-19 comparative run with the soak as co-tenant saw 5.8k); 1 h `usai bench`
                             soak: 49 M hello requests, 0 errors, RSS +0.9 %
-Developer preview           v0.0.5 (2026-09-18) — one tag publishes binaries (linux x86_64/aarch64, macOS arm64), npm
-                            (@sakaladev/usai, @sakaladev/create-usai) and Docker images (runtime + dev, amd64 + arm64);
-                            main since then: P7 fixes, the documentation split, typed ctx.resources, replica flags (0.0.6 candidate)
+Developer preview           v0.0.9 (2026-09-23) — one tag publishes binaries (linux x86_64/aarch64, macOS arm64), npm
+                            (@sakaladev/usai, @sakaladev/create-usai) and Docker images (runtime + dev, amd64 + arm64),
+                            all with Sigstore build provenance. 0.0.9 is the operator release: the multi-replica proxy
+                            configuration published, what readiness couples stated wherever a health check is set, a
+                            listener that does not serve a surface answering 404 rather than 401, a hanging readiness
+                            probe marking its resource unready, and the runtime able to see its own memory ceiling.
+                            0.0.6's Linux binaries were broken by the runner's glibc and are deprecated (0.0.7 fixed it)
 Efficiency envelope         RE-MEASURED 2026-09-23 on a box charged for its own page cache: supported floor 192 MiB /
                             1 vCPU (128 MiB serves the same shape with zero reclaim, no room for a held revision);
                             technical floor 64 MiB, NOT the 48 MiB published before — at 48 the box thrashes on its own
