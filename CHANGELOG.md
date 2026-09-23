@@ -24,6 +24,33 @@ the human summary.
   with the one the runtime was started with), and "does not verify" says the
   signature was made for different bytes than the artifact carries.
 
+### Documentation
+
+- **`docs/deploy/k8s/`** — the Deployment, the probes, the migration Job, the
+  PodDisruptionBudget and the scrape target, plus the three decisions
+  Kubernetes forces that a compose file never does: where the scheduler runs
+  when every pod has the same PodSpec, when migrations run, and what a PDB
+  means while the database is down. Until now the word "Kubernetes" appeared
+  once in the whole documentation set.
+- **A cron tick with no scheduler alive is lost, not replayed** (GUIDE §6,
+  `SUPPORTED.md`) — true since the first version, written down only now, and
+  the first thing to know before putting a single cron replica behind a
+  `Recreate` rollout.
+- **`usai probe` is for a Docker `HEALTHCHECK`**, not for a kubelet: an
+  `httpGet` probe is made by the kubelet, so the image needs no HTTP client.
+  The command's own timeout (3 s) is documented, and `USAI_STATUS_ADDR` must
+  be the pod's address rather than loopback.
+- **"Run migrations as a deploy step, never at startup"** was read as
+  forbidding an initContainer. It does not: several migrators serialize on an
+  advisory lock and apply each file exactly once. What it forbids is an
+  application that migrates itself on its first request.
+- Two sentences a reader would have coded against: a cancelled request's
+  client gets `499` with a body rather than a closed connection, and
+  `postgres-down.md`'s "Responses" bullet gave the *log's* wording for what
+  the client sees (the client gets the code and `internal error`).
+- `SUPPORTED.md` carries the container uid (10001) and the ~200 GB virtual
+  reservation, where somebody writing a PodSpec looks for them.
+
 ### CI
 
 - The secret scan failed on its own arguments (the action passes `--fail`,
