@@ -521,6 +521,11 @@ impl Runtime {
             revision.set_state(RevisionState::Active);
             previous
         };
+        // The first world's instantiation cost belongs to the activation,
+        // not to whoever sends the first request after readiness turns true.
+        if let Err(e) = self.engine.warm(&revision.compiled).await {
+            tracing::debug!(revision = %id, error = %e, "warm-up instance failed; the first world will pay it");
+        }
         tracing::info!(revision = %id, "revision active");
         // Serving nothing is a deployment that answers 404 to everything; say
         // so once, where an operator will see it.

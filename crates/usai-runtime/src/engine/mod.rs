@@ -190,6 +190,19 @@ pub trait Engine: Send + Sync {
         compiled: &Arc<dyn Compiled>,
         bindings: Arc<dyn HostBindings>,
     ) -> Result<Box<dyn WorldInstance>, EngineError>;
+    /// Pays a world's first-instantiation costs once, at activation: the
+    /// compiled image's pages are faulted in and whatever the engine
+    /// initialises lazily is initialised. The instance is created with
+    /// refusing bindings and dropped, so no application work runs — a world
+    /// resumes the same baseline. Measured on `examples/hello`: a first
+    /// request was 16–21 ms against ~4 ms for the ones after it, most of it
+    /// this.
+    async fn warm(&self, compiled: &Arc<dyn Compiled>) -> Result<(), EngineError> {
+        let _instance = self
+            .instantiate(compiled, Arc::new(RefusingBindings))
+            .await?;
+        Ok(())
+    }
     /// Build-time: evaluates the module in a capability-less instance and
     /// returns `__usai_sdk.describe(__usai_app)` (ADR-0009).
     async fn describe(

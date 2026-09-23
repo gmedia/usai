@@ -446,6 +446,17 @@ impl HttpHost {
         &self.config
     }
 
+    /// Builds the active revision's routing table now, instead of on the
+    /// first request. Compiling it is definition-lifetime work (route
+    /// matcher, one validator per contract slot) and it was measured at
+    /// most of a first request's cost on a small application; an operator
+    /// who has just been told the instance is ready should not be handing
+    /// that bill to the first caller. Quiet: a revision that cannot serve
+    /// HTTP reports itself on the request path as before.
+    pub fn warm(&self) {
+        let _ = self.compiled();
+    }
+
     /// Definition-lifetime work, done once per active revision.
     fn compiled(&self) -> Result<Arc<CompiledRevision>, Reply> {
         let revision = self.runtime.active().map_err(|_| {

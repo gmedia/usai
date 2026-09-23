@@ -467,6 +467,8 @@ async fn serve_until_signal(
             }
         });
     }
+    // The routing table before the first request, not during it.
+    http_for_drain.warm();
     let server = {
         let shutdown = shutdown.clone();
         let (tx, rx) = tokio::sync::oneshot::channel();
