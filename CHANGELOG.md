@@ -101,6 +101,39 @@ below was reproduced here before it was changed.
   the distributions that meet it and the two ways out (the Docker image, or
   `USAI_BIN` pointing at a binary built locally).
 
+### Compatibility
+
+Four of the fixes above change what a running application sees. None needs a
+migration, but two can change a live response, so read them before rolling:
+
+- **A request that was accepted may now be a `400`.** Declared string formats
+  are enforced (`z.url()`, and anything else Zod emits as a `format` without a
+  pattern). If clients have been sending values your schema said were URLs and
+  were not, they were reaching your handler; they now fail at the boundary.
+  Check the OpenAPI document for the formats you declared — that is exactly the
+  list — and count `validation_failed` after the roll.
+- **`begin`, `commit`, `rollback`, `savepoint`, `set`, `reset`, `discard`,
+  `listen` and `deallocate` through `query/one/execute` now answer
+  `transaction_control` instead of half-working.** Code that issued them was
+  already broken (the statements landed on different pooled connections and the
+  connection went back to the pool mid-transaction), but it was broken quietly
+  and is now an error. `grep` for them and move each one into
+  `transaction(async (tx) => …)`, which accepts them all. A `SET LOCAL` inside
+  `transaction` is unaffected.
+- **`performance.now()` returns a different number.** It was the wall clock
+  since the snapshot was taken; it is now milliseconds since the world started.
+  Code that treated it as a timestamp (added it to an epoch, stored it) must use
+  `Date.now()`; code that measured a duration with it was already correct and
+  gets a better answer.
+- **A build can now fail on a file that compiled before.** An unknown key in a
+  route's or stream's options is a type error rather than a silently ignored
+  key — which is the point, since `Auth:` for `auth:` served an unauthenticated
+  route. If CI fails here, the key it names was doing nothing.
+
+Also new in the log, not an error: a WARN per (workload, task) pair when a
+workload dispatches a task it never declared with `dispatches(...)`. Declare the
+edge, or ignore it — the hand-off is unaffected.
+
 ### Documentation and examples
 
 - GUIDE §3 states the rule nobody could find — **a workload exists because
