@@ -1,4 +1,9 @@
-# Usai
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/usai-logo-on-dark.svg">
+    <img src="docs/brand/usai-logo.svg" alt="Usai — a workload-native application runtime" width="440">
+  </picture>
+</p>
 
 > **A program should live only as long as its work requires.**
 
