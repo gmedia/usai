@@ -8,7 +8,7 @@ runtime of that version and the next (`SUPPORTED.md` → Versioning). Within
 GitHub releases carry the auto-generated commit list as well; this file is
 the human summary.
 
-## 0.0.9 — Unreleased
+## 0.0.9 — 2026-09-23
 
 A platform engineer deployed 0.0.8 from the published artifacts for the first
 time — release binary, systemd, a proxy, two replicas, a signed artifact, a
@@ -261,9 +261,11 @@ should read before rolling:
 > probe that hangs now marks the resource unready, a database that accepts
 > the connection and then says nothing no longer hangs activation, and the
 > queue table has operator verbs. Three of our own campaigns turned out to be
-> measuring nothing: every floor this project published is void until it is
-> re-measured, and the three-replica campaign passed 11 of 11 only after the
-> run before it passed on refusals. Read Compatibility before rolling.
+> measuring nothing: every floor this project had published was void — the
+> boxes were never charged for the binary they ran, and re-measured, the
+> technical floor is 64 MiB rather than 48 — and the three-replica campaign
+> passed 11 of 11 only after the run before it passed on refusals. Read
+> Compatibility before rolling.
 
 ## 0.0.8 — 2026-09-23
 
