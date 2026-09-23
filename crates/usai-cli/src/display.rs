@@ -404,7 +404,7 @@ pub fn inspect(definition: &ApplicationDefinition) -> String {
         // with `dispatch` lives in this process only. Say so where someone
         // reading the application's shape will see it, not only in a
         // document.
-        if matches!(w.trigger, Trigger::Task { .. }) {
+        if matches!(w.trigger, Trigger::Task) {
             let _ = writeln!(
                 out,
                 "    delivery: local, non-durable  (a crash before it finishes loses it; publish to a topic for durability)"
