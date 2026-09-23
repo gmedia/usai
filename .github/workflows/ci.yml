@@ -89,6 +89,24 @@ jobs:
           node-version: 24
       - run: pnpm audit --prod --audit-level high
 
+  secrets:
+    # A key, a token or a connection string that reaches a commit is public
+    # the moment the push is: this repository is open and its history cannot
+    # be rewritten quietly. `--only-verified` keeps the gate on findings the
+    # scanner could confirm against the provider, so a fixture's fake token
+    # (`scripts/qualification/threat`, the signing tests) does not fail a
+    # build; a real one does.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The scan needs the range being pushed, not just its tip.
+          fetch-depth: 0
+      - name: Scan the history for verified secrets
+        uses: trufflesecurity/trufflehog@main
+        with:
+          extra_args: --only-verified --fail --no-update
+
   container:
     # The two images build and the scaffold's Docker paths work — before a
     # tag ever ships them. amd64 only here; the release builds both. The
