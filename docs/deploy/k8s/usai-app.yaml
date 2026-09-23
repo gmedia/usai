@@ -225,3 +225,37 @@ spec:
       interval: 15s
       # /_usai/metrics takes the status token; the probes do not.
       bearerTokenSecret: { name: usai-app, key: USAI_STATUS_TOKEN }
+---
+# Autoscaling, if you do it. CPU is the wrong first signal: the limiter is
+# usually the world budget or the connection pool, not the core
+# [doc: runbooks/sizing.md §2]. This scales on how full the world budget is,
+# which needs a custom-metrics adapter (prometheus-adapter or KEDA) to expose
+# `usai_world_budget` — without one, delete the Pods metric and keep the CPU
+# target as a coarse fallback.
+#
+# Whatever you scale on: maxReplicas × pool.max (+ one surge replica) has to
+# stay under PostgreSQL's max_connections [doc: runbooks/sizing.md §2].
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: usai-app
+  namespace: usai
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: usai-app }
+  minReplicas: 2                    # never one: a rolling restart needs a partner
+  maxReplicas: 6                    # 6 × pool.max 4 = 24 connections, + surge
+  metrics:
+    - type: Pods
+      pods:
+        metric: { name: usai_world_budget_in_use_ratio }
+        target: { type: AverageValue, averageValue: "600m" }   # 60 % of the budget
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 70 }
+  behavior:
+    scaleDown:
+      # Memory follows the *peak* concurrency a slot ever saw and does not
+      # come back [doc: runbooks/memory-pressure.md], so scaling down early
+      # and up again buys nothing. Be slow.
+      stabilizationWindowSeconds: 600
