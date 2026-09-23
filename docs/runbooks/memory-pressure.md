@@ -41,7 +41,7 @@ whose bursts are rare, `USAI_WASM_KEEP_RESIDENT=0` gives the memory back
 after each burst (RSS 100 → 45 MiB measured) at the price of re-faulting the
 image for every world: ≈2× the CPU per request and half the throughput on
 one vCPU (the C2 table in the P8E report; values between 0 and the default
-8 MiB change nothing). Raise the limit to ≥ 512 MB for 256 worlds. A
+8 MiB change nothing). The same formula at the default `--max-worlds` of 256 asks for ≈ 1 GiB, which is the honest number for a box that really admits 256 concurrent worlds — a smaller box lowers `--max-worlds` rather than the limit. A
 memory-limited instance with fewer worlds refuses with 503
 `capacity_exhausted` instead of dying — the right failure. Watch
 `usai_worlds_live` and the container's RSS together: RSS that keeps rising

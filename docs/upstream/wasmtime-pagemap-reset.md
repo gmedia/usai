@@ -48,7 +48,7 @@ of stack (a `page_region` is 24 bytes). With the resume loop the capacity is
 a throughput knob, not a correctness one — which is why it stays a fixed
 stack buffer of 64.
 
-### What was proposed (kept for the record)
+### What was proposed (kept for the record — written before the merge, tenses unchanged)
 
 The pull request to open on `bytecodealliance/wasmtime` (a fork under the
 maintainer's account, branch `pagemap-reset-complete-traversal`), with the

@@ -1,6 +1,6 @@
 # Acceptance audit — `GOAL.md` §53, item by item
 
-**Audited:** 2026-09-18 at commit a506dda. Legend: ✓ evidence exists and is
+**Audited:** 2026-09-18 at commit `a506dda`; the ✓ column is as of that date and has not been re-walked since — 0.0.7 and 0.0.8 changed behaviour it covers (`CHANGELOG.md`). Legend: ✓ evidence exists and is
 automated; ◐ implemented, evidence partial or manual; ✗ gap. Evidence names
 are test functions under `crates/usai-runtime/tests/` unless stated. Update
 this file when an item moves.
@@ -186,5 +186,7 @@ this file when an item moves.
 
 ## Open items (in priority order)
 
-1. First tagged release (`v0.0.1`) and npm token.
-3. Per-workload CPU fairness on top of the accounting.
+1. ~~First tagged release (`v0.0.1`) and npm token.~~ Done: `v0.0.1`–`v0.0.7`
+   are published, with build provenance since 0.0.8.
+2. Per-workload CPU fairness on top of the accounting (`docs/THREAT-MODEL.md`
+   says the same: CPU is accounted, not scheduled).

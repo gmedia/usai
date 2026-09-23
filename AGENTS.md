@@ -125,7 +125,7 @@ secure multi-tenant sandbox proven
 all backend workloads supported
 ```
 
-Production readiness requires production-shaped evidence: soak, overload, crash/restart, rolling upgrade, multi-core, many-app density, threat model. None of that exists yet.
+Production readiness requires production-shaped evidence: soak, overload, crash/restart, rolling upgrade, multi-core, many-app density, threat model. Most of it exists now — 24 h and 72 h soaks, overload and restart campaigns, a two-replica rolling restart, density to N = 50, and a threat model whose claims are verified by `scripts/qualification/threat/run.sh` (`docs/STATUS.md` has the evidence). **Multi-core is the one still missing** (Q8), and P7 is still waiting on people.
 
 ---
 

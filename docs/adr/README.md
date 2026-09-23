@@ -49,7 +49,7 @@ Briefly, with the reason each was not chosen.
 | [0013](0013-capability-based-api-surface.md) | Capability-based minimal Web-like surface; no Node target | accepted (v0) | Q15 |
 | [0014](0014-no-implicit-retry.md) | No implicit retry; failure terminal by default | accepted (v0) | Q16 |
 | [0015](0015-execution-substrate-quickjs-native.md) | Bootstrap/reference substrate is native QuickJS-ng behind an engine boundary | accepted as scaffolding; production superseded by 0016 | — |
-| [0016](0016-wasm-substrate-preinitialized-image.md) | Production substrate: Wasmtime + pre-initialized QuickJS image, pooling + COW | accepted (v0), production evidence pending | ADR-0015 revisit |
+| [0016](0016-wasm-substrate-preinitialized-image.md) | Production substrate: Wasmtime + pre-initialized QuickJS image, pooling + COW | accepted (v0), evidence in (attribution, P8, P8E, the 2026-09-23 sweep) | ADR-0015 revisit |
 | [0017](0017-egress-crypto-transactions-as-capabilities.md) | Outbound HTTP is a declared resource; `crypto` subset with per-world entropy; a transaction is one owned operation | accepted (v0) | ADR-0013 follow-ups |
 | [0018](0018-direct-call-guest-abi.md) | The host enters the guest by calling bridge functions (`qjs_usai_call`: `entry`, `state`, `cancel`, `stop`), never by evaluating a script on the request path | accepted (v0) | P1/P2 lever #5, P8 |
 | [0019](0019-p9-scope-the-runtime-tax-we-keep.md) | P9 opens on three scoped levers (boundary encoding, per-concurrency memory, world entry) and not on the interpreter; P7 comes first | accepted (v0) | P8, P8E, the sweep |
