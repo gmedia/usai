@@ -60,6 +60,19 @@ Once 1.0 ships, within `1.x`:
    "why can't I" of the first year.
 6. **Multi-core** (Q8) — the answer is "run replicas". A freeze does not
    depend on it, but it will shape what `1.x` can add without a major.
+7. **What readiness means** (Q19, opened 2026-09-23) — `/_usai/ready` fails
+   when any bound resource fails its probe, and a proxy removes an unready
+   upstream, so a shared database outage takes out routes that never touch
+   the database. `USAI_READY_REQUIRES_RESOURCES=0` turns the coupling off
+   per deployment. Which of the two is the *default* is a contract an
+   operator builds a health check on, and flipping it after a freeze is a
+   breaking change to every deployment that did not set the variable. It
+   should be settled first — by a deployment or two that has lived through
+   an outage, not by argument.
+8. **`/_usai/` on a listener that does not serve it** — 404 since 0.0.9,
+   including when a status token is set (it used to be 401 for two of the
+   six paths). Anything scripted against the old answer breaks, which is the
+   reason to let it sit one release before promising it.
 
 ## What a freeze does **not** require
 
