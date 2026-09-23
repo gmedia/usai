@@ -18,7 +18,7 @@
 | [`THREAT-MODEL.md`](THREAT-MODEL.md) | before deploying, or when touching input handling, limits, or secrets |
 | [`ENVIRONMENT.md`](ENVIRONMENT.md) | every `USAI_*` variable the runtime, CLI and launcher read — operating, tuning, tooling |
 | [`CONTROL-API.md`](CONTROL-API.md) | the orchestrator's surface (`--control`): install, activate, drain, remove, invoke, stop |
-| [`runbooks/`](runbooks/README.md) | when something is wrong in production: one page per incident class, plus metrics, sizing and systemd |
+| [`runbooks/`](runbooks/README.md) | when something is wrong in production: one page per incident class, plus metrics, sizing, systemd and how a release is cut |
 | [`ROADMAP.md`](ROADMAP.md) | the phases to production-ready and what each one must prove — the phase decides what work is allowed |
 | [`ACCEPTANCE-AUDIT.md`](ACCEPTANCE-AUDIT.md) | to see which `GOAL.md` §53 acceptance items have automated evidence and which are gaps |
 | [`measurements/`](measurements/) | the substrate's measured economics (research VM), before any performance claim |
