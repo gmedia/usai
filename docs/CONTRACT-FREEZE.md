@@ -85,11 +85,18 @@ Once 1.0 ships, within `1.x`:
 
 Three choices, in the order they are usually taken:
 
-1. **Freeze now at 1.0**, with the five moving items above accepted as they
-   stand. Fastest for adopters; commits us to the 0.0.9 log shape.
+1. **Freeze now at 1.0**, with the eight moving items above accepted as they
+   stand. Fastest for adopters; commits us to the 0.0.9 log shape *and* to
+   0.0.9's answer on what readiness means (item 7), which is the one most
+   likely to be regretted: it was written before anyone had lived through a
+   database outage behind a proxy with it.
 2. **Freeze after one quiet release** (0.1.0 → 1.0): ship what is moving,
    change nothing for one release, then freeze. Costs one release cycle and
-   removes the two shapes that changed this week.
+   removes the shapes that changed this week — the log line, the readiness
+   default, the `/_usai/` 404 — from the list of things frozen before anyone
+   ran them in anger. **This is the recommendation**: everything on the
+   moving list is a week old, and nothing on it is blocking an adopter today,
+   because `0.0.x` already says contracts move.
 3. **Stay `0.x`** and say so louder: an honest "not yet" is better than a
    1.0 that has to break.
 
