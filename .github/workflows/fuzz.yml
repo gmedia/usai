@@ -24,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [manifest, http_boundary, sourcemap]
+        target: [manifest, http_boundary, sourcemap, guest_bridge, postgres_params]
     steps:
       - name: Free disk space
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL

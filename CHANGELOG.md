@@ -61,6 +61,10 @@ the human summary.
   fails rather than skipping silently when a release exists and its binary
   cannot be fetched.
 - **Secrets are scanned** on every push (TruffleHog, verified findings only).
+- **Two fuzz targets for the two blind spots the fuzzing report named**: the host's side of the guest
+  bridge protocol (`guest_bridge`) and the JSON → wire-type conversion every SQL parameter goes
+  through (`postgres_params`). 3.8 M and 2.8 M executions on their first runs, 0 crashes; both are in
+  the nightly matrix.
 
 ## 0.0.8 — 2026-09-23
 

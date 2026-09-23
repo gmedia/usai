@@ -554,6 +554,18 @@ fn int_param(value: &Value) -> Option<i64> {
         .or_else(|| value.as_str().and_then(|s| s.trim().parse::<i64>().ok()))
 }
 
+/// The JSON → wire-type conversion, for the fuzz target only: the values are
+/// the application's and the types are the server's, and everything in
+/// between is this function.
+#[cfg(feature = "fuzzing")]
+pub fn fuzz_to_sql(
+    index: usize,
+    ty: &Type,
+    value: &Value,
+) -> Result<Box<dyn ToSql + Sync + Send>, ResourceError> {
+    to_sql(index, ty, value)
+}
+
 fn to_sql(
     index: usize,
     ty: &Type,

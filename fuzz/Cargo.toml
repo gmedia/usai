@@ -31,3 +31,17 @@ path = "fuzz_targets/sourcemap.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "guest_bridge"
+path = "fuzz_targets/guest_bridge.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "postgres_params"
+path = "fuzz_targets/postgres_params.rs"
+test = false
+doc = false
+bench = false
