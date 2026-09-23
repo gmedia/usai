@@ -37,7 +37,9 @@ class BenchController extends Controller
         return is_array($body) ? $body : null;
     }
 
-    private function user(object $row): array
+    /** The user row as the shared response contract wants it. Not `user()`:
+     * that is the route handler, and PHP has one namespace for both. */
+    private function userJson(object $row): array
     {
         return ['id' => (int) $row->id, 'name' => $row->name, 'email' => $row->email];
     }
@@ -120,7 +122,7 @@ class BenchController extends Controller
             return $this->fail(404, 'not_found', 'user_not_found');
         }
 
-        return response()->json($this->user($row));
+        return response()->json($this->userJson($row));
     }
 
     public function createUser(Request $request): JsonResponse
@@ -142,7 +144,7 @@ class BenchController extends Controller
             throw $e;
         }
 
-        return response()->json($this->user($row), 201);
+        return response()->json($this->userJson($row), 201);
     }
 
     public function pay(string $id): JsonResponse
@@ -174,7 +176,7 @@ class BenchController extends Controller
             return $this->fail(404, 'not_found', 'user_not_found');
         }
 
-        return response()->json($this->user($row));
+        return response()->json($this->userJson($row));
     }
 
     public function counter(): JsonResponse
