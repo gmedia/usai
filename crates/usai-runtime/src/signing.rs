@@ -145,7 +145,7 @@ pub fn verify_artifact(
     let key = parse_public_key(&record.public_key)?;
     if !trusted.iter().any(|t| t == &key) {
         return Err(SigningError::Invalid(format!(
-            "artifact is signed by {}, which this runtime does not trust",
+            "artifact is signed by {}…, which this runtime does not trust: pass that key to --require-signature if it is yours, or rebuild and sign with the key this runtime was started with (`usai build --sign <key-file>`)",
             &record.public_key[..16]
         )));
     }
@@ -155,7 +155,12 @@ pub fn verify_artifact(
     let signature = Signature::from_slice(&signature_bytes)
         .map_err(|e| SigningError::Invalid(format!("{SIGNATURE_FILE}: {e}")))?;
     key.verify(&canonical(&record.files), &signature)
-        .map_err(|_| SigningError::Invalid("artifact signature does not verify".into()))?;
+        .map_err(|_| {
+            SigningError::Invalid(
+                "artifact signature does not verify: the signature was made for different bytes than the ones in signature.json - re-sign the artifact (`usai build --sign <key-file>`)"
+                    .into(),
+            )
+        })?;
     for (rel, expected) in &record.files {
         let bytes = std::fs::read(dir.join(rel)).map_err(|_| {
             SigningError::Invalid(format!("signed file {rel} is missing from the artifact"))

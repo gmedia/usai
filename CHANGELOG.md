@@ -10,6 +10,13 @@ the human summary.
 
 ## 0.0.10 — Unreleased
 
+### Runtime
+
+- **A refused signature says what to do about it.** "signed by X, which this
+  runtime does not trust" now names both ways out (trust that key, or re-sign
+  with the one the runtime was started with), and "does not verify" says the
+  signature was made for different bytes than the artifact carries.
+
 ### CI
 
 - The secret scan failed on its own arguments (the action passes `--fail`,
