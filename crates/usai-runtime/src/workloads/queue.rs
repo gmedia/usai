@@ -272,7 +272,13 @@ pub fn start(
             .contracts
             .message
             .as_ref()
-            .and_then(|schema| jsonschema::validator_for(schema).ok())
+            .and_then(|schema| {
+                // Formats are asserted here too (see http/router.rs).
+                jsonschema::options()
+                    .should_validate_formats(true)
+                    .build(schema)
+                    .ok()
+            })
             .map(Arc::new);
         // One sweeper per topic: a consumer killed mid-message (SIGKILL, an
         // OOM kill, a host that died) leaves its rows `processing` with no

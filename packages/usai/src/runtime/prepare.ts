@@ -456,9 +456,22 @@ function checksOf(d: ZodInternals["def"]): ((v: unknown) => boolean) | undefined
 
 /** A scalar node: type test plus the node's checks; the value itself is
  * the output. */
-function scalar(test: (v: unknown) => boolean, d: ZodInternals["def"]): Finalizer {
+function scalar(
+  test: (v: unknown) => boolean,
+  d: ZodInternals["def"],
+  own?: ZodCheckFn,
+): Finalizer {
   const checks = checksOf(d);
-  return (v) => (test(v) && (checks === undefined || checks(v)) ? v : REPARSE);
+  return (v) => {
+    if (!test(v)) return REPARSE;
+    if (checks !== undefined && !checks(v)) return REPARSE;
+    if (own !== undefined) {
+      const payload = { value: v, issues: [] as unknown[] };
+      own(payload);
+      if (payload.issues.length > 0) return REPARSE;
+    }
+    return v;
+  };
 }
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
@@ -475,8 +488,21 @@ function zodFinalizer(s: unknown, depth = 0): Finalizer {
   // coerced URL scalars against the JSON Schema) is final; anything else
   // fails the type test below and is reparsed, where Zod coerces it.
   switch (type) {
-    case "string":
-      return scalar((v) => typeof v === "string", d);
+    case "string": {
+      // `z.url()`, `z.email()`, `z.uuid()`, `z.iso.datetime()` are string
+      // nodes whose *format* is the node: `def.check === "string_format"`
+      // and the test is `_zod.check`, with `def.checks` empty. Without this
+      // the finalizer accepted any string for them, and for `z.url()` the
+      // host had nothing to check either (Zod emits `format: "uri"` and no
+      // pattern) — an external round on 0.0.7 posted "not-a-url" and got a
+      // 201. The host asserts formats now; this is the world's half.
+      const own =
+        d["format"] !== undefined && LIBRARY_CHECKS.has(String(d["check"] ?? ""))
+          ? (zi["check"] as ZodCheckFn | undefined)
+          : undefined;
+      if (d["format"] !== undefined && typeof own !== "function") throw new NotFinal();
+      return scalar((v) => typeof v === "string", d, own);
+    }
     case "number":
       return scalar((v) => typeof v === "number" && Number.isFinite(v), d);
     case "int":

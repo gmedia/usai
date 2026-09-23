@@ -342,6 +342,56 @@ impl Drop for Lease {
     }
 }
 
+/// The first word of a statement, lowercased, ignoring leading whitespace
+/// and `--`/`/* */` comments.
+fn first_word(sql: &str) -> String {
+    let mut rest = sql.trim_start();
+    loop {
+        if let Some(after) = rest.strip_prefix("--") {
+            rest = after
+                .split_once('\n')
+                .map(|(_, r)| r)
+                .unwrap_or("")
+                .trim_start();
+        } else if let Some(after) = rest.strip_prefix("/*") {
+            rest = after
+                .split_once("*/")
+                .map(|(_, r)| r)
+                .unwrap_or("")
+                .trim_start();
+        } else {
+            break;
+        }
+    }
+    rest.split(|c: char| c.is_whitespace() || c == ';')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase()
+}
+
+/// A statement that changes the *connection's* state cannot run on this path:
+/// every statement here leases its own connection from the pool, so a `BEGIN`
+/// would open a transaction on a connection that the next statement does not
+/// have — and that connection would go back to the pool still inside it. The
+/// runtime refuses instead of letting the application believe it has a
+/// transaction (found by an external round on 0.0.7: `begin` + `insert` left
+/// a backend `idle in transaction` while the insert committed elsewhere).
+fn connection_state_statement(sql: &str) -> Option<&'static str> {
+    match first_word(sql).as_str() {
+        "begin" | "start" => Some("begin"),
+        "commit" | "end" => Some("commit"),
+        "rollback" | "abort" => Some("rollback"),
+        "savepoint" => Some("savepoint"),
+        "release" => Some("release savepoint"),
+        "set" => Some("set"),
+        "reset" => Some("reset"),
+        "discard" => Some("discard"),
+        "listen" | "unlisten" => Some("listen"),
+        "deallocate" => Some("deallocate"),
+        _ => None,
+    }
+}
+
 #[derive(Deserialize)]
 struct SqlRequest {
     sql: String,
@@ -895,6 +945,22 @@ impl Postgres {
                 proof: TerminalProof::Terminal,
             })?;
         self.counters.operations.fetch_add(1, Ordering::SeqCst);
+        if request.lease.is_none()
+            && !request.async_commit
+            && let Some(word) = connection_state_statement(&request.sql)
+        {
+            return Err(ResourceError::Operation {
+                code: "transaction_control".into(),
+                message: format!(
+                    "`{word}` cannot be sent with query/one/execute: each statement leases its own \
+                     connection, so this one would change a connection the next statement does not \
+                     have — and it would return to the pool in that state. Use \
+                     `transaction(async (tx) => …)`, which pins one connection for the callback and \
+                     ends it with a commit or a rollback (docs/GUIDE.md §7)."
+                ),
+                proof: TerminalProof::Terminal,
+            });
+        }
         if let Some(lease) = request.lease {
             let method = call.method.clone();
             return self

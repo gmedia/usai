@@ -84,7 +84,14 @@ fn compile(
     match schema {
         None => Ok(None),
         Some(schema) => {
-            jsonschema::validator_for(schema)
+            // `format` is an annotation in JSON Schema unless asserted, and the
+            // SDK emits `format: "uri"` with no pattern for `z.url()`: without
+            // this the contract published a constraint the boundary did not
+            // check (found by an external round on 0.0.7 — "not-a-url" was
+            // accepted). Everything the world would check, the host checks.
+            jsonschema::options()
+                .should_validate_formats(true)
+                .build(schema)
                 .map(Some)
                 .map_err(|e| RouteBuildError::Schema {
                     workload: workload.id.clone(),

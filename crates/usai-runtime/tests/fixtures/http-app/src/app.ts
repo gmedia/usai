@@ -213,6 +213,19 @@ export const busy = http.get("/busy", { timeout: "300ms" }, async () => {
   while (Date.now() < end) i++;
   return { i };
 });
+// A contract that declares a format. Zod emits `format: "uri"` with no
+// pattern for `z.url()`, so nothing checked it: the host skipped formats and
+// the world's finalizer saw a node whose checks list is empty. Both halves
+// check it now, and the two must agree with Zod itself.
+export const formats = http.post(
+  "/formats",
+  {
+    body: z.object({ url: z.url(), email: z.email(), id: z.uuid() }),
+    response: z.object({ ok: z.boolean() }),
+  },
+  async () => ({ ok: true }),
+);
+
 export const echoQuery = http.get("/echo", {}, async (ctx) => ({
   query: ctx.query,
   headers: { "x-a": ctx.headers["x-a"] },
@@ -671,6 +684,7 @@ export default defineApp({
     detachWrite,
     slow,
     echoQuery,
+    formats,
     webhook,
     rawImage,
     sendReceipt,

@@ -198,6 +198,30 @@ export const txAbandon = http.post("/tx/abandon", { resources: [db] }, async (ct
   return { started: true };
 });
 
+// The Express habit: transaction control as raw SQL. Every statement on this
+// handle leases its own connection, so a `begin` here would open a
+// transaction on a connection the next statement does not hold, and return
+// it to the pool in that state. It must be refused, by name.
+export const rawTxControl = http.post("/tx/raw", { resources: [db] }, async (ctx) => {
+  const tried: Array<{ sql: string; code: string | null; message: string }> = [];
+  for (const sql of ["begin", "  -- start it\n  BEGIN;", "set search_path to public", "commit"]) {
+    try {
+      await d(ctx).execute(sql);
+      tried.push({ sql, code: null, message: "accepted" });
+    } catch (e) {
+      const err = e as { usai?: { code?: string }; message?: string };
+      tried.push({ sql, code: err.usai?.code ?? null, message: String(err.message ?? e) });
+    }
+  }
+  // The pinned path still takes them: this is what the refusal points at.
+  const pinned = await d(ctx).transaction(async (tx) => {
+    await tx.execute("set local statement_timeout = '5s'");
+    const row = await tx.one<{ n: number }>("select 1 as n");
+    return row?.n ?? 0;
+  });
+  return { tried, pinned };
+});
+
 export const txClosed = http.post("/tx/closed", { resources: [db] }, async (ctx) => {
   let leaked: import("@sakaladev/usai").SqlExecutor | null = null;
   await d(ctx).transaction(async (tx) => {
@@ -288,6 +312,7 @@ export default defineApp({
     textTypes,
     badParams,
     leak,
+    rawTxControl,
     txCommit,
     txRollback,
     txAbandon,

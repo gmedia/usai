@@ -401,6 +401,32 @@ async fn no_connection_state_leaks_across_worlds() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn raw_transaction_control_is_refused_and_names_the_transaction_helper() {
+    let Some(f) = fixture().await else { return };
+    // `begin` on the unpinned path used to open a transaction on one pooled
+    // connection while the statements that followed ran on others, and the
+    // connection went back to the pool `idle in transaction`.
+    let (status, body) = f.http("POST", "/tx/raw", json!({})).await;
+    assert_eq!(status, 200, "{body}");
+    for attempt in body["tried"].as_array().expect("attempts") {
+        assert_eq!(
+            attempt["code"],
+            json!("transaction_control"),
+            "{} was not refused: {attempt}",
+            attempt["sql"]
+        );
+        let message = attempt["message"].as_str().unwrap_or_default();
+        assert!(
+            message.contains("transaction("),
+            "the refusal must name the helper that works: {message}"
+        );
+    }
+    // And the pinned path still accepts exactly what was refused above.
+    assert_eq!(body["pinned"], json!(1), "{body}");
+    f.baseline();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_message_can_be_delivered_to_a_consumer_directly() {
     let Some(f) = fixture().await else { return };
     // One delivery, attempt 1, a fresh world each time, no queue row: the

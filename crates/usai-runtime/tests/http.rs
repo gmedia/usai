@@ -197,6 +197,22 @@ impl Server {
         )
     }
 
+    async fn post_json(&self, path: &str, body: Value) -> (u16, Value) {
+        let r = self
+            .client
+            .post(format!("{}{path}", self.base))
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+        let status = r.status().as_u16();
+        let text = r.text().await.unwrap();
+        (
+            status,
+            serde_json::from_str(&text).unwrap_or(Value::String(text)),
+        )
+    }
+
     /// Ownership returns to baseline once the runtime has drained: a
     /// running service is a live world by design until then.
     async fn baseline(&self) {
@@ -1792,6 +1808,36 @@ async fn application_headers_are_on_every_response_and_a_handler_wins() {
         "nosniff"
     );
     s.shutdown.cancel();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn declared_string_formats_are_enforced_at_both_halves_of_the_boundary() {
+    let Some(s) = start().await else { return };
+    let valid = json!({ "url": "https://example.dev/x", "email": "a@b.co", "id": "3f2504e0-4f89-11d3-9a0c-0305e82c3301" });
+    let (status, body) = s.post_json("/formats", valid.clone()).await;
+    assert_eq!(status, 200, "{body}");
+    // Rejected by the host, before a world: the JSON Schema says `uri`.
+    let mut bad = valid.clone();
+    bad["url"] = json!("not-a-url");
+    let (status, body) = s.post_json("/formats", bad).await;
+    assert_eq!(status, 400, "{body}");
+    assert_eq!(body["error"]["details"]["issues"][0]["path"], json!("/url"));
+    // Accepted by JSON Schema's `uri` (a scheme with an empty path is a URI)
+    // and rejected by `z.url()`: the world's finalizer must run the node's
+    // own check, or a route would accept what its own schema refuses.
+    let mut scheme_only = valid.clone();
+    scheme_only["url"] = json!("ftp:");
+    let (status, body) = s.post_json("/formats", scheme_only).await;
+    assert_eq!(
+        status, 400,
+        "the world must apply the library's own format check: {body}"
+    );
+    for (field, value) in [("email", "nope"), ("id", "xyz")] {
+        let mut bad = valid.clone();
+        bad[field] = json!(value);
+        let (status, body) = s.post_json("/formats", bad).await;
+        assert_eq!(status, 400, "{field} was accepted: {body}");
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
