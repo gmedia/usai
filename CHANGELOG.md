@@ -10,6 +10,18 @@ the human summary.
 
 ## 0.0.8 — Unreleased
 
+### Runtime
+
+- **A request that passed its deadline answers `504`, not `500`.** The world
+  driver treated a guest error as a fault even when the deadline had already
+  elapsed, so a timed-out request's status depended on where the watchdog's
+  interrupt landed. Two branches now follow the rule the rest of the driver
+  already had.
+- **Timers expire from the moment the application asked.** The deadline was
+  taken at the operation future's first poll, which on a starved runtime can
+  be much later than the `setTimeout` call — two timers started in the same
+  turn could then fire out of order.
+
 ### CLI
 
 - **The npm launcher explains a binary that will not start.** It verifies the
