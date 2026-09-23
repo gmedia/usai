@@ -41,7 +41,7 @@ refusals and *falls* while a bad-traffic flood rises. Volume is
 | `usai_process_start_time_seconds` | gauge | — | Unix time the runtime started |
 | `usai_process_resident_memory_bytes` | gauge | — | Resident set size |
 | `usai_process_proportional_memory_bytes` | gauge | — | Proportional set size (shared pages divided among their sharers): the honest per-process footprint |
-| `usai_process_virtual_memory_bytes` | gauge | — | Virtual size (address space reserved per world slot up front; not resident) |
+| `usai_process_virtual_memory_bytes` | gauge | — | Virtual size (address space reserved per world slot up front; not resident). **Do not alert on it and do not cap it**: it is hundreds of gigabytes by design — ≈208 GB at `--max-worlds 48` — because each slot reserves a guarded 4 GB range so the engine can elide bounds checks. `LimitAS` / `ulimit -v` kills the process at the first world. Resident memory is `usai_process_resident_memory_bytes`, and the limit that means something is `MemoryMax` / `mem_limit` |
 | `usai_process_resident_memory_peak_bytes` | gauge | — | Peak resident set size since start |
 | `usai_process_page_faults_total` | counter | kind | Page faults since start, by kind |
 | `usai_process_cpu_seconds_total` | counter | — | CPU consumed since start, user + system |
