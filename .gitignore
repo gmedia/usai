@@ -13,3 +13,6 @@ fuzz/artifacts/
 fuzz/coverage/
 # generated corpus entries; the curated seeds are tracked (add a new one with git add -f)
 fuzz/corpus/
+
+# Campaign outputs (evidence lives in docs/measurements, not in the tree)
+scripts/qualification/threat/out/

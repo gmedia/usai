@@ -1,0 +1,17 @@
+{
+  "name": "@usai-qualification/threat-app",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "The threat-model verification campaign's application: one route per claim in docs/THREAT-MODEL.md that can only be checked from outside.",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@sakaladev/usai": "workspace:*",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

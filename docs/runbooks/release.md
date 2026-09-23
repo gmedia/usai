@@ -40,7 +40,16 @@ pnpm install --lockfile-only
 make check                 # fmt, clippy -D warnings, docs-check, cargo test, pnpm test
 USAI_ENGINE=quickjs cargo test -p usai-runtime --test lifecycle --test http   # the reference engine
 cargo test -p usai-runtime --test postgres    # needs a PostgreSQL (USAI_TEST_DATABASE_URL)
+cargo build -p usai-cli && bash scripts/qualification/threat/run.sh   # the threat model's own claims
 ```
+
+The last one takes ~90 seconds and needs neither a database nor the VM: it
+starts the fixture and checks every promise in `docs/THREAT-MODEL.md` that
+can be seen from outside the process (bounds, deadlines, sanitized errors,
+what reaches a log line, the operator surfaces' token, signatures). A
+failure there is a release blocker — see
+`docs/measurements/2026-09-23-threat-verification.md` for what it covers and
+what it deliberately does not.
 
 `make docs-check` fails when `docs/sdk` is stale — regenerate with
 `make docs` and commit it in the same change as the code it documents. The
