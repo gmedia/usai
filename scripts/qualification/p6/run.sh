@@ -7,7 +7,11 @@
 #   scripts/qualification/p6/run.sh overload <s>     # 128 clients: refusals are 503 capacity, never 5xx, latency bounded
 #   scripts/qualification/p6/run.sh idle-burst       # 60 s idle then a burst: first-second latency and errors
 #   scripts/qualification/p6/run.sh dead-letter      # a webhook endpoint that always fails: 5 attempts then dead
-#   scripts/qualification/p6/run.sh soak <seconds>   # steady load; status sampled every 60 s (memory plateau, ownership)
+#   scripts/qualification/p6/run.sh soak <seconds> [growing|bounded]
+#                                                    # steady load; status sampled every 60 s (memory plateau,
+#                                                    # ownership). `bounded` prunes the data the load makes, so a
+#                                                    # decay cannot be blamed on the dataset — the control run the
+#                                                    # 72 h soak never had.
 #   scripts/qualification/p6/run.sh conn-churn       # connection-bound worlds (SSE + WebSocket): 500 cycles, held through a
 #                                                     revision replacement, an app restart and a proxy restart, abrupt client
 #                                                     death, a client that never reads, an idle socket (USAI_SOCKET_IDLE_TIMEOUT)
@@ -199,19 +203,41 @@ conn_churn() {
   echo "gauges: $(status | grep -o '"gauges":{[^}]*}')"
 }
 
+# `soak <seconds> bounded` keeps the dataset from growing: every minute it
+# deletes the invoices and queue rows the load just made, so the table stays
+# the size it started at. The 72 h soak's throughput decayed 794 → 154 req/s
+# with a flat p50 and a flat per-request CPU, and the explanation was the 7.4
+# million invoices it had written — an explanation with no control run behind
+# it. This is the control run: same load, same duration, a dataset that does
+# not grow. If the decay is gone, the runtime was never the cause; if it is
+# still there, it is ours.
 soak() {
-  local s="${1:-3600}"; local out="$here/out/soak.load.jsonl"; local samples="$here/out/soak.samples.jsonl"; rm -f "$out" "$samples"
-  echo "soak start $(date -u +%FT%TZ) for $s s"
+  local s="${1:-3600}"; local mode="${2:-growing}"
+  local out="$here/out/soak.load.jsonl"; local samples="$here/out/soak.samples.jsonl"; rm -f "$out" "$samples"
+  echo "soak start $(date -u +%FT%TZ) for $s s (dataset: $mode)"
   load "$s" "$out"; local pid=$LOAD_PID
   local t0=$SECONDS
+  local pruned=0
   while kill -0 "$pid" 2>/dev/null; do
     sleep 60
+    if [ "$mode" = bounded ]; then
+      # Keep the newest 20 000 invoices and the queue's finished rows for one
+      # minute; both are the application's data, deleted the way an operator
+      # would (`usai queue prune` is the supported verb for the second).
+      local gone
+      gone=$(docker compose exec -T postgres psql -U app -d invoicing -tAc \
+        "with victims as (select id from invoices order by created_at desc offset 20000)
+         delete from invoices where id in (select id from victims) returning 1" 2>/dev/null | grep -c 1)
+      docker compose exec -T postgres psql -U app -d invoicing -qc \
+        "delete from usai_queue where state in ('done','dead') and coalesce(locked_at, available_at) < now() - interval '1 minute'" >/dev/null 2>&1
+      pruned=$((pruned + ${gone:-0}))
+    fi
     # One sample a minute: memory, CPU, open descriptors and the runtime's
     # own status (ownership gauges, pool/quarantine, queue depth, images,
     # latency histogram) — the drift a long soak is for.
     echo "{\"t\":$((SECONDS - t0)),\"rssMiB\":\"$(rss_mb)\",\"cpuPct\":\"$(cpu_pct)\",\"fds\":$(fds),\"status\":$(status)}" >> "$samples"
   done
-  echo "soak end $(date -u +%FT%TZ); load: $(summarize "$out")"
+  echo "soak end $(date -u +%FT%TZ); dataset: $mode${pruned:+, pruned $pruned invoices}; load: $(summarize "$out")"
   node -e '
     const fs=require("fs"); const s=fs.readFileSync(process.argv[1],"utf8").trim().split("\n").map(JSON.parse);
     const rss=s.map(x=>parseFloat(x.rssMiB)); const g=s.map(x=>x.status.gauges||{});
@@ -229,7 +255,7 @@ case "${1:-}" in
   idle-burst) idle_burst ;;
   dead-letter) dead_letter ;;
   replicas) shift; exec "$here/replicas.sh" "$@" ;;
-  soak) soak "${2:-3600}" ;;
+  soak) soak "${2:-3600}" "${3:-growing}" ;;
   conn-churn) conn_churn "${2:-500}" ;;
   *) echo "usage: $0 churn|db-flap|restart-loop|overload|idle-burst|dead-letter|soak|conn-churn|replicas"; exit 2 ;;
 esac
