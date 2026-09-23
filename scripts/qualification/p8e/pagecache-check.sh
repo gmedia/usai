@@ -60,12 +60,18 @@ docker rm -f "$name" >/dev/null 2>&1
 #    maps its libc from there, and an overlay layer is root's to evict), so
 #    the box faults its own pages and pays for them.
 python3 "$here/evict.py" "$bin" >/dev/null
-layers=$(docker image inspect "$base" -f '{{.GraphDriver.Data.LowerDir}}:{{.GraphDriver.Data.UpperDir}}' 2>/dev/null | tr ':' '\n' | grep -v '^$' || true)
-if [ -n "$layers" ] && sudo -n true 2>/dev/null; then
-  # shellcheck disable=SC2086
-  sudo -n python3 "$here/evict.py" $layers >/dev/null
+if [ "${DROP_CACHES:-0}" = 1 ] && sudo -n true 2>/dev/null; then
+  # The complete form, for a host that is ours alone: everything the box maps
+  # is faulted by the box.
+  sync && echo 3 | sudo -n tee /proc/sys/vm/drop_caches >/dev/null
 else
-  echo "(no sudo: the image's shared libraries stay warm, so the cold row is a lower bound)"
+  layers=$(docker image inspect "$base" -f '{{.GraphDriver.Data.LowerDir}}:{{.GraphDriver.Data.UpperDir}}' 2>/dev/null | tr ':' '\n' | grep -v '^$' || true)
+  if [ -n "$layers" ] && sudo -n true 2>/dev/null; then
+    # shellcheck disable=SC2086
+    sudo -n python3 "$here/evict.py" $layers >/dev/null
+  else
+    echo "(the image's shared libraries stay warm, so the cold row is a lower bound; DROP_CACHES=1 on an idle host is the complete form)"
+  fi
 fi
 box -v "$bin:/subject:ro" --entrypoint /subject "$base" "$@"
 read -r rss_cold cur_cold <<< "$(charged)"
