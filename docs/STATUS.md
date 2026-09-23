@@ -232,10 +232,10 @@ capabilities (design), latency histogram in metrics, an API reference page — a
 
 - **Recorded rather than built, from the Kubernetes round (2026-09-23)**, in
   the order a user would miss them:
-  1. **A Grafana dashboard.** `docs/runbooks/metrics.md` is good enough that a
-     dashboard is close to free — every panel is already named there with its
-     query — and it would be the fastest on-ramp an operator gets. Nobody has
-     written the JSON.
+  1. ~~**A Grafana dashboard.**~~ — **shipped the same evening**:
+     `docs/deploy/grafana-dashboard.json`, sixteen panels, every query taken
+     from `runbooks/metrics.md` and checked against it. Not yet opened in a
+     real Grafana.
   2. ~~**Autoscaling on the honest signal.**~~ — **shipped the same evening**:
      the HPA in `docs/deploy/k8s/` targets how full the world budget is, with
      CPU as a coarse fallback and the prometheus-adapter rule that derives the

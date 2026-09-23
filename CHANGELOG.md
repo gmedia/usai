@@ -42,6 +42,10 @@ the human summary.
 
 ### Documentation
 
+- **`docs/deploy/grafana-dashboard.json`** — sixteen panels built from
+  `runbooks/metrics.md`, including the two an operator has no other way to
+  see: what the cgroup is charged against its limit, and the ceiling hits
+  that mean the container is reclaiming the pages it executes from.
 - **`docs/deploy/k8s/`** — the Deployment, the probes, the migration Job, the
   PodDisruptionBudget and the scrape target, plus the three decisions
   Kubernetes forces that a compose file never does: where the scheduler runs
