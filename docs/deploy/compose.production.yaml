@@ -50,7 +50,20 @@ services:
     mem_limit: 512m           # measured (docs/measurements/2026-09-20-p8e-efficiency.md): 192m is the supported floor for 48 worlds, 512m keeps a held revision + headroom
     stop_grace_period: 35s    # drain grace (2 s: readiness fails first) + drain bound (30 s) + margin
     restart: unless-stopped
-    healthcheck: { test: ["CMD", "usai", "probe", "live", "--addr", "127.0.0.1:9090"], interval: 30s, timeout: 5s }   # liveness (the process answers); readiness is `usai probe ready` / GET :9090/_usai/ready from the proxy/orchestrator
+    # Liveness only: "the process answers". Readiness is the proxy's job
+    # (`usai probe ready` / GET :9090/_usai/ready) because a draining
+    # instance is live and not ready, and compose cannot express that.
+    # `start_period` covers the activation (resources open before the
+    # listener answers) so a slow start is not counted as a failure, and
+    # `retries` is what makes the state change at all — without it compose
+    # only labels the container unhealthy and `restart: unless-stopped`
+    # never acts on it.
+    healthcheck:
+      test: ["CMD", "usai", "probe", "live", "--addr", "127.0.0.1:9090"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   caddy:
     image: caddy:2
