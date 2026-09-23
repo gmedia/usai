@@ -383,6 +383,35 @@ pub fn process_metrics() -> Vec<MetricFamily> {
             "gauge",
             vec![(String::new(), p.open_fds as f64)],
         ));
+        // The cgroup's own view, which is the one that decides whether this
+        // process lives. Only published when there is a limit: on a host
+        // without one these would be four zeroes an alert could misread.
+        if p.memory_limit_bytes > 0 {
+            out.push((
+                "usai_process_memory_limit_bytes",
+                "The cgroup memory limit this process runs under",
+                "gauge",
+                vec![(String::new(), p.memory_limit_bytes as f64)],
+            ));
+            out.push((
+                "usai_process_memory_charged_bytes",
+                "What the cgroup is charged (memory.current): resident memory plus the page cache this container faulted in",
+                "gauge",
+                vec![(String::new(), p.memory_charged_bytes as f64)],
+            ));
+            out.push((
+                "usai_process_memory_ceiling_hits_total",
+                "Times the cgroup hit its limit and had to reclaim (memory.events max): climbing means the container is thrashing on its own pages, which is not an OOM kill and is not logged anywhere else",
+                "counter",
+                vec![(String::new(), p.memory_ceiling_hits as f64)],
+            ));
+            out.push((
+                "usai_process_memory_oom_kills_total",
+                "OOM kills inside this cgroup (memory.events oom_kill); normally 0, because a kill of this process takes the metric with it",
+                "counter",
+                vec![(String::new(), p.memory_oom_kills as f64)],
+            ));
+        }
     }
     out
 }

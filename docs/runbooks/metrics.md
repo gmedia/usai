@@ -41,6 +41,10 @@ refusals and *falls* while a bad-traffic flood rises. Volume is
 | `usai_process_start_time_seconds` | gauge | — | Unix time the runtime started |
 | `usai_process_resident_memory_bytes` | gauge | — | Resident set size |
 | `usai_process_proportional_memory_bytes` | gauge | — | Proportional set size (shared pages divided among their sharers): the honest per-process footprint |
+| `usai_process_memory_limit_bytes` | gauge | — | The cgroup memory limit the process runs under. Published only when there is one |
+| `usai_process_memory_charged_bytes` | gauge | — | What the cgroup is charged (`memory.current`): resident memory **plus the page cache this container faulted in**, which is what the limit actually bounds |
+| `usai_process_memory_ceiling_hits_total` | counter | — | Times the cgroup hit its limit and had to reclaim (`memory.events` `max`). **Alert on this**: climbing means the container is at its ceiling and thrashing on its own pages — no OOM kill, no log line, and throughput collapses (`memory-pressure.md`) |
+| `usai_process_memory_oom_kills_total` | counter | — | OOM kills inside this cgroup. Normally 0 — a kill of the runtime takes the metric with it — so a non-zero value means a child process was killed |
 | `usai_process_virtual_memory_bytes` | gauge | — | Virtual size (address space reserved per world slot up front; not resident). **Do not alert on it and do not cap it**: it is hundreds of gigabytes by design — ≈208 GB at `--max-worlds 48` — because each slot reserves a guarded 4 GB range so the engine can elide bounds checks. `LimitAS` / `ulimit -v` kills the process at the first world. Resident memory is `usai_process_resident_memory_bytes`, and the limit that means something is `MemoryMax` / `mem_limit` |
 | `usai_process_resident_memory_peak_bytes` | gauge | — | Peak resident set size since start |
 | `usai_process_page_faults_total` | counter | kind | Page faults since start, by kind |
@@ -122,6 +126,7 @@ Label values:
 | Detached work | `increase(usai_detached_work_total[1h]) > 0` | an application bug: a handler returned with work in flight (`500 detached_work`) |
 | Service gave up | `usai_service{state="failed"} == 1` | the restart policy is exhausted; the instance stays ready, the service is down |
 | Cron on two replicas | `sum(usai_scheduler{kind="cron"}) > 1` and the schedule is not `exclusive` | the schedule fires on each — declare it `exclusive: true` or start the others with `--no-cron` |
+| **At the memory ceiling** | `increase(usai_process_memory_ceiling_hits_total[5m]) > 100` | the container is pinned at its limit and reclaiming the pages it is executing from — *not* an OOM kill, nothing is logged, and throughput collapses (measured: 1 req/s at p50 4.7 s in a box 16 MiB too small). Raise the limit or lower `--max-worlds` (`memory-pressure.md`) |
 | Memory drift | `usai_process_proportional_memory_bytes` rising over hours while `usai_worlds_live` is flat and no revision was installed | the plateau is `base + touched slots × 4 MiB` (`memory-pressure.md`); a password-hashing burst or a held revision raises RSS for minutes, not hours — growth beyond that is a leak — report it with the soak samples |
 | Dead letters | `increase(usai_queue_messages_total{state="dead"}[15m]) > 0` | messages out of attempts (`queue-dead-letter.md`) |
 | Lost consumers | `increase(usai_queue_messages_total{state="reclaimed"}[15m]) > 0` | a consumer died mid-message (a crash, an OOM kill); the message was redelivered — look for the restart |

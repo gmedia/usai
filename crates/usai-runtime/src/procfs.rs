@@ -28,6 +28,24 @@ pub struct ProcessStatus {
     pub cpu_seconds: f64,
     pub threads: u64,
     pub open_fds: u64,
+    /// The memory limit this process runs under (cgroup v2 `memory.max`),
+    /// bytes; 0 when there is none or the file is unreadable.
+    pub memory_limit_bytes: u64,
+    /// What the cgroup is charged right now (`memory.current`), bytes.
+    pub memory_charged_bytes: u64,
+    /// How many times the cgroup has hit its limit and had to reclaim
+    /// (`memory.events` `max`). **This is the number that identifies the
+    /// state between "fits" and "OOM-killed"**: a container pinned at its
+    /// ceiling reclaims the clean pages of the binary it is executing and
+    /// faults them straight back in, so nothing is killed, nothing is
+    /// logged, and throughput collapses. Measured at 1.5 M hits on a
+    /// deliberately undersized box that served one request per second
+    /// (`docs/runbooks/memory-pressure.md`).
+    pub memory_ceiling_hits: u64,
+    /// OOM kills inside this cgroup (`memory.events` `oom_kill`) — normally
+    /// 0, because the kill takes this process with it; non-zero means a
+    /// *child* was killed.
+    pub memory_oom_kills: u64,
 }
 
 #[cfg(target_os = "linux")]
@@ -73,7 +91,49 @@ pub fn read() -> Option<ProcessStatus> {
     out.open_fds = std::fs::read_dir("/proc/self/fd")
         .map(|d| d.count() as u64)
         .unwrap_or(0);
+    read_cgroup(&mut out);
     Some(out)
+}
+
+/// The cgroup this process lives in, read the same way anything else here is:
+/// when someone asks, never in the background. Only cgroup v2 (`0::<path>` in
+/// `/proc/self/cgroup`); on v1, or outside a cgroup, the fields stay 0.
+#[cfg(target_os = "linux")]
+fn read_cgroup(out: &mut ProcessStatus) {
+    let Ok(own) = std::fs::read_to_string("/proc/self/cgroup") else {
+        return;
+    };
+    let Some(rel) = own
+        .lines()
+        .find_map(|l| l.strip_prefix("0::").map(str::trim))
+    else {
+        return;
+    };
+    let dir = format!("/sys/fs/cgroup{rel}");
+    let number = |file: &str| -> u64 {
+        std::fs::read_to_string(format!("{dir}/{file}"))
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(0)
+    };
+    // "max" (no limit) parses as 0, and with no limit none of this means
+    // anything about *this* process: the charge on an unlimited slice is the
+    // whole slice's, which read as a per-process number is nonsense. Report
+    // the set or nothing.
+    out.memory_limit_bytes = number("memory.max");
+    if out.memory_limit_bytes == 0 {
+        return;
+    }
+    out.memory_charged_bytes = number("memory.current");
+    if let Ok(events) = std::fs::read_to_string(format!("{dir}/memory.events")) {
+        for line in events.lines() {
+            match line.split_once(' ') {
+                Some(("max", n)) => out.memory_ceiling_hits = n.trim().parse().unwrap_or(0),
+                Some(("oom_kill", n)) => out.memory_oom_kills = n.trim().parse().unwrap_or(0),
+                _ => {}
+            }
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
