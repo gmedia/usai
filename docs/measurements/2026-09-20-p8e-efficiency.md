@@ -137,6 +137,12 @@ large by design), and only touched slots cost anything (§4).
 
 ## 3. Supported floor — the template with PostgreSQL
 
+*(Void — see the correction at the top. The re-measured template cells, on a
+box charged for its own page cache, hold their peak at 96–106 MiB whatever
+the box size and never touch their ceiling; the number that changes is what
+the claim rests on, not the peak.
+`docs/measurements/2026-09-23-floor-accounting.md`.)*
+
 Matrix: memory 128 / 192 / 256 / 384 / 512 MiB × cpus 0.5 / 1 / 2 ×
 `--max-worlds` 8 / 48 = 30 cells. Pattern (the production shape): idle
 120 s → trickle 1 req/s for 180 s alternating hello and a PostgreSQL read →
