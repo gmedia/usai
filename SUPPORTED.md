@@ -9,7 +9,7 @@ and nothing is promised.
 
 | | Supported | Notes |
 |---|---|---|
-| Linux x86_64 (glibc ≥ 2.36) | ✓ | Debian 12 / Ubuntu 22.04 and later; the Docker images are Debian bookworm |
+| Linux x86_64 (glibc ≥ 2.36) | ✓ | Debian 12, Ubuntu 24.04 and later; the Docker images are Debian bookworm. The published binaries are compiled on Debian 12 and the release refuses to publish one that asks for a newer glibc — 0.0.6 and earlier did ask (`pidfd_spawnp@GLIBC_2.39`) and start only on glibc ≥ 2.39 |
 | Linux aarch64 (glibc ≥ 2.36) | ✓ | same |
 | macOS arm64 (14+) | development only | binaries are published; no production qualification |
 | Windows | ✗ | use WSL2 or Docker |

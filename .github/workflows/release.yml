@@ -39,11 +39,37 @@ jobs:
           v=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)"/\1/')
           [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "Cargo.toml is $v, tag is ${GITHUB_REF_NAME}"; exit 1; }
       - uses: dtolnay/rust-toolchain@stable
+        if: runner.os == 'macOS'
         with:
           toolchain: 1.98.1
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --profile dist -p usai-cli --target ${{ matrix.target }}
+        if: runner.os == 'macOS'
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: cargo build --profile dist -p usai-cli --target ${{ matrix.target }} --locked
+      # The Linux binaries are compiled on Debian 12, not on the runner: a
+      # binary carries the glibc version it was *built* against, and the
+      # runner's is newer than the floor in SUPPORTED.md (0.0.6 shipped
+      # `pidfd_spawnp@GLIBC_2.39` from Rust std and would not start on
+      # Debian 12 — including inside our own bookworm-based images).
+      - name: Build (Linux, on the glibc floor)
+        if: runner.os == 'Linux'
+        run: |
+          docker run --rm -v "$PWD":/src -w /src \
+            -e CARGO_TERM_COLOR -e CARGO_INCREMENTAL \
+            rust:1.98-bookworm \
+            cargo build --profile dist -p usai-cli --target ${{ matrix.target }} --locked
+          sudo chown -R "$(id -u):$(id -g)" target
+      - name: The binary starts on the oldest supported distribution
+        if: runner.os == 'Linux'
+        run: |
+          bin=target/${{ matrix.target }}/dist/usai
+          max=$(objdump -T "$bin" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
+          echo "highest glibc symbol version required: $max"
+          [ "$(printf '%s\nGLIBC_2.36\n' "$max" | sort -V | tail -1)" = "GLIBC_2.36" ] \
+            || { echo "::error::$max is above the glibc 2.36 floor in SUPPORTED.md"; exit 1; }
+          docker run --rm -v "$PWD/$bin":/usai:ro debian:bookworm-slim /usai --version
       - name: Package
         run: |
           name=usai-${GITHUB_REF_NAME}-${{ matrix.target }}

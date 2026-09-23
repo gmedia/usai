@@ -27,7 +27,7 @@ scaffolder simply does not republish it.
 
 ```bash
 v=0.0.6
-sed -i "0,/^version = /s//version = \"$v\"/" Cargo.toml     # check the diff, it is the workspace one
+sed -i "0,/^version = .*/s//version = \"$v\"/" Cargo.toml   # check the diff, it is the one under [workspace.package]
 node -e 'const f="packages/usai/package.json",p=require("./"+f);p.version=process.argv[1];require("fs").writeFileSync(f,JSON.stringify(p,null,2)+"\n")' $v
 node -e 'const f="packages/create-usai/package.json",p=require("./"+f);p.sdkVersion=process.argv[1];require("fs").writeFileSync(f,JSON.stringify(p,null,2)+"\n")' $v
 cargo update -w        # Cargo.lock carries the workspace version
@@ -71,7 +71,12 @@ release commit from being orphaned if the tag push is rejected.
    --profile dist -p usai-cli`, tarballs + SHA-256 on the GitHub release,
    with generated release notes. The Linux binaries are kept as artifacts
    for the images, so **the image's `usai` and the tarball's `usai` are the
-   same bits**.
+   same bits**. The Linux binaries are compiled *inside* `rust:1.98-bookworm`,
+   not on the runner: a binary carries the glibc it was built against, and the
+   runner's is newer than the floor in `SUPPORTED.md` (this is what broke
+   0.0.6 — see the CHANGELOG). The job then checks the highest `GLIBC_*`
+   symbol the binary asks for and starts it in `debian:bookworm-slim` before
+   uploading, so the floor cannot silently move again.
 2. **npm**: builds the workspace, checks the versions, publishes
    `@sakaladev/usai` and `@sakaladev/create-usai` with Trusted Publishing
    (OIDC — never a long-lived token, never bypass 2FA) and `--provenance`

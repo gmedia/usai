@@ -8,6 +8,47 @@ runtime of that version and the next (`SUPPORTED.md` → Versioning). Within
 GitHub releases carry the auto-generated commit list as well; this file is
 the human summary.
 
+## 0.0.7 — 2026-09-23
+
+A fix release: **0.0.6's Linux binaries and Docker images do not start on
+Debian 12 or on any glibc older than 2.39.** Nothing else changed — same
+runtime, same SDK, same contracts as 0.0.6.
+
+### Fixed
+
+- **The published Linux binaries are compiled on Debian 12 again.** They are
+  built on the CI runner, whose glibc is newer than the floor this project
+  promises (`SUPPORTED.md`: glibc ≥ 2.36), and Rust's standard library binds
+  `pidfd_spawnp`/`pidfd_getpid` from whatever glibc it is built against — so
+  every published tarball up to and including 0.0.6 asked for `GLIBC_2.39`
+  and died with `version 'GLIBC_2.39' not found` on Debian 12, Ubuntu 22.04,
+  RHEL 9 and Amazon Linux 2023. Until 0.0.6 the Docker images hid it (they
+  compiled their own binary from source); 0.0.6 started shipping the
+  published bits in the image, which made the images fail the same way —
+  including the build stage of the scaffold's Dockerfile, where it surfaced
+  as `usai: … GLIBC_2.39 not found` at `usai build`.
+- **The release now refuses to publish a binary above the floor.** Each Linux
+  binary is checked for its highest required glibc symbol version and started
+  inside `debian:bookworm-slim` before it is uploaded.
+
+### Compatibility
+
+- **Upgrade if you run 0.0.6 anywhere but Ubuntu 24.04 (or newer).** The
+  0.0.6 tarballs, the 0.0.6 npm install (the launcher fetches the tarball)
+  and `sakaladev/usai:0.0.6` / `:0.0.6-dev` / `:latest` are all affected;
+  `:0.0.5` and earlier images are not.
+- No artifact, ABI or configuration change: an artifact built by 0.0.6 runs
+  on 0.0.7 unchanged, and `GUEST_ABI` stays 1.
+- `@sakaladev/create-usai` 0.0.10 scaffolds against SDK 0.0.7.
+- `SUPPORTED.md` no longer claims Ubuntu 22.04: the floor is glibc 2.36
+  (Debian 12, Ubuntu 24.04), which is what the binaries are now built for.
+
+> 0.0.7: the published Linux binaries and Docker images are built on Debian 12
+> again — 0.0.6 shipped binaries that required GLIBC_2.39 and would not start
+> on Debian 12, Ubuntu 22.04, RHEL 9 or Amazon Linux 2023 (including inside
+> our own images and the scaffold's build stage). The release now verifies
+> the glibc floor before it publishes. No other change.
+
 ## 0.0.6 — 2026-09-23
 
 Since 0.0.5 (2026-09-18). Alpha, production qualification in progress: the
