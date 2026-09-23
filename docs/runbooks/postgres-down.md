@@ -21,8 +21,10 @@
 > its probe, a proxy removes an unready upstream from rotation, and every
 > replica shares the database — so the proxy runs out of upstreams and
 > answers 503 for *every* route, including the ones that never touch
-> PostgreSQL. Measured directly against a replica: `hello` 200, `notes` 503.
-> Through the documented Caddy block at the same instant: both 503. This is
+> PostgreSQL. Observed in the 2026-09-23 operator round on a two-replica
+> systemd deployment: direct to a replica `hello` answered 200 and the
+> database-backed route 503, while through the proxy at the same moment both
+> answered 503 (`docs/STATUS.md` → the tenth round). This is
 > the default because a replica that cannot reach its database cannot serve
 > most of the application, and because it stops a rollout from going live
 > broken. If you would rather keep resource-free routes answering, set
