@@ -118,6 +118,51 @@ export default defineApp({
 
 The rule has one consequence worth stating plainly: **auto-discovery cannot work.** `fs.readdirSync("./routes")`, a glob, `import.meta.glob`, `require.context` and a dynamic `import(\`./routes/${name}\`)` all fail at build — the application is bundled and its manifest is read by evaluating the module in a world that has no filesystem, before any work runs (top-level `await` is out for the same reason). A route file nobody imports is not served; a build that produced no workloads says so, and so does the runtime at activation.
 
+### Routes, services, repositories
+
+Handlers that hold business logic get ugly fast, and the layering most Express or Fastify teams end up with ports here unchanged — `routes.ts` declares, `service.ts` decides, `queries.ts` talks to the database, `schemas.ts` holds the contracts, `mapper.ts` shapes the response:
+
+```text
+src/users/
+├── module.ts     # defineModule({ name: "users", workloads: [...], resources: [db] })
+├── routes.ts     # http.post(...) — contracts, auth, resources; one line of body
+├── service.ts    # the decisions: what is allowed, what conflicts, what to write
+├── queries.ts    # the repository: SQL, and nothing else
+├── schemas.ts    # the zod schemas the routes declare
+├── mapper.ts     # row → response shape
+└── migrations/*.sql
+```
+
+**The one rule the runtime adds: a repository takes its executor as an argument.** In Express you close over a pool created at module scope; here the handle exists only inside a world (and module scope is a snapshot, so a value written there never reaches the next world). Type the repository against `SqlExecutor` — the three methods — and the same function works on the handle *and* inside a transaction, because `tx` is an `SqlExecutor` too:
+
+```ts
+// queries.ts — the repository. `SqlExecutor` is query/one/execute; `PostgresHandle` adds transaction().
+export async function insertUser(sql: SqlExecutor, email: string): Promise<UserRow> {
+  const row = await sql.one<UserRow>(
+    `insert into users (email) values ($1) returning id, email, created_at as "createdAt"`, [email]);
+  if (!row) throw new Error("insert returned no row");
+  return row;
+}
+
+// service.ts — the decisions. No HTTP in sight, and it composes the repository.
+export async function register(sql: PostgresHandle, email: string): Promise<UserRow> {
+  return sql.transaction(async (tx) => {
+    const existing = await tx.one<{ id: string }>(`select id from users where email = $1`, [email]);
+    if (existing) throw errors.conflict("that email is registered");
+    return insertUser(tx, email);          // the same repository function, now on the transaction
+  });
+}
+
+// routes.ts — the declaration, and one line of body.
+export const create = http.post(
+  "/users",
+  { body: NewUser, response: { 201: UserResponse }, resources: [db], errors: [{ code: "conflict", status: 409 }] },
+  async (ctx) => http.created(toUserResponse(await register(ctx.resources.main, ctx.body.email))),
+);
+```
+
+Two habits that do not survive the move: a singleton built at module scope that holds a connection, a cache or a counter (worlds do not share it, and what a handler writes there is discarded), and a service that reaches for a global to find the database — pass it in, which is what makes the service testable anyway. Everything else — dependency direction, naming, one folder per concern — is yours.
+
 `usai inspect` shows the application exactly as the runtime understood it. `usai config` shows every effective setting and where it came from.
 
 `usai.config.ts` is a **declaration**, evaluated in a capability-less world and cached by its source digest — not a Node script. `process.env`, `fs`, `require`, `import.meta` are not available in it (the error says so). Anything that differs per environment belongs to `env(...)` declarations in the application and to the runtime's environment, never to the config.
@@ -402,6 +447,8 @@ What runs where: an instance started with `usai run` runs the HTTP listener, the
 
 Health: `GET /_usai/live` (the process answers) and `GET /_usai/ready` (an active revision exists and every bound resource answers a 1 s probe — PostgreSQL runs `SELECT 1` on a leased connection; 503 names the failing resource; an empty `resources: {}` means every probe passed — only failures are listed). Route traffic on ready, restart on live. Between probes, `/_usai/status` → `resources[].ready` says what the *last contact* with each resource was: false from the first connection-level failure (`pool_error`, `connection_closed`, SQLSTATE 08xxx/57P0x — with `detail.lastError` and `detail.unreadyForSeconds`), true again after the next successful operation; a query's own error never flips it. While a dependency is down the runtime writes **one `WARN dependency unavailable` line per error code per second** with a `suppressed` count, not a stack per request (`docs/runbooks/postgres-down.md`). A `service()` that has exhausted its restart policy is `failed` in `/_usai/status` and `usai_service{state="failed"}` and logs `service gave up`; it does **not** make the instance unready (HTTP is still served) — alert on the gauge. `usai probe live|ready --addr <status listener>` is the same check as a command with exit code 0/1, for a container `HEALTHCHECK` or a Kubernetes probe in an image without curl.
 
+**Reading the application from a terminal.** `/_usai/docs` is a single-page shell that fetches the document at load, so `curl`ing it returns markup and no routes; `/_usai/openapi.json` is the document itself, and `usai inspect` needs no server at all. Grep those two.
+
 **What the proxy owns.** Three things an Express or Laravel application does in-process are the reverse proxy's here, on purpose: **CORS** (preflights and `Access-Control-*`, §9), **static files** and the **access log** (below). **Security headers** can live either side: `defineApp({ headers: { "strict-transport-security": "max-age=31536000", "x-content-type-options": "nosniff" } })` sets static headers on every application response (a handler's own header of the same name wins; `/_usai/*` is untouched), which is what a deployment without a proxy in front needs; a proxy that already sets them is the better place, because it covers the assets too. **Static files** (a world has no filesystem and the build has no asset loader — `import "./index.html"` fails; serve assets from the proxy or object storage; a small inline HTML string through `http.raw` is the exception) and the **access log** (below). One Caddy block covers all four:
 
 ```caddyfile
@@ -495,6 +542,8 @@ test("users", async () => {
 
 `testApp` needs the `usai` binary (`USAI_BIN` or on `PATH`) and the project's declared environment (pass `env: { DATABASE_URL }`). Run the files with `node --test` (or `usai test`, which sets `USAI_BIN` and loads `.env`); the `--conditions=usai` flag the repository's own examples use selects the SDK's TypeScript sources inside this monorepo and **breaks** an installed package — it resolves to TypeScript under `node_modules`, which Node refuses to strip (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`). Leave it out, or run `usai test`, which sets what it needs. With `migrate: true` (or `migrate: { seed: true }`) it runs `usai db migrate` / `usai db seed` first — for a throwaway database (`usai test` reads `.env`, so point `DATABASE_URL` at one that may be wiped). The harness starts the runtime with `--diagnostics`: every `TestResponse` carries `violations` (the world's lifecycle violations, e.g. `detached_work` for an un-awaited `dispatch`) — assert `deepEqual(res.violations, [])` on the requests that matter — and 500 bodies carry the error details. Lifecycle-specific tests are ordinary: mutate in one request, read in the next, and assert the mutation is gone.
 
+A `WARN connection quarantined: original query has no terminal outcome` in a test run is not a failure: the harness ends worlds while statements are still in flight, and a connection whose outcome the runtime cannot prove is replaced rather than reused (C5, `docs/runbooks/postgres-down.md`). It is the contract working.
+
 In CI, the tests need the binary and a PostgreSQL. The pure-npm path fetches the release binary on `pnpm install` (`@sakaladev/usai`'s wrapper; `USAI_RELEASE_BASE` for a mirror), and a service container is the database:
 
 ```yaml
@@ -524,6 +573,8 @@ jobs:
 `app.http.post(path, { body })` sends an object as JSON (`content-type: application/json`) and a string byte-for-byte (for signed webhook bodies: sign the string, send the string). Every call returns `{ status, headers, body, text }` — `body` is parsed JSON when the response is JSON.
 
 ## 16. A realistic application: `examples/todos`
+
+*(The examples in this repository are wired to it: their `tsconfig.json` extends the workspace base and maps `@sakaladev/usai` to the SDK's sources. Read them here; to **start** a project run `pnpm dlx @sakaladev/create-usai <dir>`, whose scaffold is self-contained.)*
 
 Everything above in one project — read it in this order.
 
@@ -583,6 +634,7 @@ The same service, piece by piece. Left: what you write today. Right: where it li
 | `morgan`, access logs | The proxy's access log; the runtime counts (`/_usai/status`, `usai_http_*`) and logs 5xx and lifecycle violations with `request_id` | §14 |
 | `req.id`, `X-Request-Id` middleware | Built in: `x-request-id` accepted or minted, `ctx.requestId`, on every log line and outbound call | §14 |
 | `multer`, `UploadFile` | `http.raw` + `multipart.parse(bytes, contentType)`; bytes into `bytea` as a `Uint8Array`; `USAI_MAX_BODY_BYTES`; large files → presigned upload to object storage | §4 |
+| `routes/` + `controllers/` + `services/` + `repositories/`, a DI container | The same layering, with one rule: a repository takes its `SqlExecutor` as an argument instead of closing over a pool — the handle lives in the world, not in module scope | §3 |
 | `express.static`, `public/` | The proxy or object storage (a world has no filesystem) | §14 |
 | `res.write` / SSE / `StreamingResponse` | `http.stream(path, { contentType })` — SSE by default, CSV/NDJSON declared | §9 |
 | `ws`, Socket.IO, Reverb | `socket(path, { incoming, outgoing })`, one world per connection, browser credential as `["bearer", token]` | §9 |

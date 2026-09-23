@@ -334,9 +334,23 @@ export interface DefineAppOptions {
    * `content-security-policy` …). A handler's own header of the same name
    * wins. Static values only — anything computed belongs in the handler. */
   headers?: Record<string, string>;
+  /** The modules this application is composed of (`defineModule`). A module
+   * brings its own workloads, resources, migrations and seeders, so a larger
+   * application lists modules here and workloads nowhere. */
   modules?: ModuleDeclaration[];
+  /** The workloads that do not belong to a module — routes, tasks, cron
+   * entries, consumers, services, commands. **A workload exists because this
+   * list (or a module's) reaches it through an `import`: the runtime never
+   * scans your files**, so a route file nobody imports is not served. */
   workloads?: Workload[];
+  /** Resources the application opens that no workload declares — rare: a
+   * resource named in a workload's `resources: [...]` is already part of the
+   * application. Everything here is opened at activation. */
   resources?: ResourceDeclaration[];
+  /** The environment the whole application requires (`env({ … })`): every
+   * variable, its type and whether it is required. A missing required
+   * variable fails activation with all of them named at once, never at the
+   * first request. */
   env?: EnvDeclaration<Record<string, EnvField<unknown>>>;
 }
 

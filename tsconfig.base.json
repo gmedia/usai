@@ -12,6 +12,10 @@
     "isolatedModules": true,
     "rewriteRelativeImportExtensions": true,
     "declaration": true,
+    // The published package ships `src/`, so a source map beside each
+    // declaration makes "go to definition" land on the implementation
+    // instead of stopping at the `.d.ts`.
+    "declarationMap": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   }
