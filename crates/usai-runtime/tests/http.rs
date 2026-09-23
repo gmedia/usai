@@ -1478,6 +1478,47 @@ async fn the_status_token_guards_the_operator_surfaces_but_not_the_probes() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_announced_surfaces_are_the_served_ones() {
+    // The startup banner is the first thing read when verifying a hardened
+    // deployment, and it used to advertise a surface `USAI_SURFACES_OFF` had
+    // removed (round 16, an operator deploying 0.0.8 with `docs` off).
+    let Some(s) = start().await else { return };
+    let all = HttpHost::new(
+        Arc::clone(&s.runtime),
+        HttpConfig {
+            serve_status: true,
+            serve_docs: true,
+            ..HttpConfig::default()
+        },
+    );
+    assert_eq!(
+        all.internal_surfaces(),
+        vec![
+            "/_usai/status",
+            "/_usai/metrics",
+            "/_usai/live",
+            "/_usai/ready",
+            "/_usai/docs"
+        ]
+    );
+    let hardened = HttpHost::new(
+        Arc::clone(&s.runtime),
+        HttpConfig {
+            serve_status: true,
+            serve_docs: true,
+            surfaces_off: vec!["docs".into(), "metrics".into()],
+            ..HttpConfig::default()
+        },
+    );
+    assert_eq!(
+        hardened.internal_surfaces(),
+        vec!["/_usai/status", "/_usai/live", "/_usai/ready"],
+        "the banner must not name a surface that answers 404"
+    );
+    s.shutdown.cancel();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_public_listener_does_not_admit_that_a_protected_surface_exists() {
     // Production shape: the surfaces live on their own listener
     // (`--status-addr`) and a status token is set. The public listener then
