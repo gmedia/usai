@@ -17,6 +17,24 @@ on a runtime you have not used. We are not testing you; we are testing the
 documentation and the runtime. Everything that confuses you is a finding,
 and the more of them you write down the more useful the session is.
 
+**Before the timer starts** (this part is setup, not the session — do it
+first and do not count it):
+
+- **Node 24 or newer** and a package manager (`pnpm` in the examples;
+  `npm`/`yarn` work). `node --version` should say `v24` or higher.
+- **A PostgreSQL you can throw away.** Any of these:
+  ```bash
+  docker run -d --name p7-pg -p 5432:5432 \
+    -e POSTGRES_USER=usai -e POSTGRES_PASSWORD=usai -e POSTGRES_DB=usai postgres:18
+  # → DATABASE_URL=postgres://usai:usai@127.0.0.1:5432/usai
+  ```
+  a managed database, or one you already run. You never need superuser
+  rights; the application creates its own tables.
+- **Nothing else.** The runtime binary is fetched for you on the first
+  command (`~/.cache/usai/<version>/usai`); you do not install it, and you
+  do not need Rust, Docker (beyond the database above) or a cluster.
+- Write down `pnpm exec usai --version` — the report needs it.
+
 **Rules**
 
 - Use only what is public: the README, `docs/GUIDE.md`, `docs/sdk/`, the
@@ -74,6 +92,11 @@ or send the same content by mail:
   Go or Spring. Mix them; five people making the same mistake means the API
   is wrong, one person means the doc is.
 - Give them the current release, not `main`; note the version on the report.
+  Today that is **0.0.9** (`pnpm dlx @sakaladev/create-usai@latest` scaffolds
+  a project pinned to it). Hand them this page and nothing else — no demo, no
+  walkthrough, no "one thing to know first". The first five minutes of
+  someone alone with the documentation is the most expensive data this
+  project can buy, and a hint spends it.
 - Do not help during the session. Afterwards, walk the report with them for
   fifteen minutes and write down the questions they ask *then* too.
 - Every report becomes a row in `docs/STATUS.md` (P7) with what was fixed;
