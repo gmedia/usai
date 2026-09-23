@@ -528,6 +528,7 @@ async fn serve_until_signal(
                         Some(&runtime.status()),
                         expose_diagnostics,
                         serve_status,
+                        false,
                     )
                 );
             }
@@ -911,6 +912,7 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
                         &format!("{} ({})", revision.id, revision.definition.identity()),
                         Some(&url),
                         Some(&banner_runtime.status()),
+                        true,
                         true,
                         true,
                     )

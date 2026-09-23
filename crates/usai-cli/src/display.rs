@@ -26,6 +26,10 @@ pub fn banner(
     status: Option<&RuntimeStatus>,
     docs: bool,
     status_surface: bool,
+    // `usai dev` only: the three rules a developer's instincts break first.
+    // A blind usability round spent twenty of its twenty-five lost minutes
+    // on exactly these, and two of the three are silent when violated.
+    teach: bool,
 ) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "Usai\n");
@@ -153,6 +157,17 @@ pub fn banner(
                 .unwrap_or("");
             let _ = writeln!(out, "  {:<16} {ready}", format!("{}/{}", r.kind, r.name));
         }
+    }
+    if teach {
+        let _ = writeln!(
+            out,
+            "\nWorlds\n  \
+             one per request, task, cron tick or command — it starts from a snapshot of module\n  \
+             scope, so what a handler writes there is gone with it (state lives in PostgreSQL)\n  \
+             each statement leases its own connection — `ctx.resources.<name>.transaction(fn)`\n  \
+             holds one across several\n  \
+             work that outlives the response: `await ctx.tasks.dispatch(task, input)`"
+        );
     }
     if let Some(url) = base_url {
         let _ = writeln!(out, "\nApp       {url}");
