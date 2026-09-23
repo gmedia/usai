@@ -28,7 +28,7 @@ Adding an API requires answering: who owns it, what happens at world end, what h
 ## Consequences
 
 - Easier: small, auditable surface; every API has a lifetime story; no chasing Node.
-- Harder: some npm packages will not run; the compatibility budget must be documented and revisited by demand.
+- Harder: some npm packages will not run; the compatibility budget **is documented** (`SUPPORTED.md` → The npm compatibility budget, 2026-09-23) and revisited by demand.
 - Forbidden: polyfilling Node globals to make arbitrary packages work; exposing an API without a lifetime rule.
 
 ## Alternatives considered

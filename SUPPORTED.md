@@ -17,6 +17,26 @@ and nothing is promised.
 | **Host envelope** | **192 MiB and 1 vCPU per application instance** (`--max-worlds 48`, PostgreSQL `pool.max` 4, status + metrics on) | measured 2026-09-19 (`docs/measurements/2026-09-20-p8e-efficiency.md`): idle 40 MiB RSS / 35 MiB PSS and 0.00 % CPU; a c=16 burst peaks at ≈102 MiB and 1 000 req/s on one vCPU, so 192 MiB leaves ≥ 25 % headroom. 128 MiB passes with 20 %; the technical floor is 48 MiB / 0.25 vCPU for a hello-only application (32 MiB is OOM-killed). Memory grows with the peak number of *concurrently used* worlds (≈4 MiB RSS / ≈1.5 MiB PSS per touched slot, kept resident so the next world does not fault the image back in), not with request count; size the limit for `40 MiB + max_worlds × 4 MiB` worst case, or lower `--max-worlds`. `USAI_WASM_KEEP_RESIDENT=0` returns the memory after a burst at ≈2× the CPU per request and half the throughput on one vCPU (measured; values between 0 and the default change nothing). A fractional vCPU works but its burst p99 is the CFS throttle (≈60–80 ms at 0.25–0.5 vCPU) |
 | Many applications per host | ✓ one process per application | measured to N = 50 on one host: ≈30 MiB PSS (47 MiB RSS) and no idle CPU per idle application, linear in N; each holds its own `pool.max` connections (N × `pool.max` on the PostgreSQL side — 200 at N=50 with `pool.max` 4); a single process serving many applications is an open question (`docs/OPEN-QUESTIONS.md` Q17), not a feature |
 
+## The npm compatibility budget
+
+ADR-0013 said this had to be written down, and it had not been. What an
+application may bring from npm, and what it may not:
+
+| | |
+|---|---|
+| **Node** | 24 or newer, for the tooling — `usai build`, `usai dev`, `usai test` run Node; the application does not (it runs in a world). The published binaries need no Node at all to *serve* |
+| **Package manager** | pnpm (what the scaffold and this repository use) or npm; both are tested — the scaffold's own CI uses npm |
+| **TypeScript** | 5.9+, and only for your own typecheck: the build strips types with esbuild and never calls `tsc` except through your `tsconfig.json` |
+| **The SDK's dependencies** | `@sakaladev/usai` depends on esbuild (the bundler) and nothing else at runtime; `zod` is yours to install and any Standard Schema library works |
+| **What a world may import** | a package that only computes. Anything that reaches for a Node built-in when it is loaded cannot be bundled — the build says which package and why (GUIDE §7 → Query builders, and what you can npm-install) |
+| **What it may not** | a driver, a connection pool, an ORM that opens its own connection, `fs`, `child_process`, native addons. The database, outbound HTTP, time and randomness are the runtime's to lease |
+
+**The budget, stated plainly:** we will not polyfill Node globals to make a
+package work, and we will not add an API without a lifetime rule (ADR-0013).
+When a package that only computes cannot be bundled, that is a bug worth
+reporting. When a package needs a socket, it is out of budget by design, and
+the answer is a resource — an existing one, or a case for a new kind.
+
 ## Data and network
 
 | | Supported |
@@ -53,6 +73,9 @@ and nothing is promised.
   says what. Runtime and SDK are released together and must be at the same
   version; the runtime refuses an artifact of another manifest format before
   serving, with a message that names both versions.
+- **The SDK axis**, since 0.0.8: CI also builds an application against the
+  *previous published SDK* and serves it on this runtime, or requires the
+  refusal to name the guest ABI before anything listens.
 - Upgrade path: build with the new SDK, deploy the new runtime with the new
   artifact. Rollback: activate the previous artifact on the previous runtime.
   The matrix runtime × artifact (N, N−1) is tested in CI on every push
