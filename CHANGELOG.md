@@ -10,6 +10,13 @@ the human summary.
 
 ## 0.0.10 — Unreleased
 
+### CLI
+
+- **`usai probe --timeout <seconds>`** (3 by default, as before). An `exec`
+  probe's own timeout has to be above the command's, or the supervisor kills
+  the check instead of reading its answer — and until now the command's was
+  both fixed and undocumented.
+
 ### Runtime
 
 - **The start-up memory check is a floor, not a forecast.** It used the full
