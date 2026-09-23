@@ -156,7 +156,6 @@ fn link(engine: &WtEngine) -> Result<Linker<HostData>, EngineError> {
                 let (kind, payload) = text.split_once('\0').unwrap_or((text.as_ref(), ""));
                 let (kind, payload) = (kind.to_owned(), payload.to_owned());
                 let data = caller.data_mut();
-                data.op_starts += 1;
                 match kind.as_str() {
                     "__log" => {
                         let (level, message) = payload
@@ -175,6 +174,14 @@ fn link(engine: &WtEngine) -> Result<Linker<HostData>, EngineError> {
                         -1
                     }
                     _ => {
+                        // Only a real operation counts: the build phase reads
+                        // this to refuse I/O in a declaration (ADR-0009), and
+                        // `__log`/`__cancel` are control calls the host
+                        // answers on the spot. Counting `__log` made a
+                        // `console.log` at module scope fail the build with
+                        // "declarations must not perform I/O", which is both
+                        // true of the counter and wrong about logging.
+                        data.op_starts += 1;
                         if !data.accepting {
                             return -1;
                         }

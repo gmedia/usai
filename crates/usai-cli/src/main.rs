@@ -3,6 +3,7 @@
 
 mod commands;
 mod display;
+mod logfmt;
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -410,9 +411,7 @@ async fn async_main() {
         "json" => tracing_subscriber::fmt()
             .with_env_filter(filter)
             .with_writer(std::io::stderr)
-            .with_target(true)
-            .json()
-            .flatten_event(true)
+            .event_format(logfmt::JsonLine)
             .init(),
         "text" => tracing_subscriber::fmt()
             .with_env_filter(filter)

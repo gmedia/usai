@@ -483,6 +483,28 @@ api.example.com {
 }
 ```
 
+**Debugging: where your output goes.** `console.log`/`console.info` are INFO,
+`console.warn` WARN, `console.error` ERROR and `console.debug` DEBUG — the
+last one is below the default filter, so raise it (`RUST_LOG=app=debug`) when
+you want it. `ctx.log.*` is the same thing under another name. Two places
+behave differently, and both surprised a developer before they were written
+down:
+
+- **In a handler** (or a task, a cron tick, a consumer) the line is printed
+  as the work runs, with `workload`, `world` and `request_id` on it — that is
+  the ordinary case.
+- **At module scope** the line runs while the application is being *defined*,
+  not per request: `usai build` prints it once, `usai dev` prints it on every
+  rebuild, and `usai run` never does, because the module was evaluated before
+  the artifact existed and every world resumes that snapshot. A `console.log`
+  at the top of `app.ts` that "does not appear" in a running server is this,
+  not a lost line.
+
+A one-shot command (`usai app`, `usai task run`, `usai db …`) keeps the
+runtime quiet by default; `-v` shows its INFO lines too. In tests, every line
+is available through `app.logs()` / `app.waitForLog()` (§15) rather than the
+terminal.
+
 **Request ids.** Every request has one: the client's `x-request-id` when it sent a sane one (≤ 128 printable ASCII characters — a proxy's trace id), a UUID minted by the runtime otherwise. It comes back on the response as `x-request-id`, is `ctx.requestId` in HTTP, raw, stream and socket handlers, rides as `request_id` on every line the world logs (`ctx.log`/`console.*`, JSON and text), and goes out as `x-request-id` on every `httpClient` call the world makes — so the proxy's access log, the application's lines and the downstream service's logs join on one value without the application doing anything. **It follows the hand-off**: a task the request invokes or dispatches runs in a world of its own, and that world carries the same id (`ctx.requestId` in the task, `request_id` on its log lines, on its outbound calls), so "everything that happened for request X, including the mail job it queued" is one filter. A queue message carries its publisher's id too (`request_id` on the `usai_queue` row): the consumer's world runs under it, `ctx.requestId` says so, and a webhook fired three retries later still joins the request that caused it. A task started by hand (`usai task run`) or by cron has none.
 
 **What a 5xx log line contains** — and does not. `application error` / `unexpected handler failure` lines carry `world`, `workload`, `request_id`, the error `code`, the error text as `error` **as the application wrote it** (`message` is the line's own text — `application error` — so the two never collide in the JSON line), `details` (for a response-contract failure: which field of the response did not match and the validator's message about it) and the source-mapped `stack`. The runtime never logs request bodies, headers, query strings, path parameters or the principal: what reaches the log about a request is what the application put in the error message and what it logged itself (`ctx.log`). Redaction is therefore the application's discipline (do not put a token or an email in an error message) plus the shipper's (a filter on `target == "app"` lines if your log pipeline redacts). Volume: one line per 5xx and per lifecycle violation, none per 2xx/4xx; application lines as written.
@@ -493,7 +515,7 @@ Where the `/_usai/*` surfaces listen: `--status` puts status, metrics, live, rea
 
 Several replicas: HTTP and queue consumers share the work without configuration (messages are claimed with `SKIP LOCKED`; migrations serialize on an advisory lock). **A cron schedule runs on every instance that schedules, unless it is declared `exclusive: true`** — then each tick is claimed once in PostgreSQL (`usai_cron_ticks`) and one instance runs it, whichever replica got there first (§6). Schedules without it need the scheduler on one replica: start the others with `usai run --no-cron` (`USAI_NO_CRON=1`); `--no-queue` likewise dedicates replicas. `SUPPORTED.md` has the topology table.
 
-Logs: `--log-format json` (global flag) writes one JSON object per line with `timestamp`, `level` and fields, on stderr, and leaves **stdout empty** for `usai run` (the startup banner becomes one `serving` line on the JSON stream), so a shipper that reads both streams of the process parses every line it sees; the application's `console.*`/`ctx.log.*` lines carry `target: "app"`, `workload`, `world`, `request_id` and appear at INFO. **Structured fields**: a trailing plain object is data, not text — `ctx.log.info("invoice paid", { invoiceId, cents })` gives `message: "invoice paid"` and `fields: {"invoiceId":…,"cents":…}`. **`fields` is a JSON-encoded string, not a nested object** (the log line stays one flat object): a Loki/promtail pipeline needs a second parse stage over it (`json` with `source: fields`), and `jq` reads it with `.fields | fromjson`; other arguments are stringified into the message as `console` does. Results of one-shot commands go to stdout.
+Logs: `--log-format json` (global flag) writes one JSON object per line with `timestamp`, `level` and fields, on stderr, and leaves **stdout empty** for `usai run` (the startup banner becomes one `serving` line on the JSON stream), so a shipper that reads both streams of the process parses every line it sees; the application's `console.*`/`ctx.log.*` lines carry `target: "app"`, `workload`, `world`, `request_id` and appear at INFO. **Structured fields**: a trailing plain object is data, not text — `ctx.log.info("invoice paid", { invoiceId, cents })` gives `message: "invoice paid"` and `fields: {"invoiceId":…,"cents":…}`. `fields` is a **nested object** in the JSON line (`.fields.invoiceId` in `jq`, no second parse stage in a Loki/promtail pipeline); other arguments are stringified into the message as `console` does. Results of one-shot commands go to stdout.
 
 Deploying with Docker: build the scaffold's `Dockerfile`, run it with
 `DATABASE_URL` and the rest of the declared environment (`usai run` never

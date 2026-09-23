@@ -226,8 +226,33 @@ impl HostBindings for RefusingBindings {
         0
     }
     fn cancel_op(&self, _op: u64) {}
+    /// A `console.log` at module scope is a developer debugging their
+    /// declarations, and the definition phase is the only place it can run.
+    /// It reaches the same `app` target as a handler's, so `usai build` and
+    /// every `usai dev` rebuild print it.
     fn log(&self, level: &str, message: &str) {
-        tracing::debug!(level, "{message}");
+        // `message\0{json}` when the call carried structured fields.
+        let (message, fields) = message.split_once('\0').unwrap_or((message, ""));
+        // An empty `fields` is noise on every line that carried none.
+        if fields.is_empty() {
+            match level {
+                "error" => tracing::error!(target: "app", phase = "definition", "{message}"),
+                "warn" => tracing::warn!(target: "app", phase = "definition", "{message}"),
+                "debug" => tracing::debug!(target: "app", phase = "definition", "{message}"),
+                _ => tracing::info!(target: "app", phase = "definition", "{message}"),
+            }
+        } else {
+            match level {
+                "error" => {
+                    tracing::error!(target: "app", phase = "definition", fields, "{message}")
+                }
+                "warn" => tracing::warn!(target: "app", phase = "definition", fields, "{message}"),
+                "debug" => {
+                    tracing::debug!(target: "app", phase = "definition", fields, "{message}")
+                }
+                _ => tracing::info!(target: "app", phase = "definition", fields, "{message}"),
+            }
+        }
     }
 }
 

@@ -214,6 +214,25 @@ impl HostBindings for WorldShared {
         // `dev` and `run` while the runtime's internals stay at their level.
         let workload = &*self.workload;
         let request_id = self.request_id.as_deref().unwrap_or("");
+        // A line that carried no structured fields should not print an empty
+        // `fields=""` on every application log.
+        if fields.is_empty() {
+            match level {
+                "error" => {
+                    tracing::error!(target: "app", workload, world = %self.id, request_id, "{message}")
+                }
+                "warn" => {
+                    tracing::warn!(target: "app", workload, world = %self.id, request_id, "{message}")
+                }
+                "debug" => {
+                    tracing::debug!(target: "app", workload, world = %self.id, request_id, "{message}")
+                }
+                _ => {
+                    tracing::info!(target: "app", workload, world = %self.id, request_id, "{message}")
+                }
+            }
+            return;
+        }
         match level {
             "error" => {
                 tracing::error!(target: "app", workload, world = %self.id, request_id, fields, "{message}")

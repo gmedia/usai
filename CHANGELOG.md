@@ -22,6 +22,23 @@ the human summary.
   never by itself), and `prepare` builds the indexes with `CREATE INDEX
   CONCURRENTLY` before an upgrade would.
 
+### Runtime
+
+- **`console.log` in a declaration no longer fails the build.** The bridge
+  routes a log through the host's control call, and the definition phase
+  counted every control call as an operation — so a `console.log` at module
+  scope was refused as "declarations must not perform I/O" (ADR-0009). In
+  `usai dev` the failed rebuild left the previous revision serving, which
+  looks exactly like a log line that vanished. Only real operations count
+  now, and a declaration's logs are printed at `usai build` and on every
+  `dev` rebuild (`target: "app"`, `phase: "definition"`). A declaration that
+  performs actual I/O is still refused.
+- **`fields` in a JSON log line is an object, not a string.** `--log-format
+  json` is written by the runtime's own formatter now, which parses the
+  application's structured fields once — `.fields.invoiceId` in `jq`, no
+  second parse stage in a Loki pipeline. Lines that carried no fields no
+  longer print `fields=""`, and an empty `request_id` is left out.
+
 ### CI
 
 - The compatibility matrix gained its **third axis**: an application built
