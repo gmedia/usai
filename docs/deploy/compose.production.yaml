@@ -88,6 +88,14 @@ configs:
           # must learn the instance is draining before its listener closes.
           health_interval 1s
           lb_try_duration 5s
+          # Readiness fails when a bound resource fails its probe, so a
+          # PostgreSQL outage takes this upstream out for *every* route,
+          # including routes that never touch the database. That is the
+          # default; USAI_READY_REQUIRES_RESOURCES=0 on the app keeps them
+          # serving. docs/runbooks/postgres-down.md has the trade-off.
+          # With more than one replica, give each its own address and keep
+          # the ports identical — health_port is one value for the whole
+          # handler (docs/runbooks/deploy-and-rollback.md).
         }
       }
 
