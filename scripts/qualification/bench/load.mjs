@@ -61,6 +61,7 @@ const lat = [],
   phases = new Map();
 let ok = 0,
   s4xx = 0,
+  s503 = 0,
   s5xx = 0,
   errors = 0,
   profiled = 0,
@@ -81,6 +82,10 @@ async function client() {
       lat.push(performance.now() - t);
       if (res.status < 300) ok++;
       else if (res.status < 500) s4xx++;
+      // A refusal is not a failure: the runtime says "not now"
+      // (capacity_exhausted, or a dependency it will not pretend about)
+      // and a saturation run has to tell that from a fault.
+      else if (res.status === 503) s503++;
       else s5xx++;
       if (prof) {
         profiled++;
@@ -105,7 +110,7 @@ for (let i = 0; i < 50; i++) {
   } catch {}
 }
 lat.length = 0;
-ok = s4xx = s5xx = errors = profiled = 0;
+ok = s4xx = s503 = s5xx = errors = profiled = 0;
 phases.clear();
 const started = performance.now();
 const runs = Array.from({ length: clients }, client);
@@ -116,7 +121,7 @@ await Promise.all(runs);
 const elapsed = (performance.now() - started) / 1000;
 lat.sort((a, b) => a - b);
 const pct = (p) => +(lat[Math.min(lat.length - 1, Math.floor(p * lat.length))] ?? 0).toFixed(3);
-const total = ok + s4xx + s5xx + errors;
+const total = ok + s4xx + s503 + s5xx + errors;
 const summary = {
   class: cls,
   clients,
@@ -128,6 +133,7 @@ const summary = {
   p99: pct(0.99),
   ok,
   s4xx,
+  s503,
   s5xx,
   errors,
 };

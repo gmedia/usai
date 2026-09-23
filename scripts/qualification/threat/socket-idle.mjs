@@ -17,22 +17,23 @@ const expect = createHash("sha1")
   .digest("base64");
 
 const started = Date.now();
-const socket = createConnection(
-  { host: url.hostname, port: Number(url.port || 80) },
-  () => {
-    socket.write(
-      `GET ${url.pathname} HTTP/1.1\r\nHost: ${url.host}\r\nUpgrade: websocket\r\n` +
-        `Connection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`,
-    );
-  },
-);
+const socket = createConnection({ host: url.hostname, port: Number(url.port || 80) }, () => {
+  socket.write(
+    `GET ${url.pathname} HTTP/1.1\r\nHost: ${url.host}\r\nUpgrade: websocket\r\n` +
+      `Connection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`,
+  );
+});
 
 let opened = false;
 let buffer = Buffer.alloc(0);
 let result = { opened: false, closeCode: null, closeReason: null, afterSeconds: null };
 
 const done = (extra) => {
-  result = { ...result, ...extra, afterSeconds: Number(((Date.now() - started) / 1000).toFixed(1)) };
+  result = {
+    ...result,
+    ...extra,
+    afterSeconds: Number(((Date.now() - started) / 1000).toFixed(1)),
+  };
   console.log(JSON.stringify(result));
   socket.destroy();
   process.exit(0);
