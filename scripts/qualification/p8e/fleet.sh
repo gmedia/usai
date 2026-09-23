@@ -166,6 +166,19 @@ floor() {
   local dir="$OUT/floor-$cell"; mkdir -p "$dir"
   PHASES="$dir/phases.jsonl"
   log "== floor $cell"
+  # One box at a time. Two runs of this script share the container name and
+  # the ports, and the second one silently takes the first one's box away:
+  # the first then measures a container that is not its own, reads an empty
+  # status and reports `ready=false` with no peak. Refusing is the only
+  # outcome that cannot be mistaken for a measurement.
+  if [ -n "$(docker ps -q -f "name=^${name}$" 2>/dev/null)" ]; then
+    cell_failed "$dir" "$cell" "a container named $name is already running - another floor run owns this box"
+    return 0
+  fi
+  if ss -ltn 2>/dev/null | grep -qE ":$port\b|:$status\b"; then
+    cell_failed "$dir" "$cell" "port $port or $status is already in use - another floor run owns this box"
+    return 0
+  fi
   docker rm -f "$name" >/dev/null 2>&1 || true
   # The readiness URL and the sampler label differ per comparator: Usai has a
   # status listener; Node answers /health on the app port; PHP is a compose
@@ -290,6 +303,16 @@ floor() {
     phase trickle "$base" 180
     phase load "$base" C 16 60
     phase idle 300
+  fi
+  # Still ours? A cell that measured somebody else's container is not a
+  # measurement, and the phases above take eleven minutes during which
+  # another run can take the name.
+  local now_id; now_id=$(docker inspect -f '{{.Id}}' "$name" 2>/dev/null || echo gone)
+  if [ "$now_id" != "$(cut -c1-64 < "$dir/container.id" 2>/dev/null)" ] && [ "$app" != php ]; then
+    kill "$sampler" 2>/dev/null || true; wait "$sampler" 2>/dev/null || true
+    cell_failed "$dir" "$cell" "the box was replaced while the cell ran (found $now_id) - another floor run took the name"
+    floor_teardown "$app" "$name"
+    return 0
   fi
   # What the kernel charged this box, which is the number a floor is about:
   # the peak it ever held, how often it hit the ceiling and had to reclaim
