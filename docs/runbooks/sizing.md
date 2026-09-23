@@ -71,7 +71,7 @@ image (one during a replacement, bounded).
 
 ```text
 mem_limit / MemoryMax  ≥  40 + peak_concurrency × (4…8) + 30   (MiB)
-48 worlds → ≥ 262 MiB; the compose file uses 512 MiB; 192 MiB is the supported floor measured with 48 worlds and a 16-client burst
+48 worlds → ≥ 262 MiB; the compose file uses 512 MiB; 192 MiB is the supported floor measured with 48 worlds and a 16-client burst (**under re-measurement**, 2026-09-23: the floor cells were not charged for the runtime's own text, so the published number can only be too small — `docs/measurements/2026-09-23-floor-accounting.md`)
 ```
 
 **Per-slot is 4 MiB for a small application and up to 8 for a real one.**
