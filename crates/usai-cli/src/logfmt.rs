@@ -12,7 +12,7 @@ use std::fmt;
 use tracing::field::{Field, Visit};
 use tracing::{Event, Subscriber};
 use tracing_subscriber::fmt::format::Writer;
-use tracing_subscriber::fmt::{FormatEvent, FormatFields, FormattedFields};
+use tracing_subscriber::fmt::{FormatEvent, FormatFields};
 use tracing_subscriber::registry::LookupSpan;
 
 pub struct JsonLine;
@@ -116,17 +116,13 @@ where
             Value::String(meta.level().as_str().to_owned()),
         );
         line.insert("target".into(), Value::String(meta.target().to_owned()));
-        // The span the event happened in, when there is one: the runtime uses
-        // spans for the world's trace.
+        // Spans: the runtime creates none of its own (every fact a line needs
+        // is on the event), and a dependency's span name is worth more than a
+        // half-parsed rendering of its fields.
         if let Some(span) = ctx.lookup_current()
-            && let Some(formatted) = span.extensions().get::<FormattedFields<N>>()
-            && !formatted.fields.is_empty()
-            && let Ok(Value::Object(map)) = serde_json::from_str::<Value>(&format!(
-                "{{{}}}",
-                formatted.fields.replace('=', ":").replace(' ', ",")
-            ))
+            && span.metadata().target() != meta.target()
         {
-            line.insert("span".into(), Value::Object(map));
+            line.insert("span".into(), Value::String(span.name().to_owned()));
         }
         for (k, v) in fields.map {
             line.insert(k, v);
