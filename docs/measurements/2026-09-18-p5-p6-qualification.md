@@ -241,6 +241,29 @@ consumers from 4 to 8 bought nothing and doubling again bought everything,
 which no model here predicts. Recorded as measured, to be chased with the
 per-phase profile on the next queue campaign rather than explained away.
 
+**The plateau did not reproduce off the VM** (2026-09-23, the WSL2 dev box:
+16 threads, PostgreSQL 18 on the same machine and the same disk, 5 000
+messages per cell, commit `70601d2`). The absolute numbers are a different
+machine's and mean nothing next to the table above; the *shape* is the point:
+
+| | c=4 × 1 | c=8 × 1 | c=16 × 1 |
+|---|---|---|---|
+| msg/s, `synchronous_commit=on` | 186 | 266 | 445 |
+| msg/s, `synchronous_commit=off` | 247 | 361 | 585 |
+
+Doubling the consumers bought 1.4× and then 1.6–1.7×, twice, with and
+without durable commits — so **c=4 ≈ c=8 is not a property of the consumer
+loop**, and the VM cells need re-running (the run's first two cells are the
+suspects: nothing in the harness pins them to an idle moment). What both
+machines do show is that four times the consumers buy about 2.4× the
+throughput, and that the ratio is the same with `synchronous_commit` off:
+the sublinearity is **not** commit durability, which is worth about a third
+of the rate here. The hypothesis to test with the per-phase profile is the
+claim itself — `ORDER BY id … FOR UPDATE SKIP LOCKED LIMIT 1` makes every
+claimant walk past the rows its siblings hold, so the claim grows more
+expensive as claimants are added. Not acted on: measuring it is the next
+campaign's job, not this report's.
+
 Producer route (`POST /enqueue`, one message per request, consumers up):
 10–12 ms per publish for one sequential client — a fresh world plus one
 synchronous commit — and 570–900 publishes/s at 16 clients; 3.5 ms / 1 650
