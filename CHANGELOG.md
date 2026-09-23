@@ -59,6 +59,15 @@ turned out to be measuring nothing, which is the other half of this release.
   rather than go live broken); `0` keeps resource-free routes serving and
   reports the failing resource in the body instead. Draining fails readiness
   either way.
+- **The runtime can see its own memory ceiling.** `/_usai/status` and
+  `/_usai/metrics` read the process's cgroup when asked and publish the
+  limit, the charge, the **ceiling hits** (`memory.events` `max`) and the OOM
+  kills — only when there is a limit. The ceiling hits are the one number
+  that identifies the state between "fits" and "OOM-killed": a container
+  pinned at its limit reclaims the pages of the binary it is executing and
+  faults them straight back in, with nothing killed and nothing logged. The
+  campaign measured one request per second in a box 16 MiB too small. The
+  alert is in `docs/runbooks/metrics.md`.
 - **The startup banner announces only the surfaces that are served.** It
   listed `/_usai/docs` after `USAI_SURFACES_OFF=docs` had removed it, and the
   status listener's 404 quoted the same fixed list.
