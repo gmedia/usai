@@ -236,12 +236,11 @@ capabilities (design), latency histogram in metrics, an API reference page — a
      dashboard is close to free — every panel is already named there with its
      query — and it would be the fastest on-ramp an operator gets. Nobody has
      written the JSON.
-  2. **Autoscaling on the honest signal.** CPU is the wrong first metric: the
-     limiter is usually the world budget or the pool. The HPA in
-     `docs/deploy/k8s/` scales on
-     `usai_world_budget{kind="in_use"} / {kind="max"}`, which needs a
-     custom-metrics adapter the manifests cannot ship. A worked
-     prometheus-adapter rule would close it.
+  2. ~~**Autoscaling on the honest signal.**~~ — **shipped the same evening**:
+     the HPA in `docs/deploy/k8s/` targets how full the world budget is, with
+     CPU as a coarse fallback and the prometheus-adapter rule that derives the
+     ratio written into the manifest. What is still missing is a cluster to
+     prove it on.
   3. **A distroless image variant.** The runtime image is Debian slim, so a
      shell and coreutils exist — disclosed in `THREAT-MODEL.md`, and an easy
      hardening win for anyone whose policy forbids them.
