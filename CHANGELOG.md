@@ -337,12 +337,23 @@ should read before rolling:
   change in 0.0.9 — it is a latent misconfiguration the runbook used to
   invite. `docs/runbooks/deploy-and-rollback.md` now has the block that
   works: one loopback address per replica, identical ports.
-- **The database-down alert fires sooner.** `usai_resource{metric="ready"}`
-  now flips within a second of the first failed readiness probe instead of
-  waiting for a real query to hit the pool, so an alert with a 30 s `for`
-  fires ~30 s into an outage on a quiet service rather than whenever traffic
-  next arrived. If you tuned that alert's window around the old lag, retune
-  it.
+- **The database-down alert fires at all.** `usai_resource{metric="ready"}`
+  now flips within a second of the first failed readiness probe. Measured
+  against 0.0.8 on the commonest outage shape — a database that accepts the
+  connection and then stops answering — the 0.0.8 metric **never moved**
+  while `/_usai/ready` was already 503, so an alert on
+  `usai_resource{metric="ready"} == 0` did not fire during the outage at
+  all. Do not retune that alert: check whether it has ever fired.
+- **Three more changes an observability pipeline feels**, none of them in
+  the first draft of this section: `/_usai/openapi.json` flips 401 → 404 on
+  a listener that does not serve it, exactly like `status` and `metrics`;
+  `usai_workload_cpu_seconds_total{workload}` adds one series per workload
+  that has run, including `cron:` and `queue:` ones, so scrape cardinality
+  grows with the application; and while `fields` becoming an object removes
+  a parse stage for `jq`, a Loki `| json` stage *renames* every field it
+  contained (`invoiceId` → `fields_invoiceId`), so saved queries, alert
+  expressions and dashboard variables built on those names have to be
+  rewritten before the roll, not after.
 
 ### Qualification (evidence, not features)
 
