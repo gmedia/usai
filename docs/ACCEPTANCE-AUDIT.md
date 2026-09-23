@@ -1,6 +1,6 @@
 # Acceptance audit — `GOAL.md` §53, item by item
 
-**Audited:** 2026-09-18 at commit `a506dda`; the ✓ column is as of that date and has not been re-walked since — 0.0.7 and 0.0.8 changed behaviour it covers (`CHANGELOG.md`). Legend: ✓ evidence exists and is
+**Audited:** 2026-09-18 at commit `a506dda`, **evidence names re-walked 2026-09-23** at 0.0.9-unreleased: of the 69 test functions this file names, 68 still exist (one had been renamed — fixed above) and the suites they live in pass. The ✓ *judgements* are still of 2026-09-18; behaviour changed in 0.0.7–0.0.9 (`CHANGELOG.md`), and where it did, the rows below say so. Legend: ✓ evidence exists and is
 automated; ◐ implemented, evidence partial or manual; ✗ gap. Evidence names
 are test functions under `crates/usai-runtime/tests/` unless stated. Update
 this file when an item moves.
@@ -21,7 +21,7 @@ this file when an item moves.
 | immutable definition creates multiple worlds | ✓ | `concurrent_worlds_do_not_share_state`, `fresh_world_per_request_and_persistent_resource` |
 | world A state invisible in world B | ✓ | `world_a_state_is_not_visible_in_world_b` |
 | persistent runtime infrastructure survives world destruction | ✓ | `persistent_resource_survives_world_destruction` |
-| ownership returns to baseline | ✓ | `assert_baseline` in every lifecycle test; `shutdown_cancels_live_work_and_returns_to_baseline` |
+| ownership returns to baseline | ✓ | `assert_baseline` in every lifecycle test; `shutdown_drains_then_cancels_live_work_and_returns_to_baseline` |
 | abnormal destruction leaves no stale execution rights | ✓ | `cancelled_world_leaves_no_stale_execution_rights`, `deadline_ends_the_world_and_ownership_returns`, `runaway_synchronous_code_is_interrupted` |
 | semantics testable without HTTP | ✓ | all of `tests/lifecycle.rs` drives `Runtime::invoke` with a hand-written `__usai_sdk` |
 
@@ -162,7 +162,7 @@ this file when an item moves.
 | PostgreSQL ownership correct | ✓ | D6 |
 | config/project model usable | ✓ | D7 |
 | API docs from runtime truth | ✓ | D8 |
-| lifecycle integration tests green | ✓ | 79 Rust acceptance tests + 7 TS, both engines |
+| lifecycle integration tests green | ✓ | 121 Rust test functions across the integration suites (http 30, postgres 24, lifecycle 18, workloads 11, hardening 7, connection 7, plus the CLI's) and 30 TS cases in 7 files; the wasm engine everywhere, the reference engine on lifecycle and http |
 | observability sufficient to debug failures | ✓ | D12 |
 | docs let a new developer build a real application | ✓ | `docs/GUIDE.md` §16 walks `examples/todos` (modules, migrations, seeders, typed env, HTTP CRUD, dispatched task, cron, command, tests); the example's test runs in CI |
 | published packages / binaries | ✓ | `v0.0.1` release with binaries for 3 targets; `@sakaladev/usai@0.0.1`, `@sakaladev/create-usai@0.0.5` on npm via Trusted Publishing; verified from a clean directory: `pnpm dlx @sakaladev/create-usai` → `pnpm install` → released `usai build` |
