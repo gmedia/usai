@@ -640,6 +640,8 @@ What building it as a user found (and what changed): outbound HTTP, `crypto`, pa
 
 Per-world cost on the Wasm substrate is flat with respect to application size: instantiating a world from the pre-initialized image costs ~0.02 ms whatever the bundle contains, and validators declared as contracts are prepared before the image is snapshotted, so a fresh world does not rebuild them. Numbers belong with their conditions: a contract-validated hello request is 0.90 ms p50 at c=1 on the qualification VM (release build, pinned core, a soak as co-tenant — `docs/measurements/2026-09-19-p8-parity.md`), and the comparators on the same host are in the same report; quote from there, not from here. Handler code runs in an interpreter compiled by Cranelift: CPU-heavy loops are slower than on a JIT; keep hot loops small or move them to the database.
 
+**A `usai dev` rebuild takes about three seconds** on an idle machine (half of it compiling the application's image), and a change that does not alter what the application declares is recognised as such — the running revision keeps serving. Coming from `tsx watch` that is slower; it buys a revision that is byte-for-byte what production runs.
+
 **The first request after a start is a little slower than the rest** — on `examples/hello` (release build, idle machine) 7–11 ms against ~4 ms for the ones after it. The two definition-lifetime costs that used to sit there, compiling the routing table and the engine's first instantiation of the image, are paid at activation now, before readiness turns true; what remains is the guest's own first entry into your code. Nothing to configure, but worth knowing if you are reading a p99 right after a rolling restart.
 
 ## 19. Coming from Express, Fastify or Laravel
