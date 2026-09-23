@@ -122,7 +122,14 @@ Idle: **0.00 % CPU, 0.00 % system time**, 3–4 threads (`available_parallelism`
 cell. That is `crate::idle` (§6): before it, an idle runtime woke 300 times
 a second for the watchdog and the epoch ticker.
 
-**Verdict.** The technical floor is **48 MiB and 0.25 vCPU**, with ≈2 MiB of
+**Verdict (void — see the correction at the top).** The ≈2 MiB of headroom
+below is the clearest casualty of the accounting error: re-measured on a box
+that pays for its own page cache, a 48 MiB `hello` cell is never OOM-killed
+and serves **one request per second**, thrashing on its own text
+(`2026-09-23-floor-accounting.md`). What follows is kept as the record of
+what was measured and how.
+
+The technical floor is **48 MiB and 0.25 vCPU**, with ≈2 MiB of
 headroom at the peak — a number to quote with its condition (hello only,
 c ≤ 4), not to deploy on. Memory usage is the same from 48 to 128 MiB and
 from 1 to 16 worlds; the pool's slot reservation is virtual (VmSize is
