@@ -36,6 +36,16 @@
 > alert below is unchanged, and draining still fails readiness (the rolling
 > restart is unaffected). Decide this before the outage, not during it.
 
+> **On Kubernetes there is a second consequence.** A PodDisruptionBudget
+> counts *ready* pods, so with the default policy a shared outage makes every
+> replica unready at once and `minAvailable: 1` blocks every voluntary
+> eviction — node drain, consolidation, a cluster upgrade — until the
+> database returns. And a pod that restarts for any unrelated reason during
+> the outage cannot come back at all: an unreachable resource fails
+> activation, which is `CrashLoopBackOff` (`docs/deploy/k8s/README.md`,
+> `docs/OPEN-QUESTIONS.md` → Q20). After the database is healthy, clear the
+> backoff with `kubectl rollout restart deployment/<name>`.
+
 - `/_usai/status` → `resources[].ready` is **false** from the first
   connection-level failure (with `detail.lastError` and
   `detail.unreadyForSeconds`) and true again after the first successful

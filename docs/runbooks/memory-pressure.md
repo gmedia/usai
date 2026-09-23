@@ -28,10 +28,13 @@ Two things sit on top of that plateau and are **not** the world pool:
 
 ## What you see when the limit is too low
 
-`docker inspect` shows `OOMKilled: true`; the log has no error before a
-new `wasm engine` line (the kernel killed the process); the proxy answers
-502 while it restarts, and with a restart policy this repeats. Measured: a
-96 MB limit on a 256-world runtime → restart loop every ~3 s.
+`docker inspect` shows `OOMKilled: true` — on Kubernetes,
+`kubectl describe pod` and `lastState.terminated.reason: OOMKilled` with exit
+code **137**. The log has no error before a new `wasm engine` line (the
+kernel killed the process); the proxy answers 502 while it restarts, and
+with a restart policy this repeats (Kubernetes: `CrashLoopBackOff`, whose
+backoff reaches five minutes). Measured: a 96 MB limit on a 256-world
+runtime → restart loop every ~3 s.
 
 ## What you see when the limit is *almost* too low
 
