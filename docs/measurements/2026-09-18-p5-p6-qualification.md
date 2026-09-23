@@ -61,7 +61,7 @@ cold slots for a new module and keeps 100 warm unused ones
 (`max_unused_warm_slots`), so churn touched ever more keep-resident pages;
 set to 0, slots used = peak concurrency.
 
-## Soaks (appended 2026-09-20)
+## Soaks (appended 2026-09-20, the 72 h run 2026-09-23)
 
 Same deployment, same 8-client load through Caddy (`loadgen.mjs`, list →
 get → create on `examples/invoicing`), a status sample every 60 s.
@@ -70,7 +70,7 @@ get → create on `examples/invoicing`), a status sample every 60 s.
 |---|---|---|
 | 1 h (different setup: `usai bench -c 16` against the runtime directly, hello, no proxy — `2026-09-18-execution-path-attribution.md` §8) | 2026-09-18 | 49 M requests at 13.6k req/s, 0 errors, RSS +0.9 % |
 | **24 h** | 2026-09-18 22:18 → 2026-09-19 22:19 UTC (86 374 s of load; 8 closed-loop clients ≈ 405 req/s of list → get → create through the proxy) | **34 978 737 ok, 0 × 4xx, 0 × 5xx, 0 × 503**, 9 client errors in **5 bad seconds** (below); p99 median 273.9 ms; RSS 54.8 → max 58.1 → 56.2 MiB at the end (1 416 samples); 35 007 080 worlds created, `liveWorlds` max 8 and 0 at the end, `detachedWorkDetected` 0, completions dropped late / rejected stale 0; PostgreSQL pool: 89.2 M operations, 3.50 M transactions, 9 cancelled, 6 rolled back for a dying world, **0 quarantined**, 8/8 available at the end |
-| 72 h | started 2026-09-19 22:28 UTC → ends 2026-09-22 22:28 UTC | running; appended when it ends |
+| **72 h** | 2026-09-19 22:28 → 2026-09-22 22:28 UTC (259 131 s of load, same 8 clients) | **73 627 701 ok, 0 × 5xx, 0 × 503, 2 × 4xx**, 36 client errors in **15 bad seconds** (two episodes, below); RSS 51.5 → max 54.9 → 53.5 MiB over 4 103 samples, fds 29 → 30, threads 19; **73 627 744 worlds created**, `detachedWorkDetected` 0, completions dropped late / rejected stale 0, `liveWorlds` 0 at the end; PostgreSQL pool **0 quarantined**, `waiting` 0 in every sample; the runtime logged no WARN or ERROR line in three days (the five WARNING lines in the container log are PostgreSQL notices, `there is no transaction in progress`, at the two error episodes) |
 
 **The 5 bad seconds** (t = 28 741–28 745 s and 40 325–40 326 s, p99 ≈ 10 001 ms
 = the client's own 10 s timeout): both episodes are whole-second gaps in
@@ -84,6 +84,54 @@ layers; the runtime, the client and the proxy all stalled with it. Reported
 as what it is — a host stall caused by the operator's own activity, not a
 runtime defect — and the reason the 72 h soak runs with no image pulls on
 the host.
+
+**The 72 h soak's throughput decays and its tail grows — and neither is the
+runtime.** Over the three days the closed-loop rate fell 794 → 154 req/s and
+the per-second p99 rose 84 → 810 ms, while the per-second p50 stayed flat at
+4.6 → 5.3 ms:
+
+| Window | avg req/s | p50 median | p99 median | p99 p95 |
+|---|---|---|---|---|
+| 0–6 h | 794 | 4.6 ms | 84 ms | 255 ms |
+| 12–18 h | 349 | 5.1 ms | 289 ms | 467 ms |
+| 24–30 h | 244 | 5.8 ms | 450 ms | 587 ms |
+| 48–54 h | 181 | 5.4 ms | 666 ms | 819 ms |
+| 66–72 h | 154 | 5.3 ms | 810 ms | 941 ms |
+
+The runtime's own per-request cost is flat across the same window — guest
+CPU 1.56 → 1.59 ms, process CPU 2.80 → 3.04 ms, SQL operations 2.52 → 2.59
+per request, pool `waiting` 0 throughout, RSS and fds flat. What grew is the
+**data the workload accumulated**: the mix is 10 % `POST /invoices`, so the
+soak wrote ≈7.4 M invoices with their items into one table over three days
+(the list is keyset-paginated on `invoices_page` and stays O(limit); the
+inserts, the index growth, the WAL, the checkpoints and autovacuum do not).
+The application spends more wall-clock waiting for PostgreSQL and less CPU
+per second as it slows: a three-day soak of this shape is as much a
+PostgreSQL soak as a runtime one. The runtime's invariants — memory,
+descriptors, ownership, the pool, the error count — held for 73.6 M worlds.
+Read as a runtime result: **no leak, no drift, no refusal, no quarantine in
+73 627 744 worlds**; read as a deployment result: a single unpartitioned
+table that takes 7 M inserts in three days needs the usual PostgreSQL care,
+and the soak does not pretend otherwise.
+
+Server-side latency over the whole soak (the runtime's own histogram, which
+includes the PostgreSQL wait): 80.8 % of requests ≤ 5 ms, 89.9 % ≤ 10 ms,
+96.6 % ≤ 250 ms, 98.9 % ≤ 500 ms, 99.97 % ≤ 1 s, 126 requests (0.0002 %)
+above 5 s. Mean 26.6 ms — the mean is the tail, and the tail is the
+database's write path late in the soak.
+
+**The 15 bad seconds** (36 client errors, all with the client's own 10 s
+timeout as the second's p99): two episodes, 2026-09-20 02:24–02:26 UTC (10
+seconds, 24 errors) and 2026-09-21 06:17 UTC (5 seconds, 12 errors). In both
+the client completed 0–64 requests in the second instead of ≈300, the
+runtime served no 5xx and logged nothing, and PostgreSQL logged `WARNING:
+there is no transaction in progress` at exactly those instants. Both fall
+inside windows when the operator ran other work on the same host (the
+two-replica campaign was 02:04–02:40 UTC on 09-20, pinned to cpus 12–15 but
+building images and starting containers on the shared daemon). Same shape as
+the 24 h soak's five bad seconds, which `journalctl -u docker` tied to image
+extraction: a whole-host stall, disclosed, not a runtime defect. 0.00005 % of
+the requests in the run.
 
 ## Connection campaign (`p6/run.sh conn-churn`, 2026-09-19 22:2x UTC)
 
@@ -187,6 +235,9 @@ queue's use of the database, none of it in the model.
 
 ## Not done here
 
-Three or more replicas, a replica set across hosts (the queue and the
+Three or more replicas, and a replica set across hosts (the queue and the
 migration lock are PostgreSQL-side and do not care; the proxy configuration
-does), and the 72 h soak (running).
+does). A soak whose workload does not accumulate data — the 72 h run above
+measured the runtime's invariants cleanly but its throughput curve is the
+PostgreSQL write path, so "steady-state throughput over days" is still
+unmeasured for a bounded dataset.
