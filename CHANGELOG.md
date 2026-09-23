@@ -41,6 +41,16 @@ the human summary.
 
 ### Operability
 
+- **CPU is accounted per workload** (`usai_workload_cpu_seconds_total{workload}`,
+  and `gauges.guestCpuNsByWorkload` in the status document). The runtime
+  measures guest CPU and deliberately does not schedule it (**ADR-0021**):
+  the accounting is how an operator finds the workload whose share does not
+  match its importance, and `concurrency:` plus a deadline is how they cap
+  it.
+- **The overload refusal names the level that is full** — it always did
+  (`runtime.worlds budget exhausted (2 in use)`), but nothing pointed at the
+  body; `docs/runbooks/overload.md` shows it and maps each level to the knob
+  that sets it.
 - **`usai inspect` shows what three ADRs said it would.** A task's line says
   `delivery: local, non-durable` and a consumer's says `delivery: durable`
   (ADR-0010 promised this and it was only ever in the document — the
@@ -57,6 +67,25 @@ the human summary.
   the placeholders `create-usai` fills in, so copying it by hand failed four
   steps later on an npm install of a package called `__USAI_VERSION__`. The
   build names it at the first command instead.
+
+### Documentation
+
+- **`docs/CONTRACT-FREEZE.md`**: what 1.0 would freeze, surface by surface,
+  what is still moving, and the three ways to take the decision. The
+  `0.0.x` sentence in `SUPPORTED.md` is what stops anyone building on this,
+  and removing it is a maintainer's call rather than a gate.
+- **The npm compatibility budget** (`SUPPORTED.md`), which ADR-0013 asked for
+  and nobody had written: what an application may bring from the registry,
+  what it may not, and the promise that we will not polyfill Node globals to
+  make a package work.
+- Three runbooks the audit found missing: a compromised token or signing key
+  (the one case a restart does not fix), the application's own failures (a
+  service that gave up, `detached_work`, 504, cron that did not run, restart
+  storms) and PostgreSQL operations (backup, restore — restoring `usai_queue`
+  replays its work — connection limits, password and CA rotation).
+- **ADR-0020** records the artifact-signing decision that shipped in 0.0.5
+  without one, and says the manifest is the compatibility surface while the
+  rest of the directory is a build output rather than an interchange format.
 
 ### CI
 
