@@ -178,7 +178,8 @@ enum Command {
         action: DbAction,
     },
     /// Probe a running instance's liveness or readiness and exit 0 / 1: a
-    /// container healthcheck without curl in the image
+    /// Docker HEALTHCHECK without curl in the image (a Kubernetes httpGet
+    /// probe is made by the kubelet and needs no client here)
     Probe {
         /// `live` or `ready`
         which: String,
