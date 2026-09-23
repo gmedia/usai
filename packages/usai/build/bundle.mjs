@@ -5,6 +5,7 @@
 //   node bundle.mjs <entry> <outfile>
 import { build } from "esbuild";
 import { readFileSync } from "node:fs";
+import { dirname, relative, resolve, sep } from "node:path";
 
 // Stamped into the bundle so the manifest records which SDK described it.
 const sdkVersion = JSON.parse(
@@ -12,6 +13,41 @@ const sdkVersion = JSON.parse(
 ).version;
 
 const [entry, outfile] = process.argv.slice(2);
+
+// A module's migrations live next to it, but the bundle has no source
+// locations, so `defineModule({ migrations })` had to be written relative to
+// the project root — a module could not be moved or copied without editing
+// the glob inside it. The build knows each file's path, so it stamps the
+// declaring file's directory onto the call; the runtime tries the glob as
+// written first and falls back to that directory, which keeps every existing
+// application working.
+const root = process.cwd();
+const stampModuleSource = {
+  name: "usai-module-source",
+  setup(build) {
+    build.onLoad({ filter: /\.(ts|tsx|js|mjs|jsx)$/ }, async (args) => {
+      if (args.path.includes(`${sep}node_modules${sep}`)) return null;
+      const { readFile } = await import("node:fs/promises");
+      const text = await readFile(args.path, "utf8");
+      if (!text.includes("defineModule")) return null;
+      const dir = relative(root, dirname(resolve(args.path)))
+        .split(sep)
+        .join("/");
+      // Only the literal-options form; `defineModule(options)` with a
+      // variable keeps the root-relative behaviour it always had.
+      const stamped = text.replace(
+        /\bdefineModule\s*\(\s*\{/g,
+        `defineModule({ sourceDir: ${JSON.stringify(dir)},`,
+      );
+      return stamped === text
+        ? null
+        : {
+            contents: stamped,
+            loader: args.path.endsWith("x") ? "tsx" : args.path.endsWith(".ts") ? "ts" : "js",
+          };
+    });
+  },
+};
 if (!entry || !outfile) {
   console.error("usage: bundle.mjs <entry> <outfile>");
   process.exit(2);
@@ -21,6 +57,7 @@ try {
   const result = await build({
     entryPoints: [entry],
     outfile,
+    plugins: [stampModuleSource],
     bundle: true,
     format: "iife",
     globalName: "__usai_app_ns",

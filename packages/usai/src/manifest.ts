@@ -80,7 +80,7 @@ export interface Manifest {
   description?: string;
   /** Response headers set on every application response. */
   headers?: Record<string, string>;
-  modules: Array<{ name: string; migrations: string[]; seeders: string[] }>;
+  modules: Array<{ name: string; migrations: string[]; seeders: string[]; sourceDir?: string }>;
   workloads: ManifestWorkload[];
   resources: Array<{
     name: string;
@@ -258,6 +258,7 @@ export function describe(app: AppDeclaration): Manifest {
     ...(app.headers !== undefined ? { headers: { ...app.headers } } : {}),
     modules: app.modules.map((m) => ({
       name: m.name,
+      ...(m.sourceDir === undefined ? {} : { sourceDir: m.sourceDir }),
       migrations: [...m.migrations],
       seeders: [...m.seeders],
     })),

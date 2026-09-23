@@ -251,6 +251,8 @@ export interface ModuleDeclaration {
   readonly resources: readonly ResourceDeclaration[];
   readonly migrations: readonly string[];
   readonly seeders: readonly string[];
+  /** The directory the declaration was written in (stamped by the build). */
+  readonly sourceDir?: string;
 }
 
 /** What {@link defineApp} returns: the application's default export.
@@ -281,12 +283,20 @@ export interface DefineModuleOptions {
   /** Resources this module declares; the same resource may be declared by
    * several modules with identical configuration. */
   resources?: ResourceDeclaration[];
-  /** Glob(s) for this module's SQL migrations, relative to the project root
-   * (e.g. `./src/billing/migrations/*.sql`). The bundle carries no source
-   * locations, so module-relative paths are not supported in v0. */
+  /** Glob(s) for this module's SQL migrations. **Write them relative to the
+   * module's own file** (`./migrations/*.sql` in `src/billing/module.ts`);
+   * a glob is also tried as written from the project root, so
+   * `./src/billing/migrations/*.sql` — the only form earlier versions
+   * accepted — keeps working. */
   migrations?: string | string[];
-  /** Glob(s) for this module's seeder files, relative to the project root. */
+  /** Glob(s) for this module's seeder files, relative to the module's own
+   * file or to the project root (the same rule as `migrations`). */
   seeders?: string | string[];
+  /** Filled in by the build, not by you: the directory the `defineModule`
+   * call was written in, relative to the project root. It is what lets a
+   * module's globs be written relative to the module itself — the runtime
+   * tries a glob as written first and falls back to this directory. */
+  sourceDir?: string;
 }
 
 /**
@@ -315,6 +325,7 @@ export function defineModule(options: DefineModuleOptions): ModuleDeclaration {
     resources: options.resources ?? [],
     migrations: toList(options.migrations),
     seeders: toList(options.seeders),
+    ...(options.sourceDir === undefined ? {} : { sourceDir: options.sourceDir }),
   };
 }
 

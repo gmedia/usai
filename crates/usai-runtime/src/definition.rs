@@ -394,6 +394,12 @@ pub struct ModuleSpec {
     pub migrations: Vec<String>,
     #[serde(default)]
     pub seeders: Vec<String>,
+    /// The directory the `defineModule` call was written in, relative to the
+    /// project root, stamped by the build. A module's globs may be written
+    /// relative to the module itself: a glob is tried as written first (so
+    /// every existing application is unaffected) and then against this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_dir: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]

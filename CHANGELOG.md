@@ -39,6 +39,17 @@ the human summary.
   second parse stage in a Loki pipeline. Lines that carried no fields no
   longer print `fields=""`, and an empty `request_id` is left out.
 
+### SDK
+
+- **A module's migrations and seeders may be written relative to the module.**
+  `defineModule({ migrations: "./migrations/*.sql" })` in
+  `src/billing/module.ts` now finds `src/billing/migrations/*.sql`: the build
+  stamps each declaration with the directory it was written in, so a module
+  is a folder you can move or copy. A glob is still tried **as written from
+  the project root first**, so every application built before this is
+  unaffected, and the "matches no file" warning fires only when neither form
+  matches.
+
 ### Operability
 
 - **CPU is accounted per workload** (`usai_workload_cpu_seconds_total{workload}`,

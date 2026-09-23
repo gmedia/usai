@@ -96,8 +96,8 @@ export const billing = defineModule({
   name: "billing",
   workloads: [createInvoice, reconcile],
   resources: [db],
-  migrations: "./src/billing/migrations/*.sql",   // root-relative
-  seeders: "./src/billing/seeders/*.ts",
+  migrations: "./migrations/*.sql",              // relative to this file (or to the project root)
+  seeders: "./seeders/*.ts",
 });
 ```
 

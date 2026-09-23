@@ -53,16 +53,30 @@ pub enum DbError {
     Resource(#[from] ResourceError),
 }
 
-/// A glob a module declares that matches nothing is almost always the
-/// module-relative form (`./migrations/*.sql` next to the module file):
-/// globs are root-relative in v0, and the config's own defaults would hide
-/// the mistake. The config's globs are allowed to be empty (a project
-/// without migrations); a module's are named.
-fn warn_if_empty(what: &str, pattern: &str, source: &str, matched: usize) {
-    if matched == 0 && source.starts_with("module ") {
-        tracing::warn!(
-            "{source} declares {what} {pattern:?}, which matches no file: globs are root-relative (`./src/<module>/{what}/…`), not relative to the module file"
-        );
+/// A module's glob is tried twice — as written, then relative to the module
+/// file — so the warning belongs to the pair, not to either attempt. The
+/// config's globs are allowed to match nothing (a project without
+/// migrations); a module's are named, because a typo there is a silent
+/// half-deployment.
+///
+/// The fallback candidate is marked in the source string so a miss on it
+/// alone stays quiet.
+const FALLBACK: &str = " (module-relative)";
+
+fn warn_if_empty(what: &str, attempts: &[(String, String, usize)]) {
+    for (pattern, source, _) in attempts {
+        if !source.starts_with("module ") || source.ends_with(FALLBACK) {
+            continue;
+        }
+        // Did anything this module declared match, either way round?
+        let module_matched = attempts
+            .iter()
+            .any(|(_, s, n)| *n > 0 && s.trim_end_matches(FALLBACK) == source);
+        if !module_matched {
+            tracing::warn!(
+                "{source} declares {what} {pattern:?}, which matches no file — neither as written (from the project root) nor next to the module itself"
+            );
+        }
     }
 }
 
@@ -74,6 +88,7 @@ pub fn discover_migrations(
     globs: &[(String, String)],
 ) -> Result<Vec<MigrationFile>, DbError> {
     let mut files: Vec<MigrationFile> = Vec::new();
+    let mut per_source: Vec<(String, String, usize)> = Vec::new();
     for (pattern, source) in globs {
         let absolute = root.join(pattern.trim_start_matches("./"));
         let pattern_str = absolute.to_string_lossy().into_owned();
@@ -100,8 +115,9 @@ pub fn discover_migrations(
                 source: source.clone(),
             });
         }
-        warn_if_empty("migrations", pattern, source, matched);
+        per_source.push((pattern.clone(), source.clone(), matched));
     }
+    warn_if_empty("migrations", &per_source);
     files.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.path.cmp(&b.path)));
     for pair in files.windows(2) {
         if pair[0].name == pair[1].name {
@@ -135,9 +151,30 @@ pub fn migration_globs_for(
     for module in modules {
         for g in &module.migrations {
             globs.push((g.clone(), format!("module {}", module.name)));
+            // A module may write its globs relative to itself. The glob as
+            // written wins when it matches (every application built before
+            // this keeps working); this is the fallback, and `discover_*`
+            // skips a duplicate file.
+            if let Some(relative) = module_relative(module, g) {
+                globs.push((relative, format!("module {}{FALLBACK}", module.name)));
+            }
         }
     }
     globs
+}
+
+/// `./migrations/*.sql` in `src/billing/module.ts` → `src/billing/migrations/*.sql`.
+fn module_relative(module: &crate::definition::ModuleSpec, glob: &str) -> Option<String> {
+    let dir = module.source_dir.as_deref()?;
+    if dir.is_empty() {
+        return None;
+    }
+    let trimmed = glob.trim_start_matches("./");
+    // An absolute-looking or already-prefixed glob is left alone.
+    if trimmed.starts_with('/') || trimmed.starts_with(dir) {
+        return None;
+    }
+    Some(format!("{dir}/{trimmed}"))
 }
 
 /// The migrations an artifact carries (`<artifact>/migrations/*.sql`).
@@ -162,6 +199,9 @@ pub fn seeder_globs(
     for module in &definition.manifest().modules {
         for g in &module.seeders {
             globs.push((g.clone(), format!("module {}", module.name)));
+            if let Some(relative) = module_relative(module, g) {
+                globs.push((relative, format!("module {}{FALLBACK}", module.name)));
+            }
         }
     }
     globs
@@ -181,6 +221,7 @@ pub fn discover_seeders(
     globs: &[(String, String)],
 ) -> Result<Vec<SeederFile>, DbError> {
     let mut files: Vec<SeederFile> = Vec::new();
+    let mut per_source: Vec<(String, String, usize)> = Vec::new();
     for (pattern, source) in globs {
         let absolute = root.join(pattern.trim_start_matches("./"));
         let paths = glob::glob(&absolute.to_string_lossy())
@@ -204,8 +245,9 @@ pub fn discover_seeders(
                 source: source.clone(),
             });
         }
-        warn_if_empty("seeders", pattern, source, matched);
+        per_source.push((pattern.clone(), source.clone(), matched));
     }
+    warn_if_empty("seeders", &per_source);
     files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(files)
 }
@@ -318,4 +360,82 @@ pub async fn migrate(
         }
     }
     Ok(done)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::definition::ModuleSpec;
+
+    fn module(name: &str, glob: &str, source_dir: Option<&str>) -> ModuleSpec {
+        ModuleSpec {
+            name: name.to_owned(),
+            migrations: vec![glob.to_owned()],
+            seeders: Vec::new(),
+            source_dir: source_dir.map(str::to_owned),
+        }
+    }
+
+    /// A module's glob may be written relative to the module's own file. The
+    /// glob as written is still tried first, so an application written
+    /// against the old root-relative rule is unaffected.
+    #[test]
+    fn a_module_glob_is_tried_as_written_and_then_next_to_the_module() {
+        let dir = std::env::temp_dir().join(format!("usai-globs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src/billing/migrations")).unwrap();
+        std::fs::write(dir.join("src/billing/migrations/001_a.sql"), "select 1;").unwrap();
+
+        // Written relative to the module file.
+        let relative = migration_globs_for(
+            &[module("billing", "./migrations/*.sql", Some("src/billing"))],
+            &[],
+        );
+        let found = discover_migrations(&dir, &relative).unwrap();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].name, "001_a.sql");
+
+        // Written relative to the project root, as every application before
+        // this one had to.
+        let rooted = migration_globs_for(
+            &[module(
+                "billing",
+                "./src/billing/migrations/*.sql",
+                Some("src/billing"),
+            )],
+            &[],
+        );
+        let found = discover_migrations(&dir, &rooted).unwrap();
+        assert_eq!(
+            found.len(),
+            1,
+            "the root-relative form still works: {found:?}"
+        );
+
+        // The same file found both ways is one migration, not two.
+        let both = migration_globs_for(
+            &[
+                module("billing", "./migrations/*.sql", Some("src/billing")),
+                module(
+                    "billing",
+                    "./src/billing/migrations/*.sql",
+                    Some("src/billing"),
+                ),
+            ],
+            &[],
+        );
+        let found = discover_migrations(&dir, &both).unwrap();
+        assert_eq!(
+            found.len(),
+            1,
+            "a duplicate path is not a duplicate migration: {found:?}"
+        );
+
+        // A module with no stamped directory behaves exactly as before.
+        let legacy = migration_globs_for(&[module("billing", "./migrations/*.sql", None)], &[]);
+        assert_eq!(legacy.len(), 1, "no fallback without a source directory");
+        assert!(discover_migrations(&dir, &legacy).unwrap().is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

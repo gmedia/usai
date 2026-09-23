@@ -15,7 +15,7 @@ the environment contract. Mirrors the runtime's `Manifest` exactly.
 | <a id="name"></a> `name` | `string` | - |
 | <a id="description"></a> `description?` | `string` | - |
 | <a id="headers"></a> `headers?` | `Record`\<`string`, `string`\> | Response headers set on every application response. |
-| <a id="modules"></a> `modules` | \{ `name`: `string`; `migrations`: `string`[]; `seeders`: `string`[]; \}[] | - |
+| <a id="modules"></a> `modules` | \{ `name`: `string`; `migrations`: `string`[]; `seeders`: `string`[]; `sourceDir?`: `string`; \}[] | - |
 | <a id="workloads"></a> `workloads` | `ManifestWorkload`[] | - |
 | <a id="resources"></a> `resources` | \{ `name`: `string`; `kind`: `string`; `module?`: `string`; `config`: `Record`\<`string`, `unknown`\>; `env`: `string`[]; \}[] | - |
 | <a id="auth"></a> `auth` | \{ `name`: `string`; `scheme`: `string`; `header?`: `string`; `description?`: `string`; `credential?`: \{ `in`: `"header"` \| `"cookie"` \| `"query"`; `name`: `string`; \}; \}[] | - |
