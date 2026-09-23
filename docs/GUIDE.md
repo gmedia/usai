@@ -241,6 +241,8 @@ export const reconcile = command("reconcile", async (ctx) => ({ args: ctx.args }
 
 `exclusive: true` is for the deployment with replicas: every instance's scheduler reaches the tick, each tries to insert `(schedule, scheduled time)` into `usai_cron_ticks` on the application's first `postgres` resource (or the one named in `exclusive: { database }`), and only the one whose insert landed runs the handler; the others count it under `cron.taken` in `/_usai/status`. No leader, no election, no clock agreement beyond the schedule itself. If the database is unreachable at the tick, every instance runs it (a flaky database must not silence a schedule everywhere at once) — write exclusive jobs to tolerate the rare double run. An exclusive schedule without a postgres resource is refused at install.
 
+**A tick that had no scheduler alive is lost, not replayed.** The scheduler asks for the *next* occurrence after "now" each time round; nothing records that an earlier one was due. So a window with no instance scheduling — a `Recreate` rollout of a single cron replica, a crash, a scale-to-zero — simply has no ticks. That is the cron contract (`GOAL.md` §18: scheduled work is finite work the runtime starts, not a durable job store): if the work must survive such a gap, publish it to a queue and let a consumer catch up, or make the handler compute what it missed from the data (`… where processed_at is null`) rather than trusting that it ran.
+
 ```bash
 usai cron run cleanup          # one tick, now, without waiting for the clock
 usai app reconcile -- --dry-run
