@@ -8,7 +8,7 @@ runtime of that version and the next (`SUPPORTED.md` → Versioning). Within
 GitHub releases carry the auto-generated commit list as well; this file is
 the human summary.
 
-## 0.0.8 — Unreleased
+## 0.0.8 — 2026-09-23
 
 Three usability rounds on 0.0.7 — a developer joining an existing codebase, an
 Express developer bringing their folder layout and their query builder, and one
@@ -159,6 +159,16 @@ edge, or ignore it — the hand-off is unaffected.
   an installed package — it breaks it.
 - The examples no longer teach `as PostgresHandle` or `params as never`, and
   their `test` script runs `usai test`, which works outside this repository.
+
+> 0.0.8: three usability rounds and a threat-model campaign. A typo in a
+> route's options no longer serves an unauthenticated route (unknown option
+> keys are a compile error), declared string formats are actually enforced,
+> raw transaction control on a pooled handle is refused instead of stranding
+> a connection, a signal arriving with the first request drains, activation
+> pays the first world's costs, performance.now() is a real monotonic clock,
+> and the bundler, the dev banner and the GUIDE teach the model instead of
+> assuming it. Read Compatibility before rolling: two of the fixes can change
+> a live response.
 
 ## 0.0.7 — 2026-09-23
 
