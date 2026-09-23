@@ -219,8 +219,25 @@ impl ResourceRegistry {
             .expect("managers poisoned")
             .get(&identity)
         {
+            tracing::debug!(
+                kind = %identity.kind,
+                name = %identity.name,
+                fingerprint = %identity.fingerprint,
+                "resource reused"
+            );
             return Ok(Arc::clone(existing));
         }
+        // ADR-0011: identity is the config plus the *resolved* environment, so
+        // a typo in a URL opens a second pool rather than warning. The
+        // fingerprint is the only way an operator can see that happen —
+        // "reused" after a deployment means the same resource, "opened" means
+        // a new one, and two `opened` for one name means the config moved.
+        tracing::info!(
+            kind = %identity.kind,
+            name = %identity.name,
+            fingerprint = %identity.fingerprint,
+            "resource opened"
+        );
         let manager = provider.open(spec, identity.clone(), env).await?;
         self.managers
             .write()

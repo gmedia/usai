@@ -39,6 +39,20 @@ the human summary.
   second parse stage in a Loki pipeline. Lines that carried no fields no
   longer print `fields=""`, and an empty `request_id` is left out.
 
+### Operability
+
+- **`usai inspect` shows what three ADRs said it would.** A task's line says
+  `delivery: local, non-durable` and a consumer's says `delivery: durable`
+  (ADR-0010 promised this and it was only ever in the document — the
+  assumption that `dispatch` survives a restart is the natural one to make).
+  An **Admission** block lists all four budget levels with where each is set,
+  rather than the one it used to print (ADR-0012).
+- **A resource's identity is logged when it opens** (`resource opened
+  kind=… name=… fingerprint=…`, and `resource reused` at debug). Identity is
+  the config plus the *resolved* environment, so a typo in a URL silently
+  opens a second pool; the fingerprint is how an operator sees that happen
+  across a deployment (ADR-0011).
+
 ### CI
 
 - The compatibility matrix gained its **third axis**: an application built

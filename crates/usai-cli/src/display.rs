@@ -395,7 +395,26 @@ pub fn inspect(definition: &ApplicationDefinition) -> String {
             let _ = writeln!(out, "    timeout: {ms}ms");
         }
         if let Some(n) = w.max_concurrency {
-            let _ = writeln!(out, "    concurrency: {n}");
+            let _ = writeln!(
+                out,
+                "    concurrency: {n}  (the workload's admission budget)"
+            );
+        }
+        // ADR-0010 asked for this and it was never printed: a task handed off
+        // with `dispatch` lives in this process only. Say so where someone
+        // reading the application's shape will see it, not only in a
+        // document.
+        if matches!(w.trigger, Trigger::Task { .. }) {
+            let _ = writeln!(
+                out,
+                "    delivery: local, non-durable  (a crash before it finishes loses it; publish to a topic for durability)"
+            );
+        }
+        if let Trigger::Queue { topic, .. } = &w.trigger {
+            let _ = writeln!(
+                out,
+                "    delivery: durable  (PostgreSQL, at least once; the row for {topic} outlives this process)"
+            );
         }
     }
     if !m.resources.is_empty() {
@@ -419,6 +438,62 @@ pub fn inspect(definition: &ApplicationDefinition) -> String {
                     max.map_or_else(|| "16 (default)".to_owned(), |n| n.to_string())
                 );
             }
+        }
+    }
+    // ADR-0012 said `inspect` can show budgets; until now it showed one of
+    // the four levels. Refusal happens at the first level that is full, so
+    // the useful view is all of them together, with where each is set.
+    {
+        let _ = writeln!(
+            out,
+            "\nAdmission (refusal is 503 at the first level that is full)"
+        );
+        let _ = writeln!(
+            out,
+            "  runtime      worlds in parallel        --max-worlds / USAI_MAX_WORLDS (default 256)"
+        );
+        let _ = writeln!(
+            out,
+            "  application  worlds for this app       the same number unless the runtime says otherwise"
+        );
+        let declared: Vec<_> = m
+            .workloads
+            .iter()
+            .filter(|w| w.max_concurrency.is_some())
+            .collect();
+        if declared.is_empty() {
+            let _ = writeln!(
+                out,
+                "  workload     none declared             `concurrency:` on a workload's options"
+            );
+        } else {
+            for w in declared {
+                let _ = writeln!(
+                    out,
+                    "  workload     {:<25} {}",
+                    w.max_concurrency
+                        .map_or_else(String::new, |n| n.to_string()),
+                    w.name
+                );
+            }
+        }
+        let pools: Vec<String> = m
+            .resources
+            .iter()
+            .filter(|r| r.kind == "postgres")
+            .map(|r| {
+                format!(
+                    "  resource     {:<25} {}/{}",
+                    r.config["pool"]["max"]
+                        .as_u64()
+                        .map_or_else(|| "16 (default)".to_owned(), |n| n.to_string()),
+                    r.kind,
+                    r.name
+                )
+            })
+            .collect();
+        for line in pools {
+            let _ = writeln!(out, "{line}");
         }
     }
     if !m.env.is_empty() {
