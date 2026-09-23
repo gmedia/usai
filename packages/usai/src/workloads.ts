@@ -7,6 +7,7 @@ import type {
   DeclaredError,
   ResourceDeclaration,
   ResourcesOf,
+  TypedWorkload,
   Workload,
   WorkloadPolicies,
 } from "./declarations.ts";
@@ -92,11 +93,12 @@ export interface TaskContext<I, R = ResourceDeclaration[]> extends BaseContext {
 export function task<
   I extends AnySchema | undefined = undefined,
   R extends ResourceDeclaration[] = ResourceDeclaration[],
+  Out = unknown,
 >(
   name: string,
   options: TaskOptions<I, R>,
-  handler: (ctx: TaskContext<I extends AnySchema ? Output<I> : unknown, R>) => unknown,
-): Workload {
+  handler: (ctx: TaskContext<I extends AnySchema ? Output<I> : unknown, R>) => Out,
+): TypedWorkload<Awaited<Out>> {
   const policies: WorkloadPolicies = {};
   if (options.timeout !== undefined) policies.timeout = options.timeout;
   if (options.concurrency !== undefined) policies.concurrency = options.concurrency;

@@ -2,7 +2,7 @@
 // (`docs/GUEST-ABI.md`). Everything asynchronous here is a host-owned
 // operation; nothing escapes the world's ownership.
 
-import type { ResourceDeclaration, Workload } from "../declarations.ts";
+import type { ResourceDeclaration, TaskOutput, Workload } from "../declarations.ts";
 import type {
   CacheLocalHandle,
   FetchInit,
@@ -72,7 +72,7 @@ export interface TaskHandle {
    * for its result, and cancelling this world cancels the child. The
    * child's thrown {@link UsaiError} is rethrown here. Use it when the
    * response depends on the task. */
-  invoke<T = unknown>(task: Workload, input?: unknown): Promise<T>;
+  invoke<W extends Workload>(task: W, input?: unknown): Promise<TaskOutput<W>>;
   /** An **ownership transfer**: the task runtime owns the child, which
    * starts once this world commits (its handler returned; for HTTP, the
    * response is committed) — a world that throws hands nothing off. This

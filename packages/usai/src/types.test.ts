@@ -89,3 +89,36 @@ export const s = http.stream("/s", { resources: [db] }, async (ctx, stream) => {
 });`);
   assert.equal(out, "", out);
 });
+
+test("a task's return type reaches ctx.tasks.invoke", () => {
+  // `invoke` used to resolve `unknown`, so the first thing a real service
+  // wrote after following GUIDE §5 was `error TS18046: 't' is of type
+  // 'unknown'` (found by an operator building a service to test an upgrade).
+  // `task()` returns a workload that remembers its handler's output.
+  const out = check(`
+    import { defineApp, http, task } from "@sakaladev/usai";
+    import { z } from "zod";
+    const count = task("count", { input: z.object({ n: z.number() }) }, async (ctx) => ({
+      doubled: ctx.input.n * 2,
+    }));
+    export const run = http.get("/run", { response: z.object({ doubled: z.number() }) }, async (ctx) => {
+      const result = await ctx.tasks.invoke(count, { n: 21 });
+      return { doubled: result.doubled };
+    });
+    export default defineApp({ name: "typed", workloads: [count, run] });
+  `);
+  assert.equal(out, "", `invoke should be typed from the task:\n${out}`);
+});
+
+test("a workload list still accepts every kind of workload", () => {
+  // TypedWorkload must stay a Workload everywhere one is expected.
+  const out = check(`
+    import { defineApp, http, task, cron } from "@sakaladev/usai";
+    import { z } from "zod";
+    const t = task("t", {}, async () => 1);
+    const c = cron("c", { schedule: "* * * * *" }, async () => {});
+    const r = http.get("/", { response: z.object({}) }, async () => ({}));
+    export default defineApp({ name: "mixed", workloads: [t, c, r] });
+  `);
+  assert.equal(out, "", out);
+});

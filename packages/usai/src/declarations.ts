@@ -202,6 +202,24 @@ export interface HttpOptions extends HttpContracts, WorkloadPolicies {
  *
  * @category Application
  */
+/** A {@link Workload} that remembers what its handler returns, so
+ * `ctx.tasks.invoke(thatTask)` is typed instead of `unknown`. The parameter
+ * is a phantom: nothing carries it at runtime, and a `TypedWorkload` is a
+ * `Workload` everywhere one is expected.
+ *
+ * @category Declarations
+ */
+export interface TypedWorkload<Out = unknown> extends Workload {
+  /** @internal phantom — never present at runtime */
+  readonly __output?: Out;
+}
+
+/** What `ctx.tasks.invoke` resolves to for a given task declaration.
+ *
+ * @category Declarations
+ */
+export type TaskOutput<W> = W extends TypedWorkload<infer Out> ? Out : unknown;
+
 export interface Workload {
   /** @internal */
   readonly __usai: "workload";

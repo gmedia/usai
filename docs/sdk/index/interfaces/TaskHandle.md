@@ -10,7 +10,7 @@ between them is who owns the child world.
 ### invoke()
 
 ```ts
-invoke<T = unknown>(task: Workload, input?: unknown): Promise<T>;
+invoke<W extends Workload>(task: W, input?: unknown): Promise<TaskOutput<W>>;
 ```
 
 An **owned** invocation: the task runs in a fresh world, this world waits
@@ -20,20 +20,20 @@ response depends on the task.
 
 #### Type Parameters
 
-| Type Parameter | Default type |
-| ------ | ------ |
-| `T` | `unknown` |
+| Type Parameter |
+| ------ |
+| `W` *extends* [`Workload`](Workload.md) |
 
 #### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
-| `task` | [`Workload`](Workload.md) |
+| `task` | `W` |
 | `input?` | `unknown` |
 
 #### Returns
 
-`Promise`\<`T`\>
+`Promise`\<[`TaskOutput`](../type-aliases/TaskOutput.md)\<`W`\>\>
 
 ***
 

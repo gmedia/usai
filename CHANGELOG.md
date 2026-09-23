@@ -30,6 +30,15 @@ the human summary.
   the check instead of reading its answer — and until now the command's was
   both fixed and undocumented.
 
+### SDK
+
+- **`ctx.tasks.invoke(task)` is typed from the task's handler.** It resolved
+  `unknown`, so the first thing a service written from GUIDE §5 hit was
+  `TS18046: 't' is of type 'unknown'` and a cast. `task()` now returns a
+  workload that remembers what its handler returns (`TypedWorkload<Out>`,
+  a phantom parameter — nothing changes at runtime, and it is still a
+  `Workload` everywhere one is expected).
+
 ### Runtime
 
 - **A cron tick is for a scheduled time, not for the moment the timer woke

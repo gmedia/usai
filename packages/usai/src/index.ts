@@ -31,6 +31,8 @@ export { defineApp, defineModule } from "./declarations.ts";
 export type {
   AppDeclaration,
   ModuleDeclaration,
+  TaskOutput,
+  TypedWorkload,
   Workload,
   ResourceDeclaration,
   AuthDeclaration,

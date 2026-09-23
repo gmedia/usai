@@ -3,11 +3,11 @@
 # Function: task()
 
 ```ts
-function task<I extends AnySchema | undefined = undefined, R extends ResourceDeclaration<string, unknown>[] = ResourceDeclaration<string, unknown>[]>(
+function task<I extends AnySchema | undefined = undefined, R extends ResourceDeclaration<string, unknown>[] = ResourceDeclaration<string, unknown>[], Out = unknown>(
    name: string, 
    options: TaskOptions<I, R>, 
-   handler: (ctx: TaskContext<I extends AnySchema ? Output<I> : unknown, R>) => unknown
-): Workload;
+   handler: (ctx: TaskContext<I extends AnySchema ? Output<I> : unknown, R>) => Out
+): TypedWorkload<Awaited<Out>>;
 ```
 
 Declare a task: a named unit of finite work that other workloads invoke
@@ -29,6 +29,7 @@ restart; for durable hand-off publish to a queue.
 | ------ | ------ |
 | `I` *extends* [`AnySchema`](../type-aliases/AnySchema.md) \| `undefined` | `undefined` |
 | `R` *extends* [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)\<`string`, `unknown`\>[] | [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)\<`string`, `unknown`\>[] |
+| `Out` | `unknown` |
 
 ## Parameters
 
@@ -36,11 +37,11 @@ restart; for durable hand-off publish to a queue.
 | ------ | ------ | ------ |
 | `name` | `string` | Unique within the application; the id is `task:<name>`. Any text; a colon is fine (`invoices:remind`). |
 | `options` | [`TaskOptions`](../interfaces/TaskOptions.md)\<`I`, `R`\> | Input schema, errors, resources, `timeout`, `concurrency`. |
-| `handler` | (`ctx`: [`TaskContext`](../interfaces/TaskContext.md)\<`I` *extends* [`AnySchema`](../type-aliases/AnySchema.md) ? [`Output`](../type-aliases/Output.md)\<`I`\> : `unknown`, `R`\>) => `unknown` | Runs in the task's world. Its return value is the `invoke` result; after a `dispatch` nobody receives it — the outcome shows only in the runtime's log and the task counters of `/_usai/status`, so a dispatched task records what matters in a resource. |
+| `handler` | (`ctx`: [`TaskContext`](../interfaces/TaskContext.md)\<`I` *extends* [`AnySchema`](../type-aliases/AnySchema.md) ? [`Output`](../type-aliases/Output.md)\<`I`\> : `unknown`, `R`\>) => `Out` | Runs in the task's world. Its return value is the `invoke` result; after a `dispatch` nobody receives it — the outcome shows only in the runtime's log and the task counters of `/_usai/status`, so a dispatched task records what matters in a resource. |
 
 ## Returns
 
-[`Workload`](../interfaces/Workload.md)
+[`TypedWorkload`](../interfaces/TypedWorkload.md)\<`Awaited`\<`Out`\>\>
 
 ## Example
 

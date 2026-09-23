@@ -2,11 +2,9 @@
 
 # Interface: Workload
 
-A declared unit of work, whatever its kind — what every `http.*`,
-`task`, `cron`, `command`, `service`, `queue.consume`, `socket` and
-`http.stream` call returns and what `defineApp`/`defineModule` list.
-Plain data: the build phase reads it into the manifest, the runtime
-routes to it, `inspect`/`graph`/the reference page render it.
+## Extended by
+
+- [`TypedWorkload`](TypedWorkload.md)
 
 ## Properties
 

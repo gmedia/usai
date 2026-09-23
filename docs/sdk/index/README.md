@@ -40,7 +40,6 @@ Vocabulary used throughout:
 | [HttpContracts](interfaces/HttpContracts.md) | The schema slots of an HTTP endpoint. Any Standard Schema (`zod`, `valibot`, `arktype`, …) works; slots whose schema can describe itself as JSON Schema are validated before a world exists, the others inside it. |
 | [ResponseHeaderDocs](type-aliases/ResponseHeaderDocs.md) | Response headers an endpoint sets, documented per status for the reference and the OpenAPI document (`responses[status].headers`): the key is the status (`201`, `200`, or `"*"` for every status), the value maps a header name to one line about it. Descriptive — the runtime does not validate them; a generated client learns they exist. |
 | [HttpOptions](interfaces/HttpOptions.md) | The schema slots of an HTTP endpoint. Any Standard Schema (`zod`, `valibot`, `arktype`, …) works; slots whose schema can describe itself as JSON Schema are validated before a world exists, the others inside it. |
-| [Workload](interfaces/Workload.md) | A declared unit of work, whatever its kind — what every `http.*`, `task`, `cron`, `command`, `service`, `queue.consume`, `socket` and `http.stream` call returns and what `defineApp`/`defineModule` list. Plain data: the build phase reads it into the manifest, the runtime routes to it, `inspect`/`graph`/the reference page render it. |
 | [ModuleDeclaration](interfaces/ModuleDeclaration.md) | What [defineModule](functions/defineModule.md) returns. |
 | [AppDeclaration](interfaces/AppDeclaration.md) | What [defineApp](functions/defineApp.md) returns: the application's default export. |
 | [DefineModuleOptions](interfaces/DefineModuleOptions.md) | Options for [defineModule](functions/defineModule.md). |
@@ -206,11 +205,19 @@ Vocabulary used throughout:
 | [Manifest](interfaces/Manifest.md) | What `usai build` writes to `manifest.json`: the application as data — every workload with its trigger, contracts (JSON Schema) and policies, every resource with its secret-free configuration, the auth schemes, the environment contract. Mirrors the runtime's `Manifest` exactly. |
 | [describe](functions/describe.md) | Turn an [AppDeclaration](interfaces/AppDeclaration.md) into its [Manifest](interfaces/Manifest.md). The build phase calls it inside a capability-less world; call it yourself to assert on an application's shape in a unit test. Throws on a duplicate workload, a conflicting resource redeclaration, or a hole in a list. |
 
+## Declarations
+
+| Name | Description |
+| ------ | ------ |
+| [TypedWorkload](interfaces/TypedWorkload.md) | A [Workload](interfaces/Workload.md) that remembers what its handler returns, so `ctx.tasks.invoke(thatTask)` is typed instead of `unknown`. The parameter is a phantom: nothing carries it at runtime, and a `TypedWorkload` is a `Workload` everywhere one is expected. |
+| [TaskOutput](type-aliases/TaskOutput.md) | What `ctx.tasks.invoke` resolves to for a given task declaration. |
+
 ## Other
 
 | Name | Description |
 | ------ | ------ |
 | [bytes](variables/bytes.md) | - |
+| [Workload](interfaces/Workload.md) | - |
 | [HttpResponse](interfaces/HttpResponse.md) | - |
 | [RawRequestBody](interfaces/RawRequestBody.md) | The exact bytes of a raw request, decoded on demand: `await ctx.request.bytes()`, `await ctx.request.text()`, or `await ctx.request.json()`. Each is a method (the body is not read until asked for). |
 | [Declare](type-aliases/Declare.md) | The signature of `http.get`/`post`/…. |
