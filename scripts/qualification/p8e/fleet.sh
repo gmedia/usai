@@ -67,6 +67,16 @@ prepare() {
   ')
   "$USAI" --root "$TEMPLATE" db migrate >/dev/null
   if docker info >/dev/null 2>&1; then log "base image $BASE_IMAGE"; docker pull -q "$BASE_IMAGE" >/dev/null; fi
+  # The binary under test must be the one that ships. Once a cell pays for
+  # its own page cache, the file's on-disk layout is part of the result: a
+  # release build with debug info is ~290 MB against the ~40 MB `dist`
+  # profile, its text is spread across a much larger file, and every fault
+  # drags in readahead around it. Measuring that binary prices a deployment
+  # nobody makes.
+  if [ "$(stat -c %s "$USAI")" -gt 104857600 ]; then
+    log "  WARNING: $USAI is $(( $(stat -c %s "$USAI") / 1048576 )) MB - that is a build with debug info, not what ships"
+    log "           build --profile dist (docker/runtime.Dockerfile does) or the floors will be pessimistic"
+  fi
   # A floor cell that cannot drop the page cache measures a warm machine and
   # says so, but the campaign should find that out here rather than in the
   # first result.json.
@@ -345,7 +355,7 @@ floor() {
   kill "$sampler" 2>/dev/null || true; wait "$sampler" 2>/dev/null || true
   docker logs "$name" > "$dir/server.log" 2>&1 || true
   floor_teardown "$app" "$name"
-  echo "{\"cell\":\"$cell\",\"app\":\"$app\",\"memMib\":$mem,\"cpus\":$cpus,\"worlds\":$worlds,\"appliedMemoryBytes\":$applied_mem,\"appliedNanoCpus\":$applied_cpu,\"cgroupPeakBytes\":${peak_bytes:-0},\"cgroupEndBytes\":${end_bytes:-0},\"cgroupCeilingHits\":${max_events:-0},\"cgroupOomKills\":${oom_kills:-0},\"coldCache\":\"$COLD\",\"oomKilled\":$oom,\"runningAtEnd\":$running,\"readyAtEnd\":$ready_end}" > "$dir/result.json"
+  echo "{\"cell\":\"$cell\",\"app\":\"$app\",\"memMib\":$mem,\"cpus\":$cpus,\"worlds\":$worlds,\"appliedMemoryBytes\":$applied_mem,\"appliedNanoCpus\":$applied_cpu,\"cgroupPeakBytes\":${peak_bytes:-0},\"cgroupEndBytes\":${end_bytes:-0},\"cgroupCeilingHits\":${max_events:-0},\"cgroupOomKills\":${oom_kills:-0},\"coldCache\":\"$COLD\",\"binaryBytes\":$(stat -c %s "$USAI" 2>/dev/null || echo 0),\"oomKilled\":$oom,\"runningAtEnd\":$running,\"readyAtEnd\":$ready_end}" > "$dir/result.json"
   log "  done: oom=$oom running=$running ready=$ready_end peak=$(( ${peak_bytes:-0} / 1048576 ))MiB ceiling_hits=${max_events:-0}"
 }
 
