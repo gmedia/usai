@@ -142,6 +142,17 @@ pub async fn build(root: &Path, check_types: bool, sign: Option<PathBuf>) -> Res
         out.manifest_path.display(),
         out.code_path.display()
     );
+    // An application with nothing to do builds, activates and serves 404s.
+    // It is almost always a file the application never imports.
+    if m.workloads.is_empty() {
+        println!(
+            "  warning: this application declares no workloads, so it will serve nothing.\n  \
+             A workload reaches the application through an `import`: list it in \
+             `defineApp({{ workloads: [...] }})` or in a module's `workloads`, \
+             and pass the module in `defineApp({{ modules: [...] }})`. The runtime \
+             never scans your files (docs/GUIDE.md §3)."
+        );
+    }
     let image = out
         .manifest_path
         .with_file_name("cache")
@@ -223,6 +234,10 @@ pub async fn run(
     drain_grace: u64,
     diagnostics: bool,
 ) -> Result<()> {
+    // Take the port first. Loading and compiling an application is seconds of
+    // work, and finding out afterwards that the address was already in use is
+    // seconds spent for nothing.
+    let listener = bind_early(host, port).await?;
     let trusted = trusted_signers(&require_signature)?;
     if !trusted.is_empty() {
         let dir = match &artifact {
@@ -324,6 +339,7 @@ pub async fn run(
     };
     serve_until_signal(
         runtime,
+        listener,
         host,
         port,
         diagnostics,
@@ -355,8 +371,24 @@ fn machine_output() -> bool {
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Binds the application's port before the work of loading an application,
+/// so `Address already in use` arrives in milliseconds. `--port 0` (tests,
+/// harnesses) keeps its meaning: the bound port is the real one.
+async fn bind_early(host: &str, port: u16) -> Result<Option<tokio::net::TcpListener>> {
+    let Ok(addr) = format!("{host}:{port}").parse::<std::net::SocketAddr>() else {
+        // An unparseable address is reported by the serve path, with context.
+        return Ok(None);
+    };
+    match tokio::net::TcpListener::bind(addr).await {
+        Ok(listener) => Ok(Some(listener)),
+        Err(e) => Err(anyhow::anyhow!("cannot listen on {addr}: {e}")),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn serve_until_signal(
     runtime: Arc<Runtime>,
+    listener: Option<tokio::net::TcpListener>,
     host: &str,
     port: u16,
     expose_diagnostics: bool,
@@ -366,9 +398,16 @@ async fn serve_until_signal(
     on_ready: Option<Box<dyn FnOnce(String) + Send>>,
     drain_grace: Duration,
 ) -> Result<()> {
-    let addr: std::net::SocketAddr = format!("{host}:{port}")
-        .parse()
-        .context("invalid listen address")?;
+    let addr: std::net::SocketAddr = match &listener {
+        // The port was taken before the application was loaded; `--port 0`
+        // means the bound one is the only true address.
+        Some(l) => l
+            .local_addr()
+            .context("the bound listener has no address")?,
+        None => format!("{host}:{port}")
+            .parse()
+            .context("invalid listen address")?,
+    };
     let http = HttpHost::new(
         Arc::clone(&runtime),
         HttpConfig {
@@ -432,10 +471,20 @@ async fn serve_until_signal(
         let shutdown = shutdown.clone();
         let (tx, rx) = tokio::sync::oneshot::channel();
         let handle = tokio::spawn(async move {
-            serve(http, shutdown, |addr| {
-                let _ = tx.send(addr);
-            })
-            .await
+            match listener {
+                Some(l) => {
+                    usai_runtime::http::serve_on(l, http, shutdown, |addr| {
+                        let _ = tx.send(addr);
+                    })
+                    .await
+                }
+                None => {
+                    serve(http, shutdown, |addr| {
+                        let _ = tx.send(addr);
+                    })
+                    .await
+                }
+            }
         });
         let bound = match rx.await {
             Ok(bound) => bound,
@@ -615,6 +664,8 @@ pub async fn config(root: &Path, json: bool) -> Result<()> {
 /// new definition; only a successful build becomes the active revision, and
 /// the previous one drains.
 pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
+    // Before the first build: a taken port should not cost a compile.
+    let listener = bind_early(host, port).await?;
     let engine = engine();
     let config = load_config(engine.as_ref(), root).await?;
     let options = BuildOptions::from_config(&config);
@@ -842,6 +893,7 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
     let banner_runtime = Arc::clone(&runtime);
     serve_until_signal(
         runtime,
+        listener,
         host,
         port,
         true,

@@ -14,6 +14,7 @@ import type {
   WorkloadPolicies,
 } from "./declarations.ts";
 import { withAuthResources } from "./declarations.ts";
+import type { NoExtraKeys } from "./declarations.ts";
 import type { BaseContext } from "./runtime/context.ts";
 
 /** Explicit response: status, headers, and a body the runtime encodes.
@@ -145,7 +146,7 @@ function normalizeResponse(
 function declare<O extends HttpOptions>(
   method: Method,
   path: string,
-  options: O,
+  options: NoExtraKeys<O, HttpOptions>,
   handler: (ctx: HttpContext<O>) => HttpHandlerResult<ResponseOf<O>>,
 ): Workload {
   const contracts: Workload["contracts"] = {};
@@ -181,7 +182,7 @@ function declare<O extends HttpOptions>(
 /** The signature of `http.get`/`post`/…. */
 export type Declare = <O extends HttpOptions>(
   path: string,
-  options: O,
+  options: NoExtraKeys<O, HttpOptions>,
   handler: (ctx: HttpContext<O>) => HttpHandlerResult<ResponseOf<O>>,
 ) => Workload;
 

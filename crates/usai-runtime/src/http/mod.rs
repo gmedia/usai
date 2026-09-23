@@ -15,4 +15,4 @@ pub mod socket;
 pub mod stream;
 
 pub use pipeline::{HttpConfig, HttpHost};
-pub use server::{serve, serve_internal};
+pub use server::{serve, serve_internal, serve_on};

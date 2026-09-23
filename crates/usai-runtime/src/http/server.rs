@@ -21,6 +21,18 @@ pub async fn serve(
     on_bound: impl FnOnce(std::net::SocketAddr),
 ) -> std::io::Result<()> {
     let listener = TcpListener::bind(host.config().addr).await?;
+    serve_on(listener, host, shutdown, on_bound).await
+}
+
+/// Serves on a listener bound earlier. `usai run` and `usai dev` take the
+/// port before they load and compile an application, so an address already
+/// in use is reported in milliseconds rather than after the build.
+pub async fn serve_on(
+    listener: TcpListener,
+    host: Arc<HttpHost>,
+    shutdown: CancellationToken,
+    on_bound: impl FnOnce(std::net::SocketAddr),
+) -> std::io::Result<()> {
     on_bound(listener.local_addr()?);
     let tracker = TaskTracker::new();
     loop {

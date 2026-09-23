@@ -160,6 +160,19 @@ export type ResponseHeaderDocs = Record<number | "*", Record<string, string>>;
  *
  * @category Application
  */
+/** Rejects option keys the shape does not declare.
+ *
+ * A declaration whose options parameter is the inferred type itself (so that
+ * `ctx` and the response type can be read off it) loses TypeScript's
+ * excess-property check: the unknown key simply widens the inferred type. A
+ * typo then compiles, builds and serves — `Auth:` for `auth:` is a route
+ * without its authentication. Mapping every key the shape does not declare to
+ * `never` puts the check back without giving up the inference.
+ *
+ * @category Advanced
+ */
+export type NoExtraKeys<O, Shape> = O & Record<Exclude<keyof O, keyof Shape>, never>;
+
 export interface HttpOptions extends HttpContracts, WorkloadPolicies {
   /** One line for the reference and the OpenAPI `summary`. Without it the
    * operation is shown by method and path. */

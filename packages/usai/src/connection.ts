@@ -15,7 +15,7 @@ import type {
 } from "./declarations.ts";
 import { withAuthResources } from "./declarations.ts";
 import type { BaseContext } from "./runtime/context.ts";
-import type { HttpContracts } from "./declarations.ts";
+import type { HttpContracts, NoExtraKeys } from "./declarations.ts";
 
 /** The second argument of an `http.stream` handler: the response, chunk
  * by chunk. The first `send`/`event`/`start` **commits** the status and
@@ -122,7 +122,7 @@ export interface StreamOptions<R extends ResourceDeclaration[] = ResourceDeclara
  */
 function stream<O extends StreamOptions>(
   path: string,
-  options: O,
+  options: NoExtraKeys<O, StreamOptions>,
   handler: (ctx: StreamContext<O>, stream: StreamHandle) => unknown,
 ): Workload {
   const method = options.method ?? "GET";

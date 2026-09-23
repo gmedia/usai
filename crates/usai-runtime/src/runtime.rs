@@ -522,6 +522,14 @@ impl Runtime {
             previous
         };
         tracing::info!(revision = %id, "revision active");
+        // Serving nothing is a deployment that answers 404 to everything; say
+        // so once, where an operator will see it.
+        if revision.definition.workloads().is_empty() {
+            tracing::warn!(
+                revision = %id,
+                "this revision declares no workloads and will serve nothing: a workload reaches the application through an `import` and `defineApp({{ workloads, modules }})`; the runtime never scans files"
+            );
+        }
         for (workload, topic) in revision.definition.unconsumed_topics() {
             tracing::warn!(
                 workload,

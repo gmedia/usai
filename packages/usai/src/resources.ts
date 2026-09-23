@@ -182,12 +182,15 @@ export type SqlParam =
  * @category Resources
  */
 export interface SqlExecutor {
+  // The parameter list is `readonly`: nothing here mutates it, and every
+  // query builder used as a compiler (kysely, drizzle) hands back a
+  // `readonly unknown[]`, which would otherwise need a cast at each call.
   /** Run a statement and return every row. */
-  query<T = Record<string, unknown>>(sql: string, params?: SqlParam[]): Promise<T[]>;
+  query<T = Record<string, unknown>>(sql: string, params?: readonly SqlParam[]): Promise<T[]>;
   /** Run a statement and return the first row, or `null`. */
-  one<T = Record<string, unknown>>(sql: string, params?: SqlParam[]): Promise<T | null>;
+  one<T = Record<string, unknown>>(sql: string, params?: readonly SqlParam[]): Promise<T | null>;
   /** Run a statement and return the number of rows affected. */
-  execute(sql: string, params?: SqlParam[]): Promise<number>;
+  execute(sql: string, params?: readonly SqlParam[]): Promise<number>;
 }
 
 /** The in-world handle for a `postgres` resource. Rows are plain objects

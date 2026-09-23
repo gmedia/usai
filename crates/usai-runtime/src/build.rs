@@ -87,6 +87,118 @@ pub enum BuildError {
     Signature(String),
 }
 
+/// What esbuild's own words do not say. A bundle failure reaching a user is
+/// almost always one of two rules they have not met yet, and both are the
+/// application model rather than the bundler: a module that reaches for Node
+/// at load time cannot be part of an application, and an application module
+/// is evaluated to be read, not to run work.
+fn bundle_hint(errors: &[BundleMessage]) -> String {
+    const BUILTINS: [&str; 23] = [
+        "fs",
+        "path",
+        "os",
+        "net",
+        "tls",
+        "dns",
+        "http",
+        "https",
+        "events",
+        "stream",
+        "util",
+        "assert",
+        "crypto",
+        "zlib",
+        "buffer",
+        "url",
+        "tty",
+        "child_process",
+        "cluster",
+        "worker_threads",
+        "perf_hooks",
+        "readline",
+        "module",
+    ];
+    let mut hints = Vec::new();
+    // esbuild says: Could not resolve "node:fs"
+    let specifier = |text: &str| -> Option<String> {
+        let rest = text.strip_prefix("Could not resolve \"")?;
+        rest.split('"').next().map(str::to_owned)
+    };
+    let unresolved: Vec<&BundleMessage> = errors
+        .iter()
+        .filter(|e| {
+            specifier(&e.text).is_some_and(|spec| {
+                spec.starts_with("node:")
+                    || BUILTINS
+                        .iter()
+                        .any(|b| spec == *b || spec.starts_with(&format!("{b}/")))
+            })
+        })
+        .collect();
+    if !unresolved.is_empty() {
+        let mut packages: Vec<String> = Vec::new();
+        for location in unresolved.iter().filter_map(|e| e.location.as_ref()) {
+            let Some(after) = location.file.split("node_modules/").nth(1) else {
+                continue;
+            };
+            let mut parts = after.split('/');
+            let name = match parts.next() {
+                // A scoped package is two segments.
+                Some(scope) if scope.starts_with('@') => {
+                    format!("{scope}/{}", parts.next().unwrap_or_default())
+                }
+                Some(name) => name.to_owned(),
+                None => continue,
+            };
+            if !name.is_empty() && !packages.contains(&name) {
+                packages.push(name);
+            }
+        }
+        hints.push(match packages.len() {
+            0 => "\n\n  A world has no filesystem, no process and no Node built-ins: an application \
+                 module cannot import one (docs/GUIDE.md §12)."
+                .to_owned(),
+            _ => format!(
+                "\n\n  A world has no Node. {} — and anything that depends on {} — reach for a Node \
+                 built-in module when they are loaded, so they cannot be part of an application. A \
+                 library that only computes can (a query builder used to *compile* SQL, a validator, \
+                 a date library); one that opens a socket, a file or a connection of its own cannot: \
+                 the database, outbound HTTP and time are the runtime's to lease (docs/GUIDE.md §7, \
+                 §11, §19).",
+                packages
+                    .iter()
+                    .take(3)
+                    .map(|p| format!("`{p}`"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                if packages.len() > 3 { "them" } else { "it" },
+            ),
+        });
+        if unresolved.iter().any(|e| {
+            e.location
+                .as_ref()
+                .is_none_or(|l| !l.file.contains("node_modules"))
+        }) {
+            hints.push(
+                "\n\n  The runtime never scans your files either: every workload reaches the \
+                 application through an `import`, and `defineApp({ workloads, modules })` is the \
+                 list (docs/GUIDE.md §3). Discovering route files with `fs`, a glob or a dynamic \
+                 `import()` cannot work."
+                    .to_owned(),
+            );
+        }
+    }
+    if errors.iter().any(|e| e.text.contains("Top-level await")) {
+        hints.push(
+            "\n\n  Top-level `await` is not available in an application module: the module is \
+             evaluated to read what the application declares, in a world with no capabilities, \
+             before any work runs. Move the await inside a workload handler (docs/GUIDE.md §3)."
+                .to_owned(),
+        );
+    }
+    hints.join("")
+}
+
 #[derive(Deserialize)]
 struct BundleReport {
     ok: bool,
@@ -172,7 +284,11 @@ async fn bundle(root: &Path, entry: &Path, outfile: &Path) -> Result<Vec<PathBuf
                 None => format!("  {}", e.text),
             })
             .collect();
-        return Err(BuildError::Bundle(lines.join("\n")));
+        return Err(BuildError::Bundle(format!(
+            "{}{}",
+            lines.join("\n"),
+            bundle_hint(&report.errors)
+        )));
     }
     Ok(report
         .inputs
