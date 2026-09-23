@@ -11,6 +11,8 @@
 # Environment: DATABASE_URL (a throwaway database), USAI (binary), OUT (run
 # directory), PIN (cpu list the fleet is confined to, e.g. 12-15), BASE_IMAGE
 # (a distro image whose glibc matches the host's binary; default ubuntu:26.04),
+# DROP_CACHES=1 (drop the kernel's whole page cache before every cell, which
+# needs passwordless sudo and a host with nothing else being measured on it),
 # NODE (node binary for the comparator), USAI_WASM_KEEP_RESIDENT (forwarded to
 # the boxed instance when set, the cell name gets a "-kr<bytes>" suffix: the C2
 # residency lever). Ports 3800–3999.
@@ -97,10 +99,27 @@ evict_for_cell() {
     log "  could not drop the page cache (python3?): this cell is measured warm"
   fi
   # The box also maps the base image's libc and friends, and those pages live
-  # in an overlay layer that only root may evict. With passwordless sudo the
-  # cell can be fully cold; without it, the shared libraries stay warm and
-  # somebody else's bill — the cell records `coldCache: "partial"` and the
-  # report says so rather than claiming a floor it did not measure.
+  # in a layer an unprivileged process cannot evict — and with the containerd
+  # image store there is no layer path to aim at anyway (`GraphDriver` is
+  # null). Three outcomes, and the cell records which one it got:
+  #
+  #   full     DROP_CACHES=1 on a host that is ours alone: the kernel's whole
+  #            page cache goes, so the box is charged for every page it maps.
+  #            Never on a host with a measurement running beside us — it is a
+  #            host-wide I/O event, and the 72 h soak's only bad seconds were
+  #            caused by exactly that.
+  #   true     the bind-mounted files were evicted and the image's layers too.
+  #   partial  the application's files were evicted and the shared libraries
+  #            were not. The charge is then a lower bound, and a floor from
+  #            such a cell is read from the resident set, not from the absence
+  #            of an OOM kill.
+  if [ "${DROP_CACHES:-0}" = 1 ] && sudo -n true 2>/dev/null; then
+    sync
+    if echo 3 | sudo -n tee /proc/sys/vm/drop_caches >/dev/null 2>&1; then
+      COLD=full
+      return
+    fi
+  fi
   local layers
   layers=$(docker image inspect "$BASE_IMAGE" -f '{{.GraphDriver.Data.LowerDir}}:{{.GraphDriver.Data.UpperDir}}' 2>/dev/null | tr ':' '\n' | grep -v '^$' || true)
   if [ -n "$layers" ] && sudo -n true 2>/dev/null; then
