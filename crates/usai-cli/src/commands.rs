@@ -269,6 +269,27 @@ pub async fn run(
             ..RuntimeConfig::default()
         },
     );
+    // A preflight the operator cannot do from outside: only the process knows
+    // both its cgroup limit and how many worlds it was told it may create.
+    // The failure this prevents is not a crash — a container at its ceiling
+    // reclaims the pages it executes from and slows to a crawl without being
+    // killed or logging anything (docs/runbooks/memory-pressure.md).
+    if let Some(p) = usai_runtime::procfs::read()
+        && p.memory_limit_bytes > 0
+    {
+        let limit_mib = p.memory_limit_bytes / (1024 * 1024);
+        // The sizing runbook's arithmetic: base + touched slots + one held
+        // revision, at the lower end of the per-slot range.
+        let wants_mib = 40 + u64::from(max_worlds.max(1)) * 4 + 30;
+        if limit_mib < wants_mib {
+            tracing::warn!(
+                limit_mib,
+                max_worlds = max_worlds.max(1),
+                wants_mib,
+                "the memory limit is below what this --max-worlds can need at full concurrency: at the limit the process reclaims the pages it executes from instead of failing, so it slows down rather than restarting (docs/runbooks/sizing.md)"
+            );
+        }
+    }
     if no_cron {
         tracing::info!("cron scheduler off on this instance (--no-cron)");
     }
