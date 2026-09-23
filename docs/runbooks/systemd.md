@@ -148,8 +148,19 @@ versions); they share nothing but PostgreSQL. The migration ledger is stable
 across versions; **`usai_queue` is brought up to date by the first process of
 the new version** — in 0.0.6 a column and two indexes, and the indexes build
 under a lock that blocks publishes and claims. On a queue table that was
-never pruned, create them yourself with `CREATE INDEX CONCURRENTLY` before
-the upgrade (CHANGELOG → Compatibility → PostgreSQL has the statements).
+never pruned that lock is the outage: build them first, while the old
+version keeps serving, with
+
+```bash
+usai --root /srv/app queue prepare        # CREATE INDEX CONCURRENTLY, repeatable
+usai --root /srv/app queue status         # rows per topic and state, oldest wait
+usai --root /srv/app queue prune --state done --older-than 30d   # the table is yours
+```
+
+`prepare` is safe to run at any time and as often as you like; the runtime's
+own `CREATE INDEX IF NOT EXISTS` then finds the index already there and takes
+no lock. **Nothing prunes by itself** — a `dead` row is a message your
+application failed, and only you know whether it is still evidence.
 Rolling the binary back needs no database change.
 
 ## Without a proxy's health check

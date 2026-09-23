@@ -82,9 +82,12 @@ Label values:
   `invalid`, `reclaimed` (claimed by a consumer that died, returned for
   another attempt or dead-lettered). Per instance and revision, cumulative.
   **Queue depth is not a metric** (it would cost a query per scrape):
-  `select topic, state, count(*) from usai_queue group by 1, 2` on the
-  backing database is the depth, and `usai_queue` rows in `ready` with an old
-  `available_at` are the lag.
+  `usai queue status` asks the database for it — rows per topic and state,
+  the oldest message still waiting (the lag) and the oldest still claimed (a
+  lost consumer, if it is older than the consumer's deadline). `--json` for a
+  script. The SQL behind it is
+  `select topic, state, count(*) from usai_queue group by 1, 2`, if you would
+  rather scrape it yourself.
 - `usai_cron_ticks_total{state}`: `due` (ticks this instance's scheduler reached), `skipped` (previous invocation still running, `overlap: skip`), `failed`, `taken` (an `exclusive` schedule's tick another instance claimed first). Per revision, cumulative.
 - `usai_resource{kind,name,metric}`: `kind` = `postgres`, `http.client`,
   `cache.local`; `metric` = `in_use`, `max`.

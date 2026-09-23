@@ -56,6 +56,12 @@ impl Fixture {
             .unwrap()
     }
 
+    /// The `usai_queue` manager, for the operator verbs.
+    fn manager(&self) -> std::sync::Arc<dyn usai_runtime::resource::ResourceManager> {
+        let revision = self.runtime.active().unwrap();
+        usai_runtime::db::database(&revision, None).unwrap()
+    }
+
     fn baseline(&self) {
         let g = self.runtime.ledger().gauges.snapshot();
         assert_eq!(g.live_worlds, 0, "{g:?}");
@@ -423,6 +429,77 @@ async fn raw_transaction_control_is_refused_and_names_the_transaction_helper() {
     }
     // And the pinned path still accepts exactly what was refused above.
     assert_eq!(body["pinned"], json!(1), "{body}");
+    f.baseline();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_queue_can_be_inspected_pruned_and_indexed_without_blocking_writers() {
+    let Some(f) = fixture_with(true).await else {
+        return;
+    };
+    use usai_runtime::workloads::queue::ops;
+    let manager = f.manager();
+    // `prepare` builds the schema's indexes with CONCURRENTLY: an upgrade
+    // that adds one would otherwise build it under a write-blocking lock on
+    // a table the runtime never prunes.
+    let built = ops::prepare_indexes(manager.as_ref())
+        .await
+        .expect("indexes built");
+    assert!(!built.is_empty(), "prepare built nothing");
+    assert!(
+        built.iter().all(|s| s.contains("CONCURRENTLY")),
+        "{built:?}"
+    );
+    // Repeating it is safe — the operator runs it before every upgrade.
+    ops::prepare_indexes(manager.as_ref())
+        .await
+        .expect("prepare repeats");
+
+    // Publish through the application, then let the consumer finish it.
+    // `http()` takes path params; this route wants a body, so invoke it the
+    // way the other queue tests in this file do.
+    let revision = f.runtime.active().unwrap();
+    let (_, workload) = revision
+        .definition
+        .workload("http:POST /orders")
+        .map(|(i, w)| (i, w.id.clone()))
+        .expect("the publish route");
+    let input = json!({ "kind": "http", "env": {}, "request": { "method": "POST", "path": "/orders", "url": "/orders", "params": {}, "query": {}, "headers": {}, "body": { "json": { "orderId": "prune-me" } } } });
+    let published = f.runtime.invoke(&workload, input).await.unwrap();
+    assert!(
+        matches!(published.termination, Termination::Completed),
+        "{:?}",
+        published.termination
+    );
+    let mut done = 0;
+    for _ in 0..60 {
+        let stats = ops::stats(manager.as_ref()).await.expect("stats");
+        done = stats
+            .as_array()
+            .map(|rows| {
+                rows.iter()
+                    .filter(|r| r["state"] == json!("done"))
+                    .filter_map(|r| r["rows"].as_i64())
+                    .sum::<i64>()
+            })
+            .unwrap_or(0);
+        if done > 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(done > 0, "no message reached `done`");
+
+    // Nothing is old enough yet: prune must not take a fresh row.
+    let kept = ops::prune(manager.as_ref(), &["done"], 3_600, None)
+        .await
+        .expect("prune");
+    assert_eq!(kept, 0, "prune took a row younger than its age filter");
+    // With no age bound it takes exactly the finished ones.
+    let deleted = ops::prune(manager.as_ref(), &["done"], 0, None)
+        .await
+        .expect("prune");
+    assert_eq!(deleted, done, "prune deleted {deleted}, expected {done}");
     f.baseline();
 }
 

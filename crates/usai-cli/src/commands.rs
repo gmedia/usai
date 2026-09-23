@@ -1054,6 +1054,172 @@ pub async fn queue_run(root: &Path, topic: &str, message: &str) -> Result<()> {
     one_shot(root, async |rt| rt.run_queue_message(topic, message).await).await
 }
 
+/// `usai queue status`: what is in the table, per topic and state.
+pub async fn queue_status(
+    root: &Path,
+    topic: Option<&str>,
+    resource: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    with_active_runtime(root, async |runtime, _config| {
+        let revision = runtime.active()?;
+        let manager = db::database(&revision, resource)?;
+        let rows = match usai_runtime::workloads::queue::ops::stats(manager.as_ref()).await {
+            Ok(rows) => rows,
+            // The table is created by the first publish or the first
+            // consumer; before that there is nothing to report, which is an
+            // answer rather than an error.
+            Err(e) if e.to_string().contains("42p01") => {
+                println!(
+                    "usai_queue does not exist in this database yet: nothing has been published and no consumer has started."
+                );
+                return Ok(());
+            }
+            Err(e) => return Err(e.into()),
+        };
+        let rows: Vec<serde_json::Value> = rows
+            .as_array()
+            .map(|r| {
+                r.iter()
+                    .filter(|row| {
+                        topic.is_none_or(|t| row.get("topic").and_then(|v| v.as_str()) == Some(t))
+                    })
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        if json {
+            println!("{}", serde_json::to_string_pretty(&rows)?);
+            return Ok(());
+        }
+        if rows.is_empty() {
+            println!("usai_queue is empty (or does not exist yet)");
+            return Ok(());
+        }
+        println!(
+            "{:<28} {:<11} {:>10} {:>14} {:>14}",
+            "topic", "state", "rows", "oldest wait", "oldest claim"
+        );
+        let secs = |row: &serde_json::Value, key: &str| match row.get(key).and_then(|v| v.as_i64()) {
+            Some(s) if s >= 86_400 => format!("{}d", s / 86_400),
+            Some(s) if s >= 3_600 => format!("{}h", s / 3_600),
+            Some(s) if s >= 60 => format!("{}m", s / 60),
+            Some(s) => format!("{s}s"),
+            None => "-".to_owned(),
+        };
+        for row in &rows {
+            println!(
+                "{:<28} {:<11} {:>10} {:>14} {:>14}",
+                row.get("topic").and_then(|v| v.as_str()).unwrap_or("?"),
+                row.get("state").and_then(|v| v.as_str()).unwrap_or("?"),
+                row.get("rows").and_then(|v| v.as_i64()).unwrap_or(0),
+                secs(row, "oldest_wait_seconds"),
+                secs(row, "oldest_claim_seconds"),
+            );
+        }
+        println!(
+            "\n`ready` is depth; a `processing` row older than the consumer's deadline is a lost\nconsumer the sweeper will reclaim; `dead` is yours to inspect and to prune."
+        );
+        Ok(())
+    })
+    .await
+}
+
+/// `usai queue prune`: delete finished rows, on purpose and never by itself.
+pub async fn queue_prune(
+    root: &Path,
+    state: &str,
+    older_than: &str,
+    topic: Option<&str>,
+    resource: Option<&str>,
+    dry_run: bool,
+) -> Result<()> {
+    let states: Vec<&str> = match state {
+        "done" => vec!["done"],
+        "dead" => vec!["dead"],
+        "all" => vec!["done", "dead"],
+        other => anyhow::bail!("--state is done, dead or all (got {other})"),
+    };
+    let seconds = parse_duration_seconds(older_than)?;
+    with_active_runtime(root, async |runtime, _config| {
+        let revision = runtime.active()?;
+        let manager = db::database(&revision, resource)?;
+        if dry_run {
+            let rows = usai_runtime::workloads::queue::ops::stats(manager.as_ref()).await?;
+            let n: i64 = rows
+                .as_array()
+                .map(|r| {
+                    r.iter()
+                        .filter(|row| {
+                            let s = row.get("state").and_then(|v| v.as_str()).unwrap_or("");
+                            states.contains(&s)
+                                && topic.is_none_or(|t| {
+                                    row.get("topic").and_then(|v| v.as_str()) == Some(t)
+                                })
+                        })
+                        .filter_map(|row| row.get("rows").and_then(|v| v.as_i64()))
+                        .sum()
+                })
+                .unwrap_or(0);
+            println!(
+                "dry run: up to {n} row(s) in state {} would be considered; the age filter (older than {older_than}) is applied by the delete itself",
+                states.join("/")
+            );
+            return Ok(());
+        }
+        let deleted =
+            usai_runtime::workloads::queue::ops::prune(manager.as_ref(), &states, seconds, topic)
+                .await?;
+        println!(
+            "deleted {deleted} row(s) in state {} older than {older_than}{}",
+            states.join("/"),
+            topic.map(|t| format!(" on {t}")).unwrap_or_default()
+        );
+        Ok(())
+    })
+    .await
+}
+
+/// `usai queue prepare`: build the indexes without blocking writers.
+pub async fn queue_prepare(root: &Path, resource: Option<&str>) -> Result<()> {
+    with_active_runtime(root, async |runtime, _config| {
+        let revision = runtime.active()?;
+        let manager = db::database(&revision, resource)?;
+        let ran = usai_runtime::workloads::queue::ops::prepare_indexes(manager.as_ref()).await?;
+        if ran.is_empty() {
+            println!("nothing to build");
+        } else {
+            println!("built {} index(es) without blocking writers:", ran.len());
+            for statement in ran {
+                println!("  {statement}");
+            }
+        }
+        println!(
+            "\nRun this before deploying a version that adds an index: the runtime's own\n`CREATE INDEX IF NOT EXISTS` would build it under a write-blocking lock at the\nfirst use of the new version."
+        );
+        Ok(())
+    })
+    .await
+}
+
+/// `7d`, `48h`, `30m`, `90s`, or plain seconds.
+fn parse_duration_seconds(value: &str) -> Result<i64> {
+    let value = value.trim();
+    let (digits, factor) = match value.chars().last() {
+        Some('d') => (&value[..value.len() - 1], 86_400),
+        Some('h') => (&value[..value.len() - 1], 3_600),
+        Some('m') => (&value[..value.len() - 1], 60),
+        Some('s') => (&value[..value.len() - 1], 1),
+        _ => (value, 1),
+    };
+    let n: i64 = digits
+        .trim()
+        .parse()
+        .with_context(|| format!("not a duration: {value} (try 7d, 48h, 30m, 90s)"))?;
+    anyhow::ensure!(n >= 0, "a duration cannot be negative");
+    Ok(n * factor)
+}
+
 /// Builds, activates (binding resources), runs `f`, and shuts down.
 async fn with_active_runtime<T>(
     root: &Path,

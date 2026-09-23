@@ -8,6 +8,29 @@ runtime of that version and the next (`SUPPORTED.md` → Versioning). Within
 GitHub releases carry the auto-generated commit list as well; this file is
 the human summary.
 
+## 0.0.9 — Unreleased
+
+### CLI
+
+- **`usai queue status`, `queue prune` and `queue prepare`.** The queue table
+  was the application's to operate with no tools for it: depth was a SQL
+  query an operator had to write, nothing pruned the rows a finished message
+  leaves behind, and a version that adds an index built it under a
+  write-blocking lock at its first use. `status` reports rows per topic and
+  state with the oldest wait and the oldest claim, `prune` deletes finished
+  rows on request (`--state done|dead|all`, `--older-than`, `--dry-run`, and
+  never by itself), and `prepare` builds the indexes with `CREATE INDEX
+  CONCURRENTLY` before an upgrade would.
+
+### CI
+
+- The compatibility matrix gained its **third axis**: an application built
+  against the *previous published SDK* is built and served by this runtime,
+  or refused with the guest-ABI message before anything listens. The job also
+  fails rather than skipping silently when a release exists and its binary
+  cannot be fetched.
+- **Secrets are scanned** on every push (TruffleHog, verified findings only).
+
 ## 0.0.8 — 2026-09-23
 
 Three usability rounds on 0.0.7 — a developer joining an existing codebase, an

@@ -35,6 +35,109 @@ const SWEEP_INTERVAL: Duration = Duration::from_secs(5);
 /// this long after the deadline belongs to a process that is gone.
 const LOST_MARGIN_MS: u64 = 10_000;
 
+/// Operator verbs over `usai_queue`. They live beside the schema they
+/// maintain, because both halves of "what the table is" have to agree.
+///
+/// The table is the application's data, not the runtime's: nothing here runs
+/// on its own, and nothing prunes without being asked.
+pub mod ops {
+    use super::SCHEMA;
+    use crate::resource::{ResourceCall, ResourceError, ResourceManager};
+    use serde_json::{Value, json};
+    use tokio_util::sync::CancellationToken;
+
+    async fn sql(
+        manager: &dyn ResourceManager,
+        method: &str,
+        statement: &str,
+        params: Vec<Value>,
+    ) -> Result<Value, ResourceError> {
+        manager
+            .call(
+                ResourceCall {
+                    method: method.to_owned(),
+                    args: json!({ "sql": statement, "params": params }),
+                },
+                CancellationToken::new(),
+            )
+            .await
+    }
+
+    /// What is in the table, per topic and state, with the ages an operator
+    /// actually pages on: the oldest thing still waiting, and the oldest
+    /// thing still claimed.
+    pub async fn stats(manager: &dyn ResourceManager) -> Result<Value, ResourceError> {
+        sql(
+            manager,
+            "query",
+            "SELECT topic, state, count(*)::bigint AS rows,
+                    max(extract(epoch FROM now() - available_at))::bigint AS oldest_wait_seconds,
+                    max(extract(epoch FROM now() - locked_at))::bigint AS oldest_claim_seconds
+             FROM usai_queue GROUP BY topic, state ORDER BY topic, state",
+            vec![],
+        )
+        .await
+    }
+
+    /// Deletes finished rows. `state` is `done`, `dead` or both; `older_than`
+    /// is seconds. Returns how many rows went.
+    ///
+    /// The runtime never does this by itself: a `dead` row is a message an
+    /// application failed to process, and only the application's owner knows
+    /// whether it is still evidence.
+    pub async fn prune(
+        manager: &dyn ResourceManager,
+        states: &[&str],
+        older_than_seconds: i64,
+        topic: Option<&str>,
+    ) -> Result<i64, ResourceError> {
+        let list: Vec<Value> = states.iter().map(|s| json!(s)).collect();
+        let affected = sql(
+            manager,
+            "execute",
+            "DELETE FROM usai_queue
+             WHERE state = ANY($1::text[])
+               AND coalesce(locked_at, available_at) < now() - ($2::bigint * interval '1 second')
+               AND ($3::text IS NULL OR topic = $3)",
+            vec![json!(list), json!(older_than_seconds), json!(topic)],
+        )
+        .await?;
+        Ok(affected.as_i64().unwrap_or(0))
+    }
+
+    /// Creates the schema's indexes with `CREATE INDEX CONCURRENTLY`, so an
+    /// upgrade does not build them under a write-blocking lock on a table
+    /// that may hold millions of rows. Safe to run repeatedly and while the
+    /// application serves; run it *before* deploying a version that adds an
+    /// index. Returns the statements it ran.
+    ///
+    /// `CONCURRENTLY` cannot run inside a transaction, which is why this is
+    /// a verb rather than a migration.
+    pub async fn prepare_indexes(
+        manager: &dyn ResourceManager,
+    ) -> Result<Vec<String>, ResourceError> {
+        // The table itself first: an index needs something to index.
+        let table = SCHEMA
+            .split(';')
+            .map(str::trim)
+            .find(|s| s.starts_with("CREATE TABLE"))
+            .unwrap_or_default();
+        if !table.is_empty() {
+            sql(manager, "execute", table, vec![]).await?;
+        }
+        let mut ran = Vec::new();
+        for statement in SCHEMA.split(';').map(str::trim) {
+            let Some(rest) = statement.strip_prefix("CREATE INDEX IF NOT EXISTS ") else {
+                continue;
+            };
+            let concurrent = format!("CREATE INDEX CONCURRENTLY IF NOT EXISTS {rest}");
+            sql(manager, "execute", &concurrent, vec![]).await?;
+            ran.push(concurrent);
+        }
+        Ok(ran)
+    }
+}
+
 pub const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS usai_queue (
   id bigserial PRIMARY KEY,
   topic text NOT NULL,

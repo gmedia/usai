@@ -33,7 +33,39 @@ apart from the application's own records:
 
 ## What to do
 
-Fix the cause (the endpoint, the payload), then requeue: `update usai_queue
-set state = 'ready', attempts = 0, last_error = null where id = …`. Messages
-that must never be lost belong in the queue (durable); `ctx.tasks.dispatch`
-is not durable (ADR-0010) and its failures are a WARN line only.
+First look at what is actually there:
+
+```bash
+usai --root /srv/app queue status                 # per topic and state, with ages
+usai --root /srv/app queue status --json | jq     # for a script or an alert
+```
+
+`ready` is depth. A `processing` row older than the consumer's deadline is a
+lost consumer — the sweeper reclaims it; you do not have to. `dead` is what
+this page is about.
+
+Fix the cause (the endpoint, the payload), then requeue. There is no verb for
+this on purpose: requeueing is a decision about *which* failures were
+transient, and the runtime will not guess.
+
+```sql
+-- one message, after you have read its last_error
+update usai_queue set state = 'ready', attempts = 0, last_error = null where id = 42;
+-- a batch that failed for one cause you have fixed
+update usai_queue set state = 'ready', attempts = 0, last_error = null
+ where topic = 'invoice.issued' and state = 'dead' and last_error like '%502%';
+```
+
+Then keep the table from growing forever — the runtime never prunes it:
+
+```bash
+usai --root /srv/app queue prune --state done --older-than 30d
+usai --root /srv/app queue prune --state dead --older-than 90d --dry-run
+```
+
+`--dry-run` counts and deletes nothing. Keep `dead` longer than `done`: it is
+the evidence for the next incident.
+
+Messages that must never be lost belong in the queue (durable);
+`ctx.tasks.dispatch` is not durable (ADR-0010) and its failures are a WARN
+line only.

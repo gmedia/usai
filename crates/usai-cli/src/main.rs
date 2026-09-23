@@ -273,6 +273,44 @@ enum QueueAction {
         #[arg(long, default_value = "null")]
         message: String,
     },
+    /// What is in `usai_queue`: rows per topic and state, the oldest message
+    /// still waiting and the oldest still claimed
+    Status {
+        /// Only this topic
+        #[arg(long)]
+        topic: Option<String>,
+        /// The postgres resource to use (default: the application's first)
+        #[arg(long)]
+        resource: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete finished rows. The runtime never prunes by itself: a `dead`
+    /// row is a message your application failed, and only you know whether
+    /// it is still evidence
+    Prune {
+        /// `done`, `dead` or `all`
+        #[arg(long, default_value = "done")]
+        state: String,
+        /// Only rows older than this (`7d`, `48h`, `30m`)
+        #[arg(long, default_value = "7d")]
+        older_than: String,
+        /// Only this topic
+        #[arg(long)]
+        topic: Option<String>,
+        #[arg(long)]
+        resource: Option<String>,
+        /// Count what would go, delete nothing
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Create the queue's indexes with CREATE INDEX CONCURRENTLY, before an
+    /// upgrade builds them under a write-blocking lock. Safe to run while
+    /// the application serves, and safe to repeat
+    Prepare {
+        #[arg(long)]
+        resource: Option<String>,
+    },
 }
 
 /// `KEY=VALUE` lines (optional `export`, optional single/double quotes,
@@ -485,6 +523,37 @@ async fn async_main() {
         Command::Queue {
             action: QueueAction::Run { topic, message },
         } => commands::queue_run(&root, &topic, &message).await,
+        Command::Queue {
+            action:
+                QueueAction::Status {
+                    topic,
+                    resource,
+                    json,
+                },
+        } => commands::queue_status(&root, topic.as_deref(), resource.as_deref(), json).await,
+        Command::Queue {
+            action:
+                QueueAction::Prune {
+                    state,
+                    older_than,
+                    topic,
+                    resource,
+                    dry_run,
+                },
+        } => {
+            commands::queue_prune(
+                &root,
+                &state,
+                &older_than,
+                topic.as_deref(),
+                resource.as_deref(),
+                dry_run,
+            )
+            .await
+        }
+        Command::Queue {
+            action: QueueAction::Prepare { resource },
+        } => commands::queue_prepare(&root, resource.as_deref()).await,
         Command::Db {
             action: DbAction::Migrate { resource, artifact },
         } => commands::db_migrate(&root, resource.as_deref(), artifact).await,
