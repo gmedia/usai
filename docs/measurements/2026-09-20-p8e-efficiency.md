@@ -334,6 +334,39 @@ per direction) and the interpreter's share of the developer surface (a
 smaller per-request SDK path in the snapshot). The fresh world is the
 product; its ≈0.16 ms is not on the table.
 
+## 7b. The comparators' floors: attempted 2026-09-23, not obtained
+
+The sweep day ended with `fleet.sh floor node|php` at the cell sizes the
+Usai floors used (node 48/64/96/128 MiB, php 32/48/64/96, all 1 vCPU) plus
+the template at 192 MiB / 1 vCPU / 48 worlds as the reference. **Only the
+reference cell is a result**; both comparator paths are broken in ways that
+are ours, and are reported rather than published:
+
+- **node**: every cell ended in under a second leaving only a container id
+  — no readiness verdict, no samples, no `server.log`. The path has never
+  produced a cell; it is a harness bug, not a Node result.
+- **php**: the four cells ran for eleven minutes each and gave *identical*
+  numbers (idle 86.9 MiB, load 145.1 MiB, 118 % of one cpu) — the cell's
+  `mem_limit` and `cpus` did not bind on what was measured, so a "32 MiB
+  floor" that idles at 87 MiB is not a floor. The load phase also carried
+  6 977 × 5xx from the same nginx ephemeral-port exhaustion the sweep hit.
+
+What the reference cell does say, on the same host and the same measurement
+(one vCPU, class C at c=16 for 60 s between two idle phases):
+
+| | Usai (template, 48 worlds) | PHP-FPM tuned (8 children + nginx) |
+|---|---|---|
+| processes | 1 (3–4 threads) | 11 |
+| idle RSS / PSS | 40.6 / 40.6 MiB | 86.9 / — MiB |
+| under load | 101.3 / 59.0 MiB | 145.1 MiB |
+| after 300 s idle | 102.3 / 59.2 MiB | 145.1 MiB |
+| cpu during load | 99 % of the core | 118 % (the limit did not bind) |
+| load result | 1 vCPU class C, no 5xx | 585 req/s with 6 977 × 5xx |
+
+Neither the node harness bug nor the php limit is worth a rerun before the
+comparator configuration is fixed; both are tracked with the sweep's own
+follow-ups (`2026-09-23-sweep.md` → what this run does not measure).
+
 ## 8. Open
 
 - **A multi-application runtime process** (many definitions, one process,

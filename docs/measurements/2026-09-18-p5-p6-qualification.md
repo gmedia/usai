@@ -192,7 +192,7 @@ campaign kills the process from the host); and a message redelivered after a
 reclaim is a duplicate the consumer must tolerate — at-least-once was always
 the contract, this is one of the ways it shows.
 
-## Queue throughput (`scripts/qualification/queue/run.sh`, 2026-09-20)
+## Queue throughput (`scripts/qualification/queue/run.sh`, 2026-09-20; re-run on the idle host 2026-09-23)
 
 What the PostgreSQL-backed queue does per second. Application: one consumer
 doing the smallest real work (one `INSERT` recording the message), a
@@ -214,6 +214,32 @@ Four runs during the day, each after a fix the previous one exposed:
 
 † one noisy cell (the two instances and PostgreSQL share four cores with
 the load generator); the other five cells of run 4 scale as expected.
+
+**Re-run on the idle host** (2026-09-23 03:22–03:29 UTC, the soak and its
+deployment gone, apps pinned to cpus 0–7, `bench-postgres` on 12–13, same
+20 000 messages per cell, commit `8acb9ed`):
+
+| | c=4 × 1 | c=8 × 1 | c=16 × 1 | c=4 × 2 | c=8 × 2 | c=16 × 2 |
+|---|---|---|---|---|---|---|
+| msg/s | 277 | 274 | **1 032** | 687 | 1 036 | **1 198** |
+| drain s | 72.2 | 73.1 | 19.4 | 29.1 | 19.3 | 16.7 |
+| publishes/s (32 in flight) | 1 603 | 1 800 | 1 700 | 1 841 | 1 802 | 1 715 |
+| producer route, 16 clients | 1 219 | 1 121 | 969 | 1 244 | 1 047 | 850 |
+
+Both instances take their half (`i1: 9 985, i2: 10 015` at c=4 × 2): the
+work is shared without configuration, as the two-replica campaign found.
+Against run 4 on the busy host every cell is faster — c=16 × 1 is 712 →
+1 032 msg/s and the publisher is 1 650 → 1 800 per second — which is what
+an idle host should do.
+
+One thing in this table is **not explained**: c=4 × 1 and c=8 × 1 are the
+same (277 and 274 msg/s) while c=16 × 1 is 3.8× either. Each cell built its
+own artifact with its own `concurrency` (checked: `app-c4`, `app-c8`,
+`app-c16` carry 4, 8 and 16), so the cells are what they say they are; the
+consumer does one `INSERT` per message and the pool is 16. Doubling the
+consumers from 4 to 8 bought nothing and doubling again bought everything,
+which no model here predicts. Recorded as measured, to be chased with the
+per-phase profile on the next queue campaign rather than explained away.
 
 Producer route (`POST /enqueue`, one message per request, consumers up):
 10–12 ms per publish for one sequential client — a fresh world plus one
