@@ -55,9 +55,18 @@ box --entrypoint /subject p8e-pagecache:local "$@"
 read -r rss_img cur_img <<< "$(charged)"
 docker rm -f "$name" >/dev/null 2>&1
 
-# 3. bind mount, cold — the file's page cache dropped just before the box
-#    starts, so the box faults its own pages and pays for them.
+# 3. bind mount, cold — the subject's page cache dropped just before the box
+#    starts, and the base image's layers with it when root allows (the box
+#    maps its libc from there, and an overlay layer is root's to evict), so
+#    the box faults its own pages and pays for them.
 python3 "$here/evict.py" "$bin" >/dev/null
+layers=$(docker image inspect "$base" -f '{{.GraphDriver.Data.LowerDir}}:{{.GraphDriver.Data.UpperDir}}' 2>/dev/null | tr ':' '\n' | grep -v '^$' || true)
+if [ -n "$layers" ] && sudo -n true 2>/dev/null; then
+  # shellcheck disable=SC2086
+  sudo -n python3 "$here/evict.py" $layers >/dev/null
+else
+  echo "(no sudo: the image's shared libraries stay warm, so the cold row is a lower bound)"
+fi
 box -v "$bin:/subject:ro" --entrypoint /subject "$base" "$@"
 read -r rss_cold cur_cold <<< "$(charged)"
 docker rm -f "$name" >/dev/null 2>&1

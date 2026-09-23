@@ -96,6 +96,21 @@ evict_for_cell() {
   else
     log "  could not drop the page cache (python3?): this cell is measured warm"
   fi
+  # The box also maps the base image's libc and friends, and those pages live
+  # in an overlay layer that only root may evict. With passwordless sudo the
+  # cell can be fully cold; without it, the shared libraries stay warm and
+  # somebody else's bill — the cell records `coldCache: "partial"` and the
+  # report says so rather than claiming a floor it did not measure.
+  local layers
+  layers=$(docker image inspect "$BASE_IMAGE" -f '{{.GraphDriver.Data.LowerDir}}:{{.GraphDriver.Data.UpperDir}}' 2>/dev/null | tr ':' '\n' | grep -v '^$' || true)
+  if [ -n "$layers" ] && sudo -n true 2>/dev/null; then
+    # The word split is the point (one path per layer), and the redirect is
+    # the caller's own file, not root's.
+    # shellcheck disable=SC2086,SC2024
+    sudo -n python3 "$here/evict.py" $layers >> "$dir/evicted.txt" 2>&1 || true
+  elif [ "$COLD" = true ]; then
+    COLD=partial
+  fi
 }
 
 # The cgroup a container's init process lives in, so the run can read what the
@@ -279,7 +294,7 @@ floor() {
   kill "$sampler" 2>/dev/null || true; wait "$sampler" 2>/dev/null || true
   docker logs "$name" > "$dir/server.log" 2>&1 || true
   floor_teardown "$app" "$name"
-  echo "{\"cell\":\"$cell\",\"app\":\"$app\",\"memMib\":$mem,\"cpus\":$cpus,\"worlds\":$worlds,\"appliedMemoryBytes\":$applied_mem,\"appliedNanoCpus\":$applied_cpu,\"cgroupPeakBytes\":${peak_bytes:-0},\"cgroupEndBytes\":${end_bytes:-0},\"cgroupCeilingHits\":${max_events:-0},\"cgroupOomKills\":${oom_kills:-0},\"coldCache\":$COLD,\"oomKilled\":$oom,\"runningAtEnd\":$running,\"readyAtEnd\":$ready_end}" > "$dir/result.json"
+  echo "{\"cell\":\"$cell\",\"app\":\"$app\",\"memMib\":$mem,\"cpus\":$cpus,\"worlds\":$worlds,\"appliedMemoryBytes\":$applied_mem,\"appliedNanoCpus\":$applied_cpu,\"cgroupPeakBytes\":${peak_bytes:-0},\"cgroupEndBytes\":${end_bytes:-0},\"cgroupCeilingHits\":${max_events:-0},\"cgroupOomKills\":${oom_kills:-0},\"coldCache\":\"$COLD\",\"oomKilled\":$oom,\"runningAtEnd\":$running,\"readyAtEnd\":$ready_end}" > "$dir/result.json"
   log "  done: oom=$oom running=$running ready=$ready_end peak=$(( ${peak_bytes:-0} / 1048576 ))MiB ceiling_hits=${max_events:-0}"
 }
 

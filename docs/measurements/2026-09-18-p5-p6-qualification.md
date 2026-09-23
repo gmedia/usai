@@ -192,6 +192,47 @@ campaign kills the process from the host); and a message redelivered after a
 reclaim is a duplicate the consumer must tolerate — at-least-once was always
 the contract, this is one of the ways it shows.
 
+## Three replicas (`p6/replicas.sh three`, 2026-09-23 17:25–17:32 UTC)
+
+`SUPPORTED.md` says N replicas behind a balancer, and every campaign before
+this one ran exactly two — so "N" rested on an induction from a single step.
+The third replica joins through a compose profile; the properties N > 2 could
+break are the shared ones (the queue claim, the migration lock, cron
+exclusivity, and a rolling restart that has to keep a quorum serving).
+
+Same shape as the two-replica campaign, on the **published 0.0.8 images**
+(`ghcr.io/gmedia/usai:0.0.8` with the application layered on), pinned to cpus
+12–15 beside the running 24 h soak (disclosed co-tenant, cpus 0–11; the p99
+maxima below carry that).
+
+| Scenario | Pass rule | Result |
+|---|---|---|
+| HTTP, 2 replicas, 60 s | something served, 0 × 5xx, both created worlds | **58 327 ok**, 0 × 4xx/5xx/503, worlds 29 184 / 29 183, p99 median 29.4 ms |
+| Queue, 1 000 invoices | exactly 1 000 deliveries, both consumed, 0 dead, 0 pending | **1 000 (sink saw 1 000)**, app 580 / app2 420 |
+| Two `migrate` jobs at once | both exit 0, three files applied once | exit 0/0, 3 rows |
+| Cron on one replica | true on app, false on app2 | as expected, `usai_scheduler{cron}` 1/0 |
+| Rolling restart under load (20 SSE/WS held) | 0 × 5xx, held connections closed `1012`/ended | **62 905 ok, 0 × 5xx**, ready again 3 s each, closes 10 × `1012` + 10 × SSE ended |
+| One replica `kill -9` under load | ≤ 16 × 5xx, every message delivered, nothing pending | **4 × 5xx** (in flight on the dead replica), 4 claims reclaimed, 300 deliveries of 300 (sink 304 — at-least-once) |
+| **Three:** HTTP, 45 s | all three created worlds, 0 × 5xx | **38 984 ok**, worlds 13 004 / 13 005 / 13 005 — the proxy's round robin is even across three |
+| **Three:** queue, 600 invoices | exactly 600 deliveries across three consumers | **600**, app 182 / app2 180 / app3 238, 0 dead, 0 pending |
+| **Three:** rolling restart of all three under load, one at a time | 0 × 5xx | **77 265 ok, 0 × 5xx** over 90 s |
+| **Three:** three concurrent `migrate` jobs on a fresh database | none fails, nothing applied twice | 3 applied, **0 applied twice**, 0 failed |
+
+**11 of 11.** Nothing about the shared state changed shape at three: the
+claim is still exactly-once per message, the advisory lock still serializes
+three migrators, cron is still one replica's job, and a restart of every
+replica in sequence costs no 5xx.
+
+The run before this one (16:42 UTC, same code) reported four failures and
+four passes, and **all eight verdicts were worthless**: the tenant token came
+back empty, so every one of its 1.5 M requests was a 401. The pass rules —
+no 5xx, no errors, both replicas created worlds — are all satisfied by
+refusals, because a rejected request creates a world too. The harness now
+requires that something was *served* before any load scenario can pass, and
+`up` fails loudly when it cannot get a token
+(`docs/measurements/2026-09-23-floor-accounting.md` is the other half of the
+same lesson from the same day).
+
 ## Queue throughput (`scripts/qualification/queue/run.sh`, 2026-09-20; re-run on the idle host 2026-09-23)
 
 What the PostgreSQL-backed queue does per second. Application: one consumer
