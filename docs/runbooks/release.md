@@ -76,6 +76,12 @@ release commit from being orphaned if the tag push is rejected.
 
 ## 4. What the workflow does, in order
 
+0. **provenance**: every tarball and both images carry a signed
+   build-provenance statement (`actions/attest-build-provenance`, Sigstore —
+   no key for us to lose), and the image attestations are pushed to the
+   registry beside the manifest. Anyone can check what produced a download
+   with `gh attestation verify` (see below); npm has carried `--provenance`
+   since 0.0.1.
 1. **binaries** (x86_64-linux, aarch64-linux, aarch64-macOS): `cargo build
    --profile dist -p usai-cli`, tarballs + SHA-256 on the GitHub release,
    with generated release notes. The Linux binaries are kept as artifacts
@@ -110,6 +116,10 @@ gh release view "v$v"                          # tarballs + checksums present
 npm view @sakaladev/usai version               # the registry agrees
 docker run --rm sakaladev/usai:$v --version    # the published image
 pnpm dlx @sakaladev/create-usai@latest demo && cd demo && pnpm install && pnpm dev   # the pure-npm path
+
+# Provenance: which workflow, at which commit, produced these bits
+gh attestation verify usai-v$v-x86_64-unknown-linux-gnu.tar.gz --repo gmedia/usai
+gh attestation verify oci://ghcr.io/gmedia/usai:$v --repo gmedia/usai
 ```
 
 `usai_build_info{version="X.Y.Z"}` is the in-band rollout check — it is the

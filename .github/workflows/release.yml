@@ -14,6 +14,10 @@ on:
 permissions:
   contents: write
   packages: write
+  # Build provenance: every tarball and image carries a signed statement of
+  # which workflow, at which commit, produced it (`gh attestation verify`).
+  id-token: write
+  attestations: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -78,6 +82,10 @@ jobs:
           cp LICENSE README.md dist/$name/
           tar -C dist -czf dist/$name.tar.gz $name
           (cd dist && shasum -a 256 $name.tar.gz > $name.tar.gz.sha256)
+      - name: Provenance for the tarball
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*.tar.gz
       - uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -209,6 +217,18 @@ jobs:
           outputs: type=image,name=${{ steps.names.outputs.ghcr }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=dev-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=dev-${{ matrix.arch }}
+      - name: Provenance for the images
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ steps.names.outputs.ghcr }}
+          subject-digest: ${{ steps.runtime.outputs.digest }}
+          push-to-registry: true
+      - name: Provenance for the dev image
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ steps.names.outputs.ghcr }}
+          subject-digest: ${{ steps.dev.outputs.digest }}
+          push-to-registry: true
       - name: Record digests
         run: |
           mkdir -p digests
