@@ -123,9 +123,41 @@ pub struct HttpStats {
     /// Sum of observed latencies, in microseconds.
     pub latency_sum_us: AtomicU64,
     pub rejections: [AtomicU64; 6],
-    /// Per-workload response classes (2xx, 3xx, 4xx, 5xx). Bounded by the
-    /// set of workloads the definitions name, never by request data.
-    pub by_workload: std::sync::RwLock<std::collections::BTreeMap<String, [AtomicU64; 4]>>,
+    /// Per-workload response classes and latency. Bounded by the set of
+    /// workloads the definitions name, never by request data.
+    pub by_workload: std::sync::RwLock<std::collections::BTreeMap<String, WorkloadCounters>>,
+}
+
+/// What one workload's responses cost. The classes answer "is this route
+/// failing"; the sum and the count answer "is this route slow", which the
+/// global histogram cannot: a route that takes 200 ms while 99.7 % of
+/// traffic takes 2 ms does not move a p99 at all (measured — an on-call
+/// round on 0.0.9 watched the documented latency alert read 2.5 ms while a
+/// route took 204 ms). Two extra series per workload, the same order as the
+/// per-workload CPU counter.
+#[derive(Debug, Default)]
+pub struct WorkloadCounters {
+    pub classes: [AtomicU64; 4],
+    pub latency_sum_us: AtomicU64,
+    pub latency_count: AtomicU64,
+}
+
+/// One workload's counters, flattened for the status document.
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkloadSnapshot {
+    #[serde(rename = "2xx")]
+    pub c2xx: u64,
+    #[serde(rename = "3xx")]
+    pub c3xx: u64,
+    #[serde(rename = "4xx")]
+    pub c4xx: u64,
+    #[serde(rename = "5xx")]
+    pub c5xx: u64,
+    /// Summed wall time of the responses counted here, and how many were
+    /// timed: `latencySumSeconds / count` is this route's mean.
+    pub latency_sum_seconds: f64,
+    pub count: u64,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -151,8 +183,7 @@ pub struct HttpSnapshot {
     pub rejections: [u64; 6],
     /// Per-workload response counts: workload id → [2xx, 3xx, 4xx, 5xx],
     /// serialised as `{ "2xx": n, "3xx": n, "4xx": n, "5xx": n }`.
-    #[serde(serialize_with = "serialize_by_workload")]
-    pub by_workload: std::collections::BTreeMap<String, [u64; 4]>,
+    pub by_workload: std::collections::BTreeMap<String, WorkloadSnapshot>,
 }
 
 pub const REJECTION_REASONS: [&str; 6] = [
@@ -185,28 +216,14 @@ fn serialize_rejections<S: serde::Serializer>(v: &[u64; 6], s: S) -> Result<S::O
     m.end()
 }
 
-fn serialize_by_workload<S: serde::Serializer>(
-    v: &std::collections::BTreeMap<String, [u64; 4]>,
-    s: S,
-) -> Result<S::Ok, S::Error> {
-    use serde::ser::SerializeMap;
-    let mut m = s.serialize_map(Some(v.len()))?;
-    for (k, c) in v {
-        m.serialize_entry(
-            k,
-            &json!({ "2xx": c[0], "3xx": c[1], "4xx": c[2], "5xx": c[3] }),
-        )?;
-    }
-    m.end()
-}
-
 impl HttpStats {
     pub fn record(&self, status: u16, before_world: bool) {
         self.record_with(status, before_world, None, None);
     }
 
-    /// Counts a response under the workload that produced (or refused) it.
-    pub fn record_workload(&self, workload: &str, status: u16) {
+    /// Counts a response under the workload that produced (or refused) it,
+    /// with what it cost.
+    pub fn record_workload(&self, workload: &str, status: u16, latency: std::time::Duration) {
         // 101 (a WebSocket upgrade) is a success, not a server error.
         let class = match status {
             100..=299 => 0,
@@ -214,19 +231,24 @@ impl HttpStats {
             400..=499 => 2,
             _ => 3,
         };
+        let add = |counters: &WorkloadCounters| {
+            counters.classes[class].fetch_add(1, Ordering::Relaxed);
+            counters
+                .latency_sum_us
+                .fetch_add(latency.as_micros() as u64, Ordering::Relaxed);
+            counters.latency_count.fetch_add(1, Ordering::Relaxed);
+        };
         if let Some(counters) = self
             .by_workload
             .read()
             .expect("stats poisoned")
             .get(workload)
         {
-            counters[class].fetch_add(1, Ordering::Relaxed);
+            add(counters);
             return;
         }
         let mut map = self.by_workload.write().expect("stats poisoned");
-        map.entry(workload.to_owned())
-            .or_insert_with(|| std::array::from_fn(|_| AtomicU64::new(0)))[class]
-            .fetch_add(1, Ordering::Relaxed);
+        add(map.entry(workload.to_owned()).or_default());
     }
 
     pub fn record_with(
@@ -293,7 +315,15 @@ impl HttpStats {
                 .map(|(k, v)| {
                     (
                         k.clone(),
-                        std::array::from_fn(|i| v[i].load(Ordering::Relaxed)),
+                        WorkloadSnapshot {
+                            c2xx: v.classes[0].load(Ordering::Relaxed),
+                            c3xx: v.classes[1].load(Ordering::Relaxed),
+                            c4xx: v.classes[2].load(Ordering::Relaxed),
+                            c5xx: v.classes[3].load(Ordering::Relaxed),
+                            latency_sum_seconds: v.latency_sum_us.load(Ordering::Relaxed) as f64
+                                / 1e6,
+                            count: v.latency_count.load(Ordering::Relaxed),
+                        },
                     )
                 })
                 .collect(),
@@ -442,6 +472,7 @@ pub fn trace_world(result: &WorkResult, revision: &str) {
     tracing::debug!(
         world = %result.world,
         workload = %result.workload,
+        request_id = result.request_id.as_deref().unwrap_or(""),
         revision,
         termination,
         outcome,
@@ -674,6 +705,9 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
     // level and must not be alerted on as one.
     let mut resources = Vec::new();
     let mut quarantines = Vec::new();
+    let (mut operations, mut transactions) = (Vec::new(), Vec::new());
+    let (mut outbound, mut outbound_failures, mut outbound_refused) =
+        (Vec::new(), Vec::new(), Vec::new());
     for r in &status.resources {
         let base = format!(
             "kind=\"{}\",name=\"{}\"",
@@ -688,6 +722,29 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
             format!("{base},metric=\"ready\""),
             if r.ready { 1.0 } else { 0.0 },
         ));
+        // The one number that separates "the dependency is slow" from "my
+        // pool is too small", which are opposite fixes: `in_use == max` is
+        // healthy saturation, `waiting > 0` is a queue. It was in the status
+        // document and nowhere else, so an on-call round spent twenty-five
+        // minutes on the difference (`docs/runbooks/slow-route.md`).
+        // A level, like in_use and max.
+        if let Some(waiting) = r.detail.get("waiting").and_then(|v| v.as_u64()) {
+            resources.push((format!("{base},metric=\"waiting\""), waiting as f64));
+        }
+        // Events are counters, per this page's own convention — and they
+        // were in the status document only, so outbound failure rate could
+        // not be graphed at all.
+        for (key, into) in [
+            ("operations", &mut operations),
+            ("transactions", &mut transactions),
+            ("requests", &mut outbound),
+            ("failures", &mut outbound_failures),
+            ("refused", &mut outbound_refused),
+        ] {
+            if let Some(value) = r.detail.get(key).and_then(|v| v.as_u64()) {
+                into.push((base.clone(), value as f64));
+            }
+        }
         quarantines.push((base, r.quarantined as f64));
     }
     if !resources.is_empty() {
@@ -698,6 +755,37 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
             "gauge",
             &resources,
         );
+        for (name, help, values) in [
+            (
+                "usai_resource_operations_total",
+                "Operations leased from this resource (cumulative)",
+                &operations,
+            ),
+            (
+                "usai_resource_transactions_total",
+                "Transactions opened on this resource (cumulative)",
+                &transactions,
+            ),
+            (
+                "usai_resource_requests_total",
+                "Outbound requests made through this resource (cumulative)",
+                &outbound,
+            ),
+            (
+                "usai_resource_failures_total",
+                "Outbound requests that failed (cumulative): the rate an outbound dependency is failing at",
+                &outbound_failures,
+            ),
+            (
+                "usai_resource_refused_total",
+                "Outbound requests refused before they were made, by the resource's own bound (cumulative)",
+                &outbound_refused,
+            ),
+        ] {
+            if !values.is_empty() {
+                metric(&mut out, name, help, "counter", values);
+            }
+        }
         metric(
             &mut out,
             "usai_resource_quarantines_total",
@@ -730,15 +818,19 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
             .by_workload
             .iter()
             .flat_map(|(w, counts)| {
-                ["2xx", "3xx", "4xx", "5xx"]
-                    .iter()
-                    .zip(counts.iter())
-                    .map(move |(class, n)| {
-                        (
-                            format!("workload=\"{}\",class=\"{class}\"", label(w)),
-                            *n as f64,
-                        )
-                    })
+                [
+                    ("2xx", counts.c2xx),
+                    ("3xx", counts.c3xx),
+                    ("4xx", counts.c4xx),
+                    ("5xx", counts.c5xx),
+                ]
+                .into_iter()
+                .map(move |(class, n)| {
+                    (
+                        format!("workload=\"{}\",class=\"{class}\"", label(w)),
+                        n as f64,
+                    )
+                })
             })
             .collect();
         if !by_workload.is_empty() {
@@ -748,6 +840,35 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
                 "HTTP responses by workload and status class (refusals after routing included)",
                 "counter",
                 &by_workload,
+            );
+            // Per-workload latency as a summary's two halves. The global
+            // histogram cannot find a slow route: one that takes 200 ms while
+            // 99.7 % of traffic takes 2 ms leaves the p99 at 2.5 ms
+            // (measured). `rate(sum) / rate(count)` by workload does, in one
+            // query, at two series per workload.
+            let sums: Vec<(String, f64)> = h
+                .by_workload
+                .iter()
+                .map(|(w, c)| (format!("workload=\"{}\"", label(w)), c.latency_sum_seconds))
+                .collect();
+            metric(
+                &mut out,
+                "usai_http_workload_request_seconds_sum",
+                "Summed response time per workload; divide by _count for the mean, which is how you find a slow route (the global histogram hides one that is a minority of traffic)",
+                "counter",
+                &sums,
+            );
+            let counts: Vec<(String, f64)> = h
+                .by_workload
+                .iter()
+                .map(|(w, c)| (format!("workload=\"{}\"", label(w)), c.count as f64))
+                .collect();
+            metric(
+                &mut out,
+                "usai_http_workload_request_seconds_count",
+                "Responses timed per workload (the denominator of _sum)",
+                "counter",
+                &counts,
             );
         }
         metric(

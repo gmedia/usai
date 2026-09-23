@@ -598,6 +598,14 @@ async fn pool_exhaustion_is_resource_aware_backpressure() {
     };
     assert_eq!(s.in_use, 4, "{s:?}");
     assert_eq!(s.max, 4);
+    // `waiting` is the number that separates "the database is slow" from
+    // "the pool is too small" — opposite fixes — and it has to be visible
+    // while the pool is full, not only in the status document.
+    assert!(
+        s.detail.contains_key("waiting"),
+        "the pool must report what is queued: {:?}",
+        s.detail
+    );
     for h in holders {
         let r = h.await.unwrap();
         assert!(r.is_ok(), "{r:?}");

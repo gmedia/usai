@@ -82,6 +82,13 @@ struct PoolConfig {
     /// skips that round-trip for applications that never touch session
     /// state and have measured the difference.
     recycling: Option<String>,
+    /// How long a world may wait for a connection before the operation is
+    /// refused (`resource_exhausted`, 503). Ten seconds by default: long
+    /// enough that a burst rides through, short enough that a caller is
+    /// told rather than held. Raise it only if you would rather a request
+    /// waited than failed.
+    #[serde(rename = "acquireTimeoutSeconds")]
+    acquire_timeout_seconds: Option<u64>,
 }
 
 #[async_trait]
@@ -139,8 +146,25 @@ impl ResourceProvider for PostgresProvider {
             ManagerConfig { recycling_method },
         );
         let max = config.pool.max.unwrap_or(16).max(1);
+        // A full pool **refuses**; it does not queue without limit. Every
+        // other admission level in this runtime answers 503 at once when it
+        // is full, `usai inspect` prints the pool under that same heading,
+        // and the runbooks promise `resource_exhausted` — but deadpool waits
+        // forever by default, so an on-call round measured 150 clients on a
+        // 2-connection pool answering **410 × 200 at a median of 23
+        // seconds**, with no refusal and no log line. Ten seconds is far
+        // longer than any healthy lease and far shorter than the default
+        // 30 s world deadline, so the request that cannot get a connection
+        // is told, rather than held.
         let pool = Pool::builder(manager)
             .max_size(max)
+            .runtime(deadpool_postgres::Runtime::Tokio1)
+            .timeouts(deadpool_postgres::Timeouts {
+                wait: Some(Duration::from_secs(
+                    config.pool.acquire_timeout_seconds.unwrap_or(10).max(1),
+                )),
+                ..Default::default()
+            })
             .build()
             .map_err(|e| ResourceError::Startup(spec.name.clone(), e.to_string()))?;
         // Fail activation, not the first request, when the database is

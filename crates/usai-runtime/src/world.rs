@@ -125,6 +125,11 @@ pub struct WorkResult {
     /// Thread CPU time spent inside guest entries (the world's own CPU;
     /// host operations run elsewhere and are not included).
     pub cpu: Duration,
+    /// The request id this world ran under, when it had one. The trace line
+    /// carries it so a log pipeline can join the runtime's own timing to the
+    /// application's lines and the proxy's access log — `world` is a
+    /// per-process counter and joins nothing outside the process.
+    pub request_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -537,6 +542,7 @@ impl WorldDriver {
             children,
             profile,
             cpu,
+            request_id: self.shared.request_id.as_deref().map(str::to_owned),
         };
         let t_retire = Instant::now();
         self.retire("finished");

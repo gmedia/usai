@@ -823,6 +823,11 @@ impl HttpHost {
     }
 
     async fn pipeline(&self, request: Request<Incoming>) -> Result<HttpResponse, Reply> {
+        // What this request cost, for the per-workload latency. One clock
+        // read per request, always on: finding a slow route needs it, and
+        // the global histogram cannot (a route that is a minority of traffic
+        // never moves a p99).
+        let entered = std::time::Instant::now();
         let mut watch = Stopwatch::start();
         let compiled = self.compiled()?;
         let (parts, body) = request.into_parts();
@@ -1129,15 +1134,16 @@ impl HttpHost {
             Ok(response)
         }
         .await;
+        let cost = entered.elapsed();
         match outcome {
             Ok(response) => {
                 self.stats
-                    .record_workload(&workload_id, response.status().as_u16());
+                    .record_workload(&workload_id, response.status().as_u16(), cost);
                 Ok(response)
             }
             Err(mut reply) => {
                 self.stats
-                    .record_workload(&workload_id, reply.status.as_u16());
+                    .record_workload(&workload_id, reply.status.as_u16(), cost);
                 reply.workload = Some(workload_id);
                 Err(reply)
             }
