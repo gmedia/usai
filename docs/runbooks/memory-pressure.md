@@ -33,6 +33,33 @@ new `wasm engine` line (the kernel killed the process); the proxy answers
 502 while it restarts, and with a restart policy this repeats. Measured: a
 96 MB limit on a 256-world runtime → restart loop every ~3 s.
 
+## What you see when the limit is *almost* too low
+
+There is a state between "fits" and "OOM-killed", and it is worse to
+diagnose than either: the container sits **at** its memory ceiling and the
+kernel keeps taking back the only thing it can take back — the clean file
+pages of the binary the process is executing — which the process then faults
+in again. Nothing is killed. No error is logged. Throughput collapses.
+
+Measured on a deliberately undersized box (2026-09-23,
+`docs/measurements/2026-09-23-floor-accounting.md`): a `hello`-only instance
+in a 48 MiB box answered **1 request per second at a p50 of 4.7 seconds**,
+with 1.5 million `memory.events` `max` — and a resident set *smaller* than
+the same instance in a 64 MiB box, which served 2 080 req/s at p50 2.1 ms.
+
+How to tell it apart from a slow application:
+
+```bash
+# cgroup v2, inside the container or from the host's cgroup path
+cat /sys/fs/cgroup/memory.events      # `max` climbing by thousands per second
+cat /sys/fs/cgroup/memory.current     # pinned at memory.max
+grep -E '^(pgmajfault|pgrefill)' /sys/fs/cgroup/memory.stat   # major faults climbing
+```
+
+`usai_process_resident_memory_bytes` going *down* while latency goes up is
+the signature. The fix is the limit, not the application: give it the memory
+the sizing section asks for.
+
 ## What to do
 
 Size the limit for `40 MiB + max_worlds × 4 MiB` (192 MiB is the supported
