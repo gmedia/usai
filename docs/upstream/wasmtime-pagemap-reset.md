@@ -8,7 +8,10 @@ Status (2026-09-23): **merged upstream.**
 The path from here is mechanical:
 
 1. `main` carries it; **v49.0.0 (2026-09-21) predates the merge**, so no
-   released version has it yet.
+   released version has it yet. (Re-checked against crates.io on 2026-09-23
+   at 20:55 UTC: 49.0.0 is still the newest. Wasmtime releases monthly on the
+   20th, so the first candidate is 50.0.0 around 2026-10-20 — this is a
+   calendar item, not a task.)
 2. The first wasmtime release after 2026-09-23 makes `vendor/` unnecessary:
    delete `vendor/wasmtime` and `vendor/wasmtime-pagemap-reset.patch`, drop
    the `[patch.crates-io]`/`path` entry in the workspace `Cargo.toml`, bump
