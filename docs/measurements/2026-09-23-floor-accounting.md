@@ -5,6 +5,12 @@ claim about a bill, and it is worth exactly as much as the accounting behind
 it. This is the day the accounting turned out to be wrong, how it was caught,
 and what the harness does now.
 
+Read in order, it is also a small lesson in instrument design: the first
+correction did not work, the second one only worked halfway, and the third
+revealed that the measurement depends on something nobody had thought of as a
+variable — which build of the binary is on disk. Each step is kept, because a
+reader repeating this on another machine will meet them in the same order.
+
 ## The impossibility
 
 The comparator floors were re-run on VM 47 (`p8e-floors2-20260923T153421Z`)
