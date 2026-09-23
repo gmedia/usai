@@ -41,7 +41,9 @@ Where to look, always:
   `usai_resource{kind,name,metric}` (levels), `usai_resource_quarantines_total{kind,name}` (events), `usai_queue_messages_total`).
 - Logs: one line per event at `info`; a request that reached a world and
   failed with a **5xx** logs `application error` with `code=`, `error=` (and a
-  source-mapped stack) — except a connection-level dependency failure, which
+  source-mapped stack) — *unless the 5xx is a lifecycle violation*
+  (`detached_work` and friends), whose line is the teaching paragraph itself
+  with the fact in `code=`; match those on `code`, never on the message — except a connection-level dependency failure, which
   is one `WARN dependency unavailable` per code per second with a
   `suppressed` count; 4xx answers (`not_found`, `conflict`, validation)
   are the application's answers, counted but not logged. The application's

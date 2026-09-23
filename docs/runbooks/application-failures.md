@@ -40,8 +40,16 @@ nothing will start it again until the **revision is activated again**.
 ## `500 detached_work`
 
 ```
-WARN lifecycle violation code=detached_work workload="http:POST /invoices"
+WARN http work `POST /invoices` ended with live asynchronous work (1 resource)…
+     world=01J… workload="http:POST /invoices" code="detached_work"
 ```
+
+The line's **message is the explanation**, several sentences of it, and it
+changes with the violation; the fact to match on is the structured field
+`code="detached_work"` (`"code":"detached_work"` with `--log-format json`,
+where the whole paragraph is the `message` value). `grep detached_work`
+finds it; `grep 'lifecycle violation'` finds nothing, because no line says
+that.
 
 The handler returned while an operation it started was still in flight — a
 write, an outbound call — so the runtime cancelled the operation and could

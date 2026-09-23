@@ -46,14 +46,17 @@ Environment=USAI_MAX_WORLDS=48
 # Zero-502 rolling restart: readiness fails and connections close after
 # their response for the grace, then in-flight work drains (bounded).
 Environment=USAI_DRAIN_GRACE=2 USAI_DRAIN_TIMEOUT=30
-# The private surfaces on a port only the proxy and the scraper reach:
-# 9091 for replica 1, 9092 for replica 2.
-Environment=USAI_STATUS_ADDR=127.0.0.1:909%i USAI_STATUS_TOKEN=<random>
-# The application on 3001, 3002, …
+# The private surfaces on an address only the proxy and the scraper reach.
+# One loopback address per replica, same ports on each: a proxy's health
+# check is usually one port for the whole upstream group, so per-replica
+# *ports* cannot be expressed in it — `deploy-and-rollback.md` → The proxy
+# configuration has the block and what goes wrong without this.
+Environment=USAI_STATUS_ADDR=127.0.0.%i:9090 USAI_STATUS_TOKEN=<random>
+# The application on 127.0.0.1:3001, 127.0.0.2:3001, …
 # `--log-format json` writes the log as JSON on stderr and leaves stdout
 # empty (the startup banner becomes one `serving` line), so a shipper that
 # reads the journal parses every line it sees.
-ExecStart=/usr/local/bin/usai --log-format json run --artifact /srv/app/current --host 127.0.0.1 --port 300%i --require-signature <public-key-hex>
+ExecStart=/usr/local/bin/usai --log-format json run --artifact /srv/app/current --host 127.0.0.%i --port 3001 --require-signature <public-key-hex>
 # SIGTERM is the drain signal; give it grace + drain + a margin before SIGKILL.
 KillSignal=SIGTERM
 TimeoutStopSec=40
@@ -67,6 +70,10 @@ PrivateTmp=yes
 NoNewPrivileges=yes
 LimitNOFILE=65536
 MemoryMax=512M
+# Do NOT add LimitAS (or `ulimit -v`). The world pool reserves address space
+# per slot up front — ~200 GB of virtual mapping for 48 worlds, a few tens of
+# MB of it resident — so any address-space cap kills the process on the first
+# world. `MemoryMax` is the correct limit: it bounds what is actually used.
 
 [Install]
 WantedBy=multi-user.target
@@ -87,10 +94,16 @@ compose file uses 35 s for 2 + 30.
 Exactly one replica runs the scheduler for schedules that are not
 `exclusive: true` — the others get `USAI_NO_CRON=1` in their `app-%i.env`
 (and `USAI_NO_SERVICES=1` when a `service()` must be single). The proxy in
-front health-checks each replica's `/_usai/ready` on its status port
-(`127.0.0.1:9091`, `:9092`) and retries a refused connection on the other
-(`deploy-and-rollback.md` → Rolling restart has the Caddy block; the health
-interval must be at or below the drain grace).
+front health-checks each replica's `/_usai/ready` on its own address
+(`127.0.0.1:9090`, `127.0.0.2:9090`) and retries a refused connection on
+another (`deploy-and-rollback.md` → The proxy configuration has the block,
+in full, and the mistake it exists to prevent; the health interval must be
+at or below the drain grace).
+
+Readiness is also how a database outage reaches your users: an unready
+replica is removed from rotation, so a shared PostgreSQL outage takes out
+every route on every replica, not only the ones that query it. That default
+and the knob that changes it are in `postgres-down.md`.
 
 A single-replica VM is the same unit as `usai-app@1` — there is no
 non-template variant to maintain.
@@ -104,7 +117,7 @@ sudo -u usai usai db migrate --artifact /srv/app/releases/$sha        # once per
 ln -sfn releases/$sha /srv/app/current
 for unit in usai-app@2 usai-app@1; do                                 # one at a time
   systemctl restart $unit
-  until curl -sf http://127.0.0.1:909${unit#usai-app@}/_usai/ready >/dev/null; do sleep 0.5; done
+  until curl -sf http://127.0.0.${unit#usai-app@}:9090/_usai/ready >/dev/null; do sleep 0.5; done
 done
 ```
 

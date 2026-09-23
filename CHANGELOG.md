@@ -24,6 +24,30 @@ the human summary.
 
 ### Runtime
 
+- **A listener that does not serve a surface answers 404, not 401.** With a
+  status token set and the surfaces on their own listener, the public
+  listener answered `401 unauthorized` for `/_usai/status` and
+  `/_usai/metrics` while answering 404 for `/_usai/live` and `/_usai/ready` —
+  telling an unauthenticated caller that this is a Usai runtime with an
+  operator surface to come back for, and naming the environment variable
+  that guards it. Whether the listener serves the surface is now decided
+  before the token is looked at.
+- **A readiness probe that hangs now makes the resource unready.** The
+  one-second bound lived in `/_usai/ready`, so a probe that never returned —
+  the usual shape of an unreachable database — was *cancelled* before it
+  could record anything: `usai_resource{metric="ready"}` stayed at 1 and the
+  documented database-down alert waited for the next real query, which on a
+  quiet service is minutes. The bound is inside the resource now.
+- **`USAI_READY_REQUIRES_RESOURCES`.** Readiness fails when a bound resource
+  fails its probe, and a proxy removes an unready upstream — so a shared
+  PostgreSQL outage takes out every route on every replica, including the
+  ones that never touch it. That remains the default (a rollout should stop
+  rather than go live broken); `0` keeps resource-free routes serving and
+  reports the failing resource in the body instead. Draining fails readiness
+  either way.
+- **The startup banner announces only the surfaces that are served.** It
+  listed `/_usai/docs` after `USAI_SURFACES_OFF=docs` had removed it, and the
+  status listener's 404 quoted the same fixed list.
 - **`console.log` in a declaration no longer fails the build.** The bridge
   routes a log through the host's control call, and the definition phase
   counted every control call as an operation — so a `console.log` at module
@@ -97,6 +121,27 @@ the human summary.
 - **ADR-0020** records the artifact-signing decision that shipped in 0.0.5
   without one, and says the manifest is the compatibility surface while the
   rest of the directory is a build output rather than an interchange format.
+- **The multi-replica proxy configuration is published**
+  (`docs/runbooks/deploy-and-rollback.md`), in full and copyable. It used to
+  live in a qualification script, and the obvious translation of the
+  runbook's own per-replica status ports into a Caddy block health-checks
+  *every* replica on replica 1's port — one replica going down takes the
+  others out of rotation. One loopback address per replica, identical ports.
+- **Health-checking `/_usai/ready` couples every route to every bound
+  resource**, and a shared database outage is therefore a total outage rather
+  than the partial one the runbook promised. Both runbooks say so now, with
+  the knob that changes it.
+- Runbooks quoted **log lines that do not exist** (`WARN lifecycle
+  violation`): a violation's message *is* its explanation, and the fact to
+  match on is the structured `code` field.
+- **Do not set `LimitAS` or `ulimit -v`** (`systemd.md`): the world pool
+  reserves address space per slot — ~200 GB of virtual mapping for 48
+  worlds, tens of MB of it resident — so an address-space cap kills the
+  process at the first world. `MemoryMax` is the limit that means something.
+- The scaffold ships **`migrations/0001_notes.sql`** and a commented
+  `postgres()` block, so there is a production migration path to run before
+  the operator has written any application code; `SUPPORTED.md` explains why
+  `create-usai` has a version line of its own.
 
 ### CI
 
@@ -110,6 +155,25 @@ the human summary.
   bridge protocol (`guest_bridge`) and the JSON → wire-type conversion every SQL parameter goes
   through (`postgres_params`). 3.8 M and 2.8 M executions on their first runs, 0 crashes; both are in
   the nightly matrix.
+
+### Qualification (evidence, not features)
+
+- **Every floor this project has published is void until it is re-measured.**
+  The boxed cells bind-mounted the binary they were measuring, and page cache
+  is charged to the cgroup that first faults it in — the host had already run
+  the same binary, so the box was never billed for the runtime's own text.
+  The comparator run that exposed it reported 88 MiB resident inside a 48 MiB
+  box with no OOM kill. The harness now bakes the binary and the application
+  into an image (which is also what a deployment does) and records what the
+  kernel charged: peak, ceiling hits, OOM kills.
+  `docs/measurements/2026-09-23-floor-accounting.md`; `SUPPORTED.md`'s host
+  envelope row says it is under re-measurement.
+- **A run of refusals is not a passing run.** The three-replica campaign
+  reported PASS for three scenarios in which every single request was a 401:
+  the tenant token was extracted with a `sed` that prints the whole body when
+  it does not match, and the pass rules — no 5xx, no errors, both replicas
+  created worlds — are all satisfied by refusals. Every load-driven verdict
+  now requires that something was served.
 
 ## 0.0.8 — 2026-09-23
 

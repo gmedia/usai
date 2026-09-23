@@ -3,3 +3,5 @@
 # needs with `env({ ... })` in src/app.ts; resources name their own variables.
 #
 # DATABASE_URL=postgres://user:password@127.0.0.1:5432/app
+# (uncomment the postgres() block in src/app.ts too, then
+#  `pnpm usai db migrate` applies migrations/0001_notes.sql)

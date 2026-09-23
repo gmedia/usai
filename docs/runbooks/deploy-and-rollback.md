@@ -103,7 +103,7 @@ Linux, no configuration needed):
 ```ini
 # usai-app@.service, replica %i on 127.0.0.%i
 Environment=USAI_STATUS_ADDR=127.0.0.%i:9090
-ExecStart=/srv/app/current/usai run --artifact /srv/app/current --addr 127.0.0.%i:3001
+ExecStart=/usr/local/bin/usai run --artifact /srv/app/current --host 127.0.0.%i --port 3001
 ```
 
 The same shape works for any proxy whose health check is per-upstream

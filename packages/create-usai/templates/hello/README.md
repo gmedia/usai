@@ -25,6 +25,13 @@ docker build -t my-app . && docker run --rm -p 3000:3000 my-app
 - `test/hello.test.ts` — a test through the real runtime (`pnpm test` finds `src|test|tests/**/*.test.ts`); replace it with your own once `/hello/:name` is gone, or it fails.
 - `src/app.ts` — the application root. Add workloads and resources here or compose modules.
 - `usai.config.ts` — project structure only (entry, migrations, seeders).
+- `migrations/0001_notes.sql` — the first migration, and the thing to run
+  `pnpm usai db migrate` against. It applies once the database is switched
+  on: uncomment the `postgres()` block in `src/app.ts`, the postgres
+  service in `compose.yaml`, and set `DATABASE_URL` in `.env`. Migrations
+  are built into the artifact, so production runs the same command against
+  the artifact (`usai db migrate --artifact /app/.usai/build`) — nothing
+  copies SQL files to a server.
 - `compose.yaml` / `Dockerfile` — the Docker paths above; delete them if you do not use Docker.
 - `pnpm-workspace.yaml` — allows esbuild's build script (pnpm blocks dependency scripts by default); npm/yarn users can delete it.
 - The `usai` binary: `pnpm usai …` runs it through the SDK (cache `~/.cache/usai/<version>`); or install it from https://github.com/gmedia/usai/releases (or `cargo build --release -p usai-cli` from the repository) and call `usai` directly.
