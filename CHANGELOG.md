@@ -10,6 +10,35 @@ the human summary.
 
 ## 0.0.8 — Unreleased
 
+Three usability rounds on 0.0.7 — a developer joining an existing codebase, an
+Express developer bringing their folder layout and their query builder, and one
+given **no documentation at all**, allowed to learn only from the CLI and its
+error messages — plus the first report from an external developer. Everything
+below was reproduced here before it was changed.
+
+### Security-adjacent
+
+- **A typo in a route's options no longer ships.** Where the options parameter
+  is the inferred type itself (HTTP routes and streams, so `ctx` and the
+  response type can be read off it), TypeScript's excess-property check never
+  fired: `Auth: session` for `auth: session` compiled, built, and served the
+  route **with no authentication at all**, and `respones:` silently dropped a
+  response contract. Unknown keys are a compile error now. Every other
+  declaration surface was already checked — verified one by one.
+- **`z.url()`, and any format Zod emits without a pattern, is enforced.** The
+  host did not assert JSON Schema formats (the specification's default) and
+  the world's fast path saw a node whose `checks` list is empty, because for a
+  format the format *is* the node. `POST {"url":"not-a-url"}` was accepted
+  while the OpenAPI document told consumers the field was a URI. Both halves
+  check it now: the host before a world, the library's own check inside it.
+- **Raw transaction control on a pooled handle is refused.** Every statement of
+  `query/one/execute` leases its own connection, so `begin` opened a
+  transaction on a connection the following statements did not hold — and it
+  went back to the pool `idle in transaction` while the "transactional" insert
+  committed elsewhere, with no warning. `begin/commit/rollback/savepoint/
+  release/set/reset/discard/listen/deallocate` now answer `transaction_control`
+  and name `transaction(async (tx) => …)`, which accepts all of them.
+
 ### Runtime
 
 - **A request that passed its deadline answers `504`, not `500`.** The world
@@ -21,14 +50,76 @@ the human summary.
   taken at the operation future's first poll, which on a starved runtime can
   be much later than the `setTimeout` call — two timers started in the same
   turn could then fire out of order.
+- **Activation pays the first world's costs, not the first request.** A first
+  request cost 16–21 ms against ~4 ms for the ones after it: the revision's
+  routing table was compiled on the request path, and so was the engine's
+  first instantiation of the image. Both happen at activation now, before
+  readiness turns true (a first request is 7–11 ms, the rest is the guest's
+  own first entry into your code).
+- **`performance.now()` is a real monotonic clock.** The WASI clock shim
+  ignored the clock id, so it answered with the wall clock: it reported the
+  time since the *snapshot* was taken and stepped whenever the host's clock
+  was corrected. It measures from the world's own start now.
+- **A hand-off nobody declared is logged.** `ctx.tasks.dispatch(task, …)` from
+  a workload with no `dispatches(...)` declaration still happens — the
+  declaration is description, not permission — but it now writes one WARN per
+  pair with the fix, because `usai graph`, `usai inspect` and the reference
+  read the definition and cannot show an edge that is not there. `usai graph`
+  says what it draws from.
+- **An application with no workloads says so** at build and at activation,
+  instead of building, activating and answering 404 to everything.
+
+### SDK
+
+- **SQL parameters are `readonly SqlParam[]`**: nothing mutates them, and every
+  query builder used as a compiler returns a `readonly unknown[]`, which needed
+  a cast at each call site.
+- **The Node reflexes are declared so the compiler can answer them.**
+  `performance` was missing (correct code did not compile) and `process`,
+  `require`, `Buffer` and `__dirname` were not declared at all, so TypeScript
+  recommended installing `@types/node` — after which `process.env.X` compiles
+  and is `undefined` at runtime. Their types are now named after the answer
+  (`ThereIsNoProcessInAWorld_UseCtxEnv`).
+- The published package ships **declaration maps**, so "go to definition"
+  lands on the implementation rather than stopping at the `.d.ts`.
 
 ### CLI
 
+- **A taken port is reported before the build**, not after it: `run` and `dev`
+  bind the listener first (70 ms instead of 14 s).
+- **A bundle failure explains itself.** Above esbuild's list: a package that
+  reaches for a Node built-in when it is loaded cannot be part of an
+  application (naming the packages), the runtime never scans your files, and
+  top-level `await` is not available in an application module.
+- **`usai dev`'s banner teaches the three rules** an Express instinct breaks
+  first — a world per unit of work starting from a snapshot of module scope, a
+  connection leased per statement, and `dispatch` for work that outlives the
+  response. Two of the three are silent when violated.
 - **The npm launcher explains a binary that will not start.** It verifies the
   binary it just fetched, does not leave one in the cache that cannot run, and
   turns the dynamic loader's `version 'GLIBC_2.x' not found` into the floor,
   the distributions that meet it and the two ways out (the Docker image, or
   `USAI_BIN` pointing at a binary built locally).
+
+### Documentation and examples
+
+- GUIDE §3 states the rule nobody could find — **a workload exists because
+  `defineApp` can reach it through an `import`; the runtime never scans your
+  files** — and shows both an Express-style file layout and the
+  routes/service/queries layering, with the one rule the runtime adds: a
+  repository takes its `SqlExecutor` as an argument, so the same function works
+  on the handle and inside a transaction.
+- GUIDE §7 gains **"Query builders, and what you can npm-install"**: the rule
+  that decides every package (a library that only computes is fine; one that
+  imports a Node built-in at load time is not), kysely's `DummyDriver` and
+  drizzle's `QueryBuilder` used as compilers — both served real rows through
+  `ctx.resources.db` — and `knex`, which cannot be bundled in any form.
+- Three statements in the GUIDE were **false** and are corrected: an auth
+  resolver's `ctx.resources` is typed, so is an `httpClient` handle (§11 showed
+  a cast it does not need), and `--conditions=usai` does not "do nothing" for
+  an installed package — it breaks it.
+- The examples no longer teach `as PostgresHandle` or `params as never`, and
+  their `test` script runs `usai test`, which works outside this repository.
 
 ## 0.0.7 — 2026-09-23
 
