@@ -1277,7 +1277,10 @@ async fn queue_schema_survives_concurrent_preparation() {
 /// dropped route or an evicted firewall state looks like from inside the
 /// process. A closed socket proves nothing — that path always worked.
 ///
-/// Returns the URL to give the application and the switch that cuts it.
+/// Returns the relay's `host:port` and the switch that cuts it. The caller
+/// points a URL at it with [`through`] — which database the URL names is the
+/// caller's business, and getting that wrong once sent a fixture's migrations
+/// into the shared CI database and broke two example suites.
 async fn cuttable_relay(url: &str) -> Option<(String, Arc<std::sync::atomic::AtomicBool>)> {
     let upstream: tokio_postgres::Config = url.parse().expect("a valid URL");
     let host = match upstream.get_hosts().first()? {
@@ -1338,15 +1341,23 @@ async fn cuttable_relay(url: &str) -> Option<(String, Arc<std::sync::atomic::Ato
         }
     });
 
-    let mut relayed = format!(
-        "postgres://{}:{}@127.0.0.1:{relay_port}/{}",
-        upstream.get_user().unwrap_or("postgres"),
-        String::from_utf8_lossy(upstream.get_password().unwrap_or_default()),
-        upstream.get_dbname().unwrap_or("postgres"),
-    );
+    Some((format!("127.0.0.1:{relay_port}"), cut))
+}
+
+/// The same connection URL, reached through `endpoint` instead of its own
+/// host and port. Everything else — user, password, database, parameters —
+/// is left alone, because the database a test migrates must stay the
+/// throwaway one it was given.
+fn through(url: &str, endpoint: &str) -> String {
+    let (scheme, rest) = url.split_once("://").expect("a postgres URL");
+    let (credentials, tail) = match rest.split_once('@') {
+        Some((c, t)) => (format!("{c}@"), t),
+        None => (String::new(), rest),
+    };
+    let path = tail.find(['/', '?']).map(|i| &tail[i..]).unwrap_or("");
     // A probe must be able to give up faster than the test waits for it.
-    relayed.push_str("?connect_timeout=2");
-    Some((relayed, cut))
+    let separator = if path.contains('?') { "&" } else { "?" };
+    format!("{scheme}://{credentials}{endpoint}{path}{separator}connect_timeout=2")
 }
 
 /// A database that stops answering makes the resource unready within the
@@ -1364,9 +1375,10 @@ async fn a_database_that_stops_answering_makes_the_resource_unready() {
         eprintln!("skipping: no database");
         return;
     };
-    let Some((relay_url, cut)) = cuttable_relay(&url).await else {
+    let Some((relay, cut)) = cuttable_relay(&url).await else {
         return;
     };
+    let relay_url = through(&url, &relay);
     let spec = usai_runtime::definition::ResourceSpec {
         name: "main".into(),
         kind: "postgres".into(),
@@ -1430,10 +1442,13 @@ async fn readiness_follows_the_database_unless_the_deployment_says_otherwise() {
         eprintln!("skipping: no database");
         return;
     };
-    let Some((relay_url, cut)) = cuttable_relay(&url).await else {
+    let Some((relay, cut)) = cuttable_relay(&url).await else {
         return;
     };
-    let Some(f) = fixture_reaching(false, move |_| relay_url.clone()).await else {
+    // Through the relay, but into the throwaway database the fixture just
+    // created — not the server's default one, which in CI is shared with the
+    // example suites.
+    let Some(f) = fixture_reaching(false, move |fresh| through(fresh, &relay)).await else {
         return;
     };
     let ready = |requires: bool| {
