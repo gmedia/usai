@@ -14,7 +14,10 @@ ARG DB_URL
 RUN apk add --no-cache postgresql-dev git unzip && docker-php-ext-install pdo_pgsql opcache
 COPY --from=composer /usr/bin/composer /usr/bin/composer
 WORKDIR /var/www
-RUN composer create-project laravel/laravel:"$LARAVEL_VERSION" . --no-interaction --prefer-dist --no-dev --no-scripts --no-progress \
+# The base image ships `/var/www/html`, and `create-project .` refuses a
+# directory that is not empty.
+RUN rm -rf /var/www/html \
+ && composer create-project laravel/laravel:"$LARAVEL_VERSION" . --no-interaction --prefer-dist --no-dev --no-scripts --no-progress \
  && rm -rf routes/web.php database/migrations/* \
  && printf '%s\n' '<?php' 'Route::get("/", fn () => response()->json(["ok" => true]));' > routes/web.php
 COPY bootstrap/app.php bootstrap/app.php

@@ -172,6 +172,11 @@ cell() {
 
 conformant() {
   local name="$1"; local port; port=$(port_of "$name")
+  # The probe pays an order and expects a 200: it must start from the same
+  # seeded state every cell starts from, or the server measured after
+  # someone else's class-E cells is refused for a 409 that is the previous
+  # server's payment (2026-09-23: `php` was dropped from a sweep for this).
+  reset_writes
   if (cd "$here" && node "$here/conformance.mjs" "http://127.0.0.1:$port") > "$OUT/$name.conformance.txt" 2>&1; then return 0; fi
   log "$name deviates from the contract (see $OUT/$name.conformance.txt): not measured"; grep '✗' "$OUT/$name.conformance.txt"; return 1
 }
