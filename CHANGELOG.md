@@ -38,6 +38,12 @@ the human summary.
   could record anything: `usai_resource{metric="ready"}` stayed at 1 and the
   documented database-down alert waited for the next real query, which on a
   quiet service is minutes. The bound is inside the resource now.
+- **A database that accepts the connection and then says nothing no longer
+  hangs activation forever.** `connect_timeout` covers establishing the TCP
+  connection and nothing after it, so a half-open firewall or a proxy in
+  front of a dead backend left `usai run` waiting at startup with no
+  diagnostic at all. The handshake is bounded now (twice the connect
+  timeout), and the refusal says which of the two happened.
 - **`USAI_READY_REQUIRES_RESOURCES`.** Readiness fails when a bound resource
   fails its probe, and a proxy removes an unready upstream — so a shared
   PostgreSQL outage takes out every route on every replica, including the
