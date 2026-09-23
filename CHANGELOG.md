@@ -61,6 +61,8 @@ runtime, same SDK, same contracts as 0.0.6.
 
 ## 0.0.6 — 2026-09-23
 
+**Withdrawn on Linux — use 0.0.7.** Its binaries and images require `GLIBC_2.39`; the 0.0.7 entry above says why and what it changes. Everything below shipped in 0.0.7 unchanged.
+
 Since 0.0.5 (2026-09-18). Alpha, production qualification in progress: the
 24 h soak, the failure campaigns, the connection campaign and the
 two-replica campaign and the 72 h soak all passed (73.6 M requests, 0 × 5xx,
