@@ -74,6 +74,13 @@ mem_limit / MemoryMax  ≥  40 + peak_concurrency × (4…8) + 30   (MiB)
 48 worlds → ≥ 262 MiB; the compose file uses 512 MiB; 192 MiB is the supported floor measured with 48 worlds and a 16-client burst (**under re-measurement**, 2026-09-23: the floor cells were not charged for the runtime's own text, so the published number can only be too small — `docs/measurements/2026-09-23-floor-accounting.md`)
 ```
 
+The runtime checks this arithmetic against its own cgroup at start and warns
+when the limit is below it (`the memory limit is below what this
+--max-worlds can need at full concurrency`, with both numbers). It is a
+warning, not a refusal: an instance that never reaches full concurrency is
+fine, and a deliberately small box — a floor measurement, a sidecar — is a
+choice. Lower `--max-worlds` to silence it honestly.
+
 **The limit also has to cover the binary the container reads.** A cgroup is
 charged for the page cache the container faults in, and that includes the
 runtime's own text — ~35 MB of `usai` on disk, of which the working set is
