@@ -290,7 +290,20 @@ async fn command_runs_in_a_fresh_finite_world() {
 async fn service_state_persists_for_the_service_lifetime_and_stops_gracefully() {
     let Some(rt) = runtime().await else { return };
     let rev = rt.active().unwrap();
-    tokio::time::sleep(Duration::from_millis(450)).await;
+    // The loop iterates every 100 ms, so 3 iterations take 300 ms of wall
+    // clock on an idle machine and considerably more on a busy one (this
+    // suite runs beside the rest of `make check`): wait for the count the
+    // assertion needs rather than for a fixed sleep that a loaded runner
+    // turns into a flake.
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let mut iterations = 0;
+    while std::time::Instant::now() < deadline {
+        iterations = audit(&rt, "service:iterations").await.as_u64().unwrap_or(0);
+        if iterations >= 3 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     let services = rev.services();
     let ledger = services
         .iter()
@@ -300,7 +313,6 @@ async fn service_state_persists_for_the_service_lifetime_and_stops_gracefully() 
         ledger.state,
         usai_runtime::workloads::services::ServiceState::Running
     );
-    let iterations = audit(&rt, "service:iterations").await.as_u64().unwrap_or(0);
     assert!(
         iterations >= 3,
         "service loop should have iterated, got {iterations}"

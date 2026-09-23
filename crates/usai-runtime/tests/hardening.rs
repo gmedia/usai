@@ -409,13 +409,14 @@ async fn budget_exhaustion_refuses_promptly_and_recovers() {
     for _ in 0..2 {
         let client = client.clone();
         slow.push(tokio::spawn(async move {
-            client
+            let r = client
                 .get(format!("http://{addr}/slow"))
                 .send()
                 .await
-                .unwrap()
-                .status()
-                .as_u16()
+                .unwrap();
+            // The body travels with the status: when this is not the 504 the
+            // deadline owes us, the envelope says which termination it was.
+            (r.status().as_u16(), r.text().await.unwrap_or_default())
         }));
     }
     // Under a loaded machine the slow requests may take a moment to be
@@ -442,7 +443,11 @@ async fn budget_exhaustion_refuses_promptly_and_recovers() {
     let body: Value = r.json().await.unwrap();
     assert_eq!(body["error"]["code"], "capacity_exhausted");
     for s in slow {
-        assert_eq!(s.await.unwrap(), 504);
+        let (status, body) = s.await.unwrap();
+        assert_eq!(
+            status, 504,
+            "a handler past its deadline answers 504: {body}"
+        );
     }
     tokio::time::sleep(Duration::from_millis(100)).await;
     let r = client

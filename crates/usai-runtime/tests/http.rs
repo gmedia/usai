@@ -1814,8 +1814,15 @@ async fn a_multi_megabyte_body_decodes_within_the_cpu_slice() {
     assert_eq!(body["bytes"], text.len());
     assert_eq!(body["chars"], text.chars().count());
     assert_eq!(body["roundtrip"], 1_000_000);
+    // The guard against the regression this test exists for is the 200
+    // above: a decode that exceeds the world's synchronous CPU slice faults
+    // the world and answers 5xx. The wall clock is a debug build sharing a
+    // machine with the rest of `make check`, so it only has to show the
+    // request did not hang — a tighter bound here measures the load on the
+    // runner, not the runtime (`bench`/`profile_bundles` measure that, in
+    // release).
     assert!(
-        started.elapsed() < std::time::Duration::from_secs(4),
+        started.elapsed() < std::time::Duration::from_secs(15),
         "{:?}",
         started.elapsed()
     );
