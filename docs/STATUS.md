@@ -17,8 +17,11 @@ Production substrate        Wasm image + pooling/COW (ADR-0016); attributed and 
 Developer preview           v0.0.5 (2026-09-18) — one tag publishes binaries (linux x86_64/aarch64, macOS arm64), npm
                             (@sakaladev/usai, @sakaladev/create-usai) and Docker images (runtime + dev, amd64 + arm64);
                             main since then: P7 fixes, the documentation split, typed ctx.resources, replica flags (0.0.6 candidate)
-Efficiency envelope         MEASURED (P8E, 2026-09-20): supported floor 192 MiB / 1 vCPU; 48 MiB / 0.25 vCPU runs hello;
-                            ≈30 MiB PSS and 0.00 % CPU per idle application at N=50 (Node + Fastify: ≈36 MiB, 0.12 %)
+Efficiency envelope         DENSITY MEASURED, FLOORS UNDER RE-MEASUREMENT (2026-09-23): the boxed floor cells bind-mounted
+                            the binary, so the container was never charged for the runtime's own text — every floor
+                            number (ours and the comparators') is void until the corrected run lands
+                            (docs/measurements/2026-09-23-floor-accounting.md). Density is unaffected: ≈30 MiB PSS and
+                            0.00 % CPU per idle application at N=50 (Node + Fastify: ≈36 MiB, 0.12 %)
 Production ready            NOT YET — alpha, production qualification in progress: 24 h soak clean (35.0 M requests, 0 runtime
                             errors), connection campaign passed, 72 h soak PASSED (73.6 M requests, 0 × 5xx, 0 quarantined, flat RSS); see below
 ```

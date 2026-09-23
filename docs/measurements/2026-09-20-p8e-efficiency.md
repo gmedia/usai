@@ -1,5 +1,19 @@
 # P8E — the efficiency envelope: floors, residency, density (2026-09-19/20)
 
+> **Correction, 2026-09-23 — both floors in this report are under
+> re-measurement and should not be quoted until it lands.** Every boxed cell
+> here bind-mounted the `usai` binary and the artifact into the container.
+> Page cache is charged to the cgroup that *first* faults a page in, and the
+> host had already run the same binary, so the box was not billed for the
+> runtime's text: the cell passed partly on memory somebody else paid for.
+> The same method was used for the comparator on 2026-09-23 and produced an
+> impossibility — 88 MiB of resident memory in a 48 MiB box, no OOM kill —
+> which is what exposed it (`docs/measurements/2026-09-23-floor-accounting.md`).
+> The harness now bakes the binary and the application into an image, the way
+> a deployment does, and records what the kernel charged the box. **Density
+> (§5) and the residency finding (§4) are unaffected**: they are bare
+> processes on the host, not boxed cells.
+
 P8 (`2026-09-19-p8-parity.md`) answered what one request costs. This
 campaign answers the other axis, which nobody had measured: what an
 application costs when it does mostly nothing, how small a host runs it
