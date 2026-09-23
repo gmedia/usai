@@ -80,7 +80,14 @@ application listener, and never publish the control port.
 2. Do not pass `--status` on public listeners; scrape metrics from a private interface.
 3. Set `DATABASE_URL` and other declared env in the deployment environment; activation fails loudly if they are missing or malformed.
 4. Size `RuntimeConfig.max_worlds` and pool sizes to the host; watch `usai_world_budget`, `usai_worlds_live` and `usai_resource_quarantines_total`.
-5. Run `usai db migrate` as a deploy step, never at startup.
+5. Run `usai db migrate` as a deploy step, not from inside the serving
+   process. Which *shape* that takes is the orchestrator's: a compose
+   `run --rm migrate`, a Kubernetes `Job` ordered before the rollout, or —
+   because several migrators serialize on an advisory lock and apply each
+   file exactly once (`SUPPORTED.md`, measured with three concurrent jobs) —
+   an initContainer on every replica. The initContainer is safe and is the
+   only shape that needs no ordering machinery; what is *not* safe is an
+   application that migrates itself on its first request.
 6. Treat lifecycle `detached_work` warnings as application bugs.
 
 ## Open
