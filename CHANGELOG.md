@@ -119,6 +119,32 @@ the human summary.
 
 ## 0.0.9 — 2026-09-23
 
+> **Known issues in 0.0.9, found by an operator upgrading a real service
+> from 0.0.8 and fixed in 0.0.10** (none is a data hazard; all are
+> observability or noise):
+>
+> - The start-up memory check warns at the **192 MiB / `--max-worlds` 48
+>   envelope `SUPPORTED.md` recommends**. It is a false positive — the shape
+>   measures a 106 MiB peak with no reclaim — but if you page on `WARN` it
+>   will page on every start. Re-scope that alert or raise the limit above
+>   262 MiB until 0.0.10.
+> - **The JSON log line's keys are alphabetical**, so it no longer begins
+>   with `timestamp`; any shipper stage anchored on a line prefix needs
+>   updating. Timestamps also lost microsecond precision, so two lines in the
+>   same millisecond are no longer orderable.
+> - **`usai queue prune` with no arguments deletes** `done` rows older than
+>   seven days immediately. Pass `--dry-run` first; 0.0.10 makes counting the
+>   default.
+> - `/_usai/status` reports the cgroup fields as `0` when there is no memory
+>   limit (the metrics endpoint correctly omits them), `resource opened` is
+>   logged just before a failed activation says it could not start, and the
+>   status listener's 404 still names `/_usai/openapi.json` after
+>   `USAI_SURFACES_OFF=docs` removed it.
+> - Not new in 0.0.9, but found the same day: a schedule could fire **twice
+>   for the same period** (measured on `*/1 * * * *`) unless it was declared
+>   `exclusive: true`. Fixed in 0.0.10.
+
+
 A platform engineer deployed 0.0.8 from the published artifacts for the first
 time — release binary, systemd, a proxy, two replicas, a signed artifact, a
 token-gated status listener — and would run it in production. Both of the

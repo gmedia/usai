@@ -75,7 +75,10 @@ mem_limit / MemoryMax  ≥  40 + peak_concurrency × (4…8) + 30   (MiB)
 ```
 
 The runtime checks its own cgroup at start, but against a **floor**, not
-against this arithmetic: `40 + 30 + max_worlds × 1` MiB, the point below
+against this arithmetic *(since 0.0.10; **0.0.9 checks the full arithmetic
+instead** and therefore warns at the 192 MiB envelope this page and
+`SUPPORTED.md` recommend — if you run 0.0.9, that warning is a known false
+positive, not a sizing problem)*: `40 + 30 + max_worlds × 1` MiB, the point below
 which the box cannot hold the runtime, one held revision and the *unique*
 memory of its slots at all (48 worlds → 118 MiB). Below that it warns —
 `the memory limit is below the floor for this --max-worlds`, with both
