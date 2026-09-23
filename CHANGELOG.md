@@ -66,6 +66,12 @@ below was reproduced here before it was changed.
   pair with the fix, because `usai graph`, `usai inspect` and the reference
   read the definition and cannot show an edge that is not there. `usai graph`
   says what it draws from.
+- **A signal that arrives with the first request drains.** The SIGINT/SIGTERM
+  handlers were installed when the shutdown `select!` was first polled —
+  after the listener was already answering — so a signal in that window took
+  the process's default action and killed it without draining. They are
+  installed before anything is served now. An orchestrator that starts a
+  container and changes its mind lands exactly in that window.
 - **An application with no workloads says so** at build and at activation,
   instead of building, activating and answering 404 to everything.
 

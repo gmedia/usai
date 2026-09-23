@@ -398,6 +398,17 @@ async fn serve_until_signal(
     on_ready: Option<Box<dyn FnOnce(String) + Send>>,
     drain_grace: Duration,
 ) -> Result<()> {
+    // Before anything can be served. `tokio::signal::unix::signal` installs
+    // the handler when it is created; `ctrl_c()` installs it on first poll,
+    // which used to be *after* the listener was already answering — a
+    // SIGINT or SIGTERM in that window took the process's default action and
+    // killed it without a drain. An orchestrator that starts a container and
+    // changes its mind (a failed deploy, a fast rollback) lands exactly
+    // there, and a loaded box widens the window.
+    let mut interrupt = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+        .context("cannot listen for SIGINT")?;
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .context("cannot listen for SIGTERM")?;
     let addr: std::net::SocketAddr = match &listener {
         // The port was taken before the application was loaded; `--port 0`
         // means the bound one is the only true address.
@@ -540,8 +551,6 @@ async fn serve_until_signal(
     // started this process (`pnpm usai`, an IDE task) names itself in
     // USAI_PARENT_PID: when it is gone, so is the reason to keep serving —
     // otherwise a killed wrapper leaves a server holding the port.
-    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-        .context("cannot listen for SIGTERM")?;
     let parent_gone = async {
         match std::env::var("USAI_PARENT_PID")
             .ok()
@@ -558,7 +567,7 @@ async fn serve_until_signal(
         }
     };
     tokio::select! {
-        _ = tokio::signal::ctrl_c() => {}
+        _ = interrupt.recv() => {}
         _ = terminate.recv() => { if !quiet { tracing::info!("SIGTERM received"); } }
         _ = parent_gone => { tracing::info!("the process that started usai is gone; shutting down"); }
         _ = async { match &stop_requested { Some(t) => t.cancelled().await, None => std::future::pending().await } } => {
@@ -581,7 +590,7 @@ async fn serve_until_signal(
         }
         tokio::select! {
             _ = tokio::time::sleep(drain_grace) => {}
-            _ = async { tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = terminate.recv() => {} } } => {
+            _ = async { tokio::select! { _ = interrupt.recv() => {}, _ = terminate.recv() => {} } } => {
                 if !quiet { tracing::info!("second signal: closing the listener now"); }
             }
         }
@@ -600,7 +609,7 @@ async fn serve_until_signal(
     };
     tokio::select! {
         _ = drain => { if !quiet { tracing::info!("drained; ownership returned to baseline"); } }
-        _ = async { tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = terminate.recv() => {} } } => {
+        _ = async { tokio::select! { _ = interrupt.recv() => {}, _ = terminate.recv() => {} } } => {
             let g = runtime.ledger().gauges.snapshot();
             tracing::warn!(live_worlds = g.live_worlds, live_ops = g.live_ops, "forced shutdown");
             std::process::exit(130);

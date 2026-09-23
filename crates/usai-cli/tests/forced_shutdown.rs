@@ -98,3 +98,75 @@ fn second_interrupt_forces_exit_and_reports_live_work() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+const PLAIN_APP: &str = r#"
+import { defineApp, http } from "@sakaladev/usai";
+export const hello = http.get("/hello/:name", {}, async (ctx) => ({ hello: ctx.params.name }));
+export default defineApp({ name: "plain", workloads: [hello] });
+"#;
+
+/// The signal handlers are installed before the listener answers anything, so
+/// a signal that arrives with the very first request still drains. They used
+/// to be installed when the shutdown `select!` was first polled — after the
+/// banner, after the first request could be served — and a SIGTERM landing in
+/// that window took the process's default action and killed it. An
+/// orchestrator that changes its mind about a deploy lands exactly there.
+#[test]
+fn a_signal_arriving_with_the_first_request_still_drains() {
+    if !support::node_available() {
+        return;
+    }
+    let Some(dir) = support::project("early-signal", PLAIN_APP) else {
+        eprintln!("skipping: run pnpm install first");
+        return;
+    };
+    let port = support::free_port();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_usai"))
+        .args([
+            "--root",
+            dir.to_str().unwrap(),
+            "run",
+            "--port",
+            &port.to_string(),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let log = support::capture(child.stderr.take().unwrap());
+    let deadline = Instant::now() + Duration::from_secs(120);
+    while support::get(port, "/hello/x").map(|(s, _)| s) != Some(200) {
+        assert!(
+            Instant::now() < deadline,
+            "server did not come up:\n{}",
+            log.lock().unwrap()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // No pause: the first response and the signal are as close together as
+    // the test can make them.
+    unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
+    assert!(
+        support::wait_for_log(&log, "draining in-flight work", Duration::from_secs(20)),
+        "the signal was not handled as a drain:\n{}",
+        log.lock().unwrap()
+    );
+    let t = Instant::now();
+    let status = loop {
+        if let Some(s) = child.try_wait().unwrap() {
+            break s;
+        }
+        assert!(
+            t.elapsed() < Duration::from_secs(30),
+            "it did not exit:\n{}",
+            log.lock().unwrap()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "a drained exit is 0:\n{}",
+        log.lock().unwrap()
+    );
+}
