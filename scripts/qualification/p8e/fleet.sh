@@ -43,10 +43,25 @@ prepare() {
     (cd "$repo/scripts/qualification/bench" && npm install --no-audit --no-fund >/dev/null)
   fi
   log "database"
+  # The campaign's database is the campaign's to create: assuming it exists
+  # made a fresh PostgreSQL container fail every cell with "not ready", and
+  # the reason was four directories deep in a server log.
   (cd "$repo/scripts/qualification/bench" && "$NODE" -e '
     const { Client } = require("pg");
-    const c = new Client({ connectionString: process.env.DATABASE_URL });
-    c.connect().then(() => c.query("drop schema public cascade; create schema public;")).then(() => c.end());
+    const url = new URL(process.env.DATABASE_URL);
+    const name = decodeURIComponent(url.pathname.slice(1));
+    const admin = new URL(url); admin.pathname = "/postgres";
+    (async () => {
+      const a = new Client({ connectionString: admin.href });
+      await a.connect();
+      const { rows } = await a.query("select 1 from pg_database where datname = $1", [name]);
+      if (rows.length === 0) { await a.query(`create database "${name}"`); console.log("created database " + name); }
+      await a.end();
+      const c = new Client({ connectionString: process.env.DATABASE_URL });
+      await c.connect();
+      await c.query("drop schema public cascade; create schema public;");
+      await c.end();
+    })().catch((e) => { console.error(e.message); process.exit(1); });
   ')
   "$USAI" --root "$TEMPLATE" db migrate >/dev/null
   if docker info >/dev/null 2>&1; then log "base image $BASE_IMAGE"; docker pull -q "$BASE_IMAGE" >/dev/null; fi
