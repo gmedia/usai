@@ -247,6 +247,18 @@ spec:
   metrics:
     - type: Pods
       pods:
+        # A *derived* series: the runtime exposes `usai_world_budget{kind}`
+        # with `in_use` and `max` [doc: runbooks/metrics.md], and the adapter
+        # turns the ratio into a per-pod metric. With prometheus-adapter:
+        #
+        #   rules:
+        #   - seriesQuery: 'usai_world_budget{kind="in_use"}'
+        #     resources: { overrides: { namespace: {resource: namespace},
+        #                               pod: {resource: pod} } }
+        #     name: { as: "usai_world_budget_in_use_ratio" }
+        #     metricsQuery: |
+        #       usai_world_budget{kind="in_use",<<.LabelMatchers>>}
+        #         / on(pod) usai_world_budget{kind="max",<<.LabelMatchers>>}
         metric: { name: usai_world_budget_in_use_ratio }
         target: { type: AverageValue, averageValue: "600m" }   # 60 % of the budget
     - type: Resource
