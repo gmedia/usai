@@ -38,6 +38,10 @@ prepare() {
   log "artifacts"
   "$USAI" --root "$TEMPLATE" build --no-typecheck >/dev/null
   "$USAI" --root "$HELLO" build --no-typecheck >/dev/null
+  log "node deps"
+  if [ ! -d "$repo/scripts/qualification/bench/node_modules/fastify" ]; then
+    (cd "$repo/scripts/qualification/bench" && npm install --no-audit --no-fund >/dev/null)
+  fi
   log "database"
   (cd "$repo/scripts/qualification/bench" && "$NODE" -e '
     const { Client } = require("pg");
@@ -53,6 +57,15 @@ prepare() {
 # The binary and the artifact are bind-mounted into a plain distro container:
 # --memory with --memory-swap equal makes a breach a real OOM kill, --cpus a
 # real CPU ceiling. The status listener stays reachable on the host network.
+# A cell that cannot even start is a verdict, not a crash: `set -e` used to
+# abandon the whole `floor` run at the first failed `docker run`, leaving a
+# directory with nothing but an empty container.id and no reason anywhere.
+cell_failed() { # dir cell reason
+  local reason; reason=$(printf '%s' "$3" | tr -d '\\"' | tr '\n' ' ')
+  log "  $reason"
+  echo "{\"cell\":\"$2\",\"pass\":false,\"reason\":\"$reason\"}" > "$1/result.json"
+}
+
 floor() {
   local app="$1" mem="$2" cpus="$3" worlds="$4"
   local root port status
@@ -78,18 +91,37 @@ floor() {
         -e HOME=/tmp -e USAI_COMPILE_CACHE=0 -e DATABASE_URL="$DATABASE_URL" -e USAI_MAX_WORLDS="$worlds" \
         ${USAI_WASM_KEEP_RESIDENT:+-e USAI_WASM_KEEP_RESIDENT="$USAI_WASM_KEEP_RESIDENT"} \
         "$BASE_IMAGE" /usai run --artifact /app/.usai/build --port "$port" --status-addr "127.0.0.1:$status" --drain-timeout 5 \
-        > "$dir/container.id";;
+        > "$dir/container.id" 2> "$dir/docker.err" \
+        || { cell_failed "$dir" "$cell" "docker run failed: $(head -c 300 "$dir/docker.err")"; return 0; };;
     node)
       # The host's Node (bind-mounted with the bench's node_modules) in the same
-      # box: Fastify + pg pool 4, the template's routes.
-      local node_dir; node_dir="$(cd "$(dirname "$(command -v "$NODE")")/.." && pwd)"
+      # box: Fastify + pg pool 4, the template's routes. All three things this
+      # needs are checked here, because each one failed silently before: a
+      # non-interactive shell has no nvm on PATH, so `command -v node` came back
+      # empty and /node was mounted from a directory that has no bin/node.
+      local node_bin node_dir
+      node_bin="$(command -v "$NODE" 2>/dev/null || true)"
+      if [ -z "$node_bin" ]; then
+        cell_failed "$dir" "$cell" "NODE=$NODE is not on PATH (a non-interactive shell has no nvm) - set NODE to an absolute path"
+        return 0
+      fi
+      node_dir="$(cd "$(dirname "$node_bin")/.." && pwd)"
+      if [ ! -x "$node_dir/bin/node" ]; then
+        cell_failed "$dir" "$cell" "$node_bin is not <prefix>/bin/node, so /node/bin/node would not exist in the box"
+        return 0
+      fi
+      if [ ! -d "$repo/scripts/qualification/bench/node_modules/fastify" ]; then
+        cell_failed "$dir" "$cell" "the bench's node dependencies are missing - run fleet.sh prepare"
+        return 0
+      fi
       ready_url="http://127.0.0.1:$port/health"; label="node+"
       docker run -d --name "$name" --network host --user "$(id -u):$(id -g)" \
         --cpus "$cpus" --memory "${mem}m" --memory-swap "${mem}m" ${PIN:+--cpuset-cpus "$PIN"} \
         -v "$node_dir:/node:ro" -v "$repo/scripts/qualification/bench:/bench:ro" -w /bench --read-only --tmpfs /tmp \
         -e HOME=/tmp -e DATABASE_URL="$DATABASE_URL" -e PORT="$port" -e POOL_MAX=4 \
         "$BASE_IMAGE" /node/bin/node baselines/node-fastify/server.mjs \
-        > "$dir/container.id";;
+        > "$dir/container.id" 2> "$dir/docker.err" \
+        || { cell_failed "$dir" "$cell" "docker run failed: $(head -c 300 "$dir/docker.err")"; return 0; };;
     php)
       # The tuned PHP-FPM compose (opcache + JIT, pm=static <worlds> children)
       # with the cell's memory and cpu limits on the php service; nginx unlimited.
@@ -98,7 +130,12 @@ floor() {
         PHP_MEM_LIMIT="${mem}m" PHP_CPUS="$cpus" PHP_CPUSET="${PIN:-}" DATABASE_URL="${DATABASE_URL//127.0.0.1/host.docker.internal}" \
         docker compose up -d --build > "$dir/compose.log" 2>&1)
       name=$(cd "$repo/scripts/qualification/bench/baselines/php" && docker compose ps -q php)
-      port=3006;;
+      port=3006
+      # The compose file's mem_limit/cpus did not reach the container in the
+      # run that produced the 2026-09-23 floors, so apply them to the container
+      # itself; the limits check below is what proves either way.
+      docker update --memory "${mem}m" --memory-swap "${mem}m" --cpus "$cpus" \
+        ${PIN:+--cpuset-cpus "$PIN"} "$name" >/dev/null 2>&1 || true;;
   esac
   local started; started=$(date +%s.%N)
   local ready=""
@@ -116,6 +153,21 @@ floor() {
     return 0
   fi
   echo "ready_seconds $(echo "$ready - $started" | bc)" > "$dir/timing.txt"
+  # A box that did not take the cell's limits prices the wrong machine, and it
+  # does it silently: ask the daemon what it applied, not what we asked for.
+  # (The php compose path is where this was found — its mem_limit/cpus reached
+  # the file but not the container.)
+  local applied_mem applied_cpu want_mem want_cpu
+  applied_mem=$(docker inspect -f '{{.HostConfig.Memory}}' "$name" 2>/dev/null || echo 0)
+  applied_cpu=$(docker inspect -f '{{.HostConfig.NanoCpus}}' "$name" 2>/dev/null || echo 0)
+  want_mem=$((mem * 1024 * 1024))
+  want_cpu=$(awk -v c="$cpus" 'BEGIN { printf "%.0f", c * 1000000000 }')
+  if [ "$applied_mem" != "$want_mem" ] || [ "$applied_cpu" != "$want_cpu" ]; then
+    docker logs "$name" > "$dir/server.log" 2>&1 || true
+    cell_failed "$dir" "$cell" "the box did not take the cell's limits (memory $applied_mem want $want_mem, nanocpus $applied_cpu want $want_cpu)"
+    floor_teardown "$app" "$name"
+    return 0
+  fi
   local sampled="$label:$pid"
   if [ "$app" = php ]; then
     local nginx; nginx=$(docker inspect -f '{{.State.Pid}}' "$(cd "$repo/scripts/qualification/bench/baselines/php" && docker compose ps -q nginx)" 2>/dev/null || echo 0)
@@ -147,7 +199,7 @@ floor() {
   kill "$sampler" 2>/dev/null || true; wait "$sampler" 2>/dev/null || true
   docker logs "$name" > "$dir/server.log" 2>&1 || true
   floor_teardown "$app" "$name"
-  echo "{\"cell\":\"$cell\",\"app\":\"$app\",\"memMib\":$mem,\"cpus\":$cpus,\"worlds\":$worlds,\"oomKilled\":$oom,\"runningAtEnd\":$running,\"readyAtEnd\":$ready_end}" > "$dir/result.json"
+  echo "{\"cell\":\"$cell\",\"app\":\"$app\",\"memMib\":$mem,\"cpus\":$cpus,\"worlds\":$worlds,\"appliedMemoryBytes\":$applied_mem,\"appliedNanoCpus\":$applied_cpu,\"oomKilled\":$oom,\"runningAtEnd\":$running,\"readyAtEnd\":$ready_end}" > "$dir/result.json"
   log "  done: oom=$oom running=$running ready=$ready_end"
 }
 
