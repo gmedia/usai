@@ -213,11 +213,17 @@ should read before rolling:
 
 - **What a box does at its ceiling, when it is charged for it.** A 48 MiB
   `hello` cell was never OOM-killed, answered every request — and served one
-  per second at a p50 of 4.7 s, with 1.5 million `memory.events.max`: it
+  per second, with 1.4 million `memory.events.max`: it
   spent the cell reclaiming and re-faulting its own text. Its resident set
   was *smaller* than the cells with room to breathe. Under the old
   accounting that cell passed with "≈2 MiB of headroom".
-- **Every floor this project has published is void until it is re-measured.**
+- **The floors, re-measured.** Supported floor **192 MiB / 1 vCPU** stands
+  (the production shape peaks at 106 MiB resident / 93 MiB charged, the same
+  at 128, 192 and 256 MiB boxes, and at 128 MiB the kernel never reclaims
+  once while it serves 1 098 req/s at p50 14 ms); **the technical floor is
+  64 MiB, not the 48 MiB published before**. Every floor this project had
+  published was void until this run.
+- **Why they were void.**
   The boxed cells bind-mounted the binary they were measuring, and page cache
   is charged to the cgroup that first faults it in — the host had already run
   the same binary, so the box was never billed for the runtime's own text.
@@ -228,8 +234,12 @@ should read before rolling:
   about to run** — `posix_fadvise`, no privileges needed — so the box faults
   its own pages, and records what the kernel charged it: peak, ceiling hits,
   OOM kills, and whether the cache was really cold.
-  `docs/measurements/2026-09-23-floor-accounting.md`; `SUPPORTED.md`'s host
-  envelope row says it is under re-measurement.
+  A floor is read from the resident set and the reclaim events, never from
+  the absence of an OOM kill — and it depends on the artifact: the cells use
+  the `dist` binary, because once a box pays for its own page cache the
+  file's layout is part of the result.
+  `docs/measurements/2026-09-23-floor-accounting.md`. The comparator floors
+  are still owed: they need an idle host, and run after the soak.
 - **The threat suite is 39 probes.** Two were added the evening round 16
   found the 401: the production shape (surfaces on their own listener, a
   token set) must answer 404 for every `/_usai/` path on the application
