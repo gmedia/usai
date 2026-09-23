@@ -163,6 +163,32 @@ the human summary.
   through (`postgres_params`). 3.8 M and 2.8 M executions on their first runs, 0 crashes; both are in
   the nightly matrix.
 
+### Compatibility
+
+No artifact, ABI or configuration change: an artifact built by 0.0.8 runs on
+0.0.9 unchanged and `GUEST_ABI` stays 1. Three things a running deployment
+should read before rolling:
+
+- **`/_usai/status` and `/_usai/metrics` answer 404 instead of 401** on a
+  listener that does not serve them (the application listener, when the
+  surfaces are on `--status-addr`). Anything scripted against the 401 —
+  a monitor that treated it as "the surface is there, I just need the token"
+  — sees a 404 now. On the listener that *does* serve them the 401 is
+  unchanged.
+- **Check your multi-replica proxy configuration.** If a Caddy
+  `reverse_proxy` with several upstreams carries `health_port`, it is
+  health-checking *every* replica on one replica's status port, and losing
+  that replica takes the others out of rotation with it. This is not a
+  change in 0.0.9 — it is a latent misconfiguration the runbook used to
+  invite. `docs/runbooks/deploy-and-rollback.md` now has the block that
+  works: one loopback address per replica, identical ports.
+- **The database-down alert fires sooner.** `usai_resource{metric="ready"}`
+  now flips within a second of the first failed readiness probe instead of
+  waiting for a real query to hit the pool, so an alert with a 30 s `for`
+  fires ~30 s into an outage on a quiet service rather than whenever traffic
+  next arrived. If you tuned that alert's window around the old lag, retune
+  it.
+
 ### Qualification (evidence, not features)
 
 - **Every floor this project has published is void until it is re-measured.**
