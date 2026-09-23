@@ -58,7 +58,7 @@ runbook.
 
 ```bash
 git commit -am "release $v"
-git tag -a "v$v" -m "$(sed -n '/^> /,/^$/p' CHANGELOG.md | sed 's/^> //')"   # the drafted tag message
+git tag -a "v$v" -m "$(awk '/^> /{f=1} f&&/^$/{exit} f' CHANGELOG.md | sed 's/^> //')"  # the newest drafted tag message
 git push origin main "v$v"
 ```
 
