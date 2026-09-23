@@ -30,6 +30,8 @@ Design choices are closed early where reasoning is sufficient. Empirical questio
 | Q10 | **Absolute p50 gap above c ≈ 16** (EXP-012B) — mechanism unknown | empirical | non-blocking until a target SLO needs it; do not rerun EXP-012B |
 | Q17 | **Multi-application runtime process** — one process, one pool, many definitions: the only way to remove the per-application intercept the P8E density run measured (≈30 MiB PSS and one process per idle application, linear to N=50; `docs/measurements/2026-09-20-p8e-efficiency.md` §5, §8). `GOAL.md` §52 lists the memory reservation policy for many-app density as research-grade | formal research | one process per application; revisions are of one application (`Runtime.active`); density is processes per host and `SUPPORTED.md` states its arithmetic (N × `pool.max` connections) |
 
+| Q18 | **The interpreter is 42 % of a trivial request** — the sweep prices the model at 6–14× Node's CPU on a route where nothing else dominates (`docs/measurements/2026-09-23-sweep.md`), and the invoice says most of that is QuickJS interpreting the application's own JavaScript. The two ways out both cost something the runtime is built on: a JIT inside the guest makes compiled code that survives a world (state a fresh world must not inherit), and compiling the application to WebAssembly ahead of time (Javy/Porffor-shaped) is a semantics risk and a research programme. Neither is in P9 (ADR-0019) | formal research | the interpreter stays; the fresh world is cheap to create and reset *because* nothing is compiled per world, and the sweep shows the cost disappears on any route that touches PostgreSQL |
+
 ## Closed
 
 | # | Question | Closed by |
