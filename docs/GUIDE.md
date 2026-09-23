@@ -47,6 +47,8 @@ built it and what this runtime understands.
 
 ```bash
 pnpm dlx @sakaladev/create-usai my-app      # or: node packages/create-usai/dist/cli.js my-app (from this repo)
+#   `dlx` caches what it fetched, so if you scaffolded once before and the
+#   template looks old, name the version: pnpm dlx @sakaladev/create-usai@latest
 cd my-app && pnpm install
 usai dev                         # from this repo: cargo run -p usai-cli -- dev --root my-app
 curl localhost:3000/hello/world
