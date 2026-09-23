@@ -80,6 +80,32 @@ Five hours is not an answer to a question about seventy-two, and the
 hypothesis is not proven until the run ends — but the shape so far is the
 one the dataset explanation predicts.
 
+**The means are flat; the seconds underneath them are not perfectly even.**
+About 3–5 % of seconds serve under 1 000 requests (against a ~1 450 mean),
+in short clusters — 581 of them in six hours, a median of 26 s apart and at
+most 74 s long — with the per-second p99 median unchanged at 18.7 ms
+throughout:
+
+| hour | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|
+| seconds under 1 000 req/s | 292 | 132 | 232 | 103 | 129 | 131 |
+| p99 median (ms) | 19.2 | 18.8 | 19.0 | 18.7 | 18.7 | 18.8 |
+| p99 p95 (ms) | 118.5 | 41.9 | 67.7 | 36.6 | 44.4 | 52.6 |
+
+Hours 1 and 3 are the two hours a floor campaign was running on cpus 12–15,
+and they are the two worst — the co-tenant is visible, as disclosed. What is
+left after it (≈2–3 % of seconds, every hour) is **not** the once-a-minute
+prune: the clusters are spread evenly across the minute rather than landing
+on it. The standing hypothesis is the database's own maintenance — the prune
+deletes rows every minute, which is dead tuples for autovacuum, and
+`pg_stat_user_tables` shows exactly that churn on the tables the load writes.
+Recorded as the hypothesis it is; the growing run's numbers are the control
+for it, and that comparison belongs in the verdict rather than here.
+
+**It is worth an operator's attention either way**: keeping a table bounded
+is not free, and a queue or an invoice table pruned on a schedule pays for it
+in the database's maintenance, not in the runtime's.
+
 ## What this run cannot settle
 
 - **Whether the 72 h decay was the dataset** — only whether a *bounded*
