@@ -114,10 +114,11 @@ jobs:
       - name: Scan the history for verified secrets
         uses: trufflesecurity/trufflehog@main
         with:
-          # The action passes `--fail` itself; repeating it is an error
-          # ("flag 'fail' cannot be repeated"), and the job fails on the flag
-          # rather than on a secret — which looks identical in the run list.
-          extra_args: --only-verified --no-update
+          # The action already passes `--fail` and `--no-update`; repeating
+          # either is an error ("flag 'fail' cannot be repeated"), and the job
+          # then fails on a flag rather than on a secret — which looks
+          # identical in the run list. Only what the action does not set.
+          extra_args: --only-verified
 
   container:
     # The two images build and the scaffold's Docker paths work — before a
