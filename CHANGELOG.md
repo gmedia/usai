@@ -178,6 +178,10 @@ the human summary.
   OOM kills, and whether the cache was really cold.
   `docs/measurements/2026-09-23-floor-accounting.md`; `SUPPORTED.md`'s host
   envelope row says it is under re-measurement.
+- **The threat suite is 39 probes.** Two were added the evening round 16
+  found the 401: the production shape (surfaces on their own listener, a
+  token set) must answer 404 for every `/_usai/` path on the application
+  listener, and the body must name no operator surface.
 - **A run of refusals is not a passing run.** The three-replica campaign
   reported PASS for three scenarios in which every single request was a 401:
   the tenant token was extracted with a `sed` that prints the whole body when
