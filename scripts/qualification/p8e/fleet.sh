@@ -105,8 +105,13 @@ floor() {
         cell_failed "$dir" "$cell" "NODE=$NODE is not on PATH (a non-interactive shell has no nvm) - set NODE to an absolute path"
         return 0
       fi
+      # The *real* path: `node` on PATH is usually a symlink into a versioned
+      # directory (nvm, ~/.local/opt/...), and a bind mount of the symlink's
+      # parent carries the link, not its target — the box then has a dangling
+      # /node/bin/node and dies before it can be measured.
+      node_bin="$(readlink -f "$node_bin")"
       node_dir="$(cd "$(dirname "$node_bin")/.." && pwd)"
-      if [ ! -x "$node_dir/bin/node" ]; then
+      if [ ! -x "$node_dir/bin/node" ] || [ "$(readlink -f "$node_dir/bin/node")" != "$node_bin" ]; then
         cell_failed "$dir" "$cell" "$node_bin is not <prefix>/bin/node, so /node/bin/node would not exist in the box"
         return 0
       fi
