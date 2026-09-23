@@ -106,7 +106,13 @@ counts. `report.mjs` renders the tables.
 ## The four scoreboards
 
 1. **Performance** — req/s, p50/p95/p99, CPU per request, per class and
-   concurrency.
+   concurrency: the c=1 invoice (`2026-09-19-p8-parity.md`) and the
+   concurrency sweep against every comparator
+   (`2026-09-23-sweep.md`: the runtime tax is 6–14× Node's CPU on a trivial
+   route and disappears into PostgreSQL on the classes an application is
+   made of; one Usai process beats one Node process from c=8 up and is 2×
+   behind an eight-worker cluster on the database classes, at 0.5 GiB of
+   memory for 64 concurrent requests).
 2. **Efficiency** — RSS and PSS idle and under load, what returns after a
    burst, the floors a cgroup box will run one application in, and density
    (N mostly-idle applications per host against Node + Fastify): the P8E

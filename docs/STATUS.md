@@ -50,8 +50,7 @@ only if you can live with those three caveats. The gates in `docs/ROADMAP.md`, w
 
 Next gate: **P7**, outside developers building from the public
 docs alone (three real humans, unguided, would already be informative); RC freezes contracts only after P7 says the API is right.
-On the idle VM since the soak ended (2026-09-23, running): `suite.sh sweep` (the concurrency curve, all comparators) — the third number the P9 decision
-needs (`2026-09-20-p8e-efficiency.md` §7) — then the leak probes, the queue campaign on an idle host and the comparator floors.
+**The concurrency sweep is in** (2026-09-23, idle VM: `docs/measurements/2026-09-23-sweep.md`) — the third number the P9 decision needed. One Usai process beats one Node process from c=8 up on every class (hello 14.8k vs 12.7k, DB read 7.0k vs 6.3k, transaction 4.2k vs 2.6k at c=64), sits 2× behind an eight-worker Node cluster on the database classes and 7× behind it on hello, and pays 6–14× Node's CPU per trivial request and ≈0.5 GiB for 64 concurrent worlds. The PHP comparators of that run are not publishable (our nginx had no keepalive upstream and ran out of ephemeral ports; the Laravel image did not build) — both fixed, re-run pending. The queue campaign on the idle host and the comparator floors run after it.
 
 Multi-instance: the topology is stated (`SUPPORTED.md`) and campaigned with two replicas (2026-09-20): HTTP and queues share work, migrations serialize on an advisory lock, **cron ticks on every instance that schedules** (`--no-cron` elsewhere), rolling restarts lose nothing with the drain grace and a proxy that health-checks `/_usai/ready`.
 
