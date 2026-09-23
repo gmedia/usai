@@ -140,9 +140,17 @@ counts. `report.mjs` renders the tables.
    burst, the floors a cgroup box will run one application in, and density
    (N mostly-idle applications per host against Node + Fastify): the P8E
    fleet, `scripts/qualification/p8e/` and
-   `docs/measurements/2026-09-20-p8e-efficiency.md` (technical floor 48 MiB /
-   0.25 vCPU; supported floor 192 MiB / 1 vCPU; ≈30 MiB PSS and 0.00 % CPU per
-   idle application at N=50 vs ≈36 MiB / 0.12 % for Node).
+   `docs/measurements/2026-09-20-p8e-efficiency.md` (density: ≈30 MiB PSS and
+   0.00 % CPU per idle application at N=50 vs ≈36 MiB / 0.12 % for Node).
+   **How a floor cell is run**: the page cache for the binary and the artifact
+   is dropped first (`evict.py`, and `DROP_CACHES=1` for the whole cache on a
+   host that is ours alone), because the kernel charges a file's pages to
+   whoever faults them in first and the campaign itself runs the same binaries
+   on the host; each cell records `coldCache: full | true | partial` beside
+   the cgroup's peak, its ceiling hits and its OOM kills. **A floor is read
+   from the resident set, not from the absence of an OOM kill**
+   (`2026-09-23-floor-accounting.md` explains why, and voids every floor this
+   project published before it).
 3. **Correctness / lifecycle** — cross-request state, resource reuse safety,
    cancellation, recovery: the probes here and the runtime's acceptance
    tests.
