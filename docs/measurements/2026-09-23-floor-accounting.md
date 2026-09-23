@@ -119,6 +119,49 @@ So each cell reports `coldCache: full | true | partial` beside its peak, and
 a floor is `peak RSS + headroom`. The OOM result stays in the table as a
 secondary signal, with its caveat attached.
 
+## What a charged box actually does at its ceiling
+
+The first cold-cache run priced the template and `hello`, and the two
+`hello` cells are the whole argument for the correction in one table
+(VM 47, 1 vCPU, cpus 12–15, the 24 h soak as a disclosed co-tenant):
+
+| cell | box | peak RSS | charged peak | `memory.events.max` | OOM | load |
+|---|---|---|---|---|---|---|
+| `hello-48m-1c-16w` | 48 MiB | 34.5 MiB | **48.0 MiB — the ceiling** | **1 518 404** | no | **1 req/s, p50 4 736 ms** |
+| `hello-64m-1c-16w` | 64 MiB | 41.8 MiB | 64.0 MiB | 237 | no | 2 080 req/s, p50 2.1 ms |
+| `template-128m-1c-48w` | 128 MiB | 106.0 MiB | 97.3 MiB | 0 | no | 1 133 req/s, p50 13.8 ms |
+| `template-192m-1c-48w` | 192 MiB | 106.1 MiB | 96.9 MiB | 0 | no | 1 104 req/s, p50 14.1 ms |
+| `template-256m-1c-48w` | 256 MiB | 105.7 MiB | 96.8 MiB | 0 | no | 1 123 req/s, p50 13.9 ms |
+
+**The 48 MiB cell did not fail. It was never OOM-killed, it answered every
+request, and it served one of them per second.** Its resident set is *below*
+the others' because the kernel kept taking its pages away: charged to the
+ceiling, it spent the cell reclaiming and re-faulting its own text, a million
+and a half times. Under the old accounting that same cell passed with "≈2 MiB
+of headroom", because the text it was thrashing on was somebody else's bill.
+This is exactly what `memory.events.max` was added to see, and it is why a
+floor cannot be read from the absence of an OOM kill.
+
+Note what the template rows say as well: the charged peak is the same at 128,
+192 and 256 MiB, and no cell touches its ceiling. Memory follows the work, not
+the box — the box only decides whether the work fits.
+
+## And the instrument bites back: measure the binary that ships
+
+Those numbers priced `target/release/usai`, which is **287 MB**: the release
+profile keeps debug info, and the profile that ships (`dist`,
+`docker/runtime.Dockerfile`) is a tenth of that. Once a box pays for its own
+page cache, the file's on-disk layout is part of the result — text spread
+through a much larger file, and every fault dragging readahead in around it.
+So the run above prices a deployment nobody makes, and the floors here are
+re-measured again against the `dist` binary. A cell records the binary's size
+now, and the run warns when it is handed one with debug info.
+
+The lesson generalises past this project: **a memory floor is a property of
+the artifact, not only of the program.** Two builds of the same code, one
+stripped and one not, do not have the same floor on a box that is charged for
+what it reads.
+
 ## Status
 
 **The floors of 2026-09-20 and 2026-09-23 are void**, and so is the first
