@@ -173,6 +173,16 @@ published (121 MB, upstream's own build), because that is the artifact an
 operator deploys, and Usai is measured as *it* is published. Each runtime
 gets the binary its users get — not the smallest one it could have.
 
+## What came out of it besides a number
+
+The runtime could not see any of this about itself. It publishes RSS, PSS,
+virtual size and faults; none of them says "you are at your cgroup's ceiling
+and reclaiming the pages you are executing from". Since 0.0.9 it reads its
+own cgroup when asked and publishes the limit, the charge, the ceiling hits
+and the OOM kills (`usai_process_memory_*`, only when a limit exists), and
+`docs/runbooks/metrics.md` carries the alert. An operator whose container is
+16 MiB too small now gets a signal instead of a mystery.
+
 ## Status
 
 **The floors of 2026-09-20 and 2026-09-23 are void**, and so is the first
