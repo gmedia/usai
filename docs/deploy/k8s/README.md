@@ -13,6 +13,22 @@ documents alone, then reviewed here. Every number traces to a document or to
 a measurement; where neither existed, the manifest says so rather than
 pretending.
 
+## The image
+
+The manifests reference `my-registry/my-app:0.1.0` — **your** image, not
+ours. The scaffold ships the Dockerfile that builds it: two stages, where the
+first uses `sakaladev/usai:<version>-dev` to produce the artifact and the
+final image is `sakaladev/usai:<version>` plus that artifact and nothing else
+— no Node, no source tree, non-root, and read-only except `/tmp`.
+
+```bash
+docker build -t my-registry/my-app:0.1.0 .   # from your project root
+docker push my-registry/my-app:0.1.0
+```
+
+Pin the tag per deployment; `latest` moving under a rollout is how two pods
+end up serving different code with the same revision id.
+
 ## The three decisions Kubernetes makes you take
 
 ### 1. Where the scheduler runs
