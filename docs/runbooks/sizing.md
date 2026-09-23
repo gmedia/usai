@@ -70,9 +70,19 @@ it back at half the throughput). Each held revision adds ≈30 MiB of compiled
 image (one during a replacement, bounded).
 
 ```text
-mem_limit / MemoryMax  ≥  40 + max_worlds × 4 + 30   (MiB)
+mem_limit / MemoryMax  ≥  40 + peak_concurrency × (4…8) + 30   (MiB)
 48 worlds → ≥ 262 MiB; the compose file uses 512 MiB; 192 MiB is the supported floor measured with 48 worlds and a 16-client burst
 ```
+
+**Per-slot is 4 MiB for a small application and up to 8 for a real one.**
+P8E measured ≈4 MiB RSS per touched slot on the hello application; the
+concurrency sweep's application — PostgreSQL, contracts on six routes,
+auth — showed ≈8 MiB per concurrent request (≈0.5 GiB resident at c=64,
+`2026-09-23-sweep.md`). Size from the peak concurrency you intend to serve,
+with your own application: `usai run --max-worlds <n>`, drive it at that
+concurrency, and read `usai_process_resident_memory_bytes` at the plateau.
+The number does not grow with request count, and it does not come back
+while the process lives (`USAI_WASM_KEEP_RESIDENT`).
 
 **Per-workload memory** on top of that formula, for the operations that
 allocate more than a world does:

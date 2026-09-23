@@ -13,16 +13,26 @@ build, and run on Usai without requiring Sakala or another deployment platform.
 
 **Alpha (0.0.x) — production qualification in progress.** Everything that
 exists has acceptance tests and ships from one tag (binaries, npm, Docker);
-a production-shaped deployment has been broken eleven ways under load
-(P5) and campaigned for reliability (P6),
-soaked for 24 hours (35 M requests, no runtime error), and run as two
-replicas behind one proxy — with the findings fixed. Still open: the 72 h
-soak, developers outside the project building from the docs alone
-(`docs/P7-EXTERNAL-VALIDATION.md`), and frozen contracts. `docs/STATUS.md`
-("Production readiness") says exactly where each gate stands, and
-`docs/ROADMAP.md` how they close. Use it for development, evaluation and
-internal tools you can restart; put it in front of paying traffic knowing
-those three caveats.
+a production-shaped deployment has been broken eleven ways under load (P5)
+and campaigned for reliability (P6), **soaked for 72 hours (73.6 M requests,
+no 5xx, no runtime error, flat memory)**, and run as two replicas behind one
+proxy — with the findings fixed. Still open: developers outside the project
+building from the docs alone (`docs/P7-EXTERNAL-VALIDATION.md`) and frozen
+contracts. `docs/STATUS.md` ("Production readiness") says exactly where each
+gate stands, and `docs/ROADMAP.md` how they close. Use it for development,
+evaluation and internal tools you can restart; put it in front of paying
+traffic knowing those two caveats.
+
+**What it costs and what it buys**, measured against six comparators on one
+box (`docs/measurements/2026-09-23-sweep.md`): a request that touches
+PostgreSQL — what an application is made of — runs level with a single Node
+process and ahead of it on transactions, ahead of a tuned PHP-FPM, and
+1.8–7× ahead of Laravel. A request that does nothing costs **6–14× Node's
+CPU**, because every unit of work gets a fresh execution world: ask each
+server for a module-level counter ten times and Usai answers `1 1 1 1 1 1 1
+1 1 1` where one Node process answers `1 2 3 …` and an eight-worker cluster
+answers `1 1 1 1 1 1 1 1 2 2`. Choose it for that property, not for
+hello-world throughput.
 
 The research phase established enough evidence to justify building a real
 runtime. This repository is the clean production-oriented implementation.
