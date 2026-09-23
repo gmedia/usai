@@ -162,6 +162,11 @@ the artifact, not only of the program.** Two builds of the same code, one
 stripped and one not, do not have the same floor on a box that is charged for
 what it reads.
 
+It also settles how the comparator is treated: `node` is measured as it is
+published (121 MB, upstream's own build), because that is the artifact an
+operator deploys, and Usai is measured as *it* is published. Each runtime
+gets the binary its users get — not the smallest one it could have.
+
 ## Status
 
 **The floors of 2026-09-20 and 2026-09-23 are void**, and so is the first
