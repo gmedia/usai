@@ -472,6 +472,14 @@ async fn serve_until_signal(
                 .unwrap_or(true),
         },
     );
+    // A deployment-wide policy belongs in the log that records the start:
+    // an operator reading why a replica stayed in rotation through an outage
+    // should find the reason here rather than in someone's environment file.
+    if !http.config().ready_requires_resources {
+        tracing::info!(
+            "readiness ignores resource health: /_usai/ready answers 200 while a bound resource fails its probe, and names it in the body (USAI_READY_REQUIRES_RESOURCES=0)"
+        );
+    }
     // A harness (`--announce`) wants a silent exit; `dev` narrates like `run`.
     let quiet = on_ready.is_some() && !expose_diagnostics;
     let shutdown = CancellationToken::new();
