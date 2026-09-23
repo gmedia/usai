@@ -25,6 +25,16 @@ the human summary.
   immediately with no confirmation — a destructive default on a command
   whose own help says the runtime never prunes by itself. It now prints what
   it would remove and deletes nothing without `--yes`.
+- **`usai top`** — what a running instance is doing *now*. `/_usai/status`
+  is cumulative, which answers the wrong question during an incident: this
+  takes two samples and prints the difference — requests per second, the
+  average and the guest CPU per workload side by side (waiting or
+  computing, answered in one screen), rejections that never reached a
+  workload, pool `in use` and `waiting`, and what the process costs.
+  `-n <seconds>` is the window, `-c 1` prints one screen and exits,
+  `--addr`/`--status-token` read `USAI_STATUS_ADDR`/`USAI_STATUS_TOKEN` like
+  `usai probe`. Counters that go backwards (a restarted instance) read zero,
+  never a negative rate.
 - **`usai probe --timeout <seconds>`** (3 by default, as before). An `exec`
   probe's own timeout has to be above the command's, or the supervisor kills
   the check instead of reading its answer — and until now the command's was
@@ -41,6 +51,23 @@ the human summary.
 
 ### Runtime
 
+- **`console.time` / `console.timeLog` / `console.timeEnd` exist in a
+  world.** They were missing, so instrumenting a handler by hand meant
+  `Date.now()` arithmetic around every phase — and `console.time?.("x")`
+  did not even typecheck. They log their elapsed milliseconds at INFO with
+  the workload and the request id, like any other application line, so they
+  are readable in production and not only in development. The labels are the
+  world's: a timer started in one request cannot be ended in another, an
+  unknown or duplicated label warns instead of reporting a meaningless
+  number, and a timer left unended is forgotten when the world ends.
+- **`--server-timing` (`USAI_SERVER_TIMING=1`).** `Server-Timing: total;dur=…,
+  world;dur=…, cpu;dur=…` on every response the application produced — the
+  request end to end, how long the world was alive, and how much of that the
+  guest spent computing rather than waiting on a resource. Until now the only
+  per-response timing was `--diagnostics`, which also hands clients error
+  details and stacks and so cannot be left on; this is timing and nothing
+  else. A request rejected before a world exists (C6) carries no header,
+  which is the answer in itself. On by default in `usai dev`.
 - **You can find a slow route now.** `usai_http_workload_request_seconds_sum`
   and `_count` per workload (and `latencySumSeconds`/`count` in
   `/_usai/status`): the global histogram cannot do it, because a route that

@@ -22,18 +22,30 @@ topk(5,
 / rate(usai_http_workload_request_seconds_count[5m]))
 ```
 
-Without Prometheus, the same numbers are in `/_usai/status`:
+Without Prometheus, `usai top` is the same numbers on the box — and over
+the **last few seconds** rather than since the process booted, which is what
+an incident is asking about:
 
-```bash
-curl -s -H "authorization: Bearer $USAI_STATUS_TOKEN" localhost:9090/_usai/status \
-| python3 -c 'import json,sys
-h=json.load(sys.stdin)["http"]["by_workload"]
-for w,c in sorted(h.items(), key=lambda kv: -(kv[1]["latencySumSeconds"]/max(kv[1]["count"],1))):
-    if c["count"]: print(f"{1000*c[\"latencySumSeconds\"]/c[\"count\"]:8.1f} ms  {c[\"count\"]:>8}  {w}")'
+```console
+$ usai top --addr 127.0.0.1:9090
+checkout  revision 7 active  engine wasm  every 2.0s
+
+  worlds 12/256 live, 12 in flight   tasks 0 running, 0 queued (max 64)
+  rss 98.4 MiB (peak 121.0)   cpu 41%   fds 37   threads 20   worlds/s 216
+
+  workload                        req/s    4xx    5xx        avg        cpu
+  http:GET /catalog               201.5      0      0     2.10ms     1.90ms
+  http:POST /orders                14.2      0      0      204ms     7.40ms
+
+  resource                 in use  waiting      ops/s      state
+  db (postgres)             16/16        9      118.0      ready
 ```
 
-A mean hides a bimodal route, but it finds the one to look at, which is the
-step that was missing.
+`-n <seconds>` sets the window, `-c 1` prints one screen and exits (the form
+to paste into an incident channel), `--status-token` when the instance needs
+one. A mean hides a bimodal route, but it finds the one to look at, which is
+the step that was missing — and the `avg` and `cpu` columns beside each other
+are step 2 below, already answered.
 
 ## 2. Waiting or computing
 
@@ -85,7 +97,7 @@ computing — there is nothing else it can be.
 | `usai_resource{kind="postgres",metric="in_use"}` at `max`, `waiting` **0** | the pool is fully used and nothing is queued — the database is answering slowly | find the query (`pg_stat_statements`), add the index, or raise `pool.max` if the queries are as fast as they get |
 | `usai_resource{metric="waiting"}` **> 0** | requests are queueing **for a connection**, not for the database | raise `pool.max`, lower the per-request work, or add replicas. At 10 s of waiting the operation is refused (`503 resource_exhausted`, `pool.acquireTimeoutSeconds`) |
 | `usai_resource{kind="http.client",metric="in_use"}` at `max` | the outbound dependency is slow or down | `usai_resource_failures_total` says whether it is failing as well as slow |
-| `usai_workload_cpu_seconds_total` climbing with latency | the application's own code | it is in the handler; `console.time` does not exist in a world, so bracket the phases with `Date.now()` and `ctx.log.info` |
+| `usai_workload_cpu_seconds_total` climbing with latency | the application's own code | it is in the handler; bracket the phases with `console.time("label")` / `console.timeEnd("label")`, which log at INFO with the workload and the request id |
 | Nothing moves, latency is flat, one client is slow | not the server | the proxy, the client, the network — `x-request-id` joins the proxy's log to the runtime's |
 
 A note that has cost people time: `in_use == max` is **healthy saturation**
@@ -94,10 +106,30 @@ read `waiting` beside it before changing anything.
 
 ## Measuring one request
 
+`--server-timing` (`USAI_SERVER_TIMING=1`) puts the standard header on every
+response the application produced:
+
+```
+Server-Timing: total;dur=214.208, world;dur=213.006, cpu;dur=8.412
+```
+
+`total` is the request end to end, `world` is how long the world was alive
+(the difference is routing, decoding, validation and encoding), and `cpu` is
+how much of the world was the guest **computing** rather than waiting on a
+resource — a `cpu` far below `world` means the handler is waiting on the
+database or an upstream, and a `cpu` close to it means the handler itself is
+the cost. It is timing and nothing else — no stacks, no error text — so it
+may stay on in production; it is off by default because it does tell a
+client something about the server. `curl -D- -o/dev/null`, a browser's
+network panel and most proxies read it without any setup. A request rejected
+**before** a world exists (an unknown route, a schema failure, a refused
+admission) carries no header at all, which is itself the answer: nothing of
+the application ran.
+
 `--diagnostics` adds `x-usai-server-ms` to every response, which is the
 runtime's own view of that request. It also exposes error details and stacks
 to clients, so it belongs on a trusted network or a test environment, not in
-front of users.
+front of users. `--server-timing` is the part of it that is safe to keep.
 
 `USAI_PROFILE=1` adds the per-phase ledger (`x-usai-profile`) — routing,
 decoding, validation, admission, the world, the guest's own phases. It
@@ -109,6 +141,6 @@ allocates per request; it is for a measurement session, not for production.
   (`pg_stat_statements`, `auto_explain`); the runtime knows a query took
   200 ms, not what the planner did.
 - **Where in your JavaScript the time went.** There is no sampling profiler
-  in a world. `Date.now()` around the phases and a `ctx.log.info` with the
-  numbers is the honest answer, and it lands at the default log level with
-  the workload and the request id already attached.
+  in a world. `console.time("query")` / `console.timeEnd("query")` around the
+  phases is the honest answer, and it lands at the default log level with the
+  workload and the request id already attached.

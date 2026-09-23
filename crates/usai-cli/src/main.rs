@@ -4,6 +4,7 @@
 mod commands;
 mod display;
 mod logfmt;
+mod top;
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -129,6 +130,12 @@ enum Command {
         /// For tests and trusted networks only (USAI_DIAGNOSTICS=1)
         #[arg(long, env = "USAI_DIAGNOSTICS", value_parser = clap::builder::FalseyValueParser::new())]
         diagnostics: bool,
+        /// Put `Server-Timing: total;dur=…, world;dur=…, cpu;dur=…` on every
+        /// response the application produced — timing only, no diagnostics —
+        /// so a browser, a proxy or `curl -D-` can see where a slow request
+        /// spent its time (USAI_SERVER_TIMING=1)
+        #[arg(long, env = "USAI_SERVER_TIMING", value_parser = clap::builder::FalseyValueParser::new())]
+        server_timing: bool,
     },
     /// Build, serve, and rebuild on change as a new revision
     Dev {
@@ -192,6 +199,25 @@ enum Command {
         /// rather than reading its answer.
         #[arg(long, default_value_t = 3)]
         timeout: u64,
+    },
+    /// What a running instance is doing now: requests per second, average and
+    /// CPU per workload, pool use, what the process costs — the status
+    /// document differenced between two samples, not totals since boot
+    Top {
+        /// The listener that serves /_usai/* (`--status-addr`, or the app
+        /// listener with `--status`); USAI_STATUS_ADDR is the environment form
+        #[arg(long, env = "USAI_STATUS_ADDR", default_value = "127.0.0.1:9090")]
+        addr: String,
+        /// Seconds between samples (the rates are over this window)
+        #[arg(long, short = 'n', default_value_t = 2.0)]
+        interval: f64,
+        /// Draw this many times and exit (`--count 1` prints one screen and is
+        /// the form to pipe or paste into an incident channel)
+        #[arg(long, short = 'c')]
+        count: Option<u64>,
+        /// The status token, when the instance requires one
+        #[arg(long, env = "USAI_STATUS_TOKEN")]
+        status_token: Option<String>,
     },
     /// Run the project's tests with `usai/test` pointed at this binary
     Test {
@@ -479,6 +505,7 @@ async fn async_main() {
             drain_timeout,
             drain_grace,
             diagnostics,
+            server_timing,
         } => {
             // The flag and the environment variable are the same setting;
             // `run` reads it from the environment where the listener is built.
@@ -515,10 +542,17 @@ async fn async_main() {
                 drain_timeout,
                 drain_grace,
                 diagnostics,
+                server_timing,
             )
             .await
         }
         Command::Dev { host, port } => commands::dev(&root, &host, port).await,
+        Command::Top {
+            addr,
+            interval,
+            count,
+            status_token,
+        } => top::run(&addr, interval, count, status_token).await,
         Command::Probe {
             which,
             addr,

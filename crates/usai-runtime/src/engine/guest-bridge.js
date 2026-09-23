@@ -784,11 +784,41 @@
     }
     return fmt(a);
   };
+  // `console.time`/`timeEnd`: the first thing anyone reaches for when a
+  // handler is slow, and its absence was a type error at build time rather
+  // than a missing line at run time. The clock is the world's own monotonic
+  // one; the labels live for the world, like everything else here.
+  const timers = new Map();
   globalThis.console = {
     log: (...a) => log("info", line(a)),
     info: (...a) => log("info", line(a)),
     debug: (...a) => log("debug", line(a)),
     warn: (...a) => log("warn", line(a)),
     error: (...a) => log("error", line(a)),
+    time: (label = "default") => {
+      if (timers.has(label)) {
+        log("warn", "Timer '" + label + "' already exists");
+        return;
+      }
+      timers.set(label, performance.now());
+    },
+    timeLog: (label = "default", ...a) => {
+      const started = timers.get(label);
+      if (started === undefined) {
+        log("warn", "Timer '" + label + "' does not exist");
+        return;
+      }
+      const took = (performance.now() - started).toFixed(3) + "ms";
+      log("info", line([label + ": " + took, ...a]));
+    },
+    timeEnd: (label = "default") => {
+      const started = timers.get(label);
+      if (started === undefined) {
+        log("warn", "Timer '" + label + "' does not exist");
+        return;
+      }
+      timers.delete(label);
+      log("info", label + ": " + (performance.now() - started).toFixed(3) + "ms");
+    },
   };
 })();

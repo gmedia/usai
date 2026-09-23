@@ -677,6 +677,85 @@ async fn query_and_headers_reach_the_handler() {
     s.shutdown.cancel();
 }
 
+/// `Server-Timing` is off unless it is asked for, and when it is on it
+/// carries timing and nothing else: what the request cost, how much of that
+/// the world was alive for, and how much of *that* was the guest computing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn server_timing_is_opt_in_and_is_only_timing() {
+    let Some(s) = start().await else { return };
+    // The default server does not volunteer it.
+    let quiet = s
+        .client
+        .get(format!("{}/echo", s.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(quiet.status(), 200);
+    assert!(quiet.headers().get("server-timing").is_none());
+
+    let host = HttpHost::new(
+        Arc::clone(&s.runtime),
+        HttpConfig {
+            addr: ([127, 0, 0, 1], 0).into(),
+            server_timing: true,
+            ..HttpConfig::default()
+        },
+    );
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let token = CancellationToken::new();
+    let t = token.clone();
+    tokio::spawn(async move {
+        serve(host, t, |addr| {
+            let _ = tx.send(addr);
+        })
+        .await
+        .unwrap()
+    });
+    let addr = rx.await.unwrap();
+    let r = s
+        .client
+        .get(format!("http://{addr}/echo"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    let timing = r
+        .headers()
+        .get("server-timing")
+        .expect("server-timing")
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let mut parts = std::collections::HashMap::new();
+    for entry in timing.split(',') {
+        let entry = entry.trim();
+        let (name, dur) = entry.split_once(";dur=").expect(&timing);
+        parts.insert(name.to_owned(), dur.parse::<f64>().expect(&timing));
+    }
+    let total = parts["total"];
+    let world = parts["world"];
+    let cpu = parts["cpu"];
+    // The world happened inside the request, and the guest's CPU inside the
+    // world. A clock that disagrees with that is measuring the wrong thing.
+    assert!(world <= total, "{timing}");
+    assert!(cpu <= world, "{timing}");
+    assert!(total > 0.0, "{timing}");
+
+    // A rejection decided before a world exists (C6) has no world to report,
+    // and says so by carrying no `Server-Timing` at all.
+    let missing = s
+        .client
+        .get(format!("http://{addr}/no-such-route"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), 404);
+    assert!(missing.headers().get("server-timing").is_none());
+
+    token.cancel();
+    s.shutdown.cancel();
+}
+
 /// `ctx.resources["x"]` on a workload that did not declare `x` fails with
 /// a named error that says what to add, not with `undefined`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -148,4 +148,13 @@ declare namespace console {
   function debug(...data: unknown[]): void;
   function warn(...data: unknown[]): void;
   function error(...data: unknown[]): void;
+  /** Start a timer. The label lives for this world, like everything else in
+   * it: a timer started in one request cannot be ended in another. */
+  function time(label?: string): void;
+  /** Log the timer's elapsed milliseconds and keep it running. */
+  function timeLog(label?: string, ...data: unknown[]): void;
+  /** Log the timer's elapsed milliseconds and forget it. At INFO, with the
+   * workload and the request id like any other application line — which is
+   * what makes it usable in production rather than only in development. */
+  function timeEnd(label?: string): void;
 }

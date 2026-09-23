@@ -34,6 +34,13 @@ orchestrator's surface).
 
 Where to look, always:
 
+- **`usai top --addr <status listener>`** first, on the box or from your
+  laptop: everything below is *cumulative since the process started*, and an
+  incident is about the last few seconds. It differences two samples —
+  requests per second and the average and guest CPU per workload (waiting or
+  computing, in one screen), rejections that never reached a workload, pool
+  `in use` and `waiting`, RSS and CPU. `-c 1` prints one screen to paste into
+  a channel.
 - `GET /_usai/status` (with `--status`): gauges (`liveWorlds`, `liveOps`,
   `detachedWorkDetected`), `revisions[]` (state, in-flight, services, queue
   counters), `resources[]` (`in_use`, `max`, `quarantined`, and per-kind

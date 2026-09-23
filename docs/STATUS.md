@@ -229,9 +229,18 @@ capabilities (design), latency histogram in metrics, an API reference page — a
   documented one is 3.8 MB/s at four clients) and so was `cpu_us`, the number
   that says waiting or computing. Written: `docs/runbooks/slow-route.md`, the
   incident page the index never had — every other row is a failure, and this
-  one is "nothing is failing and a route is slow". Still open from it:
-  `Server-Timing` (timing per response without `--diagnostics`' stacks),
-  `console.time` in a world, and a `usai top`.
+  one is "nothing is failing and a route is slow". The three the round left open were built
+  the next day (2026-09-24): **`--server-timing`** puts
+  `Server-Timing: total;dur=…, world;dur=…, cpu;dur=…` on every response the
+  application produced — timing and nothing else, so unlike `--diagnostics`
+  it may stay on in production, and a request rejected before a world exists
+  carries no header at all; **`console.time` / `timeLog` / `timeEnd`** exist
+  in a world and log at INFO with the workload and the request id (the labels
+  are the world's, and an unknown or duplicated one warns rather than
+  reporting a meaningless number); **`usai top`** differences `/_usai/status`
+  between two samples — req/s, average and guest CPU per workload side by
+  side, rejections, pool `in use` and `waiting`, what the process costs —
+  because totals since boot answer the wrong question during an incident.
 
 - `usai dev` compiles each rebuilt image once (the build's compiled form is installed directly). Measured 2026-09-23 on an idle dev box: **a source change is serving again in ≈3 s**, of which ≈1.6 s is the image compile; a change that does not alter the manifest is recognised and keeps the running revision. (Round 13 reported 9–12 s — measured on a box that still had the session's own load on it, like its first-request numbers.) The compile still takes every core for those seconds on a small host, and the obvious way to make it faster — skipping the pre-initialisation that makes worlds cheap — would make `dev` and `run` behave differently, which is the one thing a development loop must not do.
 

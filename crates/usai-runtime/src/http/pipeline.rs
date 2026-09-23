@@ -38,6 +38,12 @@ pub struct HttpConfig {
     pub serve_docs: bool,
     /// Serve `/_usai/status` (JSON) and `/_usai/metrics` (Prometheus text).
     pub serve_status: bool,
+    /// Put `Server-Timing` on every application response: what the request
+    /// cost, split into the world's wall time and the guest's own CPU. It
+    /// is timing only — no stacks, no messages, nothing `expose_diagnostics`
+    /// carries — so it is safe to leave on in production, and it is off by
+    /// default because it tells a client something about the server.
+    pub server_timing: bool,
     /// A WebSocket with no frames in either direction for this long is
     /// closed (1008) so a silent client cannot hold a world forever.
     pub socket_idle_timeout: std::time::Duration,
@@ -77,6 +83,7 @@ impl Default for HttpConfig {
             expose_diagnostics: false,
             serve_docs: false,
             serve_status: false,
+            server_timing: false,
             socket_idle_timeout: std::time::Duration::from_secs(300),
             status_token: None,
             surfaces_off: Vec::new(),
@@ -216,6 +223,21 @@ fn profile_header(host: &[(&'static str, f64)], world: &[(String, f64)]) -> Opti
         text.push_str(&format!("{k}={v:.4},"));
     }
     text.pop();
+    HeaderValue::from_str(&text).ok()
+}
+
+/// `Server-Timing: total;dur=12.4, world;dur=11.8, cpu;dur=3.1` — the three
+/// numbers that answer "where did the time go" without a profiler: what the
+/// request cost end to end, how much of it the world was alive for (the rest
+/// is routing, decoding, validation and encoding), and how much of *that*
+/// was the guest computing rather than waiting on a resource. Browsers and
+/// most proxies read the standard header; nothing here is a stack or a
+/// message, so it may stay on in production (`--server-timing`).
+fn server_timing(total: f64, world: Option<(f64, f64)>) -> Option<HeaderValue> {
+    let mut text = format!("total;dur={total:.3}");
+    if let Some((world_ms, cpu_ms)) = world {
+        text.push_str(&format!(", world;dur={world_ms:.3}, cpu;dur={cpu_ms:.3}"));
+    }
     HeaderValue::from_str(&text).ok()
 }
 
@@ -828,6 +850,9 @@ impl HttpHost {
         // the global histogram cannot (a route that is a minority of traffic
         // never moves a p99).
         let entered = std::time::Instant::now();
+        // Filled by the finite path when a world ran, so `Server-Timing`
+        // can separate the world from the pipeline around it.
+        let mut world_cost: Option<(f64, f64)> = None;
         let mut watch = Stopwatch::start();
         let compiled = self.compiled()?;
         let (parts, body) = request.into_parts();
@@ -1124,6 +1149,12 @@ impl HttpHost {
             } else {
                 Vec::new()
             };
+            if self.config.server_timing {
+                world_cost = Some((
+                    result.duration.as_secs_f64() * 1000.0,
+                    result.cpu.as_secs_f64() * 1000.0,
+                ));
+            }
             let mut response = self.encode(&workload.id, result);
             if watch.on {
                 watch.lap("encode");
@@ -1136,9 +1167,14 @@ impl HttpHost {
         .await;
         let cost = entered.elapsed();
         match outcome {
-            Ok(response) => {
+            Ok(mut response) => {
                 self.stats
                     .record_workload(&workload_id, response.status().as_u16(), cost);
+                if self.config.server_timing
+                    && let Some(v) = server_timing(cost.as_secs_f64() * 1000.0, world_cost)
+                {
+                    response.headers_mut().insert("server-timing", v);
+                }
                 Ok(response)
             }
             Err(mut reply) => {

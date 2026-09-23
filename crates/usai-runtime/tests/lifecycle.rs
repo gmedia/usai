@@ -62,6 +62,16 @@ const workloads = {
     __usai.onCancel((r) => { reason = r; });
     try { for (;;) await sleep(0); } catch (e) { return { caught: e.usai.code, reason }; }
   },
+  "task:timers": async () => {
+    // console.time's labels live in the world, like everything else in it.
+    console.timeEnd("never-started");
+    console.time("t");
+    console.time("t");
+    console.timeLog("t", { step: 1 });
+    console.timeEnd("t");
+    console.timeEnd("t");
+    return null;
+  },
 };
 const ids = Object.keys(workloads);
 globalThis.__usai_sdk = {
@@ -109,6 +119,7 @@ fn workload_ids() -> Vec<&'static str> {
         "task:cancel-aware",
         "task:timer-zero-order",
         "task:timer-zero-cancelled",
+        "task:timers",
     ]
 }
 
@@ -391,6 +402,39 @@ async fn console_output_is_captured_per_world() {
     // A trailing plain object is structured fields, not text.
     assert_eq!(r.logs[0].message, "hello");
     assert_eq!(r.logs[0].fields.as_deref(), Some(r#"{"a":1}"#));
+}
+
+#[tokio::test]
+async fn console_timers_measure_inside_the_world() {
+    let rt = runtime().await;
+    let r = rt.invoke("task:timers", json!(null)).await.unwrap();
+    let lines: Vec<(&str, &str)> = r
+        .logs
+        .iter()
+        .map(|l| (l.level.as_str(), l.message.as_str()))
+        .collect();
+    assert_eq!(lines.len(), 5, "{lines:?}");
+    // A label that was never started, and one started twice, say so instead
+    // of reporting a duration that means nothing.
+    assert_eq!(lines[0].0, "warn");
+    assert_eq!(lines[0].1, "Timer 'never-started' does not exist");
+    assert_eq!(lines[1].0, "warn");
+    assert_eq!(lines[1].1, "Timer 't' already exists");
+    // timeLog keeps the timer, timeEnd forgets it — so the second end warns.
+    assert_eq!(lines[2].0, "info");
+    assert!(
+        lines[2].1.starts_with("t: ") && lines[2].1.ends_with("ms"),
+        "{:?}",
+        lines[2]
+    );
+    assert_eq!(r.logs[2].fields.as_deref(), Some(r#"{"step":1}"#));
+    assert_eq!(lines[3].0, "info");
+    assert!(
+        lines[3].1.starts_with("t: ") && lines[3].1.ends_with("ms"),
+        "{:?}",
+        lines[3]
+    );
+    assert_eq!(lines[4].1, "Timer 't' does not exist");
 }
 
 #[tokio::test]

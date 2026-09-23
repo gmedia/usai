@@ -233,6 +233,7 @@ pub async fn run(
     drain_timeout: u64,
     drain_grace: u64,
     diagnostics: bool,
+    server_timing: bool,
 ) -> Result<()> {
     // Take the port first. Loading and compiling an application is seconds of
     // work, and finding out afterwards that the address was already in use is
@@ -437,6 +438,7 @@ pub async fn run(
         host,
         port,
         diagnostics,
+        server_timing,
         status,
         status_addr,
         stop_requested,
@@ -486,6 +488,7 @@ async fn serve_until_signal(
     host: &str,
     port: u16,
     expose_diagnostics: bool,
+    server_timing: bool,
     serve_status: bool,
     status_addr: Option<String>,
     stop_requested: Option<CancellationToken>,
@@ -518,6 +521,7 @@ async fn serve_until_signal(
         HttpConfig {
             addr,
             expose_diagnostics,
+            server_timing,
             // The reference is a runtime-owned surface like status and
             // metrics: on in dev, and wherever --status is asked for.
             serve_docs: expose_diagnostics || serve_status,
@@ -1027,6 +1031,7 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
         listener,
         host,
         port,
+        true,
         true,
         true,
         None,
