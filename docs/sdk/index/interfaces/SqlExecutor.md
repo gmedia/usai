@@ -17,7 +17,7 @@ as a base64 string — `bytes.fromBase64` turns it back into a
 ### query()
 
 ```ts
-query<T = Record<string, unknown>>(sql: string, params?: SqlParam[]): Promise<T[]>;
+query<T = Record<string, unknown>>(sql: string, params?: readonly SqlParam[]): Promise<T[]>;
 ```
 
 Run a statement and return every row.
@@ -33,7 +33,7 @@ Run a statement and return every row.
 | Parameter | Type |
 | ------ | ------ |
 | `sql` | `string` |
-| `params?` | [`SqlParam`](../type-aliases/SqlParam.md)[] |
+| `params?` | readonly [`SqlParam`](../type-aliases/SqlParam.md)[] |
 
 #### Returns
 
@@ -44,7 +44,7 @@ Run a statement and return every row.
 ### one()
 
 ```ts
-one<T = Record<string, unknown>>(sql: string, params?: SqlParam[]): Promise<T | null>;
+one<T = Record<string, unknown>>(sql: string, params?: readonly SqlParam[]): Promise<T | null>;
 ```
 
 Run a statement and return the first row, or `null`.
@@ -60,7 +60,7 @@ Run a statement and return the first row, or `null`.
 | Parameter | Type |
 | ------ | ------ |
 | `sql` | `string` |
-| `params?` | [`SqlParam`](../type-aliases/SqlParam.md)[] |
+| `params?` | readonly [`SqlParam`](../type-aliases/SqlParam.md)[] |
 
 #### Returns
 
@@ -71,7 +71,7 @@ Run a statement and return the first row, or `null`.
 ### execute()
 
 ```ts
-execute(sql: string, params?: SqlParam[]): Promise<number>;
+execute(sql: string, params?: readonly SqlParam[]): Promise<number>;
 ```
 
 Run a statement and return the number of rows affected.
@@ -81,7 +81,7 @@ Run a statement and return the number of rows affected.
 | Parameter | Type |
 | ------ | ------ |
 | `sql` | `string` |
-| `params?` | [`SqlParam`](../type-aliases/SqlParam.md)[] |
+| `params?` | readonly [`SqlParam`](../type-aliases/SqlParam.md)[] |
 
 #### Returns
 

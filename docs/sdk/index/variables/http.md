@@ -4,7 +4,7 @@
 
 ```ts
 const http: {
-  stream: <O>(path: string, options: O, handler: (ctx: StreamContext<O>, stream: StreamHandle) => unknown) => Workload;
+  stream: <O>(path: string, options: NoExtraKeys<O, StreamOptions<ResourceDeclaration<string, unknown>[]>>, handler: (ctx: StreamContext<O>, stream: StreamHandle) => unknown) => Workload;
   get: Declare;
   post: Declare;
   put: Declare;
@@ -55,7 +55,7 @@ path twice is a build error; a path nobody declares is 404
 
 | Name | Type | Default value | Description |
 | ------ | ------ | ------ | ------ |
-| <a id="property-stream"></a> `stream()` | \<`O`\>(`path`: `string`, `options`: `O`, `handler`: (`ctx`: [`StreamContext`](../interfaces/StreamContext.md)\<`O`\>, `stream`: [`StreamHandle`](../interfaces/StreamHandle.md)) => `unknown`) => [`Workload`](../interfaces/Workload.md) | `streams.stream` | Declare a streaming endpoint (`http.stream`): a **connection-bound** world that lives until the handler returns. `params` and `query` are validated before the world exists; `timeout` bounds the whole stream. Chunks are `text/event-stream` by default (`stream.event(name, data, { id })` writes one server-sent event; a reconnecting `EventSource` sends the last `id` back as `ctx.headers["last-event-id"]`); set `content-type` in `start` for anything else. A client that leaves cancels the world — the normal end of a stream, not a failure. **Example** `export const events = http.stream("/events", { resources: [cache] }, async (ctx, stream) => { while (!ctx.signal.aborted) { await stream.event("tick", { total: await ctx.resources.cache.get("total") }); await ctx.sleep("1s"); } });` |
+| <a id="property-stream"></a> `stream()` | \<`O`\>(`path`: `string`, `options`: `NoExtraKeys`\<`O`, [`StreamOptions`](../interfaces/StreamOptions.md)\<[`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)\<`string`, `unknown`\>[]\>\>, `handler`: (`ctx`: [`StreamContext`](../interfaces/StreamContext.md)\<`O`\>, `stream`: [`StreamHandle`](../interfaces/StreamHandle.md)) => `unknown`) => [`Workload`](../interfaces/Workload.md) | `streams.stream` | Declare a streaming endpoint (`http.stream`): a **connection-bound** world that lives until the handler returns. `params` and `query` are validated before the world exists; `timeout` bounds the whole stream. Chunks are `text/event-stream` by default (`stream.event(name, data, { id })` writes one server-sent event; a reconnecting `EventSource` sends the last `id` back as `ctx.headers["last-event-id"]`); set `content-type` in `start` for anything else. A client that leaves cancels the world — the normal end of a stream, not a failure. **Example** `export const events = http.stream("/events", { resources: [cache] }, async (ctx, stream) => { while (!ctx.signal.aborted) { await stream.event("tick", { total: await ctx.resources.cache.get("total") }); await ctx.sleep("1s"); } });` |
 | <a id="property-get"></a> `get` | [`Declare`](../type-aliases/Declare.md) | - | `GET` endpoint. |
 | <a id="property-post"></a> `post` | [`Declare`](../type-aliases/Declare.md) | - | `POST` endpoint. |
 | <a id="property-put"></a> `put` | [`Declare`](../type-aliases/Declare.md) | - | `PUT` endpoint. |

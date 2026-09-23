@@ -6,6 +6,10 @@
     "types": ["node"],
     "lib": ["ES2022", "DOM"]
   },
-  "include": ["src/index.ts", "src/test.ts", "src/config.ts", "globals.d.ts"],
+  // `globals.d.ts` is the *world*'s ambient surface and deliberately shadows
+  // Node's (`process`, `Buffer`, `require` exist there only to say they do
+  // not). This pass documents the SDK, including `usai/test`, which runs in
+  // Node - so it must not see them.
+  "include": ["src/index.ts", "src/test.ts", "src/config.ts"],
   "exclude": ["src/**/*.test.ts"]
 }

@@ -3,7 +3,7 @@
 # Type Alias: Declare
 
 ```ts
-type Declare = <O>(path: string, options: O, handler: (ctx: HttpContext<O>) => HttpHandlerResult<ResponseOf<O>>) => Workload;
+type Declare = <O>(path: string, options: NoExtraKeys<O, HttpOptions>, handler: (ctx: HttpContext<O>) => HttpHandlerResult<ResponseOf<O>>) => Workload;
 ```
 
 The signature of `http.get`/`post`/….
@@ -19,7 +19,7 @@ The signature of `http.get`/`post`/….
 | Parameter | Type |
 | ------ | ------ |
 | `path` | `string` |
-| `options` | `O` |
+| `options` | `NoExtraKeys`\<`O`, [`HttpOptions`](../interfaces/HttpOptions.md)\> |
 | `handler` | (`ctx`: [`HttpContext`](../interfaces/HttpContext.md)\<`O`\>) => [`HttpHandlerResult`](HttpHandlerResult.md)\<`ResponseOf`\<`O`\>\> |
 
 ## Returns

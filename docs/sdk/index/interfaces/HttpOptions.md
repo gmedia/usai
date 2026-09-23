@@ -2,7 +2,10 @@
 
 # Interface: HttpOptions
 
-Options of `http.get`/`post`/…: contracts, policies, errors, auth, resources.
+The schema slots of an HTTP endpoint. Any Standard Schema
+(`zod`, `valibot`, `arktype`, …) works; slots whose schema can describe
+itself as JSON Schema are validated before a world exists, the others
+inside it.
 
 ## Extends
 

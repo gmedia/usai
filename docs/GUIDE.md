@@ -101,6 +101,23 @@ export const billing = defineModule({
 });
 ```
 
+**Where your code lives is up to you; how the runtime finds it is not.** A workload exists because `defineApp` can *reach* it through imports — nothing scans your files. Split the application the way you would in Express (`src/routes/*.ts`, `src/controllers/*.ts`, `src/services/*.ts`) and hand the exports to `defineApp`:
+
+```ts
+// src/app.ts
+import { defineApp } from "@sakaladev/usai";
+import * as books from "./routes/books.routes.ts";     // a barrel re-export works too
+import { billing } from "./billing/module.ts";
+
+export default defineApp({
+  name: "bookstore",
+  modules: [billing],                    // a module brings its own workloads and migrations
+  workloads: [...Object.values(books)],  // or list them one by one
+});
+```
+
+The rule has one consequence worth stating plainly: **auto-discovery cannot work.** `fs.readdirSync("./routes")`, a glob, `import.meta.glob`, `require.context` and a dynamic `import(\`./routes/${name}\`)` all fail at build — the application is bundled and its manifest is read by evaluating the module in a world that has no filesystem, before any work runs (top-level `await` is out for the same reason). A route file nobody imports is not served; a build that produced no workloads says so, and so does the runtime at activation.
+
 `usai inspect` shows the application exactly as the runtime understood it. `usai config` shows every effective setting and where it came from.
 
 `usai.config.ts` is a **declaration**, evaluated in a capability-less world and cached by its source digest — not a Node script. `process.env`, `fs`, `require`, `import.meta` are not available in it (the error says so). Anything that differs per environment belongs to `env(...)` declarations in the application and to the runtime's environment, never to the config.
@@ -137,7 +154,7 @@ export const createUser = http.post("/users", { body: NewUser, response: { 201: 
 - Declare failures in `errors: [{ code, status }]`, not as schemas in `response:` — the document then types the status as the error envelope with `error.code` narrowed to the declared codes (`if (res.status === 409) res.error.code` is `"duplicate_sku"` in a generated client); a `401: Err` in `response` is described as a plain body. Every declared status carries its reason phrase (`Not Found`, `Locked`).
 - Unknown keys in a body are **stripped** by default (`z.object`): a client's typo passes as if absent. `z.strictObject({ … })` (or `.strict()`) refuses them at the boundary — `400 validation_failed` naming the key — which is what a team that generates clients from the document usually wants.
 - Validation issues use JSON-pointer paths (`/tags/0`) wherever the check ran — at the boundary or in the world. The *message* differs by where it ran: the boundary's messages are JSON-Schema-derived (`"abc" does not match the expected format`), the world's are the library's own (`Invalid UUID`); the `code`, the `slot` and the paths are the same.
-- `ctx.resources` is typed from the workload's `resources: [...]`: `resources: [db]` with `const db = postgres("db")` makes `ctx.resources.db` a `PostgresHandle`, `cache.local` a `CacheLocalHandle`, `httpClient` an `HttpClientHandle`; an undeclared name is a compile error, and at runtime (`ctx.resources["x"]` without `resources: [x]`) a `500 resource_not_declared` that names the fix. Only an auth resolver's `ctx.resources` is untyped (cast to the handle).
+- `ctx.resources` is typed from the workload's `resources: [...]`: `resources: [db]` with `const db = postgres("db")` makes `ctx.resources.db` a `PostgresHandle`, `cache.local` a `CacheLocalHandle`, `httpClient` an `HttpClientHandle`; an undeclared name is a compile error, and at runtime (`ctx.resources["x"]` without `resources: [x]`) a `500 resource_not_declared` that names the fix. An auth scheme's resolver is typed the same way from its own `auth.bearer({ resources: [db], resolve })` — nothing on this surface needs a cast, and an `as SomeHandle` in your code is a sign the workload forgot to declare the resource.
 - Paths: `:id` declares a parameter; `*path` as the last segment is a **catch-all** that takes the rest of the path as one parameter (`/files/*path` → `ctx.params.path` = `a/b/c.txt`; declare it in `params` like any other). A literal segment always wins over a parameter at the same position (`/invoices/summary` beats `/invoices/:id`, whatever the declaration order), and a literal path wins over a catch-all — except for a method the literal does not have: `http.options("/*any", …)` answers the preflight for every path while `GET /users/:id` keeps serving GET. A catch-all never turns an unknown URL into a `405` for methods it lacks (that stays `404 route_not_found`). The same method and path twice fails the build.
 - `summary` (one line) and `description` (a paragraph) on any workload's options feed the reference page and the OpenAPI document; `auth.bearer({ description })` documents the security scheme.
 - Raw endpoints: `http.raw("/webhook", async (ctx) => http.rawResponse(200, "ok"))` — exact bytes via `ctx.request.bytes()`, no contracts, documented as opaque.
@@ -199,8 +216,9 @@ export default defineApp({ workloads: [listUsers], resources: [db], env: env({ D
 - **Row types.** Rows come back as `Record<string, unknown>`; a typed response contract makes the compiler ask for more. Say what a row is once, from the schema you already have: `type TaskRow = z.infer<typeof Task>; sql.one<TaskRow>(…)`. Column aliases (`total_cents::int as "totalCents"`) shape the row to the contract. `timestamptz`/`timestamp`/`date` columns arrive as ISO-8601 strings (`2026-09-19T05:53:01.781761+00:00`) — do **not** cast them `::text`, which yields PostgreSQL's own form (`2026-09-19 12:53:01.78+07`) that JavaScript's `Date` does not parse reliably. `uuid`, `numeric`, enums and arrays arrive as strings, strings, strings and JSON arrays respectively. Response bodies are serialised with keys in sorted order, whatever order the query selected them in.
 - **Binary columns.** A `Uint8Array` parameter binds to `bytea` (`insert into attachments (data) values ($1)`, `[bytes]`); a `bytea` column comes back as a base64 string — `bytes.fromBase64(row.data)` is the `Uint8Array` again (`import { bytes } from "@sakaladev/usai"`). Fine for attachments of a few MB; a media store belongs in object storage.
 - **Errors from SQL** arrive as `UsaiOperationError` with `err.usai.code` = `sql_<SQLSTATE>` (`sql_23505` for a unique violation, `sql_23503` foreign key, `sql_40001` serialization failure) and the server's message; connection loss is `connection_closed`, a full pool `resource_exhausted`. Catch by code: `if (isUsaiError(e) && e.usai.code === "sql_23505") throw errors.conflict("email taken")`.
-- `sql.query(text, params)` → rows; `sql.one(...)` → row or null; `sql.execute(...)` → affected count. Parameters are typed from the prepared statement (`$1::int`, uuid, jsonb, timestamptz, arrays, enums …) and encoded by the runtime; every other type (`interval`, `inet`, ranges, domains …) takes a string in its text form, parsed server-side like `'30 days'::interval`. A string that is not a valid uuid/timestamp for its slot is an `invalid_param` error (500) from the handler's point of view — validate boundary input with the schema first (`z.string().uuid()`). Timestamps accept ISO-8601 and PostgreSQL's own text output.
+- `sql.query(text, params)` → rows; `sql.one(...)` → row **or `null`** (so `insert … returning id` needs `row!.id` or a check — the type does not know your statement returns one); `sql.execute(...)` → affected count. The parameter list is `readonly SqlParam[]` (`SqlParam` is exported): declare a built-up array as `const params: SqlParam[] = […]` and no cast is needed anywhere. Parameters are typed from the prepared statement (`$1::int`, uuid, jsonb, timestamptz, arrays, enums …) and encoded by the runtime; every other type (`interval`, `inet`, ranges, domains …) takes a string in its text form, parsed server-side like `'30 days'::interval`. A string that is not a valid uuid/timestamp for its slot is an `invalid_param` error (500) from the handler's point of view — validate boundary input with the schema first (`z.string().uuid()`). Timestamps accept ISO-8601 and PostgreSQL's own text output.
 - `sql.transaction(async (tx) => { … })` pins one connection for the callback: `tx.query/one/execute` run in one transaction, committed when the callback returns, rolled back when it throws (the error is rethrown). A handler that returns with the transaction still open is a lifecycle error — the runtime rolls back on its behalf and says so. **Decide inside, throw outside**: a callback that writes a verdict (revoke the token family, count the failed attempt, mark the code used) and then throws `errors.unauthorized()` rolls the verdict back with the error. Return the verdict from the callback and throw after it commits — `const verdict = await sql.transaction(async (tx) => { …; return "reused"; }); if (verdict === "reused") throw errors.custom("refresh_token_reused", 401, …);` — the pattern every auth flow needs (lockout counters, reuse detection, single-use codes).
+- **`begin`/`commit`/`rollback`/`savepoint`/`set` are refused on `query/one/execute`** and belong to `transaction(...)`. Each of those statements leases its own connection, so a raw `begin` would open a transaction on a connection the next statement does not hold — and return it to the pool in that state. The runtime answers `transaction_control` and names the helper instead of letting it half-work.
 - Each operation leases one pooled connection. A connection is reused only after a **terminal** outcome; cancellation waits for the server to confirm; anything ambiguous is quarantined and replaced. Session state is reset between worlds.
 - TLS: put `sslmode=require` in the URL (`prefer` is the default, `disable` turns it off). The server certificate is **always verified** — against Mozilla's roots plus the PEM bundle in `postgres("main", { tls: { caFile } })` or the `PGSSLROOTCERT` environment variable (private CAs, managed-database roots). There is no encrypted-but-unverified mode; a certificate that does not verify fails **activation**, not the first request.
 - Connect timeout: `connect_timeout=<s>` in the URL (PostgreSQL's parameter); 5 s when absent. It matters for an *unreachable* server (a partition drops SYNs; a stopped one refuses at once): every request that needs the database holds its world for that long before its 503 — set it low for a service that must fail fast (`docs/runbooks/postgres-down.md`).
@@ -225,6 +243,35 @@ export default defineApp({ workloads: [listUsers], resources: [db], env: env({ D
 | `LISTEN` / `NOTIFY` as a delivery path | `listen` is accepted but nothing reads the notifications — and it pins them to a pooled connection nobody owns; use the queue (§8) for work, or poll |
 | Session-level state across calls (`SET` without `LOCAL`, session advisory locks, `PREPARE`) | every call leases a connection and gives it back — only `sql.transaction` keeps one; session state would leak to the next lessee |
 | A `Uint8Array` result | `bytea` arrives as base64 (`bytes.fromBase64`) |
+
+### Query builders, and what you can npm-install
+
+There is no ORM, and there is a rule that decides every package: **a library that only computes is fine; one that reaches for a Node built-in when it is loaded is not** (a world has no `fs`, `net`, `events` or `process`, and the bundler says so by name). A connection pool, a driver and an ORM that opens its own connection are out — the database is the runtime's to lease. A query *builder* used as a compiler is in, and that turns out to be most of what people want from one:
+
+```ts
+// kysely as a compiler: DummyDriver never connects, .compile() gives { sql, parameters }
+import { DummyDriver, Kysely, PostgresAdapter, PostgresIntrospector, PostgresQueryCompiler } from "kysely";
+interface DB { books: { id: string; title: string; price_cents: number } }
+const q = new Kysely<DB>({
+  dialect: {
+    createAdapter: () => new PostgresAdapter(),
+    createDriver: () => new DummyDriver(),
+    createIntrospector: (d) => new PostgresIntrospector(d),
+    createQueryCompiler: () => new PostgresQueryCompiler(),
+  },
+});
+
+export const list = http.get("/books", { query: Filter, resources: [db] }, async (ctx) => {
+  const { sql, parameters } = q
+    .selectFrom("books").select(["title"]).where("price_cents", ">=", ctx.query.minPrice)
+    .compile();
+  return ctx.resources.db.query<{ title: string }>(sql, parameters);
+});
+```
+
+`drizzle-orm`'s `new QueryBuilder()` from `drizzle-orm/pg-core` works the same way (`.toSQL()` → `{ sql, params }`). Both were built and served real rows through `ctx.resources.db` on 0.0.7. **`knex` cannot be used at all**, in any configuration: it imports `events`, `util`, `fs` and friends at module load, so even the compile-only form fails to bundle.
+
+What you keep by compiling rather than connecting: typed, composable query building *and* the runtime's leased connections, terminal-proof reuse and quarantine. What you give up: the library's own migrations, connection pooling and result mapping — migrations are `.sql` files here (`usai db migrate`), and rows come back as plain objects.
 
 ## 8. Queue
 
@@ -289,7 +336,7 @@ import { httpClient, type HttpClientHandle } from "@sakaladev/usai";
 const payments = httpClient("payments", { baseUrlEnv: "PAYMENTS_URL", bearerTokenEnv: "PAYMENTS_TOKEN", timeoutMs: 5000, maxConcurrent: 16 });
 
 export const charge = http.post("/charge", { body: Charge, resources: [payments] }, async (ctx) => {
-  const api = ctx.resources["payments"] as HttpClientHandle;
+  const api = ctx.resources.payments;   // typed from `resources: [payments]`
   const res = await api.fetch("/v1/charges", { method: "POST", json: ctx.body });
   if (!res.ok) throw errors.unavailable(`payments answered ${res.status}`);
   return res.json();
@@ -446,7 +493,7 @@ test("users", async () => {
 
 **What a request did after it answered.** A dispatched task runs after the response was sent; the harness keeps the runtime's log (`--log-format json`, the last 10 000 lines) and lets a test join on the request id: `const res = await app.http.post("/auth/forgot", { body, headers: { "x-request-id": "t-1" } }); const line = await app.waitForLog({ requestId: "t-1", workload: "task:send-reset-email" }); line.fields.code` — `app.logs({ requestId, workload, level, target: "app", message })` is the same filter over what was already written, `waitForLog` waits (5 s by default) for a line that has not arrived yet. Every line the application wrote with `ctx.log`/`console.*` is there at INFO (`target: "app"`, `fields` parsed), the runtime's own at WARN and above; set `RUST_LOG` to change that. The harness has **no database handle by design**: read state through the application (a route, a `command` the test runs with `app.command(...).run()`), or with the driver of your choice in the test process — the tests are Node, the application is not.
 
-`testApp` needs the `usai` binary (`USAI_BIN` or on `PATH`) and the project's declared environment (pass `env: { DATABASE_URL }`). Run the files with `node --test` (or `usai test`, which sets `USAI_BIN` and loads `.env`); the `--conditions=usai` flag the repository's own examples use selects the SDK's TypeScript sources inside this monorepo and does nothing for an installed package — leave it out. With `migrate: true` (or `migrate: { seed: true }`) it runs `usai db migrate` / `usai db seed` first — for a throwaway database (`usai test` reads `.env`, so point `DATABASE_URL` at one that may be wiped). The harness starts the runtime with `--diagnostics`: every `TestResponse` carries `violations` (the world's lifecycle violations, e.g. `detached_work` for an un-awaited `dispatch`) — assert `deepEqual(res.violations, [])` on the requests that matter — and 500 bodies carry the error details. Lifecycle-specific tests are ordinary: mutate in one request, read in the next, and assert the mutation is gone.
+`testApp` needs the `usai` binary (`USAI_BIN` or on `PATH`) and the project's declared environment (pass `env: { DATABASE_URL }`). Run the files with `node --test` (or `usai test`, which sets `USAI_BIN` and loads `.env`); the `--conditions=usai` flag the repository's own examples use selects the SDK's TypeScript sources inside this monorepo and **breaks** an installed package — it resolves to TypeScript under `node_modules`, which Node refuses to strip (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`). Leave it out, or run `usai test`, which sets what it needs. With `migrate: true` (or `migrate: { seed: true }`) it runs `usai db migrate` / `usai db seed` first — for a throwaway database (`usai test` reads `.env`, so point `DATABASE_URL` at one that may be wiped). The harness starts the runtime with `--diagnostics`: every `TestResponse` carries `violations` (the world's lifecycle violations, e.g. `detached_work` for an un-awaited `dispatch`) — assert `deepEqual(res.violations, [])` on the requests that matter — and 500 bodies carry the error details. Lifecycle-specific tests are ordinary: mutate in one request, read in the next, and assert the mutation is gone.
 
 In CI, the tests need the binary and a PostgreSQL. The pure-npm path fetches the release binary on `pnpm install` (`@sakaladev/usai`'s wrapper; `USAI_RELEASE_BASE` for a mirror), and a service container is the database:
 
@@ -520,6 +567,8 @@ What building it as a user found (and what changed): outbound HTTP, `crypto`, pa
 
 Per-world cost on the Wasm substrate is flat with respect to application size: instantiating a world from the pre-initialized image costs ~0.02 ms whatever the bundle contains, and validators declared as contracts are prepared before the image is snapshotted, so a fresh world does not rebuild them. Numbers belong with their conditions: a contract-validated hello request is 0.90 ms p50 at c=1 on the qualification VM (release build, pinned core, a soak as co-tenant — `docs/measurements/2026-09-19-p8-parity.md`), and the comparators on the same host are in the same report; quote from there, not from here. Handler code runs in an interpreter compiled by Cranelift: CPU-heavy loops are slower than on a JIT; keep hot loops small or move them to the database.
 
+**The first request after a start is a little slower than the rest** — on `examples/hello` (release build, idle machine) 7–11 ms against ~4 ms for the ones after it. The two definition-lifetime costs that used to sit there, compiling the routing table and the engine's first instantiation of the image, are paid at activation now, before readiness turns true; what remains is the guest's own first entry into your code. Nothing to configure, but worth knowing if you are reading a p99 right after a rolling restart.
+
 ## 19. Coming from Express, Fastify or Laravel
 
 The same service, piece by piece. Left: what you write today. Right: where it lives in Usai, and the section that says how. "Proxy" means the reverse proxy in front (Caddy, nginx, an ingress) — §14 has one Caddy block that covers every row marked so.
@@ -549,5 +598,11 @@ The same service, piece by piece. Left: what you write today. Right: where it li
 | `process.on("SIGTERM", () => server.close())` | Built in: readiness fails, connections close after their response, in-flight work drains within a bound | §14 |
 | PM2 cluster, `pm.max_children`, Gunicorn workers | One process, many worlds in parallel (`--max-worlds`); replicas for redundancy, not for cores | `runbooks/sizing.md` |
 | Supertest, `TestClient`, Pest HTTP tests | `usai/test`: `testApp()` runs the real binary; `app.http.*`, `app.task().invoke`, `app.queue().deliver`, `res.violations` | §15 |
+
+**What your editor will suggest that does not exist here.** `req`/`res`/`next` are not the handler's
+arguments (one `ctx`, and you *return* a value); `process`, `require`, `Buffer`, `__dirname` and `fs` are
+declared in `@sakaladev/usai/globals` only so the compiler can say what to use instead — point `types` at it
+rather than `@types/node`, which would advertise APIs a world does not have and let `process.env.X` compile
+and be `undefined` at runtime. `performance.now()` exists and is monotonic from the world's start.
 
 What has no counterpart, on purpose: module-level caches and singletons (a world starts fresh; `cache.local` is the process-wide, non-durable cache), global mutable state between requests, `fs`/`process`, an ORM, and an in-process cron that is silently duplicated by the second replica.
