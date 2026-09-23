@@ -57,7 +57,13 @@ research or a different product.
    concurrent requests cost half a gigabyte and keep it. An idle-decommit
    policy (return a slot's pages after N seconds unused, pay the faults only
    on the first world after a quiet period) gives a small box both curves.
-   Contained, measurable with the P8E cells, no ABI change.
+   Contained, measurable with the P8E cells, no ABI change. **Investigated
+   2026-09-23 (`docs/upstream/wasmtime-idle-decommit.md`): the kept region is
+   anonymous memory the pool zeroes — not the module's image, which arrives
+   through the COW mapping — so releasing it has no correctness consequence.
+   But its address belongs to Wasmtime's allocator and `keep_resident` is
+   fixed when the engine is built, so this lever is an upstream API plus one
+   call from the idle path we already have, not local work.**
 3. **The world's entry cost** (open, small). What remains of the reset after
    the upstream Wasmtime patch landed (2026-09-23, merged) is the memcpy of
    the dirty pages the core itself touches. Shrinking the core's own working
