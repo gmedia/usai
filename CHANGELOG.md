@@ -163,9 +163,12 @@ the human summary.
   is charged to the cgroup that first faults it in — the host had already run
   the same binary, so the box was never billed for the runtime's own text.
   The comparator run that exposed it reported 88 MiB resident inside a 48 MiB
-  box with no OOM kill. The harness now bakes the binary and the application
-  into an image (which is also what a deployment does) and records what the
-  kernel charged: peak, ceiling hits, OOM kills.
+  box with no OOM kill. Baking the binary into an image does not fix it
+  (`docker build` warms the cache just as well, and 33 MB stayed uncharged
+  either way): the harness now **drops the page cache for what the cell is
+  about to run** — `posix_fadvise`, no privileges needed — so the box faults
+  its own pages, and records what the kernel charged it: peak, ceiling hits,
+  OOM kills, and whether the cache was really cold.
   `docs/measurements/2026-09-23-floor-accounting.md`; `SUPPORTED.md`'s host
   envelope row says it is under re-measurement.
 - **A run of refusals is not a passing run.** The three-replica campaign

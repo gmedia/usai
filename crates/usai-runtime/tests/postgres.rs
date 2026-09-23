@@ -1261,3 +1261,142 @@ async fn queue_schema_survives_concurrent_preparation() {
     tokio::time::sleep(Duration::from_millis(100)).await;
     f.baseline();
 }
+
+/// A database that stops answering mid-connection makes the resource unready
+/// within the probe's bound, without a request having to notice first.
+///
+/// Round 16 (an operator deploying 0.0.8) reported the opposite: with the
+/// database gone, `/_usai/ready` already named the failing resource while
+/// `usai_resource{kind="postgres",metric="ready"}` — the series the runbook
+/// tells you to alert on — was still 1, because the probe's timeout lived in
+/// the caller and cancelled the probe before it could record anything. On a
+/// quiet service the alert then waited for the next real query.
+///
+/// The relay here is a real PostgreSQL connection that can be *cut*: bytes
+/// stop moving in both directions and the sockets stay open, which is what a
+/// dropped route or a firewall state-table eviction looks like from inside
+/// the process. A closed socket would prove nothing — that path always
+/// worked.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_database_that_stops_answering_makes_the_resource_unready() {
+    let Some(url) = support::database_url() else {
+        eprintln!("skipping: no database");
+        return;
+    };
+    let upstream: tokio_postgres::Config = url.parse().expect("a valid URL");
+    let host = match &upstream.get_hosts()[0] {
+        tokio_postgres::config::Host::Tcp(h) => h.clone(),
+        #[cfg(unix)]
+        tokio_postgres::config::Host::Unix(_) => {
+            eprintln!("skipping: the database is on a unix socket, which this relay does not speak");
+            return;
+        }
+    };
+    let port = *upstream.get_ports().first().unwrap_or(&5432);
+
+    let cut = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let relay_port = listener.local_addr().unwrap().port();
+    let relaying = Arc::clone(&cut);
+    let target = format!("{host}:{port}");
+    tokio::spawn(async move {
+        while let Ok((client, _)) = listener.accept().await {
+            let server = match tokio::net::TcpStream::connect(&target).await {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let cut = Arc::clone(&relaying);
+            tokio::spawn(async move {
+                let (mut cr, mut cw) = client.into_split();
+                let (mut sr, mut sw) = server.into_split();
+                let a = Arc::clone(&cut);
+                // Both directions, byte by chunk, until someone cuts the
+                // wire — then the task parks and the sockets stay open.
+                let up = tokio::spawn(async move { pump(&mut cr, &mut sw, a).await });
+                let down = tokio::spawn(async move { pump(&mut sr, &mut cw, cut).await });
+                let _ = tokio::join!(up, down);
+            });
+        }
+    });
+
+    async fn pump<R, W>(from: &mut R, to: &mut W, cut: Arc<std::sync::atomic::AtomicBool>)
+    where
+        R: tokio::io::AsyncRead + Unpin,
+        W: tokio::io::AsyncWrite + Unpin,
+    {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut buf = vec![0u8; 16 * 1024];
+        loop {
+            if cut.load(std::sync::atomic::Ordering::SeqCst) {
+                std::future::pending::<()>().await;
+            }
+            let n = tokio::select! {
+                read = from.read(&mut buf) => match read { Ok(0) | Err(_) => return, Ok(n) => n },
+                _ = tokio::time::sleep(Duration::from_millis(20)) => continue,
+            };
+            if cut.load(std::sync::atomic::Ordering::SeqCst) {
+                std::future::pending::<()>().await;
+            }
+            if to.write_all(&buf[..n]).await.is_err() {
+                return;
+            }
+        }
+    }
+
+    let mut through_relay = upstream.clone();
+    through_relay.host("127.0.0.1").port(relay_port);
+    let relay_url = format!(
+        "postgres://{}:{}@127.0.0.1:{relay_port}/{}",
+        upstream.get_user().unwrap_or("postgres"),
+        String::from_utf8_lossy(upstream.get_password().unwrap_or_default()),
+        upstream.get_dbname().unwrap_or("postgres"),
+    );
+
+    let spec = usai_runtime::definition::ResourceSpec {
+        name: "main".into(),
+        kind: "postgres".into(),
+        module: None,
+        config: json!({ "pool": { "max": 2 } }),
+        env: vec!["DATABASE_URL".into()],
+    };
+    let identity = usai_runtime::resource::ResourceIdentity {
+        kind: "postgres".into(),
+        name: "main".into(),
+        fingerprint: "relay".into(),
+        compat: 1,
+    };
+    let manager = {
+        use usai_runtime::resource::ResourceProvider;
+        usai_runtime::resource::postgres::PostgresProvider
+            .open(&spec, identity, &move |name| {
+                (name == "DATABASE_URL").then(|| relay_url.clone())
+            })
+            .await
+            .expect("the relay carries a real handshake")
+    };
+    manager.probe().await.expect("healthy through the relay");
+    assert!(manager.status().ready);
+
+    // Cut the wire. Nothing closes; bytes simply stop.
+    cut.store(true, std::sync::atomic::Ordering::SeqCst);
+    let started = std::time::Instant::now();
+    let reason = manager
+        .probe()
+        .await
+        .expect_err("the database cannot answer any more");
+    assert!(
+        reason.contains("timed out"),
+        "the probe waited instead of giving up: {reason}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "the probe took {:?}",
+        started.elapsed()
+    );
+    let status = manager.status();
+    assert!(
+        !status.ready,
+        "the resource still calls itself ready, so the alert would not fire"
+    );
+    manager.shutdown().await;
+}

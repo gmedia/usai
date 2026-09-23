@@ -24,10 +24,6 @@ OUT="${OUT:-$here/out/$(date -u +%Y%m%dT%H%M%SZ)}"
 PIN="${PIN:-}"
 BASE_IMAGE="${BASE_IMAGE:-ubuntu:26.04}"
 NODE="${NODE:-node}"
-# The boxed images: the binary and the application are layers of the image,
-# never bind mounts from the host (see build_boxes).
-IMG_USAI="${IMG_USAI:-p8e-usai:local}"
-IMG_NODE="${IMG_NODE:-p8e-node:local}"
 mkdir -p "$OUT"
 log() { echo "[$(date -u +%H:%M:%S)] $*" | tee -a "$OUT/log.txt"; }
 pin() { if [ -n "$PIN" ]; then taskset -c "$PIN" "$@"; else "$@"; fi; }
@@ -68,62 +64,38 @@ prepare() {
     })().catch((e) => { console.error(e.message); process.exit(1); });
   ')
   "$USAI" --root "$TEMPLATE" db migrate >/dev/null
-  build_boxes
+  if docker info >/dev/null 2>&1; then log "base image $BASE_IMAGE"; docker pull -q "$BASE_IMAGE" >/dev/null; fi
   log "prepared"
 }
 
-# Why the binary is copied into an image instead of bind-mounted:
+# Why every cell starts by dropping the page cache for what it will run:
 #
-# A read-only bind mount of the host's `node` (or `usai`) makes the box share
-# the host's page cache for that file, and page cache is charged to the cgroup
-# that *first* faulted it in. The host had already run both binaries, so the
-# box mapped pages nobody charged it for: the 2026-09-23 node floor cells
-# reported 77-88 MiB of RSS inside a 48 MiB box and were never OOM-killed,
-# which is not a thing a 48 MiB box can do. The floor it measured was the
-# floor of a machine that already has Node resident — not the one an operator
-# would provision. Copying the files into the image gives the box its own
-# inode, so every page it touches is charged to it.
-build_boxes() {
-  if ! docker info >/dev/null 2>&1; then log "  no docker: the boxed images were not built"; return 0; fi
-  log "base image $BASE_IMAGE"
-  docker pull -q "$BASE_IMAGE" >/dev/null
-  local ctx="$OUT/box-context"
-  rm -rf "$ctx"; mkdir -p "$ctx"
-  log "image $IMG_USAI"
-  # A stripped copy, which is what ships (`dist` profile, docker/runtime.Dockerfile):
-  # symbols are never faulted in, so this changes nothing the cell measures, and
-  # it keeps the build context a few tens of MB instead of ~290.
-  cp "$USAI" "$ctx/usai"
-  strip "$ctx/usai" 2>/dev/null || true
-  cp -r "$HELLO" "$ctx/hello"
-  cp -r "$TEMPLATE" "$ctx/template"
-  chmod -R a+rX "$ctx/usai" "$ctx/hello" "$ctx/template"
-  printf 'FROM %s\nCOPY usai /usai\nCOPY hello /hello\nCOPY template /template\n' "$BASE_IMAGE" > "$ctx/Dockerfile.usai"
-  docker build -q -f "$ctx/Dockerfile.usai" -t "$IMG_USAI" "$ctx" > "$OUT/box-usai.log" 2>&1 \
-    || { log "  image $IMG_USAI failed: $(tail -c 300 "$OUT/box-usai.log")"; return 0; }
-  rm -rf "$ctx/usai" "$ctx/hello" "$ctx/template"
-  local node_bin node_dir
-  node_bin="$(command -v "$NODE" 2>/dev/null || true)"
-  if [ -z "$node_bin" ]; then log "  NODE=$NODE is not on PATH: $IMG_NODE was not built"; return 0; fi
-  node_bin="$(readlink -f "$node_bin")"
-  node_dir="$(cd "$(dirname "$node_bin")/.." && pwd)"
-  log "image $IMG_NODE (node from $node_dir)"
-  # The server needs the interpreter, not the distribution: bin/node alone
-  # keeps the context small, and npm is not what is being measured.
-  mkdir -p "$ctx/node/bin"
-  cp "$node_bin" "$ctx/node/bin/node"
-  # Only what the server needs: the bench directory also holds every run's
-  # output, and an image is not a place to put it.
-  mkdir -p "$ctx/bench/baselines"
-  cp -r "$repo/scripts/qualification/bench/node_modules" "$ctx/bench/node_modules"
-  cp -r "$repo/scripts/qualification/bench/baselines/node-fastify" "$ctx/bench/baselines/node-fastify"
-  cp "$repo/scripts/qualification/bench/package.json" "$ctx/bench/package.json"
-  cp "$repo/scripts/qualification/bench/baselines/shared-schemas.mjs" "$ctx/bench/baselines/shared-schemas.mjs"
-  chmod -R a+rX "$ctx/node" "$ctx/bench"
-  printf 'FROM %s\nCOPY node /node\nCOPY bench /bench\n' "$BASE_IMAGE" > "$ctx/Dockerfile.node"
-  docker build -q -f "$ctx/Dockerfile.node" -t "$IMG_NODE" "$ctx" > "$OUT/box-node.log" 2>&1 \
-    || { log "  image $IMG_NODE failed: $(tail -c 300 "$OUT/box-node.log")"; return 0; }
-  rm -rf "$ctx"
+# The kernel charges a file's pages to the cgroup that *first* faults them in.
+# The harness runs the same binaries on the host (build, migrate, the load
+# driver is node itself), so by the time a cell started its executable was
+# already resident and already billed to the host: the box ran on memory
+# nobody asked it to pay for. That is how the 2026-09-23 node cells reported
+# 88 MiB of resident memory inside a 48 MiB box and were never OOM-killed.
+#
+# Copying the files into an image does not fix it — `docker build` warms the
+# cache just as thoroughly, and the layer file cannot be evicted without root
+# (measured: bind mount 41.9 MB resident / 8.7 MB charged, image layer 42.0 /
+# 8.9). What fixes it is `posix_fadvise(POSIX_FADV_DONTNEED)` on the files the
+# box is about to map, which needs no privileges: the container then faults
+# them itself and is charged for them, which is what a machine that has never
+# run this application looks like. `pagecache-check.sh` is the experiment.
+# Sets COLD=true when the cache was actually dropped. A cell that could not
+# drop it is still run and still reported, but it says so: a floor measured on
+# a warm cache is the optimistic one this whole mechanism exists to avoid.
+COLD=false
+evict_for_cell() {
+  COLD=false
+  # `$dir` is the cell's directory: bash locals are visible to what they call.
+  if python3 "$here/evict.py" "$@" > "$dir/evicted.txt" 2>&1; then
+    COLD=true
+  else
+    log "  could not drop the page cache (python3?): this cell is measured warm"
+  fi
 }
 
 # The cgroup a container's init process lives in, so the run can read what the
@@ -153,7 +125,7 @@ cell_failed() { # dir cell reason
 
 floor() {
   local app="$1" mem="$2" cpus="$3" worlds="$4"
-  local port status
+  local root port status
   case "$app" in hello|template|node|php) ;; *) echo "floor: hello|template|node|php"; exit 2;; esac
   port=3800; status=3801
   local name="p8e-floor" cell="$app-${mem}m-${cpus}c-${worlds}w${USAI_WASM_KEEP_RESIDENT:+-kr$USAI_WASM_KEEP_RESIDENT}"
@@ -170,12 +142,14 @@ floor() {
       # Runs as the invoking user so the sampler may read /proc/<pid>/smaps_rollup
       # and fd (root-owned processes hide them from it); no compile cache, the
       # artifact is precompiled and the filesystem is read-only.
+      root=$([ "$app" = hello ] && echo "$HELLO" || echo "$TEMPLATE")
+      evict_for_cell "$USAI" "$root/.usai"
       docker run -d --name "$name" --network host --user "$(id -u):$(id -g)" \
         --cpus "$cpus" --memory "${mem}m" --memory-swap "${mem}m" ${PIN:+--cpuset-cpus "$PIN"} \
-        -w "/$app" --read-only --tmpfs /tmp \
+        -v "$USAI:/usai:ro" -v "$root:/app:ro" -w /app --read-only --tmpfs /tmp \
         -e HOME=/tmp -e USAI_COMPILE_CACHE=0 -e DATABASE_URL="$DATABASE_URL" -e USAI_MAX_WORLDS="$worlds" \
         ${USAI_WASM_KEEP_RESIDENT:+-e USAI_WASM_KEEP_RESIDENT="$USAI_WASM_KEEP_RESIDENT"} \
-        "$IMG_USAI" /usai run --artifact "/$app/.usai/build" --port "$port" --status-addr "127.0.0.1:$status" --drain-timeout 5 \
+        "$BASE_IMAGE" /usai run --artifact /app/.usai/build --port "$port" --status-addr "127.0.0.1:$status" --drain-timeout 5 \
         > "$dir/container.id" 2> "$dir/docker.err" \
         || { cell_failed "$dir" "$cell" "docker run failed: $(head -c 300 "$dir/docker.err")"; return 0; };;
     node)
@@ -184,19 +158,37 @@ floor() {
       # needs are checked here, because each one failed silently before: a
       # non-interactive shell has no nvm on PATH, so `command -v node` came back
       # empty and /node was mounted from a directory that has no bin/node.
-      # Node, its dependencies and the app are layers of $IMG_NODE (build_boxes
-      # says why nothing here is bind-mounted). Everything this cell needs is
-      # inside the image, so the one thing to check is that the image exists.
-      if ! docker image inspect "$IMG_NODE" >/dev/null 2>&1; then
-        cell_failed "$dir" "$cell" "the image $IMG_NODE is missing - run fleet.sh prepare (it needs NODE on PATH)"
+      # The host's Node (bind-mounted with the bench's node_modules) in the
+      # same box. All three things this needs are checked here, because each
+      # one failed silently before: a non-interactive shell has no nvm on
+      # PATH, so `command -v node` came back empty and /node was mounted from
+      # a directory that has no bin/node.
+      local node_bin node_dir
+      node_bin="$(command -v "$NODE" 2>/dev/null || true)"
+      if [ -z "$node_bin" ]; then
+        cell_failed "$dir" "$cell" "NODE=$NODE is not on PATH (a non-interactive shell has no nvm) - set NODE to an absolute path"
+        return 0
+      fi
+      # The *real* path: `node` on PATH is usually a symlink into a versioned
+      # directory (nvm, ~/.local/opt/...), and a bind mount of the symlink's
+      # parent carries the link, not its target.
+      node_bin="$(readlink -f "$node_bin")"
+      node_dir="$(cd "$(dirname "$node_bin")/.." && pwd)"
+      if [ ! -x "$node_dir/bin/node" ] || [ "$(readlink -f "$node_dir/bin/node")" != "$node_bin" ]; then
+        cell_failed "$dir" "$cell" "$node_bin is not <prefix>/bin/node, so /node/bin/node would not exist in the box"
+        return 0
+      fi
+      if [ ! -d "$repo/scripts/qualification/bench/node_modules/fastify" ]; then
+        cell_failed "$dir" "$cell" "the bench's node dependencies are missing - run fleet.sh prepare"
         return 0
       fi
       ready_url="http://127.0.0.1:$port/health"; label="node+"
+      evict_for_cell "$node_bin" "$repo/scripts/qualification/bench/node_modules" "$repo/scripts/qualification/bench/baselines/node-fastify"
       docker run -d --name "$name" --network host --user "$(id -u):$(id -g)" \
         --cpus "$cpus" --memory "${mem}m" --memory-swap "${mem}m" ${PIN:+--cpuset-cpus "$PIN"} \
-        -w /bench --read-only --tmpfs /tmp \
+        -v "$node_dir:/node:ro" -v "$repo/scripts/qualification/bench:/bench:ro" -w /bench --read-only --tmpfs /tmp \
         -e HOME=/tmp -e DATABASE_URL="$DATABASE_URL" -e PORT="$port" -e POOL_MAX=4 \
-        "$IMG_NODE" /node/bin/node baselines/node-fastify/server.mjs \
+        "$BASE_IMAGE" /node/bin/node baselines/node-fastify/server.mjs \
         > "$dir/container.id" 2> "$dir/docker.err" \
         || { cell_failed "$dir" "$cell" "docker run failed: $(head -c 300 "$dir/docker.err")"; return 0; };;
     php)
@@ -287,7 +279,7 @@ floor() {
   kill "$sampler" 2>/dev/null || true; wait "$sampler" 2>/dev/null || true
   docker logs "$name" > "$dir/server.log" 2>&1 || true
   floor_teardown "$app" "$name"
-  echo "{\"cell\":\"$cell\",\"app\":\"$app\",\"memMib\":$mem,\"cpus\":$cpus,\"worlds\":$worlds,\"appliedMemoryBytes\":$applied_mem,\"appliedNanoCpus\":$applied_cpu,\"cgroupPeakBytes\":${peak_bytes:-0},\"cgroupEndBytes\":${end_bytes:-0},\"cgroupCeilingHits\":${max_events:-0},\"cgroupOomKills\":${oom_kills:-0},\"oomKilled\":$oom,\"runningAtEnd\":$running,\"readyAtEnd\":$ready_end}" > "$dir/result.json"
+  echo "{\"cell\":\"$cell\",\"app\":\"$app\",\"memMib\":$mem,\"cpus\":$cpus,\"worlds\":$worlds,\"appliedMemoryBytes\":$applied_mem,\"appliedNanoCpus\":$applied_cpu,\"cgroupPeakBytes\":${peak_bytes:-0},\"cgroupEndBytes\":${end_bytes:-0},\"cgroupCeilingHits\":${max_events:-0},\"cgroupOomKills\":${oom_kills:-0},\"coldCache\":$COLD,\"oomKilled\":$oom,\"runningAtEnd\":$running,\"readyAtEnd\":$ready_end}" > "$dir/result.json"
   log "  done: oom=$oom running=$running ready=$ready_end peak=$(( ${peak_bytes:-0} / 1048576 ))MiB ceiling_hits=${max_events:-0}"
 }
 

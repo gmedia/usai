@@ -157,7 +157,31 @@ impl ResourceProvider for PostgresProvider {
             .collect::<Vec<_>>()
             .join(", ");
         let user = pg_config.get_user().unwrap_or("?").to_owned();
-        let probe = pool.get().await.map_err(|e| {
+        // Bounded, because `connect_timeout` is not. It covers establishing
+        // the TCP connection and nothing after it, so a server that accepts
+        // and then says nothing — a half-open firewall, a black-holed route,
+        // a load balancer in front of a dead backend — left activation
+        // waiting forever with no diagnostic. Twice the connect timeout: long
+        // enough for a slow handshake over a slow link, short enough that an
+        // operator watching a deploy sees the reason.
+        let handshake_bound = pg_config
+            .get_connect_timeout()
+            .copied()
+            .unwrap_or(Duration::from_secs(5))
+            .saturating_mul(2);
+        let probe = match tokio::time::timeout(handshake_bound, pool.get()).await {
+            Ok(result) => result,
+            Err(_) => {
+                return Err(ResourceError::Startup(
+                    spec.name.clone(),
+                    format!(
+                        "cannot connect to {endpoint} (from {url_env}) as user {user}: the server accepted the connection but did not finish the PostgreSQL handshake within {} s (a firewall or proxy that holds the connection open looks exactly like this)",
+                        handshake_bound.as_secs()
+                    ),
+                ));
+            }
+        };
+        let probe = probe.map_err(|e| {
             // Say where and why, without the pool library's framing.
             let hosts = pg_config
                 .get_hosts()
@@ -1639,20 +1663,17 @@ mod tests {
     use super::*;
     use crate::definition::ResourceSpec;
 
-    /// A readiness probe that hangs must make the resource unready.
+    /// A server that accepts the connection and then says nothing must fail
+    /// activation with a reason, not hang.
     ///
-    /// Round 16 (an operator deploying 0.0.8) caught the opposite: with the
-    /// database gone, `/_usai/ready` already named the failing resource while
-    /// `/_usai/status` and `usai_resource{metric="ready"}` still said 1,
-    /// because the timeout lived in the caller and cancelled the probe before
-    /// it could record anything. The alert the runbook tells operators to set
-    /// therefore waited for the next real query.
-    ///
-    /// The server here accepts the connection and then says nothing, which is
-    /// what a database behind a dropped route looks like: the handshake never
-    /// completes, so nothing fails — it hangs.
+    /// `connect_timeout` covers establishing the TCP connection and nothing
+    /// after it, so a half-open firewall, a black-holed route or a proxy in
+    /// front of a dead backend left `usai run` waiting forever at startup
+    /// with no diagnostic — found while writing the test for the readiness
+    /// probe of round 16, where the database was merely *refused* and the
+    /// TCP timeout covered it.
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_readiness_probe_that_hangs_makes_the_resource_unready() {
+    async fn a_server_that_never_finishes_the_handshake_fails_activation() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         let port = listener.local_addr().expect("addr").port();
         std::thread::spawn(move || {
@@ -1662,7 +1683,8 @@ mod tests {
                 held.push(stream);
             }
         });
-        let url = format!("postgres://someone:secret@127.0.0.1:{port}/whatever");
+        // One second, so the bound is two and the test is quick.
+        let url = format!("postgres://someone:secret@127.0.0.1:{port}/whatever?connect_timeout=1");
         let spec = ResourceSpec {
             name: "db".into(),
             kind: "postgres".into(),
@@ -1676,36 +1698,28 @@ mod tests {
             fingerprint: "test".into(),
             compat: 1,
         };
-        let manager = PostgresProvider
+        let started = std::time::Instant::now();
+        let opened = PostgresProvider
             .open(&spec, identity, &move |name| {
                 (name == "DATABASE_URL").then(|| url.clone())
             })
-            .await
-            .expect("open is lazy: nothing has connected yet");
-
-        let started = std::time::Instant::now();
-        let reason = manager.probe().await.expect_err("the server never answers");
+            .await;
+        let text = match opened {
+            Ok(_) => panic!("a server that never speaks was accepted as a database"),
+            Err(error) => error.to_string(),
+        };
         assert!(
-            reason.contains("timed out"),
-            "the probe should give up, not wait for the connect timeout: {reason}"
+            text.contains("handshake"),
+            "the operator is told to wait, not why: {text}"
         );
         assert!(
-            started.elapsed() < std::time::Duration::from_secs(3),
-            "the probe took {:?}",
+            text.contains("DATABASE_URL"),
+            "the message does not say where the URL came from: {text}"
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(10),
+            "activation took {:?}",
             started.elapsed()
-        );
-        // The point of the test: the fold happened, so everything an operator
-        // reads agrees with the probe.
-        let status = manager.status();
-        assert!(!status.ready, "the resource is still calling itself ready");
-        assert!(
-            status
-                .detail
-                .get("lastError")
-                .and_then(|v| v.as_str())
-                .is_some_and(|e| e.contains("timed out")),
-            "no lastError for the operator to read: {:?}",
-            status.detail
         );
     }
 }

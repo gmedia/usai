@@ -47,32 +47,59 @@ on the host before every cell (`build`, `db migrate`). Every floor in
 resident. The direction of the error is known: it can only have made the
 floors look smaller than they are.
 
+## The fix that was not one
+
+The first correction was to bake the binary into an image instead of
+bind-mounting it, on the theory that the box would then get its own inode and
+its own bill. It does get its own inode. It does not get the bill —
+`docker build` warms the cache exactly as thoroughly as the host running the
+binary did. Measured on VM 47 with a 121 MB `node`, both ways, same box:
+
+| | RSS KiB | charged KiB |
+|---|---|---|
+| bind mount, warm cache | 41 884 | 8 700 |
+| image layer, warm cache | 41 984 | 8 852 |
+
+Thirty-three megabytes of resident memory that nobody charged the container
+for, either way. **Where the file comes from is not the variable. Who touched
+it first is.** A production host has the same property, incidentally: after
+`docker pull`, the layer's pages are charged to the daemon that extracted
+them, not to the container that runs them.
+
 ## What the harness does now
 
-1. **The binary and the application are layers of an image** the run builds
-   (`fleet.sh` → `build_boxes`), never bind mounts. The box gets its own
-   inode, so every page it touches is charged to it — and this is also what a
-   deployment actually looks like: `ghcr.io/gmedia/usai` carries the binary in
-   a layer.
+1. **Every cell drops the page cache for what it is about to run**
+   (`evict.py`: `posix_fadvise(POSIX_FADV_DONTNEED)` over the binary, the
+   artifact and the comparator's dependencies). It needs no privileges —
+   unlike `/proc/sys/vm/drop_caches` — and it leaves the box as the first
+   faulter, so the kernel charges it for everything it touches. That is the
+   machine a floor is a claim about: one that has never run this application
+   before. The files go back to being bind-mounted, because a file on the
+   host is one the harness can evict and an overlay layer is not.
 2. **Each cell records what the kernel charged**, not only what the sampler
    could see: `memory.peak`, `memory.current` at the end, `memory.events`
-   `max` (how often the box hit its ceiling and had to reclaim) and
-   `oom_kill`. A cell that never OOMs but sits against its ceiling is passing
-   on reclaim, and the report can now say so.
-3. **`pagecache-check.sh`** runs the experiment on its own: the same process in
-   the same box, once bind-mounted and once as an image layer, printing the
-   resident set beside the charge. Thirty seconds, no campaign, and it is how
-   to tell whether a floor harness on any other machine is honest.
+   `max` (how often the box hit its ceiling and had to reclaim), `oom_kill`,
+   and `coldCache` — whether the eviction actually happened. A cell that
+   never OOMs but sits against its ceiling is passing on reclaim, and the
+   report can now say so.
+3. **`pagecache-check.sh`** runs the experiment on its own: the same process
+   in the same box three ways — bind-mounted warm, image layer warm, and
+   bind-mounted cold — printing the resident set beside the charge. A minute,
+   no campaign, and it is how to tell whether a floor harness on any other
+   machine is honest.
 
-The PHP cells keep a bind mount of the application's `.php` files (a few
-kilobytes through nginx and FPM); the interpreter comes from its own image
-layer, so the bill is right where it matters.
+The PHP cells are the one place this is still incomplete: the interpreter
+lives in an image layer that cannot be evicted without root, so a php floor
+is measured warm and says so (`coldCache: false`). It is recorded rather than
+claimed.
 
 ## Status
 
-**The floors of 2026-09-20 and 2026-09-23 are void.** The corrected run is
-queued behind the 24 h bounded soak on VM 47 and covers `node` 48/64/96/128,
-`template` 128/192/256 and `hello` 48/64, all at 1 vCPU. Until it lands:
+**The floors of 2026-09-20 and 2026-09-23 are void**, and so is the first
+attempt at correcting them (the image-layer run of 2026-09-23 17:32, which
+this document's middle section is about). The corrected run covers `node`
+48/64/96/128, `template` 128/192/256 and `hello` 48/64, all at 1 vCPU, with a
+cold cache per cell. Until it lands:
 
 - `SUPPORTED.md`'s host envelope row is marked as under re-measurement.
 - No floor number, ours or a comparator's, should be quoted from this repo.

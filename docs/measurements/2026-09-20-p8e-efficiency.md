@@ -9,8 +9,9 @@
 > The same method was used for the comparator on 2026-09-23 and produced an
 > impossibility — 88 MiB of resident memory in a 48 MiB box, no OOM kill —
 > which is what exposed it (`docs/measurements/2026-09-23-floor-accounting.md`).
-> The harness now bakes the binary and the application into an image, the way
-> a deployment does, and records what the kernel charged the box. **Density
+> The harness now drops the page cache for what a cell is about to run, so
+> the box faults its own pages and is charged for them, and records what the
+> kernel charged it. **Density
 > (§5) and the residency finding (§4) are unaffected**: they are bare
 > processes on the host, not boxed cells.
 
