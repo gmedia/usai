@@ -4,7 +4,23 @@
 
 - Responses: **503 `capacity_exhausted`** as soon as every world slot the
   admission budget allows is busy; the refusal costs no world (it is decided
-  before one exists) so it stays cheap under any load.
+  before one exists) so it stays cheap under any load. **The body names the
+  level that is full and how much of it is in use** — read it before changing
+  anything:
+
+  ```json
+  {"error":{"code":"capacity_exhausted","message":"runtime.worlds budget exhausted (2 in use)"}}
+  ```
+
+  `runtime.worlds` is `--max-worlds`; a workload's own name there is its
+  `concurrency:`; a resource's is its pool. `usai inspect` prints all four
+  levels under **Admission**.
+- Measured behaviour under real saturation (2026-09-23, c=64 → 512 on the
+  qualification VM, `docs/measurements/2026-09-23-saturation-and-queue.md`):
+  throughput stays flat and p99 grows with the concurrency until the budget
+  is reached, and past it the instance refuses rather than degrading — no
+  fault, no queue inside a world, and the server log stays silent because a
+  refusal is a counter and not a line.
 - Metrics: `usai_http_rejections_total{reason="capacity"}` rises;
   `usai_worlds_live` sits at the bound; `usai_http_request_seconds` p99 for
   admitted requests stays bounded because nothing queues inside the runtime.
