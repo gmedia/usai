@@ -43,7 +43,10 @@ cargo test -p usai-runtime --test postgres    # needs a PostgreSQL (USAI_TEST_DA
 ```
 
 `make docs-check` fails when `docs/sdk` is stale — regenerate with
-`make docs` and commit it in the same change as the code it documents.
+`make docs` and commit it in the same change as the code it documents. The
+version bump itself changes one line of `docs/sdk/README.md`, and the check
+reads `git status`, so it only goes green **after** the release commit:
+regenerate, commit, then run the gate on the committed tree.
 
 The release notes are `CHANGELOG.md`: its top section must be the version
 being cut (rename `— Unreleased` to the date), and its **Compatibility**

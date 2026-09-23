@@ -1,4 +1,4 @@
-# @sakaladev/usai v0.0.5
+# @sakaladev/usai v0.0.6
 
 ## Modules
 

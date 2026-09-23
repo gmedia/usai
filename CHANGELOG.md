@@ -8,7 +8,7 @@ runtime of that version and the next (`SUPPORTED.md` → Versioning). Within
 GitHub releases carry the auto-generated commit list as well; this file is
 the human summary.
 
-## 0.0.6 — unreleased
+## 0.0.6 — 2026-09-23
 
 Since 0.0.5 (2026-09-18). Alpha, production qualification in progress: the
 24 h soak, the failure campaigns, the connection campaign and the
