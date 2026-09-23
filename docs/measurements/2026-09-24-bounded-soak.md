@@ -56,20 +56,29 @@ has used, and it is visible in the data exactly once:
 After that the campaigns stopped building images; the cells that followed run
 containers from images already present.
 
-## What has been observed so far (3.9 h)
+## What has been observed so far (5.3 h)
 
 | | |
 |---|---|
-| Requests | 16.8 M ok, 0 × 4xx, 0 × 5xx, 0 × 503 |
+| Requests | 27.6 M ok, 0 × 4xx, 0 × 5xx, 0 × 503 |
 | Errors | 12 client timeouts, all in the three seconds above |
-| p50 | 4.6 ms at the start, 4.1 ms now |
-| Throughput | ≈1 400–1 580 req/s, no trend yet |
+| p50 | 3.9 ms in the first hour, 4.0 ms now |
 | RSS | 52.0 → 53.2 MiB |
 | Open descriptors | 29 → 30 |
-| Worlds created | 20.5 M |
 
-Four hours is not an answer to a question about a 72-hour decay; it is
-recorded here so the shape is on paper before the verdict is.
+Throughput by hour, which is the question this run exists to answer:
+
+| hour | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|
+| mean req/s | 1 419 | 1 483 | 1 437 | 1 496 | 1 487 |
+
+**Flat.** The 72 h run with a growing dataset had lost a third of its
+throughput by this point on its way from 794 to 154 req/s; this one has no
+trend at all, at a *higher* rate, with an unchanged p50.
+
+Five hours is not an answer to a question about seventy-two, and the
+hypothesis is not proven until the run ends — but the shape so far is the
+one the dataset explanation predicts.
 
 ## What this run cannot settle
 
