@@ -196,6 +196,34 @@ done
 cleanup
 unset SERVER_PID
 
+claim "The public listener does not admit that an operator surface exists"
+# Production shape: surfaces on their own listener, a token set, nothing under
+# /_usai/ on the application port. Every one of the six paths must answer the
+# same way there — a 401 for two of them (which is what 0.0.8 did) tells an
+# unauthenticated caller that this is a Usai runtime with a protected surface
+# to come back for, and names the variable that guards it.
+THREAT_SECRET="$CANARY" USAI_STATUS_TOKEN="$TOKEN" "$USAI" --root "$APP" run \
+  --artifact "$APP/.usai/build" --port $((PORT + 12)) --status-addr "127.0.0.1:$((PORT + 13))" \
+  >"$OUT/private-surfaces.log" 2>&1 &
+SERVER_PID=$!
+for _ in $(seq 1 60); do
+  [ "$(code "http://127.0.0.1:$((PORT + 13))/_usai/live")" = "200" ] && break
+  sleep 0.5
+done
+public="http://127.0.0.1:$((PORT + 12))"
+all404=1
+for path in /_usai/status /_usai/metrics /_usai/live /_usai/ready /_usai/docs /_usai/openapi.json; do
+  got=$(code "$public$path")
+  [ "$got" = "404" ] || { all404=0; say "    $path answered $got on the application listener"; }
+done
+[ "$all404" = 1 ] && ok "every /_usai/ path on the application listener is 404" ||
+  bad "every /_usai/ path on the application listener is 404"
+body "$public/_usai/status" | grep -qi "USAI_STATUS_TOKEN\|unauthorized" &&
+  bad "the 404 body names no operator surface" ||
+  ok "the 404 body names no operator surface"
+cleanup
+unset SERVER_PID
+
 claim "The control surface refuses a public address without a token"
 out=$(THREAT_SECRET="$CANARY" "$USAI" --root "$APP" run --artifact "$APP/.usai/build" \
   --port $((PORT + 4)) --control "0.0.0.0:$((PORT + 5))" 2>&1 | head -5)
