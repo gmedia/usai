@@ -34,6 +34,12 @@ data:
   # usai-singletons.yaml. Drop both if every schedule is `exclusive: true`.
   USAI_NO_CRON: "1"                  # [doc: SUPPORTED.md, GUIDE §14]
   USAI_NO_SERVICES: "1"
+  # Stay up and keep trying when the database is not there *yet*, instead of
+  # exiting into a restart backoff that outlives the outage. The startup
+  # probe below (30 × 2 s = 60 s) gives up before this budget does, on
+  # purpose: the pod restarts cleanly rather than sitting in a half-state.
+  # [doc: ENVIRONMENT.md, docs/OPEN-QUESTIONS.md → Q20]
+  USAI_ACTIVATION_RETRY: "90"
 ---
 apiVersion: v1
 kind: Secret

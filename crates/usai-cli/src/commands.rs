@@ -314,13 +314,71 @@ pub async fn run(
     if no_services {
         tracing::info!("services off on this instance (--no-services)");
     }
-    let revision = runtime.install(definition).await?;
-    runtime.activate(revision.id).await.map_err(|e| match e {
-        usai_runtime::RuntimeError::MissingEnv(name) => anyhow::anyhow!(
-            "missing required environment: {name}\n  `usai run` reads the process environment only — it does not load .env (that is a development convenience of `usai dev`). Export {name} (or pass it through your orchestrator / compose `environment:`) and start again."
-        ),
-        other => other.into(),
-    })?;
+    // `USAI_ACTIVATION_RETRY=<seconds>`: keep trying to open the resources
+    // for this long before giving up. Unset (the default) is exactly today's
+    // behaviour — activation fails and the process exits, which is right for
+    // a missing variable and right on a VM.
+    //
+    // On an orchestrator it is not: an unreachable database at start means
+    // the container exits, and a pod that restarts for an unrelated reason
+    // during a blip (a node drain, a scale-up, a spot reclaim) then stays
+    // down until the restart backoff expires — after the database is
+    // healthy. With this set, the process stays alive and keeps trying, so a
+    // startup probe with enough budget covers the outage and nothing
+    // restarts. Only a *dependency* is retried; a missing or malformed
+    // variable is a configuration error and fails immediately, as before.
+    // `docs/OPEN-QUESTIONS.md` → Q20 is whether this should be the default.
+    let retry_for = std::env::var("USAI_ACTIVATION_RETRY")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .unwrap_or_default();
+    let give_up_at = std::time::Instant::now() + retry_for;
+    let _revision = loop {
+        // A failed attempt must not leave its revision behind: they are
+        // bounded (8), and a minute of retries would otherwise hit the bound
+        // and turn a dependency problem into "too many revisions are held".
+        let installed = runtime.install(Arc::clone(&definition)).await;
+        let attempt = match installed {
+            Ok(revision) => {
+                let id = revision.id;
+                match runtime.activate(id).await {
+                    Ok(revision) => Ok(revision),
+                    Err(e) => {
+                        let _ = runtime.remove(id);
+                        Err(e)
+                    }
+                }
+            }
+            Err(e) => Err(e),
+        };
+        match attempt {
+            Ok(revision) => break revision,
+            Err(e) => {
+                let dependency = matches!(
+                    e,
+                    usai_runtime::RuntimeError::Resource(
+                        usai_runtime::resource::ResourceError::Startup(..)
+                    )
+                );
+                if dependency && std::time::Instant::now() < give_up_at {
+                    tracing::warn!(
+                        error = %e,
+                        retry_seconds = retry_for.as_secs(),
+                        "activation failed on a dependency; staying up and retrying (USAI_ACTIVATION_RETRY)"
+                    );
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+                return Err(match e {
+                    usai_runtime::RuntimeError::MissingEnv(name) => anyhow::anyhow!(
+                        "missing required environment: {name}\n  `usai run` reads the process environment only — it does not load .env (that is a development convenience of `usai dev`). Export {name} (or pass it through your orchestrator / compose `environment:`) and start again."
+                    ),
+                    other => other.into(),
+                });
+            }
+        }
+    };
     let (control_tx, control_rx) = tokio::sync::oneshot::channel::<String>();
     let stop_requested = match control {
         Some(addr) => {

@@ -82,13 +82,21 @@ trade-off the runbook describes for the proxy.
 
 **Does not give you**:
 
-- **A pod that waits for its database.** If a bound resource cannot be
-  reached at activation, `usai run` exits 1 before binding any listener —
-  which on Kubernetes is `CrashLoopBackOff` with a backoff that reaches five
-  minutes. A pod that restarts for an unrelated reason during a database blip
-  therefore stays down after the database is healthy. Recovering is
-  `kubectl rollout restart` once the dependency is back; whether the runtime
-  should instead retry activation while answering `/_usai/ready` 503 is
+- **A pod that waits for its database — unless you ask for it.** By default,
+  a bound resource that cannot be reached at activation ends the process
+  before any listener binds, which on Kubernetes is `CrashLoopBackOff` with a
+  backoff that reaches five minutes: a pod that restarts for an unrelated
+  reason during a database blip stays down *after* the database is healthy.
+  **`USAI_ACTIVATION_RETRY=<seconds>`** keeps the process up and retrying
+  instead, so the blip is absorbed by the `startupProbe` rather than by the
+  restart backoff — set the probe's `failureThreshold × periodSeconds` above
+  the retry budget, or the kubelet kills what the runtime is still waiting
+  for. The manifests here set 90 s of retry against a 30 × 2 s startup probe
+  (60 s), deliberately: the probe gives up first, and the pod restarts
+  cleanly rather than sitting in a half-state. When the budget ends the
+  process exits with the same error as before. A missing or malformed
+  *variable* is never retried — that is a configuration error and fails at
+  once. Whether retrying should be the default is
   `docs/OPEN-QUESTIONS.md` → Q20.
 - **A "still booting" readiness answer.** The status listener binds after
   activation, so during startup a probe gets connection-refused rather than a

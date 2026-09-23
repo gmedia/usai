@@ -24,6 +24,22 @@ the human summary.
   with the one the runtime was started with), and "does not verify" says the
   signature was made for different bytes than the artifact carries.
 
+### Runtime
+
+- **`USAI_ACTIVATION_RETRY=<seconds>`** (off by default, so nothing changes
+  unless you ask). A bound resource that cannot be opened at activation ends
+  the process — right for a missing variable, right on a VM, and on an
+  orchestrator a restart loop whose backoff outlives the outage that caused
+  it: a pod that restarts for an unrelated reason during a database blip
+  cannot come back until the backoff expires, *after* the database is
+  healthy. With a budget the process stays up and retries every 2 s, so a
+  startup probe absorbs the blip and nothing restarts; when the budget ends
+  it exits with the same error as before, and a missing or malformed
+  variable is never retried. Raised by a platform engineer evaluating 0.0.9
+  for Kubernetes, who called it the one change they would require before
+  production; whether it should be the *default* is
+  `docs/OPEN-QUESTIONS.md` → Q20.
+
 ### Documentation
 
 - **`docs/deploy/k8s/`** — the Deployment, the probes, the migration Job, the
