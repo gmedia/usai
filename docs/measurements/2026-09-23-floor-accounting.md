@@ -137,11 +137,16 @@ The first cold-cache run priced the template and `hello`, and the two
 
 | cell | box | peak RSS | charged peak | `memory.events.max` | OOM | load |
 |---|---|---|---|---|---|---|
-| `hello-48m-1c-16w` | 48 MiB | 34.5 MiB | **48.0 MiB — the ceiling** | **1 518 404** | no | **1 req/s, p50 4 736 ms** |
-| `hello-64m-1c-16w` | 64 MiB | 41.8 MiB | 64.0 MiB | 237 | no | 2 080 req/s, p50 2.1 ms |
-| `template-128m-1c-48w` | 128 MiB | 106.0 MiB | 97.3 MiB | 0 | no | 1 133 req/s, p50 13.8 ms |
-| `template-192m-1c-48w` | 192 MiB | 106.1 MiB | 96.9 MiB | 0 | no | 1 104 req/s, p50 14.1 ms |
-| `template-256m-1c-48w` | 256 MiB | 105.7 MiB | 96.8 MiB | 0 | no | 1 123 req/s, p50 13.9 ms |
+| `hello-48m-1c-16w` | 48 MiB | 33.9 MiB | **48.0 MiB — the ceiling** | **1 436 352** | no | **1 req/s, p50 889 ms** |
+| `hello-64m-1c-16w` | 64 MiB | 46.3 MiB | 64.0 MiB | 94 | no | 1 235 req/s, p50 0.76 ms |
+| `template-128m-1c-48w` | 128 MiB | 106.0 MiB | 92.7 MiB | **0** | no | 1 098 req/s, p50 14.2 ms |
+| `template-192m-1c-48w` | 192 MiB | 105.8 MiB | 92.6 MiB | **0** | no | 1 101 req/s, p50 14.1 ms |
+| `template-256m-1c-48w` | 256 MiB | 105.8 MiB | 92.5 MiB | **0** | no | 1 087 req/s, p50 14.4 ms |
+
+(`hello` runs at c=1 and c=4, the template at c=16; the numbers above are the
+heavier of each cell's two load phases. Every cell used the **`dist`
+binary** — 36 MB, what ships — with the page cache dropped for it and for the
+artifact before the box started.)
 
 **The 48 MiB cell did not fail. It was never OOM-killed, it answered every
 request, and it served one of them per second.** Its resident set is *below*
@@ -152,9 +157,37 @@ of headroom", because the text it was thrashing on was somebody else's bill.
 This is exactly what `memory.events.max` was added to see, and it is why a
 floor cannot be read from the absence of an OOM kill.
 
+The same cell was run twice, once against the 287 MB build with debug info
+and once against the 36 MB binary that ships. **Both collapse**: 1 req/s
+either way, at a p50 of 4 736 ms and 889 ms respectively. The artifact's size
+changes how badly it hurts; it does not change the verdict. 48 MiB is not a
+floor for this runtime.
+
+Note what "charged peak = the ceiling" does *not* mean. Page cache expands to
+fill a cgroup's limit and is reclaimed cheaply, so a healthy box sits at its
+ceiling too: the 64 MiB cell is charged 64.0 MiB and serves 1 235 req/s at a
+p50 of 0.76 ms. The number that separates them is the **rate of reclaim
+events** — 94 against 1 436 352. Alert on the events, not on the level.
+
 Note what the template rows say as well: the charged peak is the same at 128,
-192 and 256 MiB, and no cell touches its ceiling. Memory follows the work, not
-the box — the box only decides whether the work fits.
+192 and 256 MiB (92.5–92.7 MiB), and **no cell touches its ceiling at all**.
+Memory follows the work, not the box — the box only decides whether the work
+fits.
+
+**The two floors that come out of this**, with the conditions they are true
+under (one vCPU, cpus 12–15, the 24 h soak as a disclosed co-tenant, the
+`dist` binary, cold cache except for the base image's shared libraries):
+
+- **Supported floor — the production shape** (PostgreSQL pool 4, a task, a
+  cron, status + metrics, `--max-worlds 48`): **128 MiB serves it with no
+  reclaim at all** at 1 098 req/s and p50 14 ms. **192 MiB remains the
+  number to deploy on**: it covers the 30 MiB a held revision costs during a
+  rolling deployment, and a real application's per-slot working set is
+  larger than this template's.
+- **Technical floor — hello only**, `--max-worlds 16`: **64 MiB**, not the
+  48 MiB this project published before. 48 MiB is alive and useless.
+  Where exactly between 48 and 64 the line falls is the next run's question
+  (56 and 80 MiB cells, on an idle host, after the soak).
 
 ## And the instrument bites back: measure the binary that ships
 
@@ -189,11 +222,19 @@ and the OOM kills (`usai_process_memory_*`, only when a limit exists), and
 
 ## Status
 
-**The floors of 2026-09-20 and 2026-09-23 are void**, and so is the first
-attempt at correcting them (the image-layer run of 2026-09-23 17:32, which
-this document's middle section is about). The corrected run covers `node`
-48/64/96/128, `template` 128/192/256 and `hello` 48/64, all at 1 vCPU, with a
-cold cache per cell. Until it lands:
+**Our own floors are re-measured** (the table above, run
+`p8e-floors5-20260923T190810Z-e045d20`): supported floor **192 MiB**
+(128 MiB serves with no reclaim), technical floor **64 MiB** rather than 48.
+The floors of 2026-09-20 and of earlier today are void, and so is the first
+attempt at correcting them (the image-layer run of 17:32, which this
+document's middle section is about).
+
+**The comparator floors are still owed.** They cannot be measured beside the
+soak: its load generator is a `node` process that maps the same `node` binary
+a cell would evict, and `posix_fadvise` cannot take back pages another
+process has mapped (measured: 48 MB of 121 stayed resident). They run after
+the soak, on an idle host, with `DROP_CACHES=1` — together with `hello` at 56
+and 80 MiB to place the technical floor exactly. Until it lands:
 
 - `SUPPORTED.md`'s host envelope row is marked as under re-measurement.
 - No floor number, ours or a comparator's, should be quoted from this repo.
