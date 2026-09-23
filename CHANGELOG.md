@@ -10,6 +10,13 @@ the human summary.
 
 ## 0.0.9 — Unreleased
 
+A platform engineer deployed 0.0.8 from the published artifacts for the first
+time — release binary, systemd, a proxy, two replicas, a signed artifact, a
+token-gated status listener — and would run it in production. Both of the
+serious things they found were **deployment guidance rather than the
+runtime**, and both are fixed here. Alongside them, three campaigns of our own
+turned out to be measuring nothing, which is the other half of this release.
+
 ### CLI
 
 - **`usai queue status`, `queue prune` and `queue prepare`.** The queue table
