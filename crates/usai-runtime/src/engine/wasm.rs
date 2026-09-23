@@ -102,6 +102,11 @@ struct HostData {
     deferred: Vec<(u32, u32, String)>,
     accepting: bool,
     op_starts: u64,
+    /// The world's own zero for the monotonic clock. A world is a fresh
+    /// context, so `performance.now()` starts near zero in it — and, unlike
+    /// the wall clock, it cannot step backwards when the host's clock is
+    /// corrected (this machine steps it by more than a second under load).
+    monotonic_base: std::time::Instant,
 }
 
 impl HostData {
@@ -115,6 +120,7 @@ impl HostData {
             deferred: Vec::new(),
             accepting: !build_time,
             op_starts: 0,
+            monotonic_base: std::time::Instant::now(),
         }
     }
 }
@@ -231,11 +237,17 @@ fn link(engine: &WtEngine) -> Result<Linker<HostData>, EngineError> {
         .func_wrap(
             wasi,
             "clock_time_get",
-            |mut caller: Caller<'_, HostData>, _id: i32, _precision: i64, out: i32| -> i32 {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_nanos() as u64)
-                    .unwrap_or(0);
+            |mut caller: Caller<'_, HostData>, id: i32, _precision: i64, out: i32| -> i32 {
+                // WASI clock ids: 0 realtime, 1 monotonic (2/3 are CPU-time
+                // clocks; the monotonic answer is the honest one for them).
+                let now = if id == 0 {
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_nanos() as u64)
+                        .unwrap_or(0)
+                } else {
+                    caller.data().monotonic_base.elapsed().as_nanos() as u64
+                };
                 let Some(memory) = caller.data().memory else {
                     return 1;
                 };

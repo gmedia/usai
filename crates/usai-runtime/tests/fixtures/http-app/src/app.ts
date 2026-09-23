@@ -217,6 +217,22 @@ export const busy = http.get("/busy", { timeout: "300ms" }, async () => {
 // pattern for `z.url()`, so nothing checked it: the host skipped formats and
 // the world's finalizer saw a node whose checks list is empty. Both halves
 // check it now, and the two must agree with Zod itself.
+// The clocks a world has: `Date.now()` is the host's wall clock (it can be
+// corrected, in either direction) and `performance.now()` is monotonic from
+// the world's own start. Before this, the monotonic clock was the wall clock
+// too, so it reported the time since the snapshot was taken and stepped with
+// the host's.
+export const clocks = http.get("/clocks", {}, async (ctx) => {
+  const startedPerf = performance.now();
+  const startedWall = Date.now();
+  await ctx.sleep(60);
+  return {
+    perfElapsed: performance.now() - startedPerf,
+    wallElapsed: Date.now() - startedWall,
+    perfAtStart: startedPerf,
+  };
+});
+
 export const formats = http.post(
   "/formats",
   {
@@ -685,6 +701,7 @@ export default defineApp({
     slow,
     echoQuery,
     formats,
+    clocks,
     webhook,
     rawImage,
     sendReceipt,

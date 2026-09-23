@@ -564,6 +564,10 @@ impl WorldDriver {
                 _ = async { match &stop { Some(s) => s.cancelled().await, None => std::future::pending().await } } => {
                     // Ask once; afterwards only the hard cancel path ends the world.
                     stop = None;
+                    // A graceful stop resolves the world's pending timers so a
+                    // loop can leave `ctx.sleep`; for a finite world that is a
+                    // sleep cut short, which is worth a line when chasing one.
+                    tracing::debug!(world = %self.id, "stop requested: pending timers resolve now");
                     let watchdog = self.watchdog();
                     if let Err(e) = watchdog.finish(self.instance.stop("stop requested").await) {
                         return Termination::Faulted { detail: e.to_string() };

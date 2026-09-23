@@ -1811,6 +1811,25 @@ async fn application_headers_are_on_every_response_and_a_handler_wins() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_monotonic_clock_starts_with_the_world_and_measures_elapsed_time() {
+    let Some(s) = start().await else { return };
+    let (status, body) = s.get("/clocks").await;
+    assert_eq!(status, 200, "{body}");
+    let at_start = body["perfAtStart"].as_f64().expect("perfAtStart");
+    let elapsed = body["perfElapsed"].as_f64().expect("perfElapsed");
+    // A world is a fresh context: its monotonic clock starts near zero, not
+    // at "however long ago the image was built".
+    assert!(
+        at_start < 1_000.0,
+        "the world's clock started at {at_start} ms"
+    );
+    assert!(
+        (55.0..5_000.0).contains(&elapsed),
+        "a 60 ms sleep measured {elapsed} ms on the monotonic clock"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn declared_string_formats_are_enforced_at_both_halves_of_the_boundary() {
     let Some(s) = start().await else { return };
     let valid = json!({ "url": "https://example.dev/x", "email": "a@b.co", "id": "3f2504e0-4f89-11d3-9a0c-0305e82c3301" });

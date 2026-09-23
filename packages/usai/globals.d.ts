@@ -24,6 +24,28 @@ declare function btoa(data: string): string;
 /** Present only to explain itself: rejects with `fetch_not_available`. Use an `httpClient` resource. */
 declare function fetch(input: unknown, init?: unknown): Promise<never>;
 
+/** Elapsed milliseconds since this world began — monotonic, and unaffected
+ * by a correction to the host's wall clock. Measure durations with this;
+ * `Date.now()` is the wall clock and can step. */
+declare const performance: { now(): number };
+
+// The Node reflexes, declared so the *type name* is the answer. Without
+// them TypeScript suggests installing `@types/node`, which makes
+// `process.env.X` compile and be `undefined` at runtime.
+/** A world has no process: environment is `ctx.env`, declared with `env({ … })` (GUIDE §13). */
+interface ThereIsNoProcessInAWorld_UseCtxEnv {}
+declare const process: ThereIsNoProcessInAWorld_UseCtxEnv;
+/** A world has no module loader at runtime: `import` at the top of the file. */
+interface ThereIsNoRequireInAWorld_UseImport {}
+declare const require: ThereIsNoRequireInAWorld_UseImport;
+/** A world has no filesystem: bundle what you need, or read it from a resource (GUIDE §12). */
+interface ThereIsNoFilesystemInAWorld {}
+declare const __dirname: ThereIsNoFilesystemInAWorld;
+declare const __filename: ThereIsNoFilesystemInAWorld;
+/** Binary data is `Uint8Array` here, and `bytes` in the SDK converts it (GUIDE §7). */
+interface ThereIsNoBufferInAWorld_UseUint8Array {}
+declare const Buffer: ThereIsNoBufferInAWorld_UseUint8Array;
+
 type UsaiDigest = "SHA-256" | "SHA-384" | "SHA-512";
 /** The key usages a world's HMAC keys take — the names the DOM lib uses, so
  * code written against `lib.dom` (`usage: KeyUsage[]`) typechecks here. */
