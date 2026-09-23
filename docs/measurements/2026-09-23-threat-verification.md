@@ -4,7 +4,7 @@
 them from outside the process, one probe per claim, on the tree at
 `20e9477` (0.0.8 unreleased, debug build, this dev box).
 
-**Result: 37 probes, 37 passed, 0 failed.** The two findings of the day are
+**Result: 39 probes, 39 passed, 0 failed** (37 on 2026-09-23 morning; two more the same evening, after round 16 found the runtime telling an unauthenticated caller that an operator surface exists). The two findings of the day are
 not runtime bugs — they are bugs in the *instrument*, found by distrusting a
 clean first result (below).
 
@@ -39,6 +39,7 @@ deviation is a finding against the runtime *or* against the document.
 | A tampered *signed* artifact is refused | one line appended after signing | refused |
 | An artifact signed by another key is refused | a second `keygen`'s public key | refused |
 | A silent WebSocket client does not hold a world | a connection that says nothing, against `USAI_SOCKET_IDLE_TIMEOUT=3` | accepted, then closed `1008 idle timeout` after 3 s |
+| Nothing under `/_usai/` exists on the application listener | the production shape (surfaces on their own listener, a status token set), all six paths on the application port | 404 for every one, and no `USAI_STATUS_TOKEN` in the body |
 
 ## Two bugs in the instrument, not in the runtime
 
