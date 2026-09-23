@@ -53,7 +53,18 @@ count is a property of the random ids, not of the run order.
 | `bun` | Bun, Hono, `Bun.sql`, Zod | comparable framework, not a bare `Bun.serve` |
 | `deno` | Deno, Hono, postgres.js, Zod | comparable framework, not a bare `Deno.serve` |
 | `rust` | axum, deadpool-postgres, serde + explicit bounds | the attribution control: HTTP + PostgreSQL with no execution world; what Usai pays on top of it is the runtime |
-| `php` | nginx + PHP-FPM 8.4 + PDO (persistent), docker | representative stack, reporting only, c=1 |
+| `php` | nginx + PHP-FPM 8.4 + PDO (persistent), opcache off, `pm` default, docker | the stack as it ships, reporting only, c=1 |
+| `php-tuned` | the same with opcache + tracing JIT, `pm=static` with `PHP_CHILDREN` workers, config/preload warm | PHP configured the way someone who cares would, up to c = `PHP_CHILDREN` |
+| `laravel-fpm` | Laravel 12 on the tuned stack, FormRequest validation, the query builder, config and routes cached | the comparison people actually make |
+
+nginx reaches php-fpm through an **`upstream` block with `keepalive`**
+(`fastcgi_keep_conn on` alone does nothing without it). Without that, nginx
+opens a TCP connection per request and exhausts the container's ephemeral
+ports at a few thousand requests a second — `connect() … (99: Address not
+available)`, a 502 for the client, and a comparator that looks like it falls
+over under load while its php-fpm log holds nothing but 200s. Measured on
+2026-09-23 before the fix: up to 32 % 5xx at c=64. A comparator's proxy
+configuration is part of the measurement.
 
 The JavaScript comparators validate input **and** output with the same Zod
 schemas the Usai app declares (`baselines/shared-schemas.mjs`); the Rust
