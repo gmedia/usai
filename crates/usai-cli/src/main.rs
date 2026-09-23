@@ -186,6 +186,11 @@ enum Command {
         /// listener with `--status`); USAI_STATUS_ADDR is the environment form
         #[arg(long, env = "USAI_STATUS_ADDR", default_value = "127.0.0.1:9090")]
         addr: String,
+        /// Give up after this many seconds (default 3). An exec probe's own
+        /// timeout must be above it, or the supervisor kills the check
+        /// rather than reading its answer.
+        #[arg(long, default_value_t = 3)]
+        timeout: u64,
     },
     /// Run the project's tests with `usai/test` pointed at this binary
     Test {
@@ -508,7 +513,11 @@ async fn async_main() {
             .await
         }
         Command::Dev { host, port } => commands::dev(&root, &host, port).await,
-        Command::Probe { which, addr } => commands::probe(&which, &addr).await,
+        Command::Probe {
+            which,
+            addr,
+            timeout,
+        } => commands::probe(&which, &addr, timeout).await,
         Command::Inspect { json } => commands::inspect(&root, json).await,
         Command::Graph => commands::graph(&root).await,
         Command::Config { json } => commands::config(&root, json).await,

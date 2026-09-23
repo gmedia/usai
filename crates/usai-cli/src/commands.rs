@@ -1143,13 +1143,13 @@ pub async fn task_run(root: &Path, name: &str, input: &str) -> Result<()> {
 /// 200. Made for `HEALTHCHECK` / `livenessProbe` in an image that carries
 /// no curl; the body is printed when the answer is not 200 so a failing
 /// readiness names its resource.
-pub async fn probe(which: &str, addr: &str) -> Result<()> {
+pub async fn probe(which: &str, addr: &str, timeout: u64) -> Result<()> {
     if which != "live" && which != "ready" {
         anyhow::bail!("usai probe <live|ready>");
     }
     let url = format!("http://{addr}/_usai/{which}");
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(3))
+        .timeout(Duration::from_secs(timeout.max(1)))
         .build()?;
     let response = client
         .get(&url)
