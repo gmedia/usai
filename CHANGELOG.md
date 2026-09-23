@@ -44,7 +44,8 @@ the human summary.
   front of a dead backend left `usai run` waiting at startup with no
   diagnostic at all. The handshake is bounded now (twice the connect
   timeout), and the refusal says which of the two happened.
-- **`USAI_READY_REQUIRES_RESOURCES`.** Readiness fails when a bound resource
+- **`USAI_READY_REQUIRES_RESOURCES`** (and the start-up log says when it is
+  off). Readiness fails when a bound resource
   fails its probe, and a proxy removes an unready upstream — so a shared
   PostgreSQL outage takes out every route on every replica, including the
   ones that never touch it. That remains the default (a rollout should stop
