@@ -65,7 +65,9 @@ trade-off the runbook describes for the proxy.
 
 ## What the runtime gives you, and what it does not
 
-**Gives you**, measured on 0.0.9:
+**Gives you**, measured on 0.0.9 (a developer box, not the qualification VM:
+these are orderings and timings of events — a drain, a probe flip — not
+throughput, and `docs/measurements/` is where performance numbers live):
 
 - **A drain you can put a number on.** SIGTERM → exit is
   `USAI_DRAIN_GRACE + USAI_DRAIN_TIMEOUT` plus milliseconds, so
