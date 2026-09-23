@@ -126,21 +126,28 @@ fn read_cgroup(out: &mut ProcessStatus) {
     }
     out.memory_charged_bytes = number("memory.current");
     if let Ok(events) = std::fs::read_to_string(format!("{dir}/memory.events")) {
-        for line in events.lines() {
-            match line.split_once(' ') {
-                Some(("max", n)) => out.memory_ceiling_hits = n.trim().parse().unwrap_or(0),
-                Some(("oom_kill", n)) => out.memory_oom_kills = n.trim().parse().unwrap_or(0),
-                _ => {}
-            }
-        }
+        let (hits, kills) = parse_memory_events(&events);
+        out.memory_ceiling_hits = hits;
+        out.memory_oom_kills = kills;
     }
 }
 
+/// `memory.events` is `<key> <count>` per line; the two that matter are
+/// `max` (the cgroup hit its limit and reclaimed) and `oom_kill`. Split out
+/// so the parsing is testable without a cgroup, and because `high` and
+/// `low` look enough like `max` to be picked up by a careless match.
 #[cfg(target_os = "linux")]
-fn clock_ticks_per_second() -> i64 {
-    // SAFETY: sysconf with a constant name has no preconditions.
-    let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
-    if hz > 0 { hz } else { 100 }
+fn parse_memory_events(text: &str) -> (u64, u64) {
+    let mut hits = 0;
+    let mut kills = 0;
+    for line in text.lines() {
+        match line.split_once(' ') {
+            Some(("max", n)) => hits = n.trim().parse().unwrap_or(0),
+            Some(("oom_kill", n)) => kills = n.trim().parse().unwrap_or(0),
+            _ => {}
+        }
+    }
+    (hits, kills)
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -150,14 +157,68 @@ pub fn read() -> Option<ProcessStatus> {
 
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn memory_events_is_read_key_by_key() {
+        // What a cgroup v2 file actually looks like, including the keys that
+        // are *not* the ceiling.
+        let text = "low 0
+high 12
+max 1518404
+oom 0
+oom_kill 2
+oom_group_kill 0
+";
+        assert_eq!(parse_memory_events(text), (1_518_404, 2));
+        // A kernel that reports fewer keys, and one that reports none.
+        assert_eq!(
+            parse_memory_events(
+                "max 7
+"
+            ),
+            (7, 0)
+        );
+        assert_eq!(parse_memory_events(""), (0, 0));
+        // Garbage is zero, not a panic.
+        assert_eq!(
+            parse_memory_events(
+                "max
+max notanumber
+"
+            ),
+            (0, 0)
+        );
+    }
+
+    #[test]
+    fn the_process_snapshot_reads_without_a_cgroup_limit() {
+        // On a developer box there is usually no limit; the contract is that
+        // the cgroup fields stay 0 rather than reporting the whole slice's
+        // charge as if it were this process's.
+        let p = read().expect("linux");
+        if p.memory_limit_bytes == 0 {
+            assert_eq!(p.memory_charged_bytes, 0);
+            assert_eq!(p.memory_ceiling_hits, 0);
+        }
+        assert!(p.rss_kib > 0, "a running process has a resident set");
+    }
+
     #[test]
     fn the_process_can_describe_itself() {
-        let p = super::read().expect("linux exposes /proc/self");
+        let p = read().expect("linux exposes /proc/self");
         assert!(p.rss_kib > 0);
         assert!(p.vm_kib >= p.rss_kib);
         assert!(p.threads >= 1);
         assert!(p.open_fds >= 3);
     }
+}
+
+#[cfg(target_os = "linux")]
+fn clock_ticks_per_second() -> i64 {
+    // SAFETY: sysconf with a constant name has no preconditions.
+    let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    if hz > 0 { hz } else { 100 }
 }
 
 /// Hands the allocator's free heap back to the kernel. glibc keeps what a
