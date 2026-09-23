@@ -67,7 +67,11 @@ binary did. Measured on VM 47 with a 121 MB `node`, both ways, same box:
 | image layer, warm cache | 41 984 | 8 852 |
 
 Thirty-three megabytes of resident memory that nobody charged the container
-for, either way. **Where the file comes from is not the variable. Who touched
+for, either way. (Building those images was not free for the neighbours: the
+24 h soak running beside this on cpus 0–11 recorded **its only bad seconds of
+the run** — 12 client timeouts in three seconds — at 17:34:07–17:34:35 UTC,
+which is exactly when `docker build` wrote the two layers. Same mechanism the
+72 h soak's two stalls had, this time attributable to the second.) **Where the file comes from is not the variable. Who touched
 it first is.** A production host has the same property, incidentally: after
 `docker pull`, the layer's pages are charged to the daemon that extracted
 them, not to the container that runs them.
