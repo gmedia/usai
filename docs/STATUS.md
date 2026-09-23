@@ -27,9 +27,10 @@ Production ready            NOT YET — alpha, production qualification in progr
 
 Usai is an **alpha with production qualification in progress**: no longer a
 preview (the 24 h soak, the failure campaigns and the connection campaign
-passed on a production-shaped deployment), not yet a support promise (the
-the 72 h soak passed, no human outside developer has built from the docs,
-contracts still move within 0.0.x). Run it for development, evaluation and
+passed on a production-shaped deployment), not yet a support promise (one
+external developer has used it, not the three to ten P7 asks for, and
+**contracts still move within 0.0.x** — `docs/CONTRACT-FREEZE.md` is the
+inventory that decision needs). Run it for development, evaluation and
 internal tools you can afford to restart; put it in front of paying traffic
 only if you can live with those three caveats. The gates in `docs/ROADMAP.md`, with where each stands:
 
