@@ -129,7 +129,21 @@ bookkeeping, 0.02 create.
 
 ## In progress
 
-- nothing
+- **A 24 h soak with a bounded dataset** on VM 47 (started 2026-09-23 16:49 UTC,
+  ends 2026-09-24 16:49 UTC): the control run the 72 h soak never had, to
+  attribute that run's 794 → 154 req/s decay to the 7.4 M invoices it wrote
+  rather than to the runtime. At 3.9 h: 16.8 M requests, 0 × 5xx, 0 × 503,
+  flat p50 (4.6 → 4.1 ms), and **12 client timeouts in three seconds** —
+  attributable to the second: 17:34:07–17:34:35 UTC is when a co-tenant
+  `docker build` of ours wrote two image layers. Same host-I/O mechanism the
+  earlier soaks recorded, this time proven rather than inferred.
+- **The comparator floors**, queued behind it on the idle host
+  (`DROP_CACHES=1`, the complete cold-cache method): `node` 48/64/96/128 and
+  `hello` 48/56/64/80 to place our technical floor exactly between the 48 MiB
+  that thrashes and the 64 MiB that serves
+  (`docs/measurements/2026-09-23-floor-accounting.md`). They cannot run beside
+  the soak: its load generator is a `node` process that maps the very binary a
+  cell would evict.
 
 ## Measured (2026-09-17, release build, this machine, `usai bench` on `examples/hello`, engineering numbers — not canonical evidence)
 
