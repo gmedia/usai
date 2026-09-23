@@ -19,6 +19,31 @@ fn lifetime_label(family: LifetimeFamily, trigger: &Trigger) -> &'static str {
 }
 
 /// The compact banner `usai dev` prints.
+/// The mark, the wordmark and the tagline, in the brand's teal when the
+/// terminal takes colour. The icon is the logo's: a stroke that carries the
+/// work, one that ends early, and the dot that outlives neither.
+///
+/// Printed only to a terminal — a journal or a pipe gets the plain heading,
+/// because a service log is not a place for a logo.
+pub fn logo() -> String {
+    let colour = std::io::IsTerminal::is_terminal(&std::io::stdout())
+        && std::env::var_os("NO_COLOR").is_none();
+    if !colour {
+        return "Usai\n".to_owned();
+    }
+    // The logo's gradient: deep teal into mint.
+    let teal = "\u{1b}[38;2;13;110;102m";
+    let mint = "\u{1b}[38;2;45;212;191m";
+    let dim = "\u{1b}[2m";
+    let off = "\u{1b}[0m";
+    format!(
+        "{teal}█▌ {mint}▐█   {teal}█ █ ▄▀▀ ▄▀▄ █{off}\n\
+         {teal}█▌ {mint}▝▀   {teal}█ █ ▀▀▄ █▀█ █{off}\n\
+         {teal}▜▙▄▄ {mint}●  {teal}▀▀▀ ▀▀▀ ▀ ▀ ▀{off}\n\
+         {dim}        a workload-native application runtime{off}\n"
+    )
+}
+
 pub fn banner(
     definition: &ApplicationDefinition,
     revision: &str,
@@ -32,7 +57,7 @@ pub fn banner(
     teach: bool,
 ) -> String {
     let mut out = String::new();
-    let _ = writeln!(out, "Usai\n");
+    let _ = writeln!(out, "{}", logo());
     let _ = writeln!(out, "Application  {}", definition.name());
     let _ = writeln!(out, "Revision     {revision}");
     let m = definition.manifest();
