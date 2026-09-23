@@ -293,7 +293,7 @@ enum QueueAction {
         /// `done`, `dead` or `all`
         #[arg(long, default_value = "done")]
         state: String,
-        /// Only rows older than this (`7d`, `48h`, `30m`)
+        /// Only rows created longer ago than this (`7d`, `48h`, `30m`)
         #[arg(long, default_value = "7d")]
         older_than: String,
         /// Only this topic

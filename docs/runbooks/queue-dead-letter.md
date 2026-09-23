@@ -63,8 +63,10 @@ usai --root /srv/app queue prune --state done --older-than 30d
 usai --root /srv/app queue prune --state dead --older-than 90d --dry-run
 ```
 
-`--dry-run` counts and deletes nothing. Keep `dead` longer than `done`: it is
-the evidence for the next incident.
+`--dry-run` counts and deletes nothing. The age is the message's
+`created_at` — the one column that does not move; `available_at` is pushed
+forward by every retry. Keep `dead` longer than `done`: it is the evidence
+for the next incident.
 
 Messages that must never be lost belong in the queue (durable);
 `ctx.tasks.dispatch` is not durable (ADR-0010) and its failures are a WARN

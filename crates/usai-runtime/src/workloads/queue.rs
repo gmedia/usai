@@ -80,7 +80,10 @@ pub mod ops {
     }
 
     /// Deletes finished rows. `state` is `done`, `dead` or both; `older_than`
-    /// is seconds. Returns how many rows went.
+    /// is seconds, measured from the message's `created_at` — the one column
+    /// that does not move (`available_at` is pushed forward by every retry,
+    /// so a message that was retried would look younger than it is). Returns
+    /// how many rows went.
     ///
     /// The runtime never does this by itself: a `dead` row is a message an
     /// application failed to process, and only the application's owner knows
@@ -97,7 +100,7 @@ pub mod ops {
             "execute",
             "DELETE FROM usai_queue
              WHERE state = ANY($1::text[])
-               AND coalesce(locked_at, available_at) < now() - ($2::bigint * interval '1 second')
+               AND created_at < now() - ($2::bigint * interval '1 second')
                AND ($3::text IS NULL OR topic = $3)",
             vec![json!(list), json!(older_than_seconds), json!(topic)],
         )
