@@ -41,6 +41,26 @@ the human summary.
 
 ### Runtime
 
+- **You can find a slow route now.** `usai_http_workload_request_seconds_sum`
+  and `_count` per workload (and `latencySumSeconds`/`count` in
+  `/_usai/status`): the global histogram cannot do it, because a route that
+  is a minority of traffic never moves its p99 — measured, a 204 ms route
+  left the documented latency alert reading 2.5 ms.
+- **`usai_resource{metric="waiting"}`**, plus `usai_resource_operations_total`,
+  `_transactions_total` and, for `httpClient`, `_requests_total`,
+  `_failures_total`, `_refused_total`. `waiting` separates "the dependency is
+  slow" from "my pool is too small", which are opposite fixes and were
+  byte-identical in Prometheus before; the outbound failure rate could not be
+  graphed at all.
+- **A full PostgreSQL pool refuses instead of queueing without limit.** Every
+  other admission level answers 503 at once, `usai inspect` prints the pool
+  under that heading and the runbooks promised `resource_exhausted` — but the
+  wait was unbounded, so 150 clients on a 2-connection pool got 410 × 200 at
+  a **median of 23 seconds**, no refusal, no log line. The wait is 10 s now
+  (`postgres("db", { pool: { acquireTimeoutSeconds } })`), and `usai inspect`
+  says "queues, then refuses after 10 s".
+- **`world trace` carries `request_id`**, so the runtime's own timing line
+  joins the application's lines and the proxy's access log.
 - **A cron tick is for a scheduled time, not for the moment the timer woke
   up.** A `*/1 * * * *` schedule fired **twice for the same minute** — once
   ~0.4 s early and once at the boundary, two real runs of the handler —

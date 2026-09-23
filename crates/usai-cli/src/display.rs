@@ -482,13 +482,21 @@ pub fn inspect(definition: &ApplicationDefinition) -> String {
             .iter()
             .filter(|r| r.kind == "postgres")
             .map(|r| {
+                // The pool is the one level that *waits* before it refuses:
+                // a world queues for a connection and is refused after
+                // `acquireTimeoutSeconds`. Saying so here is the difference
+                // between looking for a 503 that comes late and looking for
+                // one that never comes.
                 format!(
-                    "  resource     {:<25} {}/{}",
+                    "  resource     {:<25} {}/{} (queues, then refuses after {} s)",
                     r.config["pool"]["max"]
                         .as_u64()
                         .map_or_else(|| "16 (default)".to_owned(), |n| n.to_string()),
                     r.kind,
-                    r.name
+                    r.name,
+                    r.config["pool"]["acquireTimeoutSeconds"]
+                        .as_u64()
+                        .unwrap_or(10)
                 )
             })
             .collect();
