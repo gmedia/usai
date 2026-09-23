@@ -19,6 +19,10 @@ data:
   USAI_DRAIN_TIMEOUT: "30"
   # Nothing here: this is the instance that *does* schedule.
   USAI_NO_QUEUE: "1"                 # let the web replicas consume the queue
+  # This one matters more here than on the web Deployment: with
+  # `strategy: Recreate` there is only ever one of these, so a restart that
+  # cannot reach the database is a gap with no scheduler at all.
+  USAI_ACTIVATION_RETRY: "90"
 ---
 apiVersion: apps/v1
 kind: Deployment
