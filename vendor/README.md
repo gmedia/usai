@@ -6,10 +6,16 @@ listed patch.
 
 ## wasmtime 48.0.2 — pagemap slot reset: complete traversal, and reset paged-out dirty pages
 
-Upstream: <https://github.com/bytecodealliance/wasmtime/pull/14357> (open,
-first review answered 2026-09-23; `docs/upstream/wasmtime-pagemap-reset.md`).
-The file here is identical to the PR branch — review fixes are applied on
-both. Until it lands, this directory is the provenance record.
+Upstream: <https://github.com/bytecodealliance/wasmtime/pull/14357>
+**merged into `main` on 2026-09-23** (`a2e2d86`;
+`docs/upstream/wasmtime-pagemap-reset.md`). `src/runtime/vm/sys/unix/pagemap.rs`
+here is byte-identical to upstream `main` (checked 2026-09-23; upstream also
+carries the three unit tests, which this vendored 48.0.2 copy does not).
+v49.0.0 was released two days before the merge, so no release carries it
+yet: **this directory goes away with the first wasmtime release after
+2026-09-23** — re-vendor nothing, delete `vendor/`, drop the
+`[patch.crates-io]` entry, bump the `wasmtime` dependency, and run the
+freshness tests.
 
 `src/runtime/vm/sys/unix/pagemap.rs`, one function, two behaviours
 (`wasmtime-pagemap-reset.patch`):

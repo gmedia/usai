@@ -1,24 +1,38 @@
 # Upstreaming the Wasmtime pagemap reset patch
 
-Status (2026-09-23): **PR open, first review answered** —
-<https://github.com/bytecodealliance/wasmtime/pull/14357> (fork
-`HasanH47/wasmtime`, branch `pagemap-reset-complete-traversal`: the patch
-plus three unit tests in `pagemap.rs`, on upstream `main` at `7ad2e73`).
-Review feedback is applied on that branch; the vendored patch follows what
-lands.
+Status (2026-09-23): **merged upstream.**
+<https://github.com/bytecodealliance/wasmtime/pull/14357> was merged into
+`bytecodealliance/wasmtime` `main` on 2026-09-23 00:35 UTC as `a2e2d86`, by
+`alexcrichton`, four days after it was opened.
 
-`alexcrichton` reviewed on 2026-09-21: "the performance boost and fix here
-both seem reasonable to me", and classed the paged-out-dirty-page hole as a
-bugfix rather than a CVE because it needs an off-by-default, explicitly
-unsupported option. Five comments, all answered on 2026-09-22 (`a327688`):
-a stray `pagemap.rs.orig` removed; the documented scan criteria updated (the
-list no longer claims `PRESENT`, and the `WRITTEN` bullet carries the
-swapped-out case); `remaining_budget` and `pages_found` folded into one
-`budget` local the regions spend. The sixth point was a question — whether a
-different buffer size or a dynamically allocated one would be better — and
-the answer measured on Linux 6.18 (4 KiB pages, an 8 MiB region, a complete
-traversal at several capacities against the cost of resetting the same
-bytes):
+The path from here is mechanical:
+
+1. `main` carries it; **v49.0.0 (2026-09-21) predates the merge**, so no
+   released version has it yet.
+2. The first wasmtime release after 2026-09-23 makes `vendor/` unnecessary:
+   delete `vendor/wasmtime` and `vendor/wasmtime-pagemap-reset.patch`, drop
+   the `[patch.crates-io]`/`path` entry in the workspace `Cargo.toml`, bump
+   the `wasmtime` dependency to that version, and run
+   `engine::wasm::tests::a_reused_slot_is_fresh_*` plus the lifecycle and
+   HTTP suites on both engines. Those tests are the check that the released
+   crate really carries both behaviours.
+3. Until then the vendored file stays — and it is byte-identical to upstream
+   `main` (checked 2026-09-23), so the eventual swap changes nothing about
+   how the runtime behaves.
+
+### The review (2026-09-21 → 09-22)
+
+`alexcrichton` reviewed: "the performance boost and fix here both seem
+reasonable to me", and classed the paged-out-dirty-page hole as a bugfix
+rather than a CVE because it needs an off-by-default, explicitly unsupported
+option. Five comments, all answered on 2026-09-22 (`a327688`): a stray
+`pagemap.rs.orig` removed; the documented scan criteria updated (the list no
+longer claims `PRESENT`, and the `WRITTEN` bullet carries the swapped-out
+case); `remaining_budget` and `pages_found` folded into one `budget` local
+that the regions spend. The sixth point was a question — whether a different
+buffer size or a dynamically allocated one would be better — and the answer
+measured on Linux 6.18 (4 KiB pages, an 8 MiB region, a complete traversal
+at several capacities against the cost of resetting the same bytes):
 
 | dirty set | cap 16 | 32 | 64 | 128 | 512 | resetting the same pages |
 |---|---|---|---|---|---|---|
@@ -32,10 +46,9 @@ for a fragmented set, and even at the every-other-page extreme 32 → 64 saves
 ≈28 µs against 86 µs of resets, while 64 → 512 saves ≈22 µs more for 12 KiB
 of stack (a `page_region` is 24 bytes). With the resume loop the capacity is
 a throughput knob, not a correctness one — which is why it stays a fixed
-stack buffer of 64. Upstream `main` still has both behaviours this repository patches (`crates/wasmtime/src/runtime/vm/sys/unix/pagemap.rs`:
-`MAX_REGIONS = 32` with `walk_end` treated as the end, and a category mask
-requiring `PRESENT`). Latest release: v48.0.2, the version vendored here.
-Nothing to rebase yet; the patch applies to `main` as is.
+stack buffer of 64.
+
+### What was proposed (kept for the record)
 
 The pull request to open on `bytecodealliance/wasmtime` (a fork under the
 maintainer's account, branch `pagemap-reset-complete-traversal`), with the

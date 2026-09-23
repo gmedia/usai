@@ -331,6 +331,15 @@ two-replica campaign and the 72 h soak all passed (73.6 M requests, 0 × 5xx,
   systemd page (a real `%i` template unit with derived ports), and the
   production compose's Caddy block (`health_interval 1s`, at the drain grace).
 
+### Upstream
+
+- The pagemap slot-reset patch this runtime vendors — a complete pagemap
+  traversal and the reset of dirty pages that are not resident — was
+  **merged into Wasmtime `main`** on 2026-09-23
+  ([#14357](https://github.com/bytecodealliance/wasmtime/pull/14357)). The
+  vendored file is byte-identical to upstream; `vendor/` goes away with the
+  first wasmtime release that carries it (v49.0.0 predates the merge).
+
 ### Qualification (evidence, not features)
 
 - P5/P6 on a production-shaped deployment: 13 deliberate failures, 1 000
