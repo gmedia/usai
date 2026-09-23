@@ -90,7 +90,7 @@ them, not to the container that runs them.
 
 The PHP cells are the one place this is still incomplete: the interpreter
 lives in an image layer that cannot be evicted without root, so a php floor
-is measured warm and says so (`coldCache: false`). It is recorded rather than
+is measured warm and says so (`coldCache: "false"`). It is recorded rather than
 claimed.
 
 ## And the part that cannot be evicted
