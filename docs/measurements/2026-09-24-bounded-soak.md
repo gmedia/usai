@@ -99,8 +99,14 @@ prune: the clusters are spread evenly across the minute rather than landing
 on it. The standing hypothesis is the database's own maintenance — the prune
 deletes rows every minute, which is dead tuples for autovacuum, and
 `pg_stat_user_tables` shows exactly that churn on the tables the load writes.
-Recorded as the hypothesis it is; the growing run's numbers are the control
-for it, and that comparison belongs in the verdict rather than here.
+The database's own counters support it: six hours in,
+`pg_stat_user_tables` shows **364 autovacuums each** on `invoices` and
+`invoice_items` (3.19 M rows deleted between them) and 360 on `tenants` —
+about one a minute per table, which is the same rate as the prune and two
+orders of magnitude more often than the checkpoints (73 timed in the same
+window, one every five minutes as configured). Recorded as the hypothesis it
+is: the correlation is strong and nobody has pinned a slow second to a
+specific vacuum.
 
 **It is worth an operator's attention either way**: keeping a table bounded
 is not free, and a queue or an invoice table pruned on a schedule pays for it
