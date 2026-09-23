@@ -35,7 +35,10 @@ Where to look, always:
 - `GET /_usai/status` (with `--status`): gauges (`liveWorlds`, `liveOps`,
   `detachedWorkDetected`), `revisions[]` (state, in-flight, services, queue
   counters), `resources[]` (`in_use`, `max`, `quarantined`, and per-kind
-  `detail`), `http` (class counters, `rejections`, latency buckets).
+  `detail`), `http` (class counters, `rejections`, latency buckets),
+  `process` (RSS, PSS, faults, CPU, threads, fds — and, when the process runs
+  under a memory limit, that limit, what the cgroup is charged, and how often
+  it has hit the ceiling).
 - `GET /_usai/metrics`: the same as Prometheus text
   (`usai_http_request_seconds`, `usai_http_rejections_total{reason}`,
   `usai_resource{kind,name,metric}` (levels), `usai_resource_quarantines_total{kind,name}` (events), `usai_queue_messages_total`).
