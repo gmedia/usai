@@ -866,6 +866,15 @@ pub fn render_graph(definition: &crate::definition::ApplicationDefinition) -> St
         }
         let _ = writeln!(out);
     }
+    // What the graph is drawn from, so a missing edge reads as a missing
+    // declaration rather than as an application that hands off nothing.
+    let _ = writeln!(
+        out,
+        "Edges are declarations: resources from a workload's `resources: [...]`, hand-offs from\n\
+         `dispatches(<workload>, <task>)` and topics from `publishes(...)`, all at module scope.\n\
+         A hand-off the application performs without declaring it runs, and is logged, but cannot\n\
+         appear here."
+    );
     out
 }
 

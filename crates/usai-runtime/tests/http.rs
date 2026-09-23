@@ -1811,6 +1811,22 @@ async fn application_headers_are_on_every_response_and_a_handler_wins() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_undeclared_hand_off_still_happens_and_is_said_out_loud() {
+    let Some(s) = start().await else { return };
+    // The declaration is documentation, not permission: refusing would break
+    // running applications. But `usai graph` and the reference read the
+    // definition, so an edge nobody declared has to be reported somewhere.
+    let (status, body) = s.get("/undeclared-dispatch").await;
+    assert_eq!(status, 200, "{body}");
+    assert!(
+        body["dispatched"]
+            .as_str()
+            .is_some_and(|id| id.contains("record")),
+        "the hand-off must happen: {body}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_monotonic_clock_starts_with_the_world_and_measures_elapsed_time() {
     let Some(s) = start().await else { return };
     let (status, body) = s.get("/clocks").await;

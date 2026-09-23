@@ -389,6 +389,15 @@ export const order = dispatches(
 export const auditRead = http.get("/audit/:key", { resources: [audit] }, async (ctx) => ({
   value: await (ctx.resources["audit"] as Audit).get(ctx.params["key"]!),
 }));
+// A hand-off the application never declared: it must still happen (the
+// declaration is about description, not permission) and it must be said out
+// loud, because `usai graph` and the reference cannot show an edge nobody
+// declared.
+export const undeclaredDispatch = http.get("/undeclared-dispatch", {}, async (ctx) => {
+  const handle = await ctx.tasks.dispatch(record, { what: "undeclared" });
+  return { dispatched: handle.id };
+});
+
 export const badDispatch = http.get("/bad-dispatch", {}, async (ctx) => {
   try {
     await ctx.tasks.dispatch({ name: "does-not-exist" } as never);
@@ -721,6 +730,7 @@ export default defineApp({
     order,
     auditRead,
     badDispatch,
+    undeclaredDispatch,
     everySecond,
     overlapping,
     nightly,

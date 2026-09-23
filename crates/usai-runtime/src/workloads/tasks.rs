@@ -124,6 +124,18 @@ impl OpHandler for InvokeHandler {
     }
 }
 
+/// One warning per (workload, task) pair for the process's lifetime: the
+/// diagnostic is about a missing declaration, which does not change between
+/// requests. Bounded — the pairs are the application's own, and a revision
+/// has finitely many.
+fn undeclared_dispatch_is_new(workload: &str, task: &str) -> bool {
+    static SEEN: std::sync::LazyLock<
+        std::sync::Mutex<std::collections::HashSet<(String, String)>>,
+    > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+    let mut seen = SEEN.lock().expect("undeclared dispatch set poisoned");
+    seen.insert((workload.to_owned(), task.to_owned()))
+}
+
 /// `task.dispatch`: ownership transfers to the task runtime. The parent's
 /// promise resolves as soon as the task is queued.
 pub struct DispatchHandler {
@@ -145,6 +157,24 @@ impl OpHandler for DispatchHandler {
                 500,
                 format!("no task named {}", request.name),
             ));
+        }
+        // The hand-off happens either way — refusing it would break running
+        // applications over a declaration that is about description — but an
+        // undeclared edge makes `usai graph`, `usai inspect` and the
+        // reference say this workload hands work to nobody, which is the one
+        // thing the single-source-of-truth contract (C8) may not do quietly.
+        // Once per pair: a hot route must not write a line per request.
+        if revision
+            .definition
+            .workload(&ctx.workload)
+            .is_some_and(|(_, w)| !w.dispatches.iter().any(|d| d == &id))
+            && undeclared_dispatch_is_new(&ctx.workload, &id)
+        {
+            tracing::warn!(
+                workload = %ctx.workload,
+                task = %id,
+                "dispatched a task this workload does not declare: `usai graph` and the reference cannot show the edge. Declare it once at module scope — `dispatches(<workload>, <task>)` — the hand-off itself is unaffected"
+            );
         }
         let dispatch_id = self.queue.enqueue(Dispatched {
             revision: Arc::clone(&revision),

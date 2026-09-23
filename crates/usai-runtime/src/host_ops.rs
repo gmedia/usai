@@ -123,6 +123,9 @@ pub struct OpContext {
     /// The request id the world runs under, handed to the worlds it
     /// invokes or dispatches so one id joins a request with its hand-offs.
     pub request_id: Option<Arc<str>>,
+    /// The workload this world is running, so an operation can hold it to
+    /// what the application declared about it.
+    pub workload: Arc<str>,
 }
 
 /// Hooks other subsystems (tasks, cron) register so the op layer does not
