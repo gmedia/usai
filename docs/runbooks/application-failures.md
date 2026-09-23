@@ -76,9 +76,12 @@ default. The world is gone, its operations released, and the client has a
 
 **Before changing the number**, find out which half it is:
 
-- **Waiting** — a slow query, a slow upstream. `usai_http_request_seconds`
-  and the resource's own metrics show where the time went. Raising the
-  deadline hides it and raises the memory the concurrent worlds hold.
+- **Waiting** — a slow query, a slow upstream, or a queue for a connection.
+  `slow-route.md` is the page for telling those apart: the `world trace`
+  line's `cpu_us` against its `duration_ms` says waiting or computing in one
+  number, and `usai_resource{metric="waiting"}` says whether the queue is
+  for the pool rather than the database. Raising the deadline hides it and
+  raises the memory the concurrent worlds hold.
 - **Computing** — the CPU slice interrupted a synchronous loop. The
   interpreter is slower than a JIT (GUIDE §18); move the loop to the
   database, or split the work into a task.

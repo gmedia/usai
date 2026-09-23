@@ -34,7 +34,12 @@ refusals and *falls* while a bad-traffic flood rises. Volume is
 | `usai_service` | gauge | revision, service, state | 1 per declared `service()`, at its current state (absent when the application declares none) |
 | `usai_queue_messages_total` | counter | revision, state | Queue messages by outcome, per revision |
 | `usai_cron_ticks_total` | counter | revision, state | Cron ticks per revision: due on this instance, skipped (previous still running), failed, taken by another instance (exclusive schedules) |
-| `usai_resource` | gauge | kind, metric, name | Resource manager state (current levels): `in_use`, `max`, `ready` (1 while the last contact with the resource succeeded, 0 after a connection-level failure until the next success) |
+| `usai_http_workload_request_seconds_sum` | counter | workload | Summed response time per workload. **`rate(sum)/rate(count)` is how you find a slow route** — the histogram below has no workload label, so a slow route that is a minority of traffic never moves its p99 (`slow-route.md`) |
+| `usai_http_workload_request_seconds_count` | counter | workload | Responses timed per workload (the denominator) |
+| `usai_resource_operations_total` | counter | kind, name | Operations leased from the resource |
+| `usai_resource_transactions_total` | counter | kind, name | Transactions opened on it |
+| `usai_resource_requests_total` / `_failures_total` / `_refused_total` | counter | kind, name | Outbound requests through an `httpClient` resource: made, failed, refused by its own in-flight bound |
+| `usai_resource` | gauge | kind, metric, name | Resource manager state (current levels): `in_use`, `max`, `waiting` (worlds queued **for a connection**, not for the database — the one number that tells a small pool from a slow dependency), `ready` (1 while the last contact with the resource succeeded, 0 after a connection-level failure until the next success) |
 | `usai_resource_quarantines_total` | counter | kind, name | Connections quarantined because their outcome could not be proven (cumulative) |
 | `usai_tasks` | gauge | state | Dispatched task queue |
 | `usai_build_info` | gauge | version | Usai runtime version (label), always 1 |
@@ -129,7 +134,8 @@ it executes from.
 | Capacity refusals | `increase(usai_http_rejections_total{reason="capacity"}[5m]) > 0` | the instance is refusing work before a world exists: raise `--max-worlds`, add a replica, or find the slow dependency (`overload.md`) |
 | Database unreachable | `usai_resource{kind="postgres",metric="ready"} == 0` for 30 s | the last operation or probe failed at the connection level; `/_usai/status` → `resources[].detail.lastError` says how (`postgres-down.md`) |
 | Pool poisoned / database flapping | `increase(usai_resource_quarantines_total[5m]) > 0` while the database is healthy | a connection's outcome could not be proven (C5); a burst during a failover is expected, a steady trickle is a bug or a network problem (`postgres-down.md`) |
-| Pool saturated | `usai_resource{metric="in_use"} == on (kind,name) usai_resource{metric="max"}` for 1 m | queries wait; size `pool.max` against `--max-worlds` |
+| Pool saturated | `usai_resource{metric="waiting"} > 0` for 1 m | requests are queueing **for a connection**: size `pool.max` against `--max-worlds`, or make the queries faster. `in_use == max` on its own is healthy saturation and is not worth waking anyone for — read `waiting` beside it (`slow-route.md`) |
+| A route got slow | `topk(5, rate(usai_http_workload_request_seconds_sum[5m]) / rate(usai_http_workload_request_seconds_count[5m])) > 0.5` | per-workload mean latency. The global histogram's p99 cannot see a slow route that is a minority of traffic — measured at 2.5 ms while a route took 204 ms |
 | Detached work | `increase(usai_detached_work_total[1h]) > 0` | an application bug: a handler returned with work in flight (`500 detached_work`) |
 | Service gave up | `usai_service{state="failed"} == 1` | the restart policy is exhausted; the instance stays ready, the service is down |
 | Cron on two replicas | `sum(usai_scheduler{kind="cron"}) > 1` and the schedule is not `exclusive` | the schedule fires on each — declare it `exclusive: true` or start the others with `--no-cron` |

@@ -14,6 +14,7 @@ and how recovery happens — without reading Rust.
 | Runtime stopped, killed, or restarted | [runtime-restart.md](runtime-restart.md) |
 | Bad deployment, rollback, revision replacement | [deploy-and-rollback.md](deploy-and-rollback.md) |
 | Overload and capacity refusals | [overload.md](overload.md) |
+| **A route is slow but succeeding** (which route, waiting or computing, waiting on what) | [slow-route.md](slow-route.md) |
 | Memory pressure / OOM | [memory-pressure.md](memory-pressure.md) |
 | Invalid configuration at start | [invalid-config.md](invalid-config.md) |
 | Disk full | [disk-full.md](disk-full.md) |
@@ -40,7 +41,7 @@ Where to look, always:
   `process` (RSS, PSS, faults, CPU, threads, fds — and, when the process runs
   under a memory limit, that limit, what the cgroup is charged, and how often
   it has hit the ceiling).
-- `GET /_usai/metrics`: the same as Prometheus text
+- `GET /_usai/metrics`: the same facts as Prometheus text (the status document carries a few extra per-resource details; everything worth alerting on is in both)
   (`usai_http_request_seconds`, `usai_http_rejections_total{reason}`,
   `usai_resource{kind,name,metric}` (levels), `usai_resource_quarantines_total{kind,name}` (events), `usai_queue_messages_total`).
 - Logs: one line per event at `info`; a request that reached a world and

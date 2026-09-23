@@ -36,9 +36,15 @@
   scheduler on exactly one instance (`--no-cron` / `USAI_NO_CRON=1` on the
   others), queue consumers wherever you want the work done (`--no-queue`
   dedicates replicas), services where you mean them (`--no-services`).
-- A slow dependency, not traffic: if `usai_resource{metric="in_use"}` is at
-  `max` while worlds are live, the pool is the bottleneck (503
-  `resource_exhausted`); raise `pool.max` or fix the query.
+- A slow dependency, not traffic: `usai_resource{metric="in_use"}` at `max`
+  means the pool is fully *used*; `usai_resource{metric="waiting"}` above 0
+  means worlds are **queueing for a connection**, which is the one that
+  needs a bigger `pool.max` (the other needs a faster query). A world that
+  waits longer than `pool.acquireTimeoutSeconds` (10 s) is refused with
+  `503 resource_exhausted` — before 0.0.10 it waited for as long as its
+  deadline allowed, which is how a 2-connection pool answered 150 clients
+  with 200s at a median of 23 seconds. `slow-route.md` walks the whole
+  diagnosis.
 
 The campaign's spike (64 clients on top of 8) produced no refusals at 256
 worlds: p99 rose to 57 ms and throughput to the CPU's limit.
