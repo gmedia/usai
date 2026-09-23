@@ -28,8 +28,11 @@ What happens to the work in flight, in order:
 - **At the drain timeout** what has not returned is cancelled: `WARN drain
   did not finish; cancelling what is left` (`error="revision rev<n> did not drain
   within 30s"`), then `revision retired cancelled_in_flight=<n>`. A cancelled
-  request's client sees the connection close (the runtime records it as
-  **499**, client-side/cancelled, not a 5xx); a cancelled queue message goes
+  request's client gets a real response — `499` with
+  `{"error":{"code":"cancelled"}}`, a status the runtime counts as
+  client-side rather than a 5xx — not a dropped connection (measured on
+  0.0.9: the client received body and status 8.0 s after SIGTERM with
+  grace 2 and timeout 5); a cancelled queue message goes
   back for another attempt; a cancelled task logs `termination="cancelled:
   …"`. Nothing else is written on the way out.
 

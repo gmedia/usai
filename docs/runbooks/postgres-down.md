@@ -11,10 +11,13 @@
   outage: `sql_57p01` (`terminating connection due to administrator
   command`) or `sql_57p03` for a query that was on the wire when the server
   went down cleanly, `connection_closed` for one whose connection vanished
-  without a word (a kill −9, a network partition), `pool_error … cannot
-  connect to <host:port> as user <user>: <reason>` for every attempt while
-  the server is unreachable — the same wording as the activation-time
-  failure. Clients see the status and the code; they do not need to tell
+  without a word (a kill −9, a network partition), `pool_error` for every attempt while
+  the server is unreachable. **That code is what the client sees; the
+  wording is what the log sees** — a client's body is
+  `{"error":{"code":"pool_error","message":"internal error"}}`, while the
+  log line carries `cannot connect to <host:port> as user <user>: <reason>`,
+  the same wording as the activation-time failure. The host and the user are
+  operator information and do not leave the process. Clients see the status and the code; they do not need to tell
   them apart.
 > **Through a proxy that health-checks `/_usai/ready`, this is a total
 > outage, not a partial one.** Readiness fails when any bound resource fails
