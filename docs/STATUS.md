@@ -136,7 +136,8 @@ bookkeeping, 0.02 create.
   flat p50 (4.6 → 4.1 ms), and **12 client timeouts in three seconds** —
   attributable to the second: 17:34:07–17:34:35 UTC is when a co-tenant
   `docker build` of ours wrote two image layers. Same host-I/O mechanism the
-  earlier soaks recorded, this time proven rather than inferred.
+  earlier soaks recorded, this time proven rather than inferred. Method and
+  running numbers: `docs/measurements/2026-09-24-bounded-soak.md`.
 - **The comparator floors**, queued behind it on the idle host
   (`DROP_CACHES=1`, the complete cold-cache method): `node` 48/64/96/128 and
   `hello` 48/56/64/80 to place our technical floor exactly between the 48 MiB
