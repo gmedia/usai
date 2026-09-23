@@ -74,12 +74,22 @@ async fn fixture() -> Option<Fixture> {
 }
 
 async fn fixture_with(queue_consumers: bool) -> Option<Fixture> {
+    fixture_reaching(queue_consumers, |url| url.to_owned()).await
+}
+
+/// `reroute` rewrites the connection URL the application is given — the
+/// readiness test sends it through a relay it can cut.
+async fn fixture_reaching(
+    queue_consumers: bool,
+    reroute: impl FnOnce(&str) -> String,
+) -> Option<Fixture> {
     let Some(url) = support::database_url() else {
         eprintln!("skipping: no PostgreSQL available");
         return None;
     };
     // One database per fixture: tests run concurrently.
     let url = support::fresh_database(&url).await;
+    let url = reroute(&url);
     if std::process::Command::new("node")
         .arg("--version")
         .output()
@@ -1262,64 +1272,30 @@ async fn queue_schema_survives_concurrent_preparation() {
     f.baseline();
 }
 
-/// A database that stops answering mid-connection makes the resource unready
-/// within the probe's bound, without a request having to notice first.
+/// A TCP relay in front of the real database that can be **cut**: bytes stop
+/// moving in both directions and the sockets stay open, which is what a
+/// dropped route or an evicted firewall state looks like from inside the
+/// process. A closed socket proves nothing — that path always worked.
 ///
-/// Round 16 (an operator deploying 0.0.8) reported the opposite: with the
-/// database gone, `/_usai/ready` already named the failing resource while
-/// `usai_resource{kind="postgres",metric="ready"}` — the series the runbook
-/// tells you to alert on — was still 1, because the probe's timeout lived in
-/// the caller and cancelled the probe before it could record anything. On a
-/// quiet service the alert then waited for the next real query.
-///
-/// The relay here is a real PostgreSQL connection that can be *cut*: bytes
-/// stop moving in both directions and the sockets stay open, which is what a
-/// dropped route or a firewall state-table eviction looks like from inside
-/// the process. A closed socket would prove nothing — that path always
-/// worked.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_database_that_stops_answering_makes_the_resource_unready() {
-    let Some(url) = support::database_url() else {
-        eprintln!("skipping: no database");
-        return;
-    };
+/// Returns the URL to give the application and the switch that cuts it.
+async fn cuttable_relay(url: &str) -> Option<(String, Arc<std::sync::atomic::AtomicBool>)> {
     let upstream: tokio_postgres::Config = url.parse().expect("a valid URL");
-    let host = match &upstream.get_hosts()[0] {
+    let host = match upstream.get_hosts().first()? {
         tokio_postgres::config::Host::Tcp(h) => h.clone(),
         #[cfg(unix)]
         tokio_postgres::config::Host::Unix(_) => {
             eprintln!(
                 "skipping: the database is on a unix socket, which this relay does not speak"
             );
-            return;
+            return None;
         }
     };
     let port = *upstream.get_ports().first().unwrap_or(&5432);
-
     let cut = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let relay_port = listener.local_addr().unwrap().port();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.ok()?;
+    let relay_port = listener.local_addr().ok()?.port();
     let relaying = Arc::clone(&cut);
     let target = format!("{host}:{port}");
-    tokio::spawn(async move {
-        while let Ok((client, _)) = listener.accept().await {
-            let server = match tokio::net::TcpStream::connect(&target).await {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-            let cut = Arc::clone(&relaying);
-            tokio::spawn(async move {
-                let (mut cr, mut cw) = client.into_split();
-                let (mut sr, mut sw) = server.into_split();
-                let a = Arc::clone(&cut);
-                // Both directions, byte by chunk, until someone cuts the
-                // wire — then the task parks and the sockets stay open.
-                let up = tokio::spawn(async move { pump(&mut cr, &mut sw, a).await });
-                let down = tokio::spawn(async move { pump(&mut sr, &mut cw, cut).await });
-                let _ = tokio::join!(up, down);
-            });
-        }
-    });
 
     async fn pump<R, W>(from: &mut R, to: &mut W, cut: Arc<std::sync::atomic::AtomicBool>)
     where
@@ -1345,15 +1321,52 @@ async fn a_database_that_stops_answering_makes_the_resource_unready() {
         }
     }
 
-    let mut through_relay = upstream.clone();
-    through_relay.host("127.0.0.1").port(relay_port);
-    let relay_url = format!(
+    tokio::spawn(async move {
+        while let Ok((client, _)) = listener.accept().await {
+            let Ok(server) = tokio::net::TcpStream::connect(&target).await else {
+                continue;
+            };
+            let cut = Arc::clone(&relaying);
+            tokio::spawn(async move {
+                let (mut cr, mut cw) = client.into_split();
+                let (mut sr, mut sw) = server.into_split();
+                let a = Arc::clone(&cut);
+                let up = tokio::spawn(async move { pump(&mut cr, &mut sw, a).await });
+                let down = tokio::spawn(async move { pump(&mut sr, &mut cw, cut).await });
+                let _ = tokio::join!(up, down);
+            });
+        }
+    });
+
+    let mut relayed = format!(
         "postgres://{}:{}@127.0.0.1:{relay_port}/{}",
         upstream.get_user().unwrap_or("postgres"),
         String::from_utf8_lossy(upstream.get_password().unwrap_or_default()),
         upstream.get_dbname().unwrap_or("postgres"),
     );
+    // A probe must be able to give up faster than the test waits for it.
+    relayed.push_str("?connect_timeout=2");
+    Some((relayed, cut))
+}
 
+/// A database that stops answering makes the resource unready within the
+/// probe's bound, without a request having to notice first.
+///
+/// Round 16 (an operator deploying 0.0.8) reported the opposite: with the
+/// database gone, `/_usai/ready` already named the failing resource while
+/// `usai_resource{kind="postgres",metric="ready"}` — the series the runbook
+/// tells you to alert on — was still 1, because the probe's timeout lived in
+/// the caller and cancelled the probe before it could record anything. On a
+/// quiet service the alert then waited for the next real query.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_database_that_stops_answering_makes_the_resource_unready() {
+    let Some(url) = support::database_url() else {
+        eprintln!("skipping: no database");
+        return;
+    };
+    let Some((relay_url, cut)) = cuttable_relay(&url).await else {
+        return;
+    };
     let spec = usai_runtime::definition::ResourceSpec {
         name: "main".into(),
         kind: "postgres".into(),
@@ -1379,7 +1392,6 @@ async fn a_database_that_stops_answering_makes_the_resource_unready() {
     manager.probe().await.expect("healthy through the relay");
     assert!(manager.status().ready);
 
-    // Cut the wire. Nothing closes; bytes simply stop.
     cut.store(true, std::sync::atomic::Ordering::SeqCst);
     let started = std::time::Instant::now();
     let reason = manager
@@ -1401,4 +1413,76 @@ async fn a_database_that_stops_answering_makes_the_resource_unready() {
         "the resource still calls itself ready, so the alert would not fire"
     );
     manager.shutdown().await;
+}
+
+/// What a proxy sees when the database goes: readiness fails by default, and
+/// `USAI_READY_REQUIRES_RESOURCES=0` keeps the replica asking for traffic
+/// while still naming the failing resource.
+///
+/// The default is the one an operator has to understand before the outage
+/// (round 16 measured its consequence: a proxy health-checking `/_usai/ready`
+/// removes every replica at once, so routes that never touch the database
+/// stop answering too). Both halves are asserted here because both are
+/// documented promises — `docs/runbooks/postgres-down.md`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn readiness_follows_the_database_unless_the_deployment_says_otherwise() {
+    let Some(url) = support::database_url() else {
+        eprintln!("skipping: no database");
+        return;
+    };
+    let Some((relay_url, cut)) = cuttable_relay(&url).await else {
+        return;
+    };
+    let Some(f) = fixture_reaching(false, move |_| relay_url.clone()).await else {
+        return;
+    };
+    let ready = |requires: bool| {
+        let runtime = Arc::clone(&f.runtime);
+        async move {
+            let host = usai_runtime::http::HttpHost::new(
+                runtime,
+                usai_runtime::http::HttpConfig {
+                    serve_status: true,
+                    ready_requires_resources: requires,
+                    ..usai_runtime::http::HttpConfig::default()
+                },
+            );
+            let uri: ::http::Uri = "/_usai/ready".parse().unwrap();
+            let response = host
+                .internal(&uri, &::http::HeaderMap::new(), true, false)
+                .await
+                .expect("the status surface serves readiness");
+            let status = response.status().as_u16();
+            let body = ::http_body_util::BodyExt::collect(response.into_body())
+                .await
+                .unwrap()
+                .to_bytes();
+            (status, serde_json::from_slice::<Value>(&body).unwrap())
+        }
+    };
+
+    let (status, body) = ready(true).await;
+    assert_eq!(status, 200, "healthy: {body}");
+
+    cut.store(true, std::sync::atomic::Ordering::SeqCst);
+
+    let (status, body) = ready(true).await;
+    assert_eq!(status, 503, "the database is gone: {body}");
+    assert_eq!(body["ready"], json!(false));
+    assert!(
+        body["resources"]["main"].is_string(),
+        "the body must name what failed: {body}"
+    );
+
+    let (status, body) = ready(false).await;
+    assert_eq!(
+        status, 200,
+        "with the coupling off the replica keeps asking for traffic: {body}"
+    );
+    assert_eq!(body["ready"], json!(true));
+    assert!(
+        body["resources"]["main"].is_string(),
+        "the failing resource is still reported: {body}"
+    );
+    f.runtime.shutdown().await;
 }
