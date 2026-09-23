@@ -73,9 +73,14 @@ pub struct Gauges {
     /// Monotonic: thread CPU time spent inside guest entries, in
     /// nanoseconds, summed over every world (per-world CPU accounting).
     pub guest_cpu_ns: AtomicU64,
+    /// The same, per workload. CPU is accounted and not scheduled
+    /// (`docs/THREAT-MODEL.md`), which is only useful if an operator can see
+    /// *which* workload is spending it. Bounded by the set of workloads the
+    /// definitions name, never by request data.
+    pub guest_cpu_ns_by_workload: std::sync::RwLock<std::collections::BTreeMap<String, AtomicU64>>,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GaugeSnapshot {
     pub worlds_created: u64,
@@ -86,6 +91,9 @@ pub struct GaugeSnapshot {
     pub completions_rejected_stale: u64,
     pub detached_work_detected: u64,
     pub guest_cpu_ns: u64,
+    /// Workload id → guest CPU nanoseconds.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub guest_cpu_ns_by_workload: std::collections::BTreeMap<String, u64>,
 }
 
 impl Gauges {
@@ -99,7 +107,34 @@ impl Gauges {
             completions_rejected_stale: self.completions_rejected_stale.load(Ordering::SeqCst),
             detached_work_detected: self.detached_work_detected.load(Ordering::SeqCst),
             guest_cpu_ns: self.guest_cpu_ns.load(Ordering::SeqCst),
+            guest_cpu_ns_by_workload: self
+                .guest_cpu_ns_by_workload
+                .read()
+                .expect("cpu map poisoned")
+                .iter()
+                .map(|(k, v)| (k.clone(), v.load(Ordering::SeqCst)))
+                .collect(),
         }
+    }
+
+    /// Adds a world's guest CPU time to the totals, global and per workload.
+    pub fn record_guest_cpu(&self, workload: &str, nanos: u64) {
+        self.guest_cpu_ns.fetch_add(nanos, Ordering::Relaxed);
+        if let Some(counter) = self
+            .guest_cpu_ns_by_workload
+            .read()
+            .expect("cpu map poisoned")
+            .get(workload)
+        {
+            counter.fetch_add(nanos, Ordering::Relaxed);
+            return;
+        }
+        self.guest_cpu_ns_by_workload
+            .write()
+            .expect("cpu map poisoned")
+            .entry(workload.to_owned())
+            .or_default()
+            .fetch_add(nanos, Ordering::Relaxed);
     }
 }
 

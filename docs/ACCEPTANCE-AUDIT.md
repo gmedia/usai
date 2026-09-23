@@ -188,5 +188,6 @@ this file when an item moves.
 
 1. ~~First tagged release (`v0.0.1`) and npm token.~~ Done: `v0.0.1`–`v0.0.7`
    are published, with build provenance since 0.0.8.
-2. Per-workload CPU fairness on top of the accounting (`docs/THREAT-MODEL.md`
-   says the same: CPU is accounted, not scheduled).
+2. ~~Per-workload CPU fairness on top of the accounting.~~ Decided by
+   **ADR-0021**: accounted per workload and capped with admission; a
+   scheduler needs preemptible guest execution, which breaks the world.

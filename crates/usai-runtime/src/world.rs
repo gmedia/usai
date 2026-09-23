@@ -523,8 +523,7 @@ impl WorldDriver {
         };
         let cpu = Duration::from_nanos(self.watch.cpu_ns.load(Ordering::Relaxed));
         self.gauges
-            .guest_cpu_ns
-            .fetch_add(cpu.as_nanos() as u64, Ordering::Relaxed);
+            .record_guest_cpu(&workload_id, cpu.as_nanos() as u64);
         let mut result = WorkResult {
             world: self.id,
             workload: workload_id,

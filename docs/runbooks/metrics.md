@@ -25,6 +25,7 @@ refusals and *falls* while a bad-traffic flood rises. Volume is
 | `usai_worlds_live` | gauge | — | Execution worlds currently alive |
 | `usai_worlds_created_total` | counter | — | Execution worlds created |
 | `usai_guest_cpu_seconds_total` | counter | — | Thread CPU time spent executing guest code, summed over worlds |
+| `usai_workload_cpu_seconds_total` | counter | workload | The same, per workload. CPU is accounted, not scheduled (ADR-0021): this is how you find the workload whose share does not match its importance, and `concurrency:` plus a deadline is how you cap it |
 | `usai_ops_live` | gauge | — | External operations with a live owner |
 | `usai_completions_total` | counter | outcome | Operation completions by routing outcome |
 | `usai_detached_work_total` | counter | — | Finite worlds that ended with live asynchronous work |

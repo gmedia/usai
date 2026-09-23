@@ -482,6 +482,22 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
         "counter",
         &[(String::new(), g.guest_cpu_ns as f64 / 1e9)],
     );
+    // The same, per workload: CPU is accounted and not scheduled, so the
+    // accounting has to answer "which workload is spending it".
+    if !g.guest_cpu_ns_by_workload.is_empty() {
+        let by_workload: Vec<(String, f64)> = g
+            .guest_cpu_ns_by_workload
+            .iter()
+            .map(|(w, ns)| (format!("workload=\"{}\"", label(w)), *ns as f64 / 1e9))
+            .collect();
+        metric(
+            &mut out,
+            "usai_workload_cpu_seconds_total",
+            "Thread CPU time spent executing guest code, per workload",
+            "counter",
+            &by_workload,
+        );
+    }
     metric(
         &mut out,
         "usai_ops_live",
