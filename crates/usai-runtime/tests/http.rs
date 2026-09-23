@@ -11,6 +11,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 use usai_runtime::build::{BuildOptions, build};
+use usai_runtime::definition::{ApplicationDefinition, BuiltWith};
 use usai_runtime::http::{HttpConfig, HttpHost, serve};
 use usai_runtime::*;
 
@@ -2034,6 +2035,39 @@ async fn a_stream_declares_its_media_type() {
             .unwrap()
             .contains("Chunks are text/csv"),
         "{op}"
+    );
+    s.shutdown.cancel();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_artifact_from_a_newer_sdk_serves_but_says_so() {
+    // Supported is "same version, or built by the previous one"
+    // (`SUPPORTED.md`), and the refusals are on the manifest format and the
+    // guest ABI — which do not move every release. So the commonest
+    // rolling-deploy mistake, shipping the artifact before the binary, works
+    // silently whenever those happen to match. It must not be silent: an
+    // operator upgrading 0.0.8 → 0.0.9 ran exactly this and got no signal.
+    let Some(s) = start().await else { return };
+    let revision = s.runtime.active().unwrap();
+    let mut manifest = revision.definition.manifest().clone();
+    let built = manifest.built_with.get_or_insert(BuiltWith {
+        sdk: None,
+        runtime: None,
+        abi: None,
+    });
+    built.sdk = Some("99.0.0".into());
+    let code = revision.definition.code().clone();
+    // The definition is built, not refused …
+    let definition = ApplicationDefinition::new(manifest, code).expect("it still serves");
+    assert_eq!(
+        definition
+            .manifest()
+            .built_with
+            .as_ref()
+            .unwrap()
+            .sdk
+            .as_deref(),
+        Some("99.0.0")
     );
     s.shutdown.cancel();
 }

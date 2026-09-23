@@ -43,6 +43,11 @@ the human summary.
 - **The status listener's 404 no longer names `/_usai/openapi.json` when
   `USAI_SURFACES_OFF=docs` removed it.** 0.0.9 fixed the banner and the same
   list one path further along was left behind.
+- **An artifact built by a newer SDK than the runtime says so** (a WARN
+  naming both versions, not a refusal — refusing would strand a rollback).
+  The refusals are on the manifest format and the guest ABI, which do not
+  move every release, so shipping the artifact before the binary used to
+  work in silence.
 - **`resource opened` is logged after the resource opens.** It was logged
   before, so a failed activation printed an INFO `resource opened` directly
   above its own fatal error.

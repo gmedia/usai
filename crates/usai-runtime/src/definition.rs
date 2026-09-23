@@ -588,6 +588,15 @@ impl ApplicationDefinition {
     }
 
     pub fn new(manifest: Manifest, code: Code) -> Result<Arc<Self>, DefinitionError> {
+        /// `0.0.10` → `(0, 0, 10)`; anything that is not three numbers is
+        /// `None` and compares to nothing (a pre-release, a git build).
+        fn release_order(version: &str) -> Option<(u64, u64, u64)> {
+            let mut parts = version.split('.');
+            let mut next = || parts.next()?.parse::<u64>().ok();
+            let (a, b, c) = (next()?, next()?, next()?);
+            parts.next().is_none().then_some((a, b, c))
+        }
+
         if manifest.manifest_version != MANIFEST_VERSION {
             let built = manifest.built_with.clone().unwrap_or(BuiltWith {
                 sdk: None,
@@ -615,6 +624,25 @@ impl ApplicationDefinition {
                     .and_then(|b| b.sdk.clone())
                     .unwrap_or_else(|| "unknown".into()),
             });
+        }
+        // Supported is "same version, or built by the previous one"
+        // (`SUPPORTED.md`). The refusals above are on the manifest format
+        // and the guest ABI, which do not move every release — so an
+        // artifact from a *newer* SDK serves silently whenever they happen
+        // to match, and shipping the artifact before the binary is the
+        // commonest rolling-deploy mistake. It is not a refusal (the
+        // artifact may well be fine, and refusing would strand a rollback),
+        // but it must not be silent.
+        if let Some(sdk) = manifest.built_with.as_ref().and_then(|b| b.sdk.as_deref())
+            && let (Some(built), Some(running)) =
+                (release_order(sdk), release_order(env!("CARGO_PKG_VERSION")))
+            && built > running
+        {
+            tracing::warn!(
+                artifact_sdk = sdk,
+                runtime = env!("CARGO_PKG_VERSION"),
+                "this artifact was built by a newer SDK than the runtime serving it: supported is the same version or the one before (SUPPORTED.md). It is serving because the manifest format and the guest ABI happen to match — deploy the runtime first"
+            );
         }
         if manifest.code_sha256 != code.sha256 {
             return Err(DefinitionError::CodeMismatch {
