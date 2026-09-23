@@ -209,6 +209,30 @@ capabilities (design), latency histogram in metrics, an API reference page — a
 
 ## Known gaps / debt
 
+- **Thirteenth round (2026-09-23, an on-call engineer finding *their own*
+  slow code)** — the first round about the application's performance rather
+  than the runtime's. Four kinds of slowness (a slow query, a slow
+  JavaScript loop, a slow upstream, contention on the pool), investigated
+  from the public documents with no profiler. Verdict: the slow loop was
+  found in two minutes (`usai_workload_cpu_seconds_total` is genuinely
+  better than what a Node service gives you), the other three took between
+  four and twenty-five minutes and two of them were **not findable from
+  metrics at all**. Everything below was fixed the same night: there was no
+  per-workload latency anywhere, so the documented p99 alert read 2.5 ms
+  while a route took 204 ms (it was 98 requests among 32 631); the field that
+  separates a queue for a connection from a slow database (`waiting`) was in
+  the status JSON and nowhere else; the PostgreSQL pool **queued without
+  limit** while `usai inspect` and two runbooks promised it refused — 150
+  clients on a 2-connection pool answered 410 × 200 at a median of 23 s with
+  no refusal and no log line; `world trace` carried no `request_id`; the
+  narrow log target that gives one line per request was undocumented (the
+  documented one is 3.8 MB/s at four clients) and so was `cpu_us`, the number
+  that says waiting or computing. Written: `docs/runbooks/slow-route.md`, the
+  incident page the index never had — every other row is a failure, and this
+  one is "nothing is failing and a route is slow". Still open from it:
+  `Server-Timing` (timing per response without `--diagnostics`' stacks),
+  `console.time` in a world, and a `usai top`.
+
 - `usai dev` compiles each rebuilt image once (the build's compiled form is installed directly). Measured 2026-09-23 on an idle dev box: **a source change is serving again in ≈3 s**, of which ≈1.6 s is the image compile; a change that does not alter the manifest is recognised and keeps the running revision. (Round 13 reported 9–12 s — measured on a box that still had the session's own load on it, like its first-request numbers.) The compile still takes every core for those seconds on a small host, and the obvious way to make it faster — skipping the pre-initialisation that makes worlds cheap — would make `dev` and `run` behave differently, which is the one thing a development loop must not do.
 
 - The Wasm substrate is the research representation (ADR-0016); its per-request cost is attributed and, after P8, halved on the VM (`2026-09-19-p8-parity.md`): what remains is the interpreter running the developer surface, the boundary JSON and the fresh world itself. Do not cite the research programme's numbers for this codebase; cite the suite's. The native QuickJS engine stays as reference; do not use it for economics.
