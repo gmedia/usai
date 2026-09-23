@@ -4,7 +4,7 @@
 them from outside the process, one probe per claim, on the tree at
 `20e9477` (0.0.8 unreleased, debug build, this dev box).
 
-**Result: 35 probes, 35 passed, 0 failed.** The two findings of the day are
+**Result: 37 probes, 37 passed, 0 failed.** The two findings of the day are
 not runtime bugs — they are bugs in the *instrument*, found by distrusting a
 clean first result (below).
 
@@ -38,6 +38,7 @@ deviation is a finding against the runtime *or* against the document.
 | A signature can be required | signed artifact under `--require-signature` | serves |
 | A tampered *signed* artifact is refused | one line appended after signing | refused |
 | An artifact signed by another key is refused | a second `keygen`'s public key | refused |
+| A silent WebSocket client does not hold a world | a connection that says nothing, against `USAI_SOCKET_IDLE_TIMEOUT=3` | accepted, then closed `1008 idle timeout` after 3 s |
 
 ## Two bugs in the instrument, not in the runtime
 
@@ -59,10 +60,11 @@ has only been written. Two probes were passing without proving anything:
 
 ## What this run does not cover
 
-- **The WebSocket idle timeout** (1008 after `socket_idle_timeout`): covered
-  by the connection campaign (`2026-09-18-p5-p6-qualification.md`,
-  `conn-churn`), not re-probed here — it needs a WebSocket client and 300 s
-  of wall clock, or the environment override.
+- ~~The WebSocket idle timeout~~ — **covered since the same day**: the
+  campaign runs a second instance with `USAI_SOCKET_IDLE_TIMEOUT=3`, opens a
+  connection with a hand-rolled client (`socket-idle.mjs`, RFC 6455 enough to
+  read a close frame) and says nothing. The server accepts it and closes it
+  with `1008 idle timeout` after 3 s, which is the documented control.
 - **Admission refusal under load** (503 `capacity_exhausted`, hierarchical
   budgets): covered by `crates/usai-runtime/tests/hardening.rs`
   (`budget_exhaustion_refuses_promptly_and_recovers`) and the P5/P6

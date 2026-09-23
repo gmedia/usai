@@ -164,6 +164,24 @@ grep -q "does not declare" "$LOG" && ok "the undeclared dispatch is logged" || b
 cleanup
 unset SERVER_PID
 
+claim "A silent WebSocket client does not hold a world forever"
+# The documented control is `socket_idle_timeout` (300 s by default, far too
+# long for a probe): the campaign runs a second instance with it set to 3 s.
+THREAT_SECRET="$CANARY" USAI_SOCKET_IDLE_TIMEOUT=3 "$USAI" --root "$APP" run \
+  --artifact "$APP/.usai/build" --port $((PORT + 10)) --status --status-addr "127.0.0.1:$((PORT + 11))" \
+  >"$OUT/socket-idle.log" 2>&1 &
+SERVER_PID=$!
+for _ in $(seq 1 60); do
+  [ "$(code "http://127.0.0.1:$((PORT + 11))/_usai/ready")" = "200" ] && break
+  sleep 0.5
+done
+idle=$(node "$here/socket-idle.mjs" "ws://127.0.0.1:$((PORT + 10))/socket" 30 2>&1 | tail -1)
+say "        $idle"
+echo "$idle" | grep -q '"opened":true' && ok "the connection was accepted" || bad "the connection was accepted" "$idle"
+echo "$idle" | grep -q '"closeCode":1008' && ok "an idle connection is closed with 1008" || bad "an idle connection is closed with 1008" "$idle"
+cleanup
+unset SERVER_PID
+
 claim "A surface that is switched off is not served"
 THREAT_SECRET="$CANARY" USAI_SURFACES_OFF=metrics,docs "$USAI" --root "$APP" run \
   --artifact "$APP/.usai/build" --port $((PORT + 2)) --status --status-addr "127.0.0.1:$((PORT + 3))" \
