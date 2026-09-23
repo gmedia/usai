@@ -24,8 +24,6 @@ the human summary.
   with the one the runtime was started with), and "does not verify" says the
   signature was made for different bytes than the artifact carries.
 
-### Runtime
-
 - **`USAI_ACTIVATION_RETRY=<seconds>`** (off by default, so nothing changes
   unless you ask). A bound resource that cannot be opened at activation ends
   the process — right for a missing variable, right on a VM, and on an
