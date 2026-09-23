@@ -39,7 +39,7 @@ Design choices are closed early where reasoning is sufficient. Empirical questio
 | Q1 | Schema integration | [ADR-0002](adr/0002-schema-strategy.md) |
 | Q2 | Response API | [ADR-0003](adr/0003-response-api.md) |
 | Q3 | Authentication model | [ADR-0004](adr/0004-authentication-boundary.md) |
-| Q4 | Application artifact | [ADR-0005](adr/0005-application-artifact-identity.md) (identity/layering; byte format is a D3 follow-up) |
+| Q4 | Application artifact | [ADR-0005](adr/0005-application-artifact-identity.md) (identity/layering; byte format decided by ADR-0020: the manifest is the compatibility surface, the rest of the directory is a build output and not an interchange format) |
 | Q5 | Development reload | [ADR-0006](adr/0006-revision-lifecycle-and-dev-reload.md) |
 | Q6 | Runtime-local state | [ADR-0007](adr/0007-no-runtime-local-persistent-objects.md) |
 | Q7 | Revision lifecycle | [ADR-0006](adr/0006-revision-lifecycle-and-dev-reload.md) |
