@@ -74,10 +74,11 @@ the answer is a resource — an existing one, or a case for a new kind.
   version; the runtime refuses an artifact of another manifest format before
   serving, with a message that names both versions.
 - **`@sakaladev/create-usai` has its own version line** and is deliberately
-  ahead (0.0.11 while the runtime and SDK are at 0.0.8): it is a scaffolder,
+  ahead (0.0.11 while the runtime and SDK were at 0.0.8): it is a scaffolder,
   not part of the runtime contract, and a fix to the template it writes does
   not wait for a release of the runtime. What it scaffolds is pinned to the
-  runtime version (`^0.0.8` in the generated `package.json`, `0.0.8` images),
+  runtime version (`^X.Y.Z` in the generated `package.json` and the matching
+  images),
   so the version you check before a deployment is the one in *your* project,
   not the scaffolder's.
 - **The SDK axis**, since 0.0.8: CI also builds an application against the
