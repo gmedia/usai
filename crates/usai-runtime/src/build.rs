@@ -65,6 +65,10 @@ pub enum BuildError {
         "{root} is not a Usai project: no package.json or usai.config.ts here\n  hint: run this inside the project directory, or pass --root <dir>; `pnpm dlx @sakaladev/create-usai <dir>` creates one"
     )]
     NotAProject { root: PathBuf },
+    #[error(
+        "{root} is the scaffold template, not a project: `package.json` still has the placeholders `create-usai` fills in (`__NAME__`, `__USAI_VERSION__`).\n  hint: `pnpm dlx @sakaladev/create-usai <dir>` writes a real project; copying `templates/hello` by hand leaves the placeholders behind"
+    )]
+    UnfilledTemplate { root: PathBuf },
     #[error("bundling failed:\n{0}")]
     Bundle(String),
     #[error("io: {0}")]
@@ -350,8 +354,18 @@ const CONFIG_FILE: &str = "usai.config.ts";
 /// use TypeScript syntax but cannot perform I/O (contract C9).
 pub async fn load_config(engine: &dyn Engine, root: &Path) -> Result<ProjectConfig, BuildError> {
     let config_path = root.join(CONFIG_FILE);
-    if !config_path.exists() && !root.join("package.json").exists() {
+    let package_json = root.join("package.json");
+    if !config_path.exists() && !package_json.exists() {
         return Err(BuildError::NotAProject {
+            root: root.to_path_buf(),
+        });
+    }
+    // A hand-copied `templates/hello` fails four steps later, on an npm
+    // install of a package named `__USAI_VERSION__`. Say it here instead.
+    if let Ok(text) = std::fs::read_to_string(&package_json)
+        && (text.contains("__USAI_VERSION__") || text.contains("__NAME__"))
+    {
+        return Err(BuildError::UnfilledTemplate {
             root: root.to_path_buf(),
         });
     }

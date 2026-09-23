@@ -53,6 +53,11 @@ the human summary.
   opens a second pool; the fingerprint is how an operator sees that happen
   across a deployment (ADR-0011).
 
+- **A hand-copied scaffold template says so.** `templates/hello` still holds
+  the placeholders `create-usai` fills in, so copying it by hand failed four
+  steps later on an npm install of a package called `__USAI_VERSION__`. The
+  build names it at the first command instead.
+
 ### CI
 
 - The compatibility matrix gained its **third axis**: an application built
