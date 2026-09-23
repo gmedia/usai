@@ -15,6 +15,22 @@ then **dead-lettered**: state `dead` in `usai_queue`, `last_error` set.
   and the error; the application's own record (the invoicing example writes
   `webhook_deliveries` per attempt) shows what each attempt saw.
 
+**A dead letter whose `last_error` reads `consumer lost: claimed by … at …,
+never completed`** is a different story: the message was claimed and its
+consumer never recorded an outcome. Two causes, and the row tells them
+apart from the application's own records:
+
+- the consumer really died (a crash, an OOM kill, a `kill -9`, a lost host)
+  — the work did not finish, and redelivery is what you want;
+- the consumer finished but **could not write the outcome** (the pool was
+  saturated, the database blipped). The runtime retries that write once and
+  then logs `could not record the message's outcome; the row stays
+  'processing' …`; grep for that line at the message's `locked_at`. If it is
+  there, the handler already ran — requeue only if the handler is not
+  idempotent to a second run, and note that with `retry.maxAttempts` at its
+  default of 1 there is no second attempt, which is why the row went
+  straight to `dead`.
+
 ## What to do
 
 Fix the cause (the endpoint, the payload), then requeue: `update usai_queue

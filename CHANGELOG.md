@@ -163,6 +163,13 @@ two-replica campaign and the 72 h soak all passed (73.6 M requests, 0 × 5xx,
   lists its path parameters; `204`/`205`/`304` carry no content; the socket
   description says what the browser does per auth scheme (a cookie travels
   with the upgrade by itself).
+- **A queue consumer's outcome mark is no longer lost silently.** The write
+  that records `done`/`retry`/`dead` is retried once (synchronously) when it
+  fails and then logged with what the operator will see — a message whose
+  handler ran but whose mark never landed used to sit in `processing` until
+  the sweep redelivered or dead-lettered it, with nothing in the log. Found
+  by running a 0.0.5 and a 0.0.6 consumer against one `usai_queue` while a
+  third process saturated the pool.
 - Catch-all routes: `/files/*path` takes the rest of the path as one
   parameter; a catch-all serves the methods a literal path lacks
   (`http.options("/*any", …)` answers every preflight while `GET /users/:id`

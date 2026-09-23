@@ -128,6 +128,50 @@ async fn mark(
         .map_err(|e| e.to_string())
 }
 
+/// The mark that records a message's outcome, which must not be lost: the
+/// row stays `processing` when it is, and the sweeper then redelivers or
+/// dead-letters work that was already done (found running a 0.0.5 and a
+/// 0.0.6 consumer against one table while a third process saturated the
+/// pool). The statement is idempotent — it names the row by id — so a
+/// failure is retried once, synchronously this time, and a second failure
+/// is logged with what the operator will see because of it.
+/// `mark_outcome` for the integration tests.
+pub async fn mark_outcome_for_test(
+    manager: &dyn ResourceManager,
+    queue: &str,
+    id: i64,
+    outcome: &str,
+    sql_text: &str,
+    params: Vec<Value>,
+) {
+    mark_outcome(manager, queue, id, outcome, sql_text, params).await
+}
+
+async fn mark_outcome(
+    manager: &dyn ResourceManager,
+    queue: &str,
+    id: i64,
+    outcome: &str,
+    sql_text: &str,
+    params: Vec<Value>,
+) {
+    let Err(first) = mark(manager, "execute", sql_text, params.clone()).await else {
+        return;
+    };
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    // No `async_commit` on the retry: the whole point is to know it landed.
+    if let Err(second) = sql(manager, "execute", sql_text, params).await {
+        tracing::warn!(
+            queue = %queue,
+            id,
+            outcome,
+            error = %second,
+            first_error = %first,
+            "could not record the message's outcome; the row stays `processing` until the lost-consumer sweep redelivers it (or dead-letters it when its attempts are spent) — the handler already ran"
+        );
+    }
+}
+
 /// Databases whose queue table this process has already prepared, by the
 /// resource's fingerprint: DDL costs a catalog lock and a commit, and it
 /// used to run on **every publish** (the queue campaign measured 300
@@ -367,7 +411,15 @@ pub fn start(
                     match outcome {
                         Ok(()) => {
                             stats.done.fetch_add(1, Ordering::SeqCst);
-                            let _ = mark(manager.as_ref(), "execute", "UPDATE usai_queue SET state = 'done', locked_at = NULL, locked_by = NULL WHERE id = $1", vec![json!(claimed.id)]).await;
+                            mark_outcome(
+                                manager.as_ref(),
+                                &name,
+                                claimed.id,
+                                "done",
+                                "UPDATE usai_queue SET state = 'done', locked_at = NULL, locked_by = NULL WHERE id = $1",
+                                vec![json!(claimed.id)],
+                            )
+                            .await;
                         }
                         Err(error) => {
                             let attempt = claimed.attempts.max(1) as u32;
@@ -375,9 +427,11 @@ pub fn start(
                                 stats.retried.fetch_add(1, Ordering::SeqCst);
                                 let delay = retry.delay_ms(attempt);
                                 tracing::warn!(queue = %name, id = claimed.id, attempt, delay_ms = delay, error = %error, "message failed; retrying");
-                                let _ = mark(
+                                mark_outcome(
                                     manager.as_ref(),
-                                    "execute",
+                                    &name,
+                                    claimed.id,
+                                    "retry",
                                     "UPDATE usai_queue SET state = 'ready', available_at = now() + ($2::bigint * interval '1 millisecond'), locked_at = NULL, locked_by = NULL, last_error = $3 WHERE id = $1",
                                     vec![json!(claimed.id), json!(delay), json!(error)],
                                 )
@@ -385,7 +439,15 @@ pub fn start(
                             } else {
                                 stats.dead.fetch_add(1, Ordering::SeqCst);
                                 tracing::error!(queue = %name, id = claimed.id, attempt, error = %error, "message dead-lettered");
-                                let _ = sql(manager.as_ref(), "execute", "UPDATE usai_queue SET state = 'dead', locked_at = NULL, locked_by = NULL, last_error = $2 WHERE id = $1", vec![json!(claimed.id), json!(error)]).await;
+                                mark_outcome(
+                                    manager.as_ref(),
+                                    &name,
+                                    claimed.id,
+                                    "dead",
+                                    "UPDATE usai_queue SET state = 'dead', locked_at = NULL, locked_by = NULL, last_error = $2 WHERE id = $1",
+                                    vec![json!(claimed.id), json!(error)],
+                                )
+                                .await;
                             }
                         }
                     }

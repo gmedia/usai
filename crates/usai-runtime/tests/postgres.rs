@@ -939,6 +939,200 @@ async fn messages_a_lost_consumer_had_claimed_are_reclaimed() {
 /// consumers off (fresh database, no table), eight workers preparing the
 /// queue schema at once used to lose three of them to 42P07. Every worker
 /// must end up with the schema, without an error.
+/// A failed outcome mark must not vanish: the statement is idempotent, so a
+/// blip retries synchronously, and only a second failure is (loudly) given
+/// up on. Simulated by taking the table away between the handler and the
+/// mark — the retry then fails too, and what must not happen is a silent
+/// success.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_failed_outcome_mark_is_retried_and_then_said_out_loud() {
+    let Some(f) = fixture().await else { return };
+    let rev = f.runtime.active().unwrap();
+    let manager = rev.resources().get("main").cloned().unwrap();
+    usai_runtime::workloads::queue::ensure_schema(manager.as_ref())
+        .await
+        .unwrap();
+    let call = |sql: &str, params: Vec<Value>| {
+        let m = Arc::clone(&manager);
+        let sql = sql.to_owned();
+        async move {
+            m.call(
+                ResourceCall {
+                    method: "one".into(),
+                    args: json!({ "sql": sql, "params": params }),
+                },
+                CancellationToken::new(),
+            )
+            .await
+        }
+    };
+    let id = call(
+        "INSERT INTO usai_queue (topic, payload, available_at, state, locked_at, locked_by, attempts) VALUES ('orders', $1::jsonb, now(), 'processing', now(), 'test', 1) RETURNING id",
+        vec![json!({ "orderId": "x" })],
+    )
+    .await
+    .unwrap()["id"]
+        .clone();
+    // The mark lands on the first try.
+    usai_runtime::workloads::queue::mark_outcome_for_test(
+        manager.as_ref(),
+        "orders",
+        id.as_i64().unwrap(),
+        "done",
+        "UPDATE usai_queue SET state = 'done', locked_at = NULL, locked_by = NULL WHERE id = $1",
+        vec![id.clone()],
+    )
+    .await;
+    let row = call(
+        "SELECT state FROM usai_queue WHERE id = $1",
+        vec![id.clone()],
+    )
+    .await
+    .unwrap();
+    assert_eq!(row["state"], "done");
+    // And when the statement cannot work at all, the call still returns —
+    // the consumer loop is never blocked by a database that refuses it.
+    usai_runtime::workloads::queue::mark_outcome_for_test(
+        manager.as_ref(),
+        "orders",
+        id.as_i64().unwrap(),
+        "done",
+        "UPDATE usai_queue_gone SET state = 'done' WHERE id = $1",
+        vec![id],
+    )
+    .await;
+    f.baseline();
+}
+
+/// A rolling upgrade shares one `usai_queue` between versions. The table a
+/// 0.0.5 deployment left behind (no `request_id`, one index) must upgrade in
+/// place when a newer runtime touches it, and the statements the older
+/// runtime issues must keep working against the upgraded table — otherwise
+/// "both versions can serve behind one proxy" (`SUPPORTED.md`) is a wish.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_queue_table_upgrades_in_place_and_the_previous_version_keeps_working() {
+    let Some(f) = fixture().await else { return };
+    let rev = f.runtime.active().unwrap();
+    let manager = rev.resources().get("main").cloned().unwrap();
+    let exec = |sql: &str, params: Vec<Value>| {
+        let m = Arc::clone(&manager);
+        let sql = sql.to_owned();
+        async move {
+            m.call(
+                ResourceCall {
+                    method: "execute".into(),
+                    args: json!({ "sql": sql, "params": params }),
+                },
+                CancellationToken::new(),
+            )
+            .await
+        }
+    };
+    let one = |sql: &str, params: Vec<Value>| {
+        let m = Arc::clone(&manager);
+        let sql = sql.to_owned();
+        async move {
+            m.call(
+                ResourceCall {
+                    method: "one".into(),
+                    args: json!({ "sql": sql, "params": params }),
+                },
+                CancellationToken::new(),
+            )
+            .await
+        }
+    };
+
+    // The table as 0.0.5 created it, verbatim.
+    exec("DROP TABLE IF EXISTS usai_queue", vec![])
+        .await
+        .unwrap();
+    for statement in [
+        "CREATE TABLE usai_queue (
+           id bigserial PRIMARY KEY,
+           topic text NOT NULL,
+           payload jsonb NOT NULL,
+           state text NOT NULL DEFAULT 'ready',
+           attempts int NOT NULL DEFAULT 0,
+           available_at timestamptz NOT NULL DEFAULT now(),
+           locked_at timestamptz,
+           locked_by text,
+           last_error text,
+           created_at timestamptz NOT NULL DEFAULT now()
+         )",
+        "CREATE INDEX usai_queue_ready ON usai_queue (topic, available_at) WHERE state = 'ready'",
+    ] {
+        exec(statement, vec![]).await.unwrap();
+    }
+    // A message the old version published, waiting in the old table.
+    exec(
+        "INSERT INTO usai_queue (topic, payload, available_at) VALUES ($1, $2::jsonb, now())",
+        vec![json!("orders"), json!({ "orderId": "from-0.0.5" })],
+    )
+    .await
+    .unwrap();
+
+    // This runtime joins: preparing the schema adds the column and the
+    // indexes to the existing table, and leaves the waiting message alone.
+    usai_runtime::workloads::queue::ensure_schema(manager.as_ref())
+        .await
+        .expect("the old table upgrades in place");
+    let columns = one(
+        "SELECT count(*)::int AS n FROM information_schema.columns WHERE table_name = 'usai_queue' AND column_name = 'request_id'",
+        vec![],
+    )
+    .await
+    .unwrap();
+    assert_eq!(columns["n"], 1, "request_id was added: {columns}");
+    let kept = one(
+        "SELECT payload->>'orderId' AS id, request_id FROM usai_queue WHERE topic = 'orders'",
+        vec![],
+    )
+    .await
+    .unwrap();
+    assert_eq!(kept["id"], "from-0.0.5");
+    assert_eq!(
+        kept["request_id"],
+        Value::Null,
+        "an old row has no id: {kept}"
+    );
+
+    // A new publish carries the request id; the old version's own statements
+    // — publish, claim, done, verbatim from 0.0.5 — still work on the
+    // upgraded table.
+    exec(
+        "INSERT INTO usai_queue (topic, payload, available_at, request_id) VALUES ($1, $2::jsonb, now(), $3)",
+        vec![json!("orders"), json!({ "orderId": "from-0.0.6" }), json!("trace-1")],
+    )
+    .await
+    .unwrap();
+    one(
+        "INSERT INTO usai_queue (topic, payload, available_at) VALUES ($1, $2::jsonb, now() + ($3::bigint * interval '1 millisecond')) RETURNING id",
+        vec![json!("orders"), json!({ "orderId": "0.0.5-publish" }), json!(0)],
+    )
+    .await
+    .unwrap();
+    for expected in ["from-0.0.5", "from-0.0.6", "0.0.5-publish"] {
+        let claimed = one(
+            "UPDATE usai_queue SET state = 'processing', locked_at = now(), locked_by = $1, attempts = attempts + 1
+             WHERE id = (SELECT id FROM usai_queue WHERE topic = $2 AND state = 'ready' AND available_at <= now()
+                         ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1)
+             RETURNING id, payload, attempts",
+            vec![json!("old-consumer"), json!("orders")],
+        )
+        .await
+        .unwrap();
+        assert_eq!(claimed["payload"]["orderId"], expected, "{claimed}");
+        exec(
+            "UPDATE usai_queue SET state = 'done', locked_at = NULL, locked_by = NULL WHERE id = $1",
+            vec![claimed["id"].clone()],
+        )
+        .await
+        .unwrap();
+    }
+    f.baseline();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn queue_schema_survives_concurrent_preparation() {
     let Some(f) = fixture_with(false).await else {

@@ -233,6 +233,30 @@ off` row measures: ≈8 ms of worker time, ≈1 000 messages/s for eight
 workers on one instance. 5× over the day's first run, all of it in the
 queue's use of the database, none of it in the model.
 
+## Mixed versions on one queue table (2026-09-23, developer machine)
+
+`SUPPORTED.md` and `runbooks/systemd.md` promise that a 0.0.5 and a 0.0.6
+instance can serve behind one proxy during a roll — "they share nothing but
+PostgreSQL, and the queue table and the migration ledger are stable across
+versions". Measured, because 0.0.6 adds a column to `usai_queue`:
+
+| Step | Result |
+|---|---|
+| The 0.0.5 schema created verbatim (no `request_id`, one index), a message waiting in it, then a 0.0.6 runtime prepares the schema | the column and the two indexes are added in place, the waiting row is untouched and keeps `request_id` NULL (regression test `the_queue_table_upgrades_in_place_and_the_previous_version_keeps_working`) |
+| The 0.0.5 statements (publish, claim, done) run verbatim against the upgraded table | all three work; a 0.0.5 consumer never sees the new column |
+| 20 messages published by the 0.0.6 CLI, consumed by a **0.0.5 runtime** | 20/20 consumed, `state = done` |
+| Both runtimes consuming the same topic while the **0.0.5 CLI** publishes 100 with 8 in flight | 100 distinct messages processed exactly once — 92 by the 0.0.5 instance, 8 by the 0.0.6 one — no duplicate rows, no ordering requirement broken |
+
+One message of the 120 ended as a dead letter (`consumer lost: claimed by
+rev1:bench.work:6 …`, the 0.0.5 `locked_by` format) although its handler had
+run: under the publisher's burst the 0.0.5 consumer's `done` mark did not
+land, the row stayed `processing`, and the 0.0.6 sweeper dead-lettered it 40 s
+later because the application declares no `retry` (`maxAttempts` defaults to
+1). The mark was discarded with `let _ =` on both versions — a failed mark
+was silent. **Fixed in 0.0.6**: the mark is retried once, synchronously, and a
+second failure is logged with the consequence; the runbook says how to tell
+the two kinds of `consumer lost` apart (`runbooks/queue-dead-letter.md`).
+
 ## Not done here
 
 Three or more replicas, and a replica set across hosts (the queue and the
