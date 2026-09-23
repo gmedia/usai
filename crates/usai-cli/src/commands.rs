@@ -289,7 +289,7 @@ pub async fn run(
                     if let Some(tx) = tx.take() {
                         let _ = tx.send(format!("http://{bound}"));
                     }
-                    if !announce {
+                    if !announce && !machine_output() {
                         eprintln!("Control   http://{bound}");
                     }
                 })
@@ -340,6 +340,18 @@ pub async fn graph(root: &Path) -> Result<()> {
     let (definition, _) = definition_for(root, None).await?;
     print!("{}", usai_runtime::observability::render_graph(&definition));
     Ok(())
+}
+
+/// `--log-format json`: no human banner on stdout, so everything the process
+/// writes is one JSON object per line on stderr.
+static MACHINE_OUTPUT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn suppress_human_output() {
+    MACHINE_OUTPUT.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+fn machine_output() -> bool {
+    MACHINE_OUTPUT.load(std::sync::atomic::Ordering::SeqCst)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -440,6 +452,20 @@ async fn serve_until_signal(
         let url = format!("http://{bound}");
         match on_ready {
             Some(f) => f(url),
+            None if machine_output() => {
+                // The same facts the banner carries, as one log line.
+                let revision = runtime.active()?;
+                let m = revision.definition.manifest();
+                tracing::info!(
+                    application = revision.definition.name(),
+                    revision = %revision.id,
+                    identity = revision.definition.identity(),
+                    url = %url,
+                    workloads = m.workloads.len(),
+                    resources = m.resources.len(),
+                    "serving"
+                );
+            }
             None => {
                 let revision = runtime.active()?;
                 print!(

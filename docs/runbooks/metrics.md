@@ -12,7 +12,12 @@ quarantines ever — alert on `increase()` of the second, never on the first
 as if it were cumulative), and **refusals decided before a world existed are
 counted separately** (`usai_http_rejections_total{reason}`) and are *not* in
 `usai_http_request_seconds`: a p99 that improves during a flood of bad
-requests is a trap, read the rejections beside it.
+requests is a trap, read the rejections beside it. The same fact bites
+elsewhere: **`usai_http_request_seconds_count` is not the request rate** —
+it counts admitted requests only, so a dashboard that measures throughput
+with `rate(usai_http_request_seconds_count[5m])` under-reports by the
+refusals and *falls* while a bad-traffic flood rises. Volume is
+`usai_http_requests_total`; the histogram is for latency.
 
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
@@ -67,8 +72,11 @@ Label values:
   `failed` — `failed` stays 1 when the restart policy is exhausted (log line
   `service gave up`); it does not make the instance unready.
 - `usai_http_workload_responses_total{workload}`: the workload id,
-  `<kind>:<name>` as `usai inspect` lists it (`http:listInvoices`,
-  `socket:chat`), one series per workload that has answered; a request that never matched a route is under
+  `<kind>:<name>` as `usai inspect` lists it — for an HTTP or stream route
+  the **method and path**, `http:GET /invoices`, `http:POST /invoices/:id/pay`
+  (mind the space: quote the label value in PromQL); for the other kinds the
+  declared name, `socket:chat`, `task:send-reset-email`. One series per
+  workload that has answered; a request that never matched a route is under
   `usai_http_rejections_total{reason="route"}` and has no workload.
 - `usai_queue_messages_total{state}`: `claimed`, `done`, `retried`, `dead`,
   `invalid`, `reclaimed` (claimed by a consumer that died, returned for

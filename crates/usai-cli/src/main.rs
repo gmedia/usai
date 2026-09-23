@@ -389,6 +389,12 @@ async fn async_main() {
             std::process::exit(2);
         }
     }
+    if cli.log_format == "json" {
+        // A JSON log pipeline reads both of the process's streams under an
+        // orchestrator: the human banner on stdout would be a parse error per
+        // start. `serve` emits one structured line instead.
+        commands::suppress_human_output();
+    }
     if let Some(engine) = &cli.engine {
         // SAFETY: no other thread exists yet; the runtime reads it later.
         unsafe { std::env::set_var("USAI_ENGINE", engine) };

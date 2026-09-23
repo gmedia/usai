@@ -95,6 +95,10 @@ docker run --rm sakaladev/usai:$v --version    # the published image
 pnpm dlx @sakaladev/create-usai@latest demo && cd demo && pnpm install && pnpm dev   # the pure-npm path
 ```
 
+`usai_build_info{version="X.Y.Z"}` is the in-band rollout check — it is the
+only thing that tells a scraper which version answered, so a deployment
+watching a roll should graph it per instance.
+
 The last one is the path a new user takes: it fetches the release binary
 through the launcher (`USAI_RELEASE_BASE` for a mirror) and must serve
 `/hello/world`.

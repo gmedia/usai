@@ -203,7 +203,23 @@ pub async fn ensure_schema(manager: &dyn ResourceManager) -> Result<(), String> 
         attempts += 1;
         let mut result = Ok(());
         for statement in SCHEMA.split(';').map(str::trim).filter(|s| !s.is_empty()) {
+            // Every statement is `IF NOT EXISTS`, so on a prepared database
+            // this is a catalog lookup. On a database whose table predates
+            // this version it is real work — an index over an existing
+            // `usai_queue` builds under a lock that blocks publishes and
+            // claims — so a slow one says what it was doing and for how
+            // long, instead of looking like a stall with no cause.
+            let started = std::time::Instant::now();
             result = sql(manager, "execute", statement, vec![]).await.map(|_| ());
+            let elapsed = started.elapsed();
+            if elapsed > std::time::Duration::from_millis(500) {
+                let first_line = statement.lines().next().unwrap_or(statement);
+                tracing::warn!(
+                    ms = elapsed.as_millis() as u64,
+                    statement = first_line,
+                    "preparing the queue schema took a while: this statement was building on an existing usai_queue and held a lock on it. Prune the table (done/dead rows are yours to delete) or create the index with CREATE INDEX CONCURRENTLY before the upgrade"
+                );
+            }
             if result.is_err() {
                 break;
             }

@@ -163,6 +163,12 @@ two-replica campaign and the 72 h soak all passed (73.6 M requests, 0 × 5xx,
   lists its path parameters; `204`/`205`/`304` carry no content; the socket
   description says what the browser does per auth scheme (a cookie travels
   with the upgrade by itself).
+- `--log-format json` keeps stdout empty for `usai run`: the startup banner
+  becomes one `serving` line on the JSON stream, so a log shipper that reads
+  both of the process's streams no longer sees a parse error per start.
+- Preparing the queue schema logs a warning when a statement takes more than
+  half a second — on an upgrade that means an index building over an
+  existing `usai_queue`, and the line says so.
 - **A queue consumer's outcome mark is no longer lost silently.** The write
   that records `done`/`retry`/`dead` is retried once (synchronously) when it
   fails and then logged with what the operator will see — a message whose
@@ -356,6 +362,25 @@ two-replica campaign and the 72 h soak all passed (73.6 M requests, 0 × 5xx,
 
 ### Compatibility
 
+**Upgrading a running 0.0.5 deployment, in order.** Each step is safe to
+stop at; the details are below.
+
+1. **Fix the alerts and dashboards first** (they must be right before the
+   binary lands): the lowercase state labels, the queries that counted
+   requests with `usai_http_request_seconds_count`, and the 5xx threshold if
+   you run WebSockets.
+2. **Prepare the database** (optional but strongly advised on a busy
+   queue): prune `usai_queue` and create its new objects with
+   `CONCURRENTLY`, days ahead if you like — a 0.0.5 runtime ignores all
+   three.
+3. **Install the binary and roll the replicas** one at a time, still serving
+   the 0.0.5 artifact. Watch for an hour.
+4. **Rebuild the application with the 0.0.6 SDK** and roll the artifact the
+   same way.
+5. **Rollback** is the reverse: the artifact first, then the binary — a
+   0.0.6 artifact is refused by a 0.0.5 runtime, and nothing in the database
+   has to be undone.
+
 - Artifacts built by 0.0.5 run on the 0.0.6 runtime (`GUEST_ABI` 1 unchanged);
   a 0.0.6 artifact on a 0.0.5 runtime is refused at install with both versions
   named, as before.
@@ -367,22 +392,74 @@ two-replica campaign and the 72 h soak all passed (73.6 M requests, 0 × 5xx,
   periods sized as drain + 5 s still cover it. `USAI_MAX_BODY_BYTES`,
   `USAI_CONTROL_TOKEN` and the tuning knobs are listed in `docs/ENVIRONMENT.md`.
 - **Log pipelines**: a 5xx line's error text moved from a second `message`
-  key to `error`; a database outage is one `WARN dependency unavailable` per
+  key to `error`; `fields` on an application line is a **JSON-encoded
+  string, not a nested object**, so a Loki/promtail pipeline needs a second
+  parse stage (`json` with `source: fields`); `--log-format json` now keeps
+  stdout empty for `usai run` (the human banner became one `serving` line on
+  the JSON stream), so a shipper that reads both streams no longer sees a
+  parse error per start; a database outage is one `WARN dependency unavailable` per
   code per second (with `suppressed`) instead of an `ERROR` per request;
   `revision retired` now also appears after a timed-out drain (with
   `cancelled_in_flight`). Application log lines gain `request_id` and
   `fields`.
-- **Metrics**: state label values of `usai_revision_in_flight` and
-  `usai_service` are lowercase (`active`, `failed`) — alerts written with
-  `Active`/`Failed` match nothing; `usai_http_request_seconds` no longer
-  counts refusals decided before a world (a p99 may rise, honestly);
-  `usai_resource{metric="ready"}`, `usai_cron_ticks_total`,
-  `usai_http_streams_failed_total` and the `reclaimed` queue state are new.
-- **PostgreSQL**: `usai_queue` gains a `request_id` column, added with
-  `ALTER TABLE … ADD COLUMN IF NOT EXISTS` on the first use by a 0.0.6
-  process (a brief exclusive lock, once); `usai_cron_ticks` is created when a
-  schedule is `exclusive`. A 0.0.5 and a 0.0.6 runtime can share the queue
-  table during a rolling upgrade.
+- **Metrics**, in the order they will bite:
+  - State label values of `usai_revision_in_flight` and `usai_service` are
+    lowercase (`active`, `failed`) — alerts written with `Active`/`Failed`
+    match nothing and fire never.
+  - `usai_http_request_seconds` no longer counts refusals decided before a
+    world (a p99 may rise, honestly) — and therefore
+    **`usai_http_request_seconds_count` is not the request rate**. A panel
+    built on `rate(usai_http_request_seconds_count[5m])` now under-reports by
+    the refusal volume, and *falls* during a flood of bad requests. Count
+    volume with `usai_http_requests_total`, use the histogram for latency
+    only.
+  - **A WebSocket upgrade (101) is counted in `usai_http_upgrades_total`, not
+    as a 5xx.** A deployment with sockets will see its 5xx rate fall by the
+    upgrade rate: re-baseline 5xx thresholds before the upgrade, or they
+    become meaninglessly loose.
+  - New series (nothing breaks, but `sum by (…)` panels gain rows):
+    `usai_process_*`, `usai_scheduler{kind}`,
+    `usai_http_workload_responses_total{workload,class}`,
+    `usai_resource{metric="ready"}`, `usai_cron_ticks_total{state}`,
+    `usai_http_streams_failed_total`, and `reclaimed` in
+    `usai_queue_messages_total{state}`. `docs/runbooks/metrics.md` is the
+    complete list, with the label values as the exposition spells them (an
+    HTTP workload label is `http:GET /invoices` — method and path, quoted).
+- **WebSocket clients**: a refused credential is now a plain `401` to the
+  upgrade request; 0.0.5 answered `101` and then closed the socket. A client
+  that treats anything but `101` as a transport failure will retry forever
+  instead of re-authenticating — check yours before the runtime upgrade.
+  Existing credential forms keep working; `new WebSocket(url, ["bearer",
+  token])` (the credential as the second subprotocol) is new and additive.
+- **PostgreSQL.** On its first use of the queue (a consumer starting, or the
+  first publish) a 0.0.6 process brings `usai_queue` up to date, in one
+  statement each:
+
+  ```sql
+  ALTER TABLE usai_queue ADD COLUMN IF NOT EXISTS request_id text;
+  CREATE INDEX IF NOT EXISTS usai_queue_claim ON usai_queue (topic, id) WHERE state = 'ready';
+  CREATE INDEX IF NOT EXISTS usai_queue_processing ON usai_queue (topic, locked_at) WHERE state = 'processing';
+  ```
+
+  The `ALTER` is metadata only (a brief `ACCESS EXCLUSIVE` lock). **The two
+  indexes are new in 0.0.6 and build under a `SHARE` lock: publishes and
+  claims on that table block while they do.** The runtime never prunes
+  `done`/`dead` rows (`GUIDE.md` §8), so on a long-lived deployment this can
+  be minutes at the moment the first upgraded replica starts. Run the three
+  statements yourself beforehand — with `CREATE INDEX CONCURRENTLY IF NOT
+  EXISTS`, after deleting the rows you no longer need — and the runtime will
+  find them and do nothing. A 0.0.5 runtime is unaffected by the column and
+  never uses the indexes, so preparing days ahead is safe, and so is leaving
+  them behind after a rollback. A slow statement now says so in the log
+  (`preparing the queue schema took a while …`).
+  `usai_cron_ticks` is created when a schedule is `exclusive`.
+- **Both versions can share the queue table during the roll** — measured, not
+  assumed: a 0.0.5 and a 0.0.6 consumer against one table, 100 messages
+  published by the 0.0.5 CLI, every message processed exactly once
+  (`docs/measurements/2026-09-18-p5-p6-qualification.md` → Mixed versions).
+- **Rolling the binary back to 0.0.5 needs no database change**: the added
+  column is nullable and 0.0.5 never names it, the added indexes are unused
+  by it, and the migration ledger is untouched.
 - **OpenAPI consumers**: error responses are `allOf [UsaiError, { error.code
   enum }]` rather than a bare `$ref` (a generator sees a narrower type, a
   reader sees the same envelope); descriptions read `Not Found: code

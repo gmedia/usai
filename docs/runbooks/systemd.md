@@ -50,6 +50,9 @@ Environment=USAI_DRAIN_GRACE=2 USAI_DRAIN_TIMEOUT=30
 # 9091 for replica 1, 9092 for replica 2.
 Environment=USAI_STATUS_ADDR=127.0.0.1:909%i USAI_STATUS_TOKEN=<random>
 # The application on 3001, 3002, …
+# `--log-format json` writes the log as JSON on stderr and leaves stdout
+# empty (the startup banner becomes one `serving` line), so a shipper that
+# reads the journal parses every line it sees.
 ExecStart=/usr/local/bin/usai --log-format json run --artifact /srv/app/current --host 127.0.0.1 --port 300%i --require-signature <public-key-hex>
 # SIGTERM is the drain signal; give it grace + drain + a margin before SIGKILL.
 KillSignal=SIGTERM
@@ -139,9 +142,15 @@ Runtime and SDK ship together; an artifact built by version N runs on the
 runtime of N and N+1 (`SUPPORTED.md`). Order: install the new binary,
 restart the replicas one at a time (they now run the old artifact on the new
 runtime), then deploy the artifact built with the new SDK the same way. A
-0.0.5 and a 0.0.6 runtime can serve behind one proxy during the roll; they
-share nothing but PostgreSQL, and the queue table and the migration ledger
-are stable across versions.
+0.0.5 and a 0.0.6 runtime can serve behind one proxy during the roll
+(measured: `docs/measurements/2026-09-18-p5-p6-qualification.md` → Mixed
+versions); they share nothing but PostgreSQL. The migration ledger is stable
+across versions; **`usai_queue` is brought up to date by the first process of
+the new version** — in 0.0.6 a column and two indexes, and the indexes build
+under a lock that blocks publishes and claims. On a queue table that was
+never pruned, create them yourself with `CREATE INDEX CONCURRENTLY` before
+the upgrade (CHANGELOG → Compatibility → PostgreSQL has the statements).
+Rolling the binary back needs no database change.
 
 ## Without a proxy's health check
 
