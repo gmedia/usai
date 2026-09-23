@@ -239,7 +239,7 @@ own artifact with its own `concurrency` (checked: `app-c4`, `app-c8`,
 consumer does one `INSERT` per message and the pool is 16. Doubling the
 consumers from 4 to 8 bought nothing and doubling again bought everything,
 which no model here predicts. Recorded as measured, to be chased with the
-per-phase profile on the next queue campaign rather than explained away.
+per-phase profile on the next queue campaign rather than explained away. **Chased and closed on 2026-09-23** (`2026-09-23-saturation-and-queue.md`): on the idle host the same cells scale 432 → 741 → 1 107 msg/s, so the plateau was that run's, not the consumer loop's.
 
 **The plateau did not reproduce off the VM** (2026-09-23, the WSL2 dev box:
 16 threads, PostgreSQL 18 on the same machine and the same disk, 5 000
