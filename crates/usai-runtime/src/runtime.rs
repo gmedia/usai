@@ -629,7 +629,12 @@ impl Runtime {
         if let Err(e) = self.engine.warm(&revision.compiled).await {
             tracing::debug!(revision = %id, error = %e, "warm-up instance failed; the first world will pay it");
         }
-        tracing::info!(revision = %id, "revision active");
+        // The identity on **every** transition, not only on `installed`. An
+        // on-call round stated a bad revision's blast radius to the
+        // millisecond from these lines and then could not say which *build*
+        // it was, because `active`/`draining`/`retired` carried only `rev2` —
+        // and a filtered or rotated log no longer has the install line.
+        tracing::info!(revision = %id, identity = revision.definition.identity(), "revision active");
         // Serving nothing is a deployment that answers 404 to everything; say
         // so once, where an operator will see it.
         if revision.definition.workloads().is_empty() {
@@ -673,7 +678,7 @@ impl Runtime {
             && let Ok(old) = self.revision(previous)
         {
             old.set_state(RevisionState::Draining);
-            tracing::info!(revision = %previous, "revision draining");
+            tracing::info!(revision = %previous, identity = old.definition.identity(), "revision draining");
             // The replaced revision retires by itself once its in-flight
             // work is done, so an orchestrator that only installs and
             // activates never accumulates draining revisions. An explicit
@@ -715,11 +720,16 @@ impl Runtime {
             return;
         }
         revision.set_state(RevisionState::Retired);
-        self.revisions
+        let retired = self
+            .revisions
             .write()
             .expect("revisions poisoned")
             .remove(&id);
-        tracing::info!(revision = %id, "revision retired");
+        tracing::info!(
+            revision = %id,
+            identity = retired.as_ref().map(|r| r.definition.identity()).unwrap_or_default(),
+            "revision retired"
+        );
         self.release_unbound_resources().await;
     }
 
@@ -777,11 +787,16 @@ impl Runtime {
             return Err(RuntimeError::DrainTimeout(id, self.config.drain_timeout));
         }
         revision.set_state(RevisionState::Retired);
-        self.revisions
+        let retired = self
+            .revisions
             .write()
             .expect("revisions poisoned")
             .remove(&id);
-        tracing::info!(revision = %id, "revision retired");
+        tracing::info!(
+            revision = %id,
+            identity = retired.as_ref().map(|r| r.definition.identity()).unwrap_or_default(),
+            "revision retired"
+        );
         self.release_unbound_resources().await;
         Ok(())
     }
@@ -1371,7 +1386,7 @@ impl Runtime {
         let remaining = std::mem::take(&mut *self.revisions.write().expect("revisions poisoned"));
         for revision in remaining.into_values() {
             revision.set_state(RevisionState::Retired);
-            tracing::info!(revision = %revision.id, cancelled_in_flight = revision.in_flight(), "revision retired");
+            tracing::info!(revision = %revision.id, identity = revision.definition.identity(), cancelled_in_flight = revision.in_flight(), "revision retired");
         }
         self.resources.shutdown().await;
     }

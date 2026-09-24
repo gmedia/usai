@@ -108,5 +108,44 @@ fn a_command_runs_from_an_artifact_with_no_source_tree() {
         &image,
     );
     assert!(ok, "the suggested order has to work: {text}");
+
+    // **Which build is in this directory?** After a control-plane deploy the
+    // running revision and the `--artifact` the process was started with
+    // disagree, and `CONTROL-API.md` correctly warns that any restart brings
+    // back whatever the directory holds — but there was no way to check that
+    // you had rewritten it. `/_usai/status` carries the *revision's*
+    // identity and the artifact carried none, so the two halves of the
+    // comparison existed and never met. An on-call round demonstrated the
+    // cost end to end: a fix deployed through the control plane, a restart
+    // on the same command line, and the break back with every probe green.
+    //
+    // `usai inspect --root` was the only thing that printed an identity, and
+    // a production image is exactly where there is no source tree to point
+    // it at.
+    let (ok, text) = usai(&["inspect", "--artifact", build.to_str().unwrap()], &image);
+    assert!(ok, "inspect must read an artifact with no project: {text}");
+    let identity = text
+        .lines()
+        .find_map(|l| l.strip_prefix("Identity:"))
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_owned();
+    assert_eq!(
+        identity.len(),
+        16,
+        "the artifact's identity is what `/_usai/status` prints for the revision: {text}"
+    );
+    // And it is the *same* identity the runtime computes, or the comparison
+    // an operator is being told to make would be between two different
+    // things.
+    let (ok, from_project) = usai(
+        &["--root", project.to_str().unwrap(), "inspect"],
+        Path::new("."),
+    );
+    assert!(ok, "{from_project}");
+    assert!(
+        from_project.contains(&identity),
+        "the artifact and the project it was built from disagree about identity:\n{from_project}"
+    );
     let _ = std::fs::remove_dir_all(&image);
 }

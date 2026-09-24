@@ -83,7 +83,9 @@ replica, an outage makes them all unready at once, so `minAvailable: 1`
 blocks **every voluntary eviction** — node drain, consolidation, cluster
 upgrade — until the database comes back. That is defensible (evicting pods
 during a database outage helps nobody) but it surprises people at 3 a.m.
-`USAI_READY_REQUIRES_RESOURCES=0` is the other choice, and it is the same
+Since 0.0.10 the coupling is **off by default** for exactly this reason
+(ADR-0022), so a shared outage no longer makes every pod unready;
+`USAI_READY_REQUIRES_RESOURCES=1` is the other choice, and it is the same
 trade-off the runbook describes for the proxy.
 
 ## What the runtime gives you, and what it does not

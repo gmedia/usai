@@ -62,16 +62,20 @@ pub struct HttpConfig {
     /// `/_usai/` path. Production rarely wants all of them.
     pub surfaces_off: Vec<String>,
     /// Whether a bound resource that fails its probe makes `/_usai/ready`
-    /// answer 503 (the default) or merely report it while the replica keeps
-    /// asking for traffic (`USAI_READY_REQUIRES_RESOURCES=0`).
+    /// answer 503, or merely report it while the replica keeps asking for
+    /// traffic (**the default**; `USAI_READY_REQUIRES_RESOURCES=1` couples
+    /// them).
     ///
-    /// It is a deployment decision, not a runtime one. A proxy removes an
-    /// unready upstream from rotation, so with the default a database
-    /// outage takes out *every* route on every replica that shares that
-    /// database — including routes that never touch it. With it off, those
-    /// routes keep serving and the database-backed ones answer 503 on their
-    /// own. Draining is unaffected either way: a draining replica always
-    /// fails readiness, which is what the rolling restart depends on.
+    /// It is a deployment decision, not a runtime one, and the default is
+    /// uncoupled because the common case is a database *shared* by every
+    /// replica. A proxy removes an unready upstream from rotation, so
+    /// coupling turns that one outage into a total one — every route on
+    /// every replica, including routes that never touch the database.
+    /// Coupling is right when a replica's database is its own: it takes
+    /// itself out and the others carry the traffic.
+    ///
+    /// Draining is unaffected either way: a draining replica always fails
+    /// readiness, which is what the rolling restart depends on.
     pub ready_requires_resources: bool,
 }
 
@@ -87,7 +91,7 @@ impl Default for HttpConfig {
             socket_idle_timeout: std::time::Duration::from_secs(300),
             status_token: None,
             surfaces_off: Vec::new(),
-            ready_requires_resources: true,
+            ready_requires_resources: false,
         }
     }
 }
@@ -1840,6 +1844,38 @@ pub(crate) fn render_output(output: GuestHttpOutput, lifecycle: Option<String>) 
 }
 
 /// Connection-level dependency failures, one line per code per second.
+/// Who a 5xx out of a world belongs to.
+///
+/// The distinction is not cosmetic: `docs/runbooks/metrics.md` tells an
+/// operator that a route's own failures are its 5xx minus its rejections,
+/// and a **resource** refusal is not counted in `usai_http_rejections_total`
+/// — so anything filed as an application error here is charged to the
+/// handler. A pool that could not be acquired within `acquireTimeoutSeconds`
+/// was filed exactly that way, with a JavaScript stack, once per occurrence,
+/// for as long as the saturation lasted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ServerError {
+    /// The dependency cannot be reached at all. Rate-limited; readiness and
+    /// `resources[].ready` carry the state.
+    DependencyUnavailable,
+    /// The dependency is there and full. Rate-limited too: saturation lasts
+    /// longer than an outage, so a line per request is worse, not better.
+    DependencySaturated,
+    /// The handler's own failure. This one gets the stack and the details,
+    /// because that is what the developer needs.
+    Application,
+}
+
+fn classify_server_error(code: &str) -> ServerError {
+    if crate::resource::postgres::connection_level(code) {
+        ServerError::DependencyUnavailable
+    } else if code == "resource_exhausted" {
+        ServerError::DependencySaturated
+    } else {
+        ServerError::Application
+    }
+}
+
 static DEPENDENCY_LOG: crate::observability::RateLimitedLog =
     crate::observability::RateLimitedLog::new(std::time::Duration::from_secs(1));
 
@@ -1898,7 +1934,10 @@ impl HttpHost {
                 // of the response did not match) are what the developer
                 // needs: always in the log, in the response only in dev.
                 let details = usai.get("details").cloned().unwrap_or(Value::Null);
-                if crate::resource::postgres::connection_level(raw_code) {
+                if matches!(
+                    classify_server_error(raw_code),
+                    ServerError::DependencyUnavailable
+                ) {
                     // The database is down: every request fails the same way,
                     // and a stack per request is noise that buries the one
                     // line that matters. One warning per code per second,
@@ -1906,6 +1945,26 @@ impl HttpHost {
                     // `resources[].ready` carry the state.
                     if let Some(suppressed) = DEPENDENCY_LOG.allow(raw_code) {
                         tracing::warn!(world = %world, workload, request_id, code = raw_code, error = %error.message, suppressed, "dependency unavailable");
+                    }
+                } else if matches!(
+                    classify_server_error(raw_code),
+                    ServerError::DependencySaturated
+                ) {
+                    // Saturation, not a handler that failed. It was logged as
+                    // an `application error` with a JavaScript stack, one per
+                    // occurrence — so a pool that could not be acquired
+                    // inside `acquireTimeoutSeconds` paged the application
+                    // team, and `metrics.md`'s "5xx minus rejections is the
+                    // route's own failures" charged every one of them to the
+                    // handler, because a resource refusal is not counted in
+                    // `usai_http_rejections_total`.
+                    //
+                    // The *unavailable* case above was already rate-limited
+                    // for exactly this reason; the saturated case lasts
+                    // longer and was not. Same treatment, and the message
+                    // says which of the two it is.
+                    if let Some(suppressed) = DEPENDENCY_LOG.allow(raw_code) {
+                        tracing::warn!(world = %world, workload, request_id, code = raw_code, error = %error.message, suppressed, "dependency saturated; a resource could not be acquired within its acquire timeout");
                     }
                 } else {
                     // `details` and `stack` are absent far more often than
@@ -1972,5 +2031,41 @@ mod tests {
             query_to_json(Some("a=1&a=2&b=x")),
             json!({ "a": ["1", "2"], "b": "x" })
         );
+    }
+}
+
+#[cfg(test)]
+mod server_error_tests {
+    use super::*;
+
+    /// A pool the runtime could not hand out inside `acquireTimeoutSeconds`
+    /// is **saturation**, not a handler that failed. It was logged as
+    /// `application error` with a JavaScript stack, one line per occurrence,
+    /// so an overload round watched 158 pool timeouts get charged to the
+    /// application team — and `metrics.md`'s "5xx minus rejections is the
+    /// route's own failures" agreed with the log, because a resource refusal
+    /// is not in `usai_http_rejections_total`.
+    ///
+    /// The unreachable case was already rate-limited for exactly this
+    /// reason. Saturation lasts longer than an outage, so it needs it more.
+    #[test]
+    fn a_pool_timeout_is_saturation_not_an_application_failure() {
+        assert_eq!(
+            classify_server_error("resource_exhausted"),
+            ServerError::DependencySaturated
+        );
+        // The database being gone stays its own thing, with its own line.
+        assert_eq!(
+            classify_server_error("sql_57p01"),
+            ServerError::DependencyUnavailable
+        );
+        // And a handler that threw still gets the stack and the details.
+        for code in ["internal", "response_contract_failed", "guest_fault"] {
+            assert_eq!(
+                classify_server_error(code),
+                ServerError::Application,
+                "{code} is the handler's own failure"
+            );
+        }
     }
 }

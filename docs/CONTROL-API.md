@@ -274,6 +274,22 @@ curl -sf -H "$H" -H 'content-type: application/json' -X POST $C/revisions/$id/ac
 # holds it draining; keep the previous artifact directory mounted.
 ```
 
+**How to tell which build a directory holds.** `--artifact` is what a restart
+serves, so after a control-plane deploy you have to be able to check that the
+path you rewrote points at the build you meant. The two halves are
+`/_usai/status` → `revisions[].identity` for the running process and
+`usai inspect --artifact <dir>` for the directory:
+
+```bash
+running=$(curl -sf -H "$H" $C/health | jq -r '.active.identity')
+on_disk=$(usai inspect --artifact /srv/app/current | awk '/^Identity:/{print $2}')
+[ "$running" = "$on_disk" ] || echo "a restart will change the running build"
+```
+
+Every revision transition logs its identity too (`revision installed`,
+`active`, `draining`, `retired`), so a log alone answers "which build was
+that" after the fact.
+
 **The rollback handle is the previous artifact directory, not the previous
 revision.** A replaced revision drains and then stops being listed — measured
 at under 100 ms for a revision with nothing in flight, which is every

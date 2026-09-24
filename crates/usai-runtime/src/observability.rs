@@ -539,6 +539,13 @@ pub fn trace_world(result: &WorkResult, revision: &str) {
         .map(|c| format!("{}[{:?}]", c.workload, c.relation))
         .collect();
     let violations: Vec<&str> = result.violations.iter().map(|v| v.code).collect();
+    // As JSON text, not as `Debug`. Under `--log-format json` a `?`-recorded
+    // value arrives as a *string*, so `children` and `violations` shipped as
+    // `"[]"` — the runbook's own example shows `"children":[]`, and anything
+    // indexing them as arrays broke on the difference. The formatter parses
+    // these two the way it already parses the guest's `fields`.
+    let children = serde_json::to_string(&children).unwrap_or_else(|_| "[]".into());
+    let violations = serde_json::to_string(&violations).unwrap_or_else(|_| "[]".into());
     tracing::debug!(
         world = %result.world,
         workload = %result.workload,
@@ -546,12 +553,16 @@ pub fn trace_world(result: &WorkResult, revision: &str) {
         revision,
         termination,
         outcome,
-        duration_ms = result.duration.as_millis() as u64,
+        // Fractional. As an integer, every world under a millisecond read
+        // `0`, and the runbook's own "is it waiting or computing" ratio —
+        // `cpu_us` over `duration_ms` — came out at 123 % and 259 % for the
+        // fast routes, which is the one place the page teaches a division.
+        duration_ms = result.duration.as_secs_f64() * 1000.0,
         cpu_us = result.cpu.as_micros() as u64,
         completions_delivered = result.completions_delivered,
         completions_dropped = result.completions_dropped,
-        children = ?children,
-        violations = ?violations,
+        children = %children,
+        violations = %violations,
         "world trace"
     );
 }

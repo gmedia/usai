@@ -60,13 +60,19 @@ Once 1.0 ships, within `1.x`:
    "why can't I" of the first year.
 6. **Multi-core** (Q8) — the answer is "run replicas". A freeze does not
    depend on it, but it will shape what `1.x` can add without a major.
-7. **What readiness means** (Q19, opened 2026-09-23) — `/_usai/ready` fails
-   when any bound resource fails its probe, and a proxy removes an unready
-   upstream, so a shared database outage takes out routes that never touch
-   the database. `USAI_READY_REQUIRES_RESOURCES=0` turns the coupling off
-   per deployment. Which of the two is the *default* is a contract an
-   operator builds a health check on, and flipping it after a freeze is a
-   breaking change to every deployment that did not set the variable. It
+7. ~~**What readiness means** (Q19)~~ — **settled 2026-09-24**
+   ([ADR-0022](adr/0022-readiness-does-not-follow-a-shared-dependency.md)):
+   readiness reports resource health rather than following it, and
+   `USAI_READY_REQUIRES_RESOURCES=1` couples them for a replica that owns
+   its database. It was listed here because flipping the default *after* a
+   freeze is a breaking change to every deployment that did not set the
+   variable — so it was flipped before, which is what this list is for. The
+   paragraph below is kept because the reasoning still applies to the next
+   default anyone is tempted to change late. The original text: `/_usai/ready`
+   failed when any bound resource failed its probe, and a proxy removes an
+   unready upstream, so a shared database outage took out routes that never
+   touch the database. Which of the two is the *default* is a contract an
+   operator builds a health check on. It
    should be settled first — by a deployment or two that has lived through
    an outage, not by argument.
 8. **`/_usai/` on a listener that does not serve it** — 404 since 0.0.9,

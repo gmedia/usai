@@ -329,24 +329,27 @@ pub async fn run(
         tracing::info!("services off on this instance (--no-services)");
     }
     // `USAI_ACTIVATION_RETRY=<seconds>`: keep trying to open the resources
-    // for this long before giving up. Unset (the default) is exactly today's
-    // behaviour — activation fails and the process exits, which is right for
-    // a missing variable and right on a VM.
+    // for this long before giving up. **60 s by default** (ADR-0022);
+    // `0` restores the immediate exit.
     //
-    // On an orchestrator it is not: an unreachable database at start means
-    // the container exits, and a pod that restarts for an unrelated reason
-    // during a blip (a node drain, a scale-up, a spot reclaim) then stays
-    // down until the restart backoff expires — after the database is
-    // healthy. With this set, the process stays alive and keeps trying, so a
-    // startup probe with enough budget covers the outage and nothing
-    // restarts. Only a *dependency* is retried; a missing or malformed
-    // variable is a configuration error and fails immediately, as before.
-    // `docs/OPEN-QUESTIONS.md` → Q20 is whether this should be the default.
+    // Failing activation rather than the first request is the contract
+    // (`GOAL.md` §32) and it has not moved: the process still refuses to
+    // serve, and it still exits with the same error when the budget runs
+    // out. What changed is the *shape* of the failure on an orchestrator,
+    // where exiting meant `CrashLoopBackOff` with a backoff that reaches
+    // five minutes — so a pod restarted for an unrelated reason during a
+    // database blip (a node drain, a scale-up, a spot reclaim, a rollout
+    // already in flight) stayed down long after the database was healthy,
+    // turning a 30 s failover into a multi-minute outage.
+    //
+    // Only a *dependency* is retried. A missing or malformed variable is a
+    // configuration error that no amount of waiting fixes, and fails at
+    // once, as it always did.
     let retry_for = std::env::var("USAI_ACTIVATION_RETRY")
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())
         .map(Duration::from_secs)
-        .unwrap_or_default();
+        .unwrap_or(Duration::from_secs(60));
     let give_up_at = std::time::Instant::now() + retry_for;
     let _revision = loop {
         // A failed attempt must not leave its revision behind: they are
@@ -379,7 +382,7 @@ pub async fn run(
                     tracing::warn!(
                         error = %e,
                         retry_seconds = retry_for.as_secs(),
-                        "activation failed on a dependency; staying up and retrying (USAI_ACTIVATION_RETRY)"
+                        "activation failed on a dependency; staying up and retrying (USAI_ACTIVATION_RETRY, 0 to exit at once)"
                     );
                     tokio::time::sleep(Duration::from_secs(2)).await;
                     continue;
@@ -568,27 +571,32 @@ async fn serve_until_signal(
                         .collect()
                 })
                 .unwrap_or_default(),
-            // On by default: a replica that cannot reach a bound resource
-            // asks to be taken out of rotation. Off (`0`, `false`, `no`,
-            // `off`) keeps resource-free routes serving through a shared
-            // outage instead — the trade-off is in
-            // docs/runbooks/postgres-down.md.
+            // **Off by default** (ADR-0021b / Q19): a bound resource that
+            // fails its probe is reported, and the replica keeps asking for
+            // traffic. Turn it on (`1`, `true`, `yes`, `on`) for a replica
+            // whose database is its own, where taking itself out of rotation
+            // lets the others carry the load.
+            //
+            // The default is off because the common case is a database
+            // *shared* by every replica: coupling then turns one outage into
+            // a total one, including the routes that never touch it, which
+            // is the opposite of what a proxy is being asked to do.
             ready_requires_resources: std::env::var("USAI_READY_REQUIRES_RESOURCES")
                 .map(|v| {
-                    !matches!(
+                    matches!(
                         v.trim().to_ascii_lowercase().as_str(),
-                        "" | "0" | "false" | "no" | "off"
+                        "1" | "true" | "yes" | "on"
                     )
                 })
-                .unwrap_or(true),
+                .unwrap_or(false),
         },
     );
     // A deployment-wide policy belongs in the log that records the start:
     // an operator reading why a replica stayed in rotation through an outage
     // should find the reason here rather than in someone's environment file.
-    if !http.config().ready_requires_resources {
+    if http.config().ready_requires_resources {
         tracing::info!(
-            "readiness ignores resource health: /_usai/ready answers 200 while a bound resource fails its probe, and names it in the body (USAI_READY_REQUIRES_RESOURCES=0)"
+            "readiness requires resource health: /_usai/ready answers 503 while a bound resource fails its probe, so this replica leaves the rotation (USAI_READY_REQUIRES_RESOURCES=1). With a database shared by every replica this makes one outage a total one"
         );
     }
     // A harness (`--announce`) wants a silent exit; `dev` narrates like `run`.
@@ -759,8 +767,8 @@ async fn serve_until_signal(
     Ok(())
 }
 
-pub async fn inspect(root: &Path, json: bool) -> Result<()> {
-    let (definition, _) = definition_for(root, None).await?;
+pub async fn inspect(root: &Path, json: bool, artifact: Option<PathBuf>) -> Result<()> {
+    let (definition, _) = definition_for(root, artifact).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(definition.manifest())?);
     } else {

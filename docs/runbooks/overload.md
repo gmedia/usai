@@ -22,6 +22,29 @@ one screen.
   `runtime.worlds` is `--max-worlds`; a workload's own name there is its
   `concurrency:`; a resource's is its pool. `usai inspect` prints all four
   levels under **Admission**.
+
+  > **The body names the level that filled, which is not always the level
+  > that caused it.** A slow dependency fills the world budget *through* the
+  > resource: worlds pile up waiting for a connection, the budget is
+  > genuinely exhausted, and the body says `runtime.worlds` while the cause
+  > is an 8-connection pool. A drill on this page produced 108 063
+  > `capacity_exhausted` and **zero** `resource_exhausted` in a scenario
+  > whose root cause was unambiguously the pool.
+  >
+  > So before you act on the body, read **`waiting`** beside `in use`:
+  >
+  > ```console
+  > $ usai top -c 1
+  >   worlds 256/256 live, 256 in flight
+  >   resource                 in use  waiting      ops/s      state
+  >   main (postgres)             8/8      252       31.2      ready
+  > ```
+  >
+  > `waiting` above 0 means the worlds are queued **for a connection** and
+  > the answer is `pool.max`, not `--max-worlds`. Raising the world budget
+  > here adds worlds to pile onto the same connections and costs memory —
+  > the same drill measured 1 023 MiB RSS at 256 live worlds. `waiting` at 0
+  > with the budget full is the real capacity case.
 - Measured behaviour under real saturation (2026-09-23, c=64 → 512 on the
   qualification VM, `docs/measurements/2026-09-23-saturation-and-queue.md`):
   throughput stays flat and p99 grows with the concurrency until the budget
@@ -31,7 +54,12 @@ one screen.
 - Metrics: `usai_http_rejections_total{reason="capacity"}` rises;
   `usai_worlds_live` sits at the bound; `usai_http_request_seconds` p99 for
   admitted requests stays bounded because nothing queues inside the runtime.
-- Log: nothing per refusal (they are counted, not logged).
+- Log: nothing per refusal — `capacity_exhausted` is counted, not logged.
+  A **resource** refusal (`503 resource_exhausted`, a pool not acquired
+  within `acquireTimeoutSeconds`) does write one line, rate-limited, as
+  `dependency saturated`. It used to be an `application error` with a
+  JavaScript stack, once per occurrence, which charged saturation to the
+  application team.
 
 ## What to change
 

@@ -42,7 +42,7 @@ refusals and *falls* while a bad-traffic flood rises. Volume is
 | `usai_http_workload_request_seconds_count` | counter | workload | Responses timed per workload (the denominator). **Refusals decided before a world existed are not here** — they have no world time, and counting them as zero made a route's mean *fall* as it was flooded with 400s |
 | `usai_http_workload_rejections_total` | counter | workload, reason | Requests this route matched and the runtime refused before a world existed. They are in `usai_http_workload_responses_total` (the client got that status) and not in the latency, so **subtract this from the workload's 5xx to get the route's own failures** — a capacity refusal is the instance's admission bound, and waking the route's owner for it is the wrong response |
 | `usai_resource_operations_total` | counter | kind, name | Operations leased from the resource |
-| `usai_resource_operation_seconds_total` | counter | kind, name | **Time spent inside them.** `rate(seconds)/rate(operations)` is the mean time in this resource; `rate(seconds)` against a route's `rate(usai_http_workload_request_seconds_sum)` is the share of that route's time spent waiting on it — which is the difference between "the database is slow" and "my pool is too small", and used to be a hand-off to `pg_stat_statements` |
+| `usai_resource_operation_seconds_total` | counter | kind, name | **Time spent inside them**, across every workload. `rate(seconds)/rate(operations)` is the mean time in this resource. It carries **no workload label**, so it cannot be divided by one route's `usai_http_workload_request_seconds_sum` — that ratio mixes a numerator over all routes with a denominator over one, and comes out above 1 as soon as a second route uses the resource. For "how much of *this* route was the database", read `Server-Timing` (`cpu` far below `world` means waiting) or the `world trace` line's `duration_ms` against `cpu_us`; both are per request and neither needs a label |
 | `usai_resource_transactions_total` | counter | kind, name | Transactions opened on it |
 | `usai_resource_requests_total` / `_failures_total` / `_refused_total` | counter | kind, name | Outbound requests through an `httpClient` resource: made, failed, refused by its own in-flight bound |
 | `usai_resource` | gauge | kind, metric, name | Resource manager state (current levels): `in_use`, `max`, `waiting` (worlds queued **for a connection**, not for the database — the one number that tells a small pool from a slow dependency), `ready` (1 while the last contact with the resource succeeded, 0 after a connection-level failure until the next success) |
@@ -140,7 +140,11 @@ Label values:
 - `usai_tasks{state}`: `queued`, `running`. `usai_tasks_total{state}`:
   `completed`, `failed`, `lost` (dispatched in memory and gone with a
   shutdown — ADR-0010).
-- `usai_http_rejections_total{reason}`: `route`, `validation`, `auth`,
+- `usai_http_rejections_total{reason}`: `route`, `validation` (**including
+  `payload_too_large`** — a body over the bound is refused by the same
+  pre-world gate as a failed schema, so "clients sending 20 MB bodies" and
+  "clients sending malformed JSON" share this counter; the response code
+  tells them apart), `auth`,
   `capacity`, `draining`, `other`. `draining` is rare by design: a request
   that was routed by a revision which retired between routing and
   admission (`503 revision_draining`). A process stop does **not** produce
@@ -209,7 +213,7 @@ collector is the supported way to put it on a dashboard.
 | Capacity refusals | `increase(usai_http_rejections_total{reason="capacity"}[5m]) > 0` | the instance is refusing work before a world exists: raise `--max-worlds`, add a replica, or find the slow dependency (`overload.md`) |
 | Database unreachable | `usai_resource{kind="postgres",metric="ready"} == 0` for 30 s | the last operation or probe failed at the connection level; `/_usai/status` → `resources[].detail.lastError` says how (`postgres-down.md`) |
 | Pool poisoned / database flapping | `increase(usai_resource_quarantines_total[5m]) > 0` while the database is healthy | a connection's outcome could not be proven (C5); a burst during a failover is expected, a steady trickle is a bug or a network problem (`postgres-down.md`) |
-| Pool saturated | `usai_resource{metric="waiting"} > 0` for 1 m | requests are queueing **for a connection**: size `pool.max` against `--max-worlds`, or make the queries faster. `in_use == max` on its own is healthy saturation and is not worth waking anyone for — read `waiting` beside it (`slow-route.md`) |
+| Pool saturated | `usai_resource{metric="waiting"} > 0 and usai_resource{metric="ready"} == 1` for 1 m | requests are queueing **for a connection**: size `pool.max` against `--max-worlds`, or make the queries faster. `in_use == max` on its own is healthy saturation and is not worth waking anyone for — read `waiting` beside it (`slow-route.md`). **The `ready == 1` clause is what keeps this alert honest**: during a total outage worlds queue for connections that will never come, so `waiting` is high and the advice ("size `pool.max`") is wrong — that is the row above, and it is the one to act on. `usai top` prints `UNREADY` in the same row as `waiting`, which is why it does not mislead the way two separate series do |
 | A route got slow | `topk(5, rate(usai_http_workload_request_seconds_sum[5m]) / rate(usai_http_workload_request_seconds_count[5m])) > 0.5` | per-workload mean latency. The global histogram's p99 cannot see a slow route that is a minority of traffic — measured at 2.5 ms while a route took 204 ms |
 | Detached work | `increase(usai_detached_work_total[1h]) > 0` | an application bug: a handler returned with work in flight (`500 detached_work`) |
 | Cut-off unwind | `increase(usai_deadline_unwind_overruns_total[1h]) > 0` | a stream, socket or service hit its declared `timeout:` and its own ending did not finish in the unwind grace (5 s; 1 s for a stream) — whatever `close` was releasing was reclaimed by the cancellation path instead. Either the deadline is too tight for that handler's ending, or the ending is doing too much |

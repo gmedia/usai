@@ -63,6 +63,18 @@ impl Fields {
                 _ => {}
             }
         }
+        // The same, for the two fields that are JSON *arrays* by
+        // construction. They used to arrive as `Debug` text, so a `world
+        // trace` line carried `"children":"[]"` — a string — while the
+        // runbook's example showed an array, and a shipper indexing them
+        // failed on a value it had every reason to expect.
+        if matches!(name, "children" | "violations")
+            && let Value::String(s) = &value
+            && let Ok(parsed @ Value::Array(_)) = serde_json::from_str::<Value>(s)
+        {
+            self.map.insert(name.to_owned(), parsed);
+            return;
+        }
         // An empty request id says nothing; leaving it out keeps the line
         // about what happened.
         if matches!(&value, Value::String(s) if s.is_empty()) && name == "request_id" {
@@ -165,4 +177,41 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
     let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
     (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A `world trace` line's `children` and `violations` are arrays. Under
+    /// `--log-format json` they arrived as the *string* `"[]"`, because the
+    /// runtime recorded them with `?` (Debug) and a tracing field value has
+    /// no array type — while `docs/runbooks/slow-route.md` shows
+    /// `"children":[]` in its own example. An on-call round found it the way
+    /// a shipper would: by indexing a field that is documented as a list and
+    /// getting a string.
+    #[test]
+    fn a_world_traces_arrays_ship_as_arrays() {
+        let mut fields = Fields::default();
+        // Exactly what the runtime emits: the JSON text of a Vec.
+        let children = serde_json::to_string(&["http:GET /a[Owned]".to_owned()]).unwrap();
+        let violations = serde_json::to_string(&Vec::<&str>::new()).unwrap();
+        fields.put("children", Value::String(children));
+        fields.put("violations", Value::String(violations));
+        assert_eq!(
+            fields.map["children"],
+            serde_json::json!(["http:GET /a[Owned]"]),
+            "a consumer indexing `children` must get a list"
+        );
+        assert_eq!(fields.map["violations"], serde_json::json!([]));
+    }
+
+    /// And a value that is not the JSON it claims to be keeps what it had: a
+    /// log line is not the place to lose information.
+    #[test]
+    fn an_unparseable_array_field_stays_the_string_it_was() {
+        let mut fields = Fields::default();
+        fields.put("children", Value::String("[not json".to_owned()));
+        assert_eq!(fields.map["children"], serde_json::json!("[not json"));
+    }
 }

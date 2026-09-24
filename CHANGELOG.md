@@ -17,6 +17,36 @@ the old artifact for a while (`SUPPORTED.md` → Versioning).
 
 **When the binary lands, before you rebuild:**
 
+- **Two defaults change, and both change what an existing deployment does.**
+  They are contract-shaped, decided once, and deliberately before the freeze
+  rather than after it.
+
+  - **`/_usai/ready` no longer fails because a bound resource does**
+    (ADR-0022, `docs/OPEN-QUESTIONS.md` → Q19). A proxy removes an unready
+    upstream, so coupling them turned a *shared* database outage — the
+    common case — into a total one: every route on every replica, including
+    the routes that never touch the database. Readiness now reports the
+    failing resource and the routes that need it answer 503 on their own,
+    which is what `docs/runbooks/postgres-down.md` has always described.
+    **If each of your replicas owns its database, set
+    `USAI_READY_REQUIRES_RESOURCES=1`** — there, taking itself out of
+    rotation is right. Draining fails readiness either way, so the rolling
+    restart is unaffected. Alert on
+    `usai_resource{metric="ready"} == 0`, which this release also makes the
+    gate on the "pool saturated" alert so the two cannot fire together
+    saying different things.
+  - **An unreachable dependency at activation is retried for 60 s**
+    (ADR-0023, Q20) instead of ending the process at once. Activation still
+    fails rather than the first request, and the process still exits with
+    the same error when the budget ends — but exiting *immediately* is
+    `CrashLoopBackOff` on an orchestrator, with a backoff that outlives the
+    outage which caused it. A missing or malformed **variable** is still
+    never retried. `USAI_ACTIVATION_RETRY=0` restores the old behaviour, and
+    is what you want on a laptop. **Give your startup probe a budget at
+    least as large**, and note the process is not answering `/_usai/ready`
+    while it retries — a probe gets a refused connection, which a
+    startupProbe handles and a livenessProbe should not be looking at yet.
+
 - **One stream reaching its declared deadline used to break every other
   connection on the instance** — for one day, between two commits in this
   release. A stream was handed the revision's own drain token rather than a
@@ -969,8 +999,8 @@ Everything else is additive or a fix to behaviour that was wrong.
   with the one the runtime was started with), and "does not verify" says the
   signature was made for different bytes than the artifact carries.
 
-- **`USAI_ACTIVATION_RETRY=<seconds>`** (off by default, so nothing changes
-  unless you ask). A bound resource that cannot be opened at activation ends
+- **`USAI_ACTIVATION_RETRY=<seconds>`** (see the upgrading section: it is
+  **60 s by default**). A bound resource that cannot be opened at activation ends
   the process — right for a missing variable, right on a VM, and on an
   orchestrator a restart loop whose backoff outlives the outage that caused
   it: a pod that restarts for an unrelated reason during a database blip

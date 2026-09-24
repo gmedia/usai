@@ -142,15 +142,13 @@ every bound resource.** A replica whose database probe fails is *unready*,
 and a proxy removes an unready upstream from rotation — including for
 routes that never touch the database. When the database is shared, every
 replica fails at once and the proxy has nothing left to send to: a
-PostgreSQL blip becomes a total 503, not a partial one. That is the
-default because a replica that cannot reach the database really cannot
-serve most of an application, and because it is the behaviour that makes a
-rollout stop instead of going live broken. If you would rather keep
-resource-free routes serving through a database outage, set
-`USAI_READY_REQUIRES_RESOURCES=0` on every replica: readiness then reports
-resource health without failing on it, drains still fail readiness (the
-rolling restart above is unaffected), and `postgres-down.md` describes what
-each choice looks like at 3 a.m.
+PostgreSQL blip becomes a total 503, not a partial one. **That is why the
+coupling is off by default since 0.0.10** (ADR-0022).
+Readiness reports resource health without failing on it, drains still fail
+readiness (the rolling restart above is unaffected), and the routes that
+need the database answer 503 on their own. Set
+`USAI_READY_REQUIRES_RESOURCES=1` on every replica when each owns its
+database; `postgres-down.md` describes what each choice looks like at 3 a.m.
 - **Connection-bound worlds** on the restarted replica end at the drain
   bound (WebSocket `1012 server draining`, event streams ended); clients
   reconnect and land on the other replica. Held connections on the other

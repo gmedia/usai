@@ -27,17 +27,20 @@
 > PostgreSQL. Observed in the 2026-09-23 operator round on a two-replica
 > systemd deployment: direct to a replica `hello` answered 200 and the
 > database-backed route 503, while through the proxy at the same moment both
-> answered 503 (`docs/STATUS.md` → the tenth round). This is
-> the default because a replica that cannot reach its database cannot serve
-> most of the application, and because it stops a rollout from going live
-> broken. If you would rather keep resource-free routes answering, set
-> `USAI_READY_REQUIRES_RESOURCES=0` on every replica: `/_usai/ready` then
-> answers 200 and still names the failing resource in `resources`, so the
-> alert below is unchanged, and draining still fails readiness (the rolling
-> restart is unaffected). Decide this before the outage, not during it.
+> answered 503 (`docs/STATUS.md` → the tenth round). **That is why the
+> coupling is off by default since 0.0.10** (ADR-0022): `/_usai/ready`
+> answers 200, names the failing resource in `resources`, and the routes
+> that need the database answer 503 on their own — so the partial outage
+> this page describes is what the deployment actually gets. The alert below
+> is unchanged either way, and draining still fails readiness (the rolling
+> restart is unaffected).
+>
+> Set `USAI_READY_REQUIRES_RESOURCES=1` on every replica when each one owns
+> its database: there, taking itself out of rotation is right, because the
+> others can carry the traffic. Decide this before the outage, not during it.
 
 > **On Kubernetes there is a second consequence.** A PodDisruptionBudget
-> counts *ready* pods, so with the default policy a shared outage makes every
+> counts *ready* pods, so with the coupling on a shared outage makes every
 > replica unready at once and `minAvailable: 1` blocks every voluntary
 > eviction — node drain, consolidation, a cluster upgrade — until the
 > database returns. And a pod that restarts for any unrelated reason during
@@ -94,8 +97,29 @@ keep it above the network's real connect latency.
 
 Finite work fails terminally for that request (no implicit retry, ADR-0014):
 the caller gets the 503 and decides. Queue messages are re-delivered when
-the database returns (they were never claimed, or the claim's transaction
-never committed). Cron ticks that fail are logged and skipped. Open
+the database returns — they were never claimed, or the claim's transaction
+never committed, **or the handler ran to completion and the database went
+away before its outcome could be recorded**.
+
+> **The third case re-runs work that already happened.** The message stays
+> `processing`, the lost-consumer sweep redelivers it, and the handler runs
+> a second time — on a payment, that is a second settlement. A drill on this
+> page produced 5 duplicate rows out of 21 828 messages. The runtime says so
+> at the moment it happens, and this is the line to grep for after any
+> outage:
+>
+> ```
+> WARN could not record the message's outcome; the row stays `processing`
+>      until the lost-consumer sweep redelivers it (or dead-letters it when
+>      its attempts are spent) — the handler already ran
+> ```
+>
+> Delivery is at-least-once by design (`GUIDE.md` §8), so a handler that
+> writes must be idempotent — a unique key on the message id, or an upsert.
+> **When the outage is over, reconcile before you close the incident**:
+> count the effects, not the messages. `usai queue status <topic>` and the
+> `done`/`dead` counters tell you what the queue believes, which is exactly
+> what this case gets wrong. Cron ticks that fail are logged and skipped. Open
 transactions are rolled back for the world (`rolledBackForWorld` in the
 resource detail) and their connections quarantined when the rollback cannot
 reach the server. Quarantine is about *proof*, not about the outage: a

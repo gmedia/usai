@@ -155,6 +155,13 @@ enum Command {
     Inspect {
         #[arg(long)]
         json: bool,
+        /// Inspect a built artifact instead of a project. This is the only
+        /// way to answer "which build is in the directory `--artifact`
+        /// points at" — a production image carries `.usai/build` and no
+        /// source tree, and after a control-plane deploy the running
+        /// revision and that directory disagree until someone rewrites it.
+        #[arg(long)]
+        artifact: Option<PathBuf>,
     },
     /// Show the workload → resource / dispatch graph
     Graph,
@@ -627,7 +634,7 @@ async fn async_main() {
             addr,
             timeout,
         } => commands::probe(&which, &addr, timeout).await,
-        Command::Inspect { json } => commands::inspect(&root, json).await,
+        Command::Inspect { json, artifact } => commands::inspect(&root, json, artifact).await,
         Command::Graph => commands::graph(&root).await,
         Command::Config { json } => commands::config(&root, json).await,
         Command::App {
