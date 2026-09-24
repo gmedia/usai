@@ -37,6 +37,68 @@ fn out_dir(tag: &str) -> PathBuf {
     ))
 }
 
+/// An artifact directory is a deploy mount and a rollback target, so a
+/// failed build must not touch it. It used to: the bundler wrote `app.js`
+/// first and a fault in `describe()` left that new bundle beside the
+/// previous `manifest.json` — which the runtime refuses to serve, correctly
+/// and permanently, until the next *successful* build.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_failed_build_leaves_the_previous_artifact_runnable() {
+    let Some(root) = root() else { return };
+    let engine = usai_runtime::engine::from_env(64).unwrap();
+    let config = load_config(engine.as_ref(), &root).await.unwrap();
+    let out = out_dir("atomic");
+    build(
+        engine.as_ref(),
+        &BuildOptions {
+            out_dir: out.clone(),
+            ..BuildOptions::from_config(&config)
+        },
+    )
+    .await
+    .expect("the first build");
+    let good = usai_runtime::build::load_artifact(&out)
+        .await
+        .expect("the artifact this build wrote");
+
+    // An entry that bundles and then faults before the manifest exists.
+    let bad_entry = out
+        .join("..")
+        .join(format!("bad-entry-{}.ts", std::process::id()));
+    tokio::fs::write(&bad_entry, "throw new Error(\"boom\");\n")
+        .await
+        .unwrap();
+    let failure = build(
+        engine.as_ref(),
+        &BuildOptions {
+            out_dir: out.clone(),
+            entry: bad_entry.canonicalize().unwrap(),
+            ..BuildOptions::from_config(&config)
+        },
+    )
+    .await;
+    let error = match failure {
+        Ok(_) => panic!("the bad entry built"),
+        Err(e) => e.to_string(),
+    };
+    // The point of the test is a failure *after* the bundler wrote a file.
+    // If the bundler itself had refused, nothing would have been written and
+    // the assertion below would hold for the wrong reason.
+    assert!(
+        !error.contains("bundler") && !error.contains("esbuild"),
+        "the bundler refused, so this proves nothing: {error}"
+    );
+
+    // The directory still holds a coherent artifact: same identity, and it
+    // loads — which is the integrity check the runtime runs before serving.
+    let after = usai_runtime::build::load_artifact(&out)
+        .await
+        .expect("the previous artifact survived the failed build");
+    assert_eq!(after.identity(), good.identity());
+    let _ = tokio::fs::remove_file(&bad_entry).await;
+    let _ = tokio::fs::remove_dir_all(&out).await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn config_and_module_metadata_compose_deterministically() {
     let Some(root) = root() else { return };

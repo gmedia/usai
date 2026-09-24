@@ -212,13 +212,28 @@ fn render(before: &Sample, now: &Sample) -> String {
         ));
     }
 
+    // Worlds alive per workload, summed over revisions. A stream or a
+    // socket holds one for as long as its connection lives and completes no
+    // requests while it does, so without this column the runaway export is
+    // a row of zeros — which is what an incident screen showed before.
+    let mut live: BTreeMap<String, u64> = BTreeMap::new();
+    if let Some(revisions) = now.get(&["revisions"]).and_then(Value::as_array) {
+        for revision in revisions {
+            if let Some(map) = revision.get("liveByWorkload").and_then(Value::as_object) {
+                for (workload, n) in map {
+                    *live.entry(workload.clone()).or_default() += n.as_u64().unwrap_or(0);
+                }
+            }
+        }
+    }
+
     // Per workload: the table the global histogram cannot give you.
     let empty = serde_json::Map::new();
     let by_workload = now
         .get(&["http", "by_workload"])
         .and_then(Value::as_object)
         .unwrap_or(&empty);
-    let mut rows: Vec<(String, f64, u64, u64, f64, f64)> = Vec::new();
+    let mut rows: Vec<(String, f64, u64, u64, u64, f64, f64)> = Vec::new();
     for (workload, stats) in by_workload {
         let count = stats.get("count").and_then(Value::as_u64).unwrap_or(0);
         let was = before
@@ -249,6 +264,7 @@ fn render(before: &Sample, now: &Sample) -> String {
         rows.push((
             workload.clone(),
             served as f64 / seconds,
+            live.remove(workload.as_str()).unwrap_or(0),
             class("4xx"),
             class("5xx"),
             if served > 0 {
@@ -263,7 +279,17 @@ fn render(before: &Sample, now: &Sample) -> String {
             },
         ));
     }
-    rows.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    // A workload that has live worlds and has completed nothing yet — the
+    // first long export, a socket that just connected — has no row in the
+    // response table at all. It is exactly the one to show.
+    for (workload, n) in live {
+        rows.push((workload, 0.0, n, 0, 0, 0.0, 0.0));
+    }
+    rows.sort_by(|a, b| {
+        b.1.total_cmp(&a.1)
+            .then_with(|| b.2.cmp(&a.2))
+            .then_with(|| a.0.cmp(&b.0))
+    });
     let width = rows
         .iter()
         .map(|r| r.0.len())
@@ -271,20 +297,24 @@ fn render(before: &Sample, now: &Sample) -> String {
         .unwrap_or(8)
         .clamp(8, 44);
     out.push_str(&format!(
-        "\n  {:<width$}  {:>8}  {:>5}  {:>5}  {:>9}  {:>9}\n",
-        "workload", "req/s", "4xx", "5xx", "avg", "cpu"
+        "\n  {:<width$}  {:>8}  {:>5}  {:>5}  {:>5}  {:>9}  {:>9}\n",
+        "workload", "req/s", "live", "4xx", "5xx", "avg", "cpu"
     ));
     if rows.is_empty() {
         out.push_str("  (no HTTP workload has been called yet)\n");
     }
-    for (workload, per_second, s4xx, s5xx, avg, cpu) in rows.iter().take(20) {
-        let short = if workload.len() > width {
-            format!("…{}", &workload[workload.len() - width + 1..])
+    for (workload, per_second, alive, s4xx, s5xx, avg, cpu) in rows.iter().take(20) {
+        let short = if workload.chars().count() > width {
+            let tail: String = workload
+                .chars()
+                .skip(workload.chars().count() - width + 1)
+                .collect();
+            format!("…{tail}")
         } else {
             workload.clone()
         };
         out.push_str(&format!(
-            "  {short:<width$}  {per_second:>8.1}  {s4xx:>5}  {s5xx:>5}  {:>9}  {:>9}\n",
+            "  {short:<width$}  {per_second:>8.1}  {alive:>5}  {s4xx:>5}  {s5xx:>5}  {:>9}  {:>9}\n",
             ms(*avg),
             ms(*cpu)
         ));
@@ -505,6 +535,34 @@ mod tests {
             "{limited}"
         );
         assert!(limited.contains("1 OOM kill(s) since boot"), "{limited}");
+    }
+
+    /// A stream or a socket holds a world for as long as its connection
+    /// lives and completes nothing while it does. Without a `live` column
+    /// the incident screen shows the runaway export as a row of zeros — or,
+    /// on its first run, as no row at all.
+    #[test]
+    fn a_workload_that_is_running_shows_even_when_it_has_finished_nothing() {
+        let mut before = status(1_000, 10.0, 1_000_000_000, 5.0);
+        before["revisions"][0]["liveByWorkload"] = json!({ "stream:GET /exports/invoices.csv": 2 });
+        let mut after = status(1_200, 10.5, 1_200_000_000, 5.2);
+        after["revisions"][0]["liveByWorkload"] =
+            json!({ "stream:GET /exports/invoices.csv": 3, "http:GET /hello/:name": 1 });
+        let screen = render(&sample(2, before), &sample(0, after));
+        // The stream has no row in by_workload at all — it has completed
+        // nothing — and it is still on the screen, with its three worlds.
+        let row = screen
+            .lines()
+            .find(|l| l.contains("stream:GET /exports/invoices.csv"))
+            .unwrap_or_else(|| panic!("no row for a live stream:\n{screen}"));
+        assert!(row.split_whitespace().any(|f| f == "3"), "{row}");
+        // And a workload that is both serving and running shows both.
+        let served = screen
+            .lines()
+            .find(|l| l.contains("http:GET /hello/:name"))
+            .unwrap_or_else(|| panic!("no row for the served workload:\n{screen}"));
+        assert!(served.contains("100.0"), "{served}");
+        assert!(served.split_whitespace().any(|f| f == "1"), "{served}");
     }
 
     /// A restarted instance's counters go backwards. That is a fact about

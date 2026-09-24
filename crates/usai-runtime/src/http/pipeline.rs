@@ -96,7 +96,7 @@ pub struct HttpHost {
     runtime: Arc<Runtime>,
     config: HttpConfig,
     compiled: RwLock<Option<Arc<CompiledRevision>>>,
-    pub stats: crate::observability::HttpStats,
+    pub stats: Arc<crate::observability::HttpStats>,
     /// Set when the process has been told to stop and has not yet closed
     /// its listener: readiness fails and every response asks the peer to
     /// close, so a proxy stops routing here and stops reusing its idle
@@ -233,8 +233,16 @@ fn profile_header(host: &[(&'static str, f64)], world: &[(String, f64)]) -> Opti
 /// was the guest computing rather than waiting on a resource. Browsers and
 /// most proxies read the standard header; nothing here is a stack or a
 /// message, so it may stay on in production (`--server-timing`).
-fn server_timing(total: f64, world: Option<(f64, f64)>) -> Option<HeaderValue> {
-    let mut text = format!("total;dur={total:.3}");
+fn server_timing(total: f64, world: Option<(f64, f64)>, streaming: bool) -> Option<HeaderValue> {
+    // A header leaves with the head, and a stream's world runs on after it,
+    // so there is no honest `total` to put there. Say what the number is:
+    // `head` is time-to-first-byte, and the stream's real cost is in the
+    // per-workload metrics, which record it when the world ends.
+    let mut text = if streaming {
+        format!("head;dur={total:.3}")
+    } else {
+        format!("total;dur={total:.3}")
+    };
     if let Some((world_ms, cpu_ms)) = world {
         text.push_str(&format!(", world;dur={world_ms:.3}, cpu;dur={cpu_ms:.3}"));
     }
@@ -459,7 +467,7 @@ impl HttpHost {
             runtime,
             config,
             compiled: RwLock::new(None),
-            stats: crate::observability::HttpStats::default(),
+            stats: Arc::default(),
             draining: std::sync::atomic::AtomicBool::new(false),
         })
     }
@@ -531,7 +539,15 @@ impl HttpHost {
         }
         let mut response = match self.pipeline(request).await {
             Ok(mut response) => {
-                if !internal {
+                // A stream's head is not its cost — the world runs on after
+                // this returns — so the stream's own task records it when
+                // the world ends. `x-usai-lifetime: stream` is set on
+                // exactly those responses, and on no others.
+                let deferred = response
+                    .headers()
+                    .get("x-usai-lifetime")
+                    .is_some_and(|v| v.as_bytes() == b"stream");
+                if !internal && !deferred {
                     self.stats.record_with(
                         response.status().as_u16(),
                         false,
@@ -853,6 +869,7 @@ impl HttpHost {
         // Filled by the finite path when a world ran, so `Server-Timing`
         // can separate the world from the pipeline around it.
         let mut world_cost: Option<(f64, f64)> = None;
+        let mut stream_records_itself = false;
         let mut watch = Stopwatch::start();
         let compiled = self.compiled()?;
         let (parts, body) = request.into_parts();
@@ -1105,6 +1122,10 @@ impl HttpHost {
                 "validated": validated,
             });
             if route.kind == RouteKind::Stream {
+                // A stream's cost is its world's lifetime, which is not
+                // known when the head commits — `run_stream` records it
+                // when the world ends, and the pipeline records nothing.
+                stream_records_itself = true;
                 return self
                     .run_stream(
                         admission,
@@ -1168,18 +1189,26 @@ impl HttpHost {
         let cost = entered.elapsed();
         match outcome {
             Ok(mut response) => {
-                self.stats
-                    .record_workload(&workload_id, response.status().as_u16(), cost);
+                if !stream_records_itself {
+                    self.stats
+                        .record_workload(&workload_id, response.status().as_u16(), cost);
+                }
                 if self.config.server_timing
-                    && let Some(v) = server_timing(cost.as_secs_f64() * 1000.0, world_cost)
+                    && let Some(v) = server_timing(
+                        cost.as_secs_f64() * 1000.0,
+                        world_cost,
+                        stream_records_itself,
+                    )
                 {
                     response.headers_mut().insert("server-timing", v);
                 }
                 Ok(response)
             }
             Err(mut reply) => {
-                self.stats
-                    .record_workload(&workload_id, reply.status.as_u16(), cost);
+                if !stream_records_itself {
+                    self.stats
+                        .record_workload(&workload_id, reply.status.as_u16(), cost);
+                }
                 reply.workload = Some(workload_id);
                 Err(reply)
             }
@@ -1243,9 +1272,24 @@ impl HttpHost {
                     // The world keeps running; its result is observed by the task.
                     let workload = workload.to_owned();
                     let streams_failed = std::sync::Arc::clone(&self.stats.streams_failed);
+                    let by_workload = std::sync::Arc::clone(&self.stats.by_workload);
+                    let stats = Arc::clone(&self.stats);
+                    let head_status = head.status;
                     tokio::spawn(async move {
                         match task.await {
                             Ok(Ok(result)) => {
+                                // The cost of a stream is how long its world
+                                // lived, not how long the head took: a 6 s
+                                // export used to be filed as 2 ms, which put
+                                // the slowest route on the box at the bottom
+                                // of every latency signal the runtime has.
+                                crate::observability::record_into(
+                                    &by_workload,
+                                    &workload,
+                                    head_status,
+                                    result.duration,
+                                );
+                                stats.record_with(head_status, false, Some(result.duration), None);
                                 for v in &result.violations {
                                     tracing::warn!(world = %result.world, workload, code = v.code, "{}", v.message);
                                 }
@@ -1254,6 +1298,7 @@ impl HttpHost {
                                 // it can be — the log and a counter — and the body ends
                                 // early (GUIDE §9: end a stream with a sentinel the
                                 // client checks for).
+                                let mut deadline_ended = false;
                                 let failed = match (&result.termination, &result.outcome) {
                                     (crate::world::Termination::Completed, Some(Err(e))) => {
                                         Some(format!("{}: {}", e.name, e.message))
@@ -1268,24 +1313,61 @@ impl HttpHost {
                                         tracing::debug!(world = %result.world, workload, reason, "stream ended with its client");
                                         None
                                     }
+                                    // A stream has no default deadline, so
+                                    // this is one the workload declared,
+                                    // doing what it was asked to do. The
+                                    // client's body still ends early, so it
+                                    // is counted — but it is not a handler
+                                    // that failed, and the line says which.
+                                    (crate::world::Termination::DeadlineExceeded, _) => {
+                                        tracing::warn!(
+                                            world = %result.world,
+                                            workload,
+                                            duration_ms = result.duration.as_secs_f64() * 1000.0,
+                                            "stream reached its declared timeout; the client received a 200 and a body that ended early"
+                                        );
+                                        deadline_ended = true;
+                                        None
+                                    }
                                     (t, _) => Some(format!("{t:?}")),
                                 };
                                 if let Some(error) = failed {
                                     streams_failed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                                     tracing::error!(world = %result.world, workload, error = %error, "stream handler failed after the head was sent; the client received a 200 and a body that ended early");
+                                } else if deadline_ended {
+                                    streams_failed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                                 }
                             }
-                            Ok(Err(e)) => tracing::error!(workload, error = %e, "stream world failed"),
-                            Err(e) => tracing::error!(workload, error = %e, "stream task panicked"),
+                            Ok(Err(e)) => {
+                                crate::observability::record_into(&by_workload, &workload, head_status, std::time::Duration::ZERO);
+                                stats.record_with(head_status, false, Some(std::time::Duration::ZERO), None);
+                                tracing::error!(workload, error = %e, "stream world failed");
+                            }
+                            Err(e) => {
+                                crate::observability::record_into(&by_workload, &workload, head_status, std::time::Duration::ZERO);
+                                stats.record_with(head_status, false, Some(std::time::Duration::ZERO), None);
+                                tracing::error!(workload, error = %e, "stream task panicked");
+                            }
                         }
                     });
                     Ok(builder.body(BoxBody::new(StreamBody::new(body))).expect("stream response"))
                 }
                 Err(_) => {
-                    // The sink was dropped without a head: the world ended first.
-                    let result = task.await.map_err(|e| Reply::after_world(StatusCode::INTERNAL_SERVER_ERROR, "stream_failed", e.to_string()))?;
-                    let result = result.map_err(|e| Reply::after_world(StatusCode::INTERNAL_SERVER_ERROR, "world_creation_failed", e.to_string()))?;
-                    Ok(self.encode(workload, result))
+                    // The sink was dropped without a head: the world ended
+                    // first, so this is an ordinary response and its cost is
+                    // still the world's lifetime.
+                    let result = task.await.map_err(|e| {
+                        self.stats.record_workload(workload, 500, std::time::Duration::ZERO);
+                        Reply::after_world(StatusCode::INTERNAL_SERVER_ERROR, "stream_failed", e.to_string())
+                    })?;
+                    let result = result.map_err(|e| {
+                        self.stats.record_workload(workload, 500, std::time::Duration::ZERO);
+                        Reply::after_world(StatusCode::INTERNAL_SERVER_ERROR, "world_creation_failed", e.to_string())
+                    })?;
+                    let duration = result.duration;
+                    let response = self.encode(workload, result);
+                    self.stats.record_workload(workload, response.status().as_u16(), duration);
+                    Ok(response)
                 }
             },
             finished = &mut task => {
@@ -1470,6 +1552,20 @@ impl HttpHost {
         match result.termination {
             Termination::Completed => {}
             Termination::DeadlineExceeded => {
+                // A 504 used to be a counter and nothing else: no line, no
+                // request id, no duration — so "which request timed out at
+                // 03:14, and was it waiting or computing" had no answer
+                // unless the debug trace happened to be on, which the
+                // runbook itself says not to leave on. It is a 5xx like any
+                // other and the GUIDE promised a line for it.
+                tracing::warn!(
+                    world = %result.world,
+                    workload,
+                    request_id = result.request_id.as_deref().unwrap_or(""),
+                    duration_ms = result.duration.as_secs_f64() * 1000.0,
+                    cpu_us = result.cpu.as_micros() as u64,
+                    "deadline exceeded; the world was cancelled and the client got 504"
+                );
                 return json_response(
                     StatusCode::GATEWAY_TIMEOUT,
                     &json!({ "error": { "code": "deadline_exceeded", "message": "the request did not complete within its deadline" } }),
@@ -1664,7 +1760,19 @@ impl HttpHost {
                         tracing::warn!(world = %world, workload, code = raw_code, error = %error.message, suppressed, "dependency unavailable");
                     }
                 } else {
-                    tracing::error!(world = %world, workload, code = raw_code, error = %error.message, %details, stack = error.stack.as_deref().unwrap_or(""), "application error");
+                    // `details` and `stack` are absent far more often than
+                    // they are present, and a field that is the JSON string
+                    // "null" (or "") is a wart in a line a pipeline parses.
+                    let details_text = (!details.is_null()).then(|| details.to_string());
+                    tracing::error!(
+                        world = %world,
+                        workload,
+                        code = raw_code,
+                        error = %error.message,
+                        details = details_text.as_deref(),
+                        stack = error.stack.as_deref(),
+                        "application error"
+                    );
                 }
                 if self.config.expose_diagnostics {
                     if !details.is_null() {
@@ -1676,7 +1784,7 @@ impl HttpHost {
             }
             return json_response(status, &body);
         }
-        tracing::error!(world = %world, workload, name = %error.name, error = %error.message, stack = error.stack.as_deref().unwrap_or(""), "unexpected handler failure");
+        tracing::error!(world = %world, workload, name = %error.name, error = %error.message, stack = error.stack.as_deref(), "unexpected handler failure");
         let mut body = json!({ "error": { "code": "internal", "message": "internal error" } });
         if self.config.expose_diagnostics {
             body["error"]["message"] = Value::String(format!("{}: {}", error.name, error.message));

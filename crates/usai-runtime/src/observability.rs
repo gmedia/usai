@@ -124,8 +124,10 @@ pub struct HttpStats {
     pub latency_sum_us: AtomicU64,
     pub rejections: [AtomicU64; 6],
     /// Per-workload response classes and latency. Bounded by the set of
-    /// workloads the definitions name, never by request data.
-    pub by_workload: std::sync::RwLock<std::collections::BTreeMap<String, WorkloadCounters>>,
+    /// workloads the definitions name, never by request data. Shared,
+    /// because a stream's cost is only known when its world ends — long
+    /// after the response left the pipeline (`record_into`).
+    pub by_workload: WorkloadStats,
 }
 
 /// What one workload's responses cost. The classes answer "is this route
@@ -216,6 +218,42 @@ fn serialize_rejections<S: serde::Serializer>(v: &[u64; 6], s: S) -> Result<S::O
     m.end()
 }
 
+/// The per-workload map, shareable with whoever finishes the work.
+pub type WorkloadStats =
+    std::sync::Arc<std::sync::RwLock<std::collections::BTreeMap<String, WorkloadCounters>>>;
+
+/// Counts one response under its workload. Free-standing so the task that
+/// outlives a streaming response can call it with nothing but the map: a
+/// stream's latency is its **world's lifetime**, which is not known until
+/// long after the pipeline returned the head.
+pub fn record_into(
+    by_workload: &WorkloadStats,
+    workload: &str,
+    status: u16,
+    latency: std::time::Duration,
+) {
+    // 101 (a WebSocket upgrade) is a success, not a server error.
+    let class = match status {
+        100..=299 => 0,
+        300..=399 => 1,
+        400..=499 => 2,
+        _ => 3,
+    };
+    let add = |counters: &WorkloadCounters| {
+        counters.classes[class].fetch_add(1, Ordering::Relaxed);
+        counters
+            .latency_sum_us
+            .fetch_add(latency.as_micros() as u64, Ordering::Relaxed);
+        counters.latency_count.fetch_add(1, Ordering::Relaxed);
+    };
+    if let Some(counters) = by_workload.read().expect("stats poisoned").get(workload) {
+        add(counters);
+        return;
+    }
+    let mut map = by_workload.write().expect("stats poisoned");
+    add(map.entry(workload.to_owned()).or_default());
+}
+
 impl HttpStats {
     pub fn record(&self, status: u16, before_world: bool) {
         self.record_with(status, before_world, None, None);
@@ -224,31 +262,7 @@ impl HttpStats {
     /// Counts a response under the workload that produced (or refused) it,
     /// with what it cost.
     pub fn record_workload(&self, workload: &str, status: u16, latency: std::time::Duration) {
-        // 101 (a WebSocket upgrade) is a success, not a server error.
-        let class = match status {
-            100..=299 => 0,
-            300..=399 => 1,
-            400..=499 => 2,
-            _ => 3,
-        };
-        let add = |counters: &WorkloadCounters| {
-            counters.classes[class].fetch_add(1, Ordering::Relaxed);
-            counters
-                .latency_sum_us
-                .fetch_add(latency.as_micros() as u64, Ordering::Relaxed);
-            counters.latency_count.fetch_add(1, Ordering::Relaxed);
-        };
-        if let Some(counters) = self
-            .by_workload
-            .read()
-            .expect("stats poisoned")
-            .get(workload)
-        {
-            add(counters);
-            return;
-        }
-        let mut map = self.by_workload.write().expect("stats poisoned");
-        add(map.entry(workload.to_owned()).or_default());
+        record_into(&self.by_workload, workload, status, latency);
     }
 
     pub fn record_with(
@@ -556,6 +570,33 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
             "Thread CPU time spent executing guest code, per workload",
             "counter",
             &by_workload,
+        );
+    }
+    // The same for the worlds themselves. A stream or a socket holds a
+    // world for as long as its connection lives and moves no per-request
+    // rate while it does, so the total alone cannot say which workload is
+    // holding the budget.
+    let live_by_workload: Vec<(String, f64)> = status
+        .revisions
+        .iter()
+        .flat_map(|r| r.live_by_workload.iter())
+        .fold(
+            std::collections::BTreeMap::<&str, u64>::new(),
+            |mut acc, (w, n)| {
+                *acc.entry(w.as_str()).or_default() += n;
+                acc
+            },
+        )
+        .into_iter()
+        .map(|(w, n)| (format!("workload=\"{}\"", label(w)), n as f64))
+        .collect();
+    if !live_by_workload.is_empty() {
+        metric(
+            &mut out,
+            "usai_workload_worlds_live",
+            "Execution worlds currently alive, per workload",
+            "gauge",
+            &live_by_workload,
         );
     }
     metric(

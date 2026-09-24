@@ -12,6 +12,16 @@ the human summary.
 
 ### CLI
 
+- **`usai inspect` prints the effective deadline** for every workload and
+  where it came from (`timeout: 30000ms  (the runtime default)`,
+  `(declared)`, or `none  (it runs until it ends or its connection does)`).
+  The OpenAPI document has carried both since D2; the command that needs no
+  server, and is the first one a new project runs, printed nothing unless
+  the workload happened to declare one.
+- **`usai top` has a `live` column** — worlds running right now, per
+  workload. A workload with a world alive gets a row even when it has
+  completed nothing at all, which is the case that matters: a runaway export
+  moves no rate while it runs.
 - **The JSON log line starts with `timestamp` again, at microsecond
   precision.** 0.0.9's formatter built the line in a sorted map, so the keys
   came out alphabetically — a line beginning `{"application"` breaks any
@@ -48,6 +58,9 @@ the human summary.
 
 ### SDK
 
+- **`WorkloadPolicies.timeout` says what it actually does** for each
+  lifetime, now that a declared one is honoured on a stream, a socket and a
+  service.
 - **`ctx.tasks.invoke(task)` is typed from the task's handler.** It resolved
   `unknown`, so the first thing a service written from GUIDE §5 hit was
   `TS18046: 't' is of type 'unknown'` and a cast. `task()` now returns a
@@ -57,6 +70,56 @@ the human summary.
 
 ### Runtime
 
+- **A stream's latency is its world's lifetime.** It was recorded when the
+  head committed, so a 6.5-second CSV export was filed as 2.8 ms — in the
+  per-workload sum, in the global histogram and in `usai top`, which showed
+  the slowest route on the box as idle. Every latency signal the runtime
+  publishes was silently wrong for any application that streams. The number
+  is now taken when the world ends; a stream's `Server-Timing` says
+  `head;dur=…` instead of `total`, because the header leaves with the head
+  and there is no honest total to put in it.
+- **A `timeout:` declared on a stream, a socket or a service is honoured.**
+  It was accepted, published to API consumers as
+  `x-usai-timeout-source: "declared"`, and dropped — while `concurrency:` in
+  the same options object was enforced. An unbounded export whose contract
+  promised it stopped after 8 s is worse than an unbounded export. There is
+  still no *default* deadline for those kinds (one that ended a service
+  after 30 s would be useless); a declared one ends the world, and for a
+  stream that means the client's body stops there, counted and logged as the
+  declared timeout rather than as a handler that failed.
+- **A `504 deadline_exceeded` writes a log line.** It was a counter and
+  nothing else: no workload, no request id, no duration — so "which request
+  timed out at 03:14, and was it waiting or computing" had no answer unless
+  the per-world debug trace happened to be on, which the runbook says not to
+  leave on. It is now a WARN with `workload`, `request_id`, `duration_ms`
+  and `cpu_us`, which is what `GUIDE` §4 and §14 had promised all along.
+- **A failed build no longer bricks the artifact directory.** The bundler
+  wrote `app.js` first, so a fault later in the build (a workload declared
+  after the `defineModule` that lists it, for instance) left a new bundle
+  beside the previous `manifest.json` — which the runtime correctly refuses
+  to serve, permanently, until the next *successful* build. On a CI box or a
+  deploy mount that directory is the rollback target. Everything fallible
+  now happens in a staging directory and the artifact is published by
+  renaming into it.
+- **A bare calendar date binds as `timestamptz`.** `?from=2026-01-01` — the
+  canonical reporting-API filter, ISO-8601, and something PostgreSQL casts
+  without complaint — was `invalid_param: cannot encode "2026-01-01"`. It is
+  midnight **UTC**, consistent with how the runtime already reads a
+  zone-less timestamp.
+- **A parameter error names the statement it came from** (`in: select …`,
+  whitespace-collapsed, 120 characters, parameters excluded). An error
+  raised by a host operation is not thrown from the handler's frames, so its
+  stack is the runtime's; across thirty queries "which one" is the question,
+  and now the message answers it. Arrays get their own advice instead of the
+  scalar "pass a string in the type's text form", which for `_timestamptz`
+  meant a PostgreSQL array literal and sent people in circles: bind
+  `text[]` and cast the column in SQL.
+- **`usai_workload_worlds_live{workload}`**, and `liveByWorkload` per
+  revision in `/_usai/status`. A stream, a socket or a service holds a world
+  for as long as it runs and completes no requests while it does, so the
+  total alone could not say which workload was holding the budget.
+- **`details` is no longer the JSON string `"null"`** on an `application
+  error` line, and `stack` is absent rather than empty when there is none.
 - **`console.time` / `console.timeLog` / `console.timeEnd` exist in a
   world.** They were missing, so instrumenting a handler by hand meant
   `Date.now()` arithmetic around every phase — and `console.time?.("x")`

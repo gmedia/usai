@@ -107,8 +107,12 @@ export interface WorkloadPolicies {
   /** Per-invocation deadline (`"5s"`, `"500ms"`, or milliseconds). The
    * world is cancelled when it passes: an HTTP caller gets 504, an
    * `invoke` rejects with `deadline_exceeded`, a queue message counts as
-   * a failed attempt. Undeclared: the runtime default (30 s) for
-   * requests, none for the other kinds. */
+   * a failed attempt, and a **stream** ends — the client keeps the 200 it
+   * already has and the body stops there. Undeclared: the runtime default
+   * (30 s) for requests, tasks, cron ticks, queue messages, commands,
+   * migrations and seeders; **none** for a stream, a socket or a service,
+   * which would be useless with one. A deadline you declare is honoured
+   * whatever the kind — it is the only way to bound an export. */
   timeout?: string | number;
   /** How many worlds of this workload may run at once. Past the bound the
    * next one is refused, never queued: an HTTP request gets 503

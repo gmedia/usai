@@ -756,6 +756,113 @@ async fn server_timing_is_opt_in_and_is_only_timing() {
     s.shutdown.cancel();
 }
 
+/// A stream's cost is how long its **world** lived, not how long the head
+/// took. Recorded the other way, a six-second export was filed as two
+/// milliseconds: the slowest route on the box sat at the bottom of every
+/// latency signal the runtime publishes, and `usai top` showed it idle.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_streams_latency_is_its_worlds_lifetime() {
+    let Some(s) = start().await else { return };
+    // The counters belong to the host that served the request, so this test
+    // needs one of its own with the status surface on.
+    let host = HttpHost::new(
+        Arc::clone(&s.runtime),
+        HttpConfig {
+            addr: ([127, 0, 0, 1], 0).into(),
+            serve_status: true,
+            ..HttpConfig::default()
+        },
+    );
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let token = CancellationToken::new();
+    let t = token.clone();
+    tokio::spawn(async move {
+        serve(host, t, |addr| {
+            let _ = tx.send(addr);
+        })
+        .await
+        .unwrap()
+    });
+    let addr = rx.await.unwrap();
+
+    // 20 ticks × 20 ms of sleep: several hundred milliseconds of world, and
+    // a head that commits almost at once.
+    let r = s
+        .client
+        .get(format!("http://{addr}/events?n=20"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    let text = r.text().await.unwrap();
+    assert!(text.contains("event: done"), "{text}");
+
+    // The world's end is observed by a task that outlives the response, so
+    // the number lands a moment after the body does.
+    let mut measured = 0.0;
+    let mut global = 0.0;
+    for _ in 0..50 {
+        let status: Value = s
+            .client
+            .get(format!("http://{addr}/_usai/status"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let row = &status["http"]["by_workload"]["stream:GET /events"];
+        if row["count"].as_u64().unwrap_or(0) > 0 {
+            measured = row["latencySumSeconds"].as_f64().unwrap_or(0.0);
+            global = status["http"]["latency_sum_seconds"]
+                .as_f64()
+                .unwrap_or(0.0);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(40)).await;
+    }
+    assert!(
+        measured > 0.2,
+        "a 20-tick stream recorded as {measured}s — that is the head, not the stream"
+    );
+    // The global histogram is fed the same number, or a p99 built on it is
+    // a lie for every application that streams.
+    assert!(
+        global > 0.2,
+        "the global latency sum is {global}s for a stream that took {measured}s"
+    );
+    token.cancel();
+    s.shutdown.cancel();
+}
+
+/// A stream has no *default* deadline. One it **declares** is a bound the
+/// developer asked for, and the OpenAPI document publishes it to consumers
+/// as authoritative — so dropping it silently left an unbounded export whose
+/// contract said it stopped.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_declared_timeout_bounds_a_stream() {
+    let Some(s) = start().await else { return };
+    // The handler would send for a minute; the declaration says 300 ms.
+    let started = std::time::Instant::now();
+    let r = s
+        .client
+        .get(format!("{}/bounded", s.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    let body = r.text().await.unwrap();
+    let took = started.elapsed();
+    assert!(
+        took < Duration::from_secs(5),
+        "the declared timeout did not end the stream: {took:?}"
+    );
+    // It ran, and it ended early — the client's body stops mid-export,
+    // which is what a bound on a stream means.
+    assert!(body.contains("chunk 0"), "{body:?}");
+    assert!(!body.contains("chunk 599"), "the stream ran to completion");
+}
+
 /// `ctx.resources["x"]` on a workload that did not declare `x` fails with
 /// a named error that says what to add, not with `undefined`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

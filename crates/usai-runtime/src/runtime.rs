@@ -118,6 +118,12 @@ pub struct Revision {
     app_budget: Arc<Budget>,
     workload_budgets: Vec<Option<Arc<Budget>>>,
     in_flight: AtomicU64,
+    /// Worlds alive **per workload**, one slot per declared workload. The
+    /// total has always been here; without the breakdown, an incident
+    /// screen can say twelve worlds are live and not which route is
+    /// holding them — and for a stream or a socket, which never move a
+    /// per-request rate while they run, that is the whole question.
+    live_by_workload: Vec<AtomicU64>,
     settled: Notify,
     cron_stop: Mutex<Option<CancellationToken>>,
     pub cron_stats: Arc<cron::CronStats>,
@@ -191,6 +197,7 @@ impl Revision {
 /// wait for it. Dropped by the work's future on every path.
 struct InFlight {
     revision: Arc<Revision>,
+    workload_index: usize,
     _runtime_permit: Permit,
     _app_permit: Permit,
     _workload_permit: Option<Permit>,
@@ -198,6 +205,9 @@ struct InFlight {
 
 impl Drop for InFlight {
     fn drop(&mut self) {
+        if let Some(live) = self.revision.live_by_workload.get(self.workload_index) {
+            live.fetch_sub(1, Ordering::SeqCst);
+        }
         if self.revision.in_flight.fetch_sub(1, Ordering::SeqCst) == 1 {
             self.revision.settled.notify_waiters();
         }
@@ -277,6 +287,12 @@ pub struct RevisionStatus {
     pub identity: String,
     pub state: RevisionState,
     pub in_flight: u64,
+    /// Worlds alive right now, per workload, omitting the idle ones. A
+    /// connection-bound world (a stream, a socket) holds a slot for as long
+    /// as its connection lives and moves no per-request rate while it does,
+    /// so this is the only place an incident screen can see it.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub live_by_workload: BTreeMap<String, u64>,
     pub services: Vec<services::ServiceStatus>,
     /// Queue consumers of this revision: messages claimed, done, retried,
     /// dead-lettered, refused by contract.
@@ -442,6 +458,11 @@ impl Runtime {
                     .map(|n| Budget::new(format!("{}.worlds", w.id), n))
             })
             .collect();
+        let live_by_workload = definition
+            .workloads()
+            .iter()
+            .map(|_| AtomicU64::new(0))
+            .collect();
         let revision = Arc::new(Revision {
             id,
             definition,
@@ -451,6 +472,7 @@ impl Runtime {
             env: RwLock::new(Arc::new(BTreeMap::new())),
             app_budget,
             workload_budgets,
+            live_by_workload,
             in_flight: AtomicU64::new(0),
             settled: Notify::new(),
             cron_stop: Mutex::new(None),
@@ -751,11 +773,15 @@ impl Runtime {
             None => None,
         };
         revision.in_flight.fetch_add(1, Ordering::SeqCst);
+        if let Some(live) = revision.live_by_workload.get(index) {
+            live.fetch_add(1, Ordering::SeqCst);
+        }
         Ok(Admission {
             revision: Arc::clone(revision),
             workload_index: index,
             in_flight: InFlight {
                 revision: Arc::clone(revision),
+                workload_index: index,
                 _runtime_permit: runtime_permit,
                 _app_permit: app_permit,
                 _workload_permit: workload_permit,
@@ -795,11 +821,15 @@ impl Runtime {
             None => None,
         };
         revision.in_flight.fetch_add(1, Ordering::SeqCst);
+        if let Some(live) = revision.live_by_workload.get(index) {
+            live.fetch_add(1, Ordering::SeqCst);
+        }
         Ok(Admission {
             revision: Arc::clone(revision),
             workload_index: index,
             in_flight: InFlight {
                 revision: Arc::clone(revision),
+                workload_index: index,
                 _runtime_permit: runtime_permit,
                 _app_permit: app_permit,
                 _workload_permit: workload_permit,
@@ -941,7 +971,14 @@ impl Runtime {
                     .map(Duration::from_millis)
                     .unwrap_or(self.config.default_timeout),
             ),
-            _ => None,
+            // A connection-bound or persistent workload gets no *default*
+            // deadline — a stream or a service that ended after 30 s would
+            // be useless. A timeout it **declared** is a different thing: it
+            // is a bound the developer asked for, and the OpenAPI document
+            // publishes it to consumers as `x-usai-timeout-source: declared`.
+            // Dropping it left an unbounded export whose contract said it
+            // stopped after 8 s, which is worse than an unbounded export.
+            _ => workload.timeout_ms.map(Duration::from_millis),
         };
         let cancel = {
             let token = self.shutdown.child_token();
@@ -1020,6 +1057,16 @@ impl Runtime {
                 identity: r.definition.identity(),
                 state: r.state(),
                 in_flight: r.in_flight(),
+                live_by_workload: r
+                    .definition
+                    .workloads()
+                    .iter()
+                    .zip(&r.live_by_workload)
+                    .filter_map(|(w, live)| {
+                        let n = live.load(Ordering::SeqCst);
+                        (n > 0).then(|| (w.id.clone(), n))
+                    })
+                    .collect(),
                 services: r.services(),
                 cron: {
                     use std::sync::atomic::Ordering;

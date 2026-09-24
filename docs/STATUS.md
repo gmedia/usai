@@ -242,6 +242,41 @@ capabilities (design), latency histogram in metrics, an API reference page — a
   side, rejections, pool `in use` and `waiting`, what the process costs —
   because totals since boot answer the wrong question during an incident.
 
+- **Round 17 (2026-09-24): a data/reporting developer** (ten years of
+  Node/PostgreSQL: Express, Knex, `pg-copy-streams`, BullMQ) built a
+  reporting service from the public docs alone — bulk import, keyset-paginated
+  aggregate, a streaming CSV export, a nightly cron, a dispatched rebuild
+  task and tests. **21 minutes, first build first try, 9 workloads, tests
+  green first run.** The question the round existed to answer came out well:
+  a `DECLARE CURSOR` + `FETCH` loop streaming into `stream.send()` exported
+  **855 101 rows / 49.6 MB in 6.45 s with RSS 54.9 → 65.6 MiB**, three
+  concurrent exports peaking at 81.5 MiB (≈9 MiB each, flat in table size),
+  and a deadline genuinely cancelled the query server-side
+  (`pg_stat_activity` went `active` → `idle`). Verdict: would build it, with
+  two conditions — both fixed the same day. Twelve findings; the runtime
+  ones, all fixed: a stream's latency was recorded as time-to-headers, so a
+  6.5 s export was filed as 2.8 ms **in every latency signal the runtime
+  publishes** and `usai top` showed the slowest route on the box as idle; a
+  `timeout:` declared on a stream was accepted, published to consumers as
+  authoritative, and dropped; a `504 deadline_exceeded` wrote no log line at
+  all; a failed build left a new `app.js` beside the previous
+  `manifest.json` and bricked the artifact directory — which on a CI box is
+  the rollback target; `?from=2026-01-01` was `invalid_param`; the
+  bulk-insert advice for an array of timestamps was wrong; `details` on an
+  error line was the JSON string `"null"`. Also built from it:
+  `usai_workload_worlds_live` and a `live` column in `usai top` (a stream
+  holds a world and moves no rate, so the incident screen showed a runaway
+  export as zeros), the effective deadline in `usai inspect`, and a
+  parameter error that names its statement (a host operation's error is not
+  thrown from the handler's frames, so there is no application stack to
+  map). **Recorded as breadth, not built**: a per-route body limit
+  (`USAI_MAX_BODY_BYTES` is process-global, so a 5 MB import route raises
+  the bound for every route in the process), and a streaming request body
+  (`RawRequestBody` is `bytes`/`text`/`json`, so an import is always
+  buffered — `unnest` did 50 000 rows in 491 ms, so the absence of `COPY`
+  costs little at this scale, but the row ceiling is a memory decision
+  rather than a streaming one).
+
 - `usai dev` compiles each rebuilt image once (the build's compiled form is installed directly). Measured 2026-09-23 on an idle dev box: **a source change is serving again in ≈3 s**, of which ≈1.6 s is the image compile; a change that does not alter the manifest is recognised and keeps the running revision. (Round 13 reported 9–12 s — measured on a box that still had the session's own load on it, like its first-request numbers.) The compile still takes every core for those seconds on a small host, and the obvious way to make it faster — skipping the pre-initialisation that makes worlds cheap — would make `dev` and `run` behave differently, which is the one thing a development loop must not do.
 
 - The Wasm substrate is the research representation (ADR-0016); its per-request cost is attributed and, after P8, halved on the VM (`2026-09-19-p8-parity.md`): what remains is the interpreter running the developer surface, the boundary JSON and the fresh world itself. Do not cite the research programme's numbers for this codebase; cite the suite's. The native QuickJS engine stays as reference; do not use it for economics.

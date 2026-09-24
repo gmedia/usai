@@ -33,9 +33,10 @@ checkout  revision 7 active  engine wasm  every 2.0s
   worlds 12/256 live, 12 in flight   tasks 0 running, 0 queued (max 64)
   mem 121.4/192 MiB charged (rss 155.0, pss 118.2)   cpu 41%   fds 37   threads 20   worlds/s 216
 
-  workload                        req/s    4xx    5xx        avg        cpu
-  http:GET /catalog               201.5      0      0     2.10ms     1.90ms
-  http:POST /orders                14.2      0      0      204ms     7.40ms
+  workload                        req/s   live    4xx    5xx        avg        cpu
+  http:GET /catalog               201.5      3      0      0     2.10ms     1.90ms
+  http:POST /orders                14.2      9      0      0      204ms     7.40ms
+  stream:GET /exports.csv           0.0      2      0      0     0.00ms     0.00ms
 
   resource                 in use  waiting      ops/s      state
   db (postgres)             16/16        9      118.0      ready
@@ -43,7 +44,11 @@ checkout  revision 7 active  engine wasm  every 2.0s
 
 `-n <seconds>` sets the window, `-c 1` prints one screen and exits (the form
 to paste into an incident channel), `--status-token` when the instance needs
-one. A mean hides a bimodal route, but it finds the one to look at, which is
+one. The **`live`** column is worlds running right now, and it is the one to
+read for anything connection-bound: a stream or a socket completes no
+requests while it runs, so it moves no rate — the row above shows two
+exports in flight at `0.0` req/s, and a workload that has finished nothing
+at all still gets a row when it has a world alive. A mean hides a bimodal route, but it finds the one to look at, which is
 the step that was missing — and the `avg` and `cpu` columns beside each other
 are step 2 below, already answered.
 
@@ -140,6 +145,13 @@ allocates per request; it is for a measurement session, not for production.
 - **Which SQL statement is slow.** That is PostgreSQL's own instrumentation
   (`pg_stat_statements`, `auto_explain`); the runtime knows a query took
   200 ms, not what the planner did.
+**Streams.** A stream's latency is its **world's lifetime**, recorded when
+the world ends — so a six-second export is six seconds in
+`usai_http_workload_request_seconds_sum` and in `usai top`'s `avg`, and it
+arrives a moment after the body does. Its `Server-Timing` header says
+`head;dur=…` rather than `total`, because the header leaves with the head
+and there is no honest total to put in it.
+
 - **Where in your JavaScript the time went.** There is no sampling profiler
   in a world. `console.time("query")` / `console.timeEnd("query")` around the
   phases is the honest answer, and it lands at the default log level with the

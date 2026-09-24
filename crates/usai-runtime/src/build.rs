@@ -483,18 +483,28 @@ impl BuildOptions {
 pub async fn build(engine: &dyn Engine, options: &BuildOptions) -> Result<BuildOutput, BuildError> {
     let code_path = options.out_dir.join("app.js");
     let manifest_path = options.out_dir.join("manifest.json");
+    // Everything that can fail happens against a staging directory, because
+    // an artifact directory is a deploy mount and a rollback target: a build
+    // that bundled `app.js` and then faulted in `describe()` used to leave a
+    // new bundle beside the previous `manifest.json`, which the runtime
+    // correctly refuses to serve — so a failed build bricked the artifact
+    // until the next *successful* one. Publishing is renames within the same
+    // directory, after the last fallible step.
+    let staging = options.out_dir.join(".staging");
+    let _ = tokio::fs::remove_dir_all(&staging).await;
+    let staged_code = staging.join("app.js");
     let entry = if options.entry.is_absolute() {
         options.entry.clone()
     } else {
         options.root.join(&options.entry)
     };
-    let mut inputs = bundle(&options.root, &entry, &code_path).await?;
+    let mut inputs = bundle(&options.root, &entry, &staged_code).await?;
     let config_path = options.root.join(CONFIG_FILE);
     if config_path.exists() {
         inputs.push(config_path);
     }
 
-    let source = tokio::fs::read_to_string(&code_path).await?;
+    let source = tokio::fs::read_to_string(&staged_code).await?;
     let code = Code::new(source);
     let compiled = engine.compile_code(&code).await?;
     let mut manifest_value = engine.describe(&compiled).await?;
@@ -519,7 +529,19 @@ pub async fn build(engine: &dyn Engine, options: &BuildOptions) -> Result<BuildO
         "abi": abi,
     });
     let manifest: Manifest = serde_json::from_value(manifest_value)?;
+    // Nothing below this line can fail on the application's account, so the
+    // artifact directory is safe to touch now.
+    tokio::fs::create_dir_all(&options.out_dir).await?;
+    tokio::fs::rename(&staged_code, &code_path).await?;
+    let staged_map = staging.join("app.js.map");
+    if tokio::fs::try_exists(&staged_map).await.unwrap_or(false) {
+        tokio::fs::rename(&staged_map, options.out_dir.join("app.js.map")).await?;
+    } else {
+        // A build without a map must not leave the previous build's.
+        let _ = tokio::fs::remove_file(options.out_dir.join("app.js.map")).await;
+    }
     tokio::fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest)?).await?;
+    let _ = tokio::fs::remove_dir_all(&staging).await;
     // The engine's compiled form next to the artifact, so installing it is
     // a load rather than a compile (which takes every core for seconds).
     let image_path = options.out_dir.join(IMAGE_FILE);

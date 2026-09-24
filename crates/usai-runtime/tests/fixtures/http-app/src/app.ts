@@ -507,6 +507,17 @@ export const endless = http.stream("/endless", {}, async (ctx, stream) => {
 });
 
 export const plainStream = http.stream("/no-send", {}, async () => ({ nothing: "sent" }));
+
+// A stream gets no deadline by default — one that ended after 30 s would be
+// useless — but a timeout it *declares* is a bound the developer asked for
+// and the OpenAPI document publishes. This one would otherwise run for a
+// minute.
+export const boundedStream = http.stream("/bounded", { timeout: "300ms" }, async (ctx, stream) => {
+  for (let i = 0; i < 600; i++) {
+    await stream.send(`chunk ${i}\n`);
+    await ctx.sleep("100ms");
+  }
+});
 // An event that does not match its declared schema is a contract violation
 // inside the world: the stream ends early and the log names the event.
 export const badEvent = http.stream(
@@ -741,6 +752,7 @@ export default defineApp({
     endless,
     csvExport,
     plainStream,
+    boundedStream,
     badEvent,
     chat,
     socketLocalRead,

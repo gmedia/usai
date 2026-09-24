@@ -582,9 +582,41 @@ fn parse_timestamptz(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     }
     // No zone at all: PostgreSQL would assume the session time zone; the
     // runtime assumes UTC and says so in the docs.
-    chrono::NaiveDateTime::parse_from_str(&normalized, "%Y-%m-%dT%H:%M:%S%.f")
+    if let Ok(n) = chrono::NaiveDateTime::parse_from_str(&normalized, "%Y-%m-%dT%H:%M:%S%.f") {
+        return Some(n.and_utc());
+    }
+    // A calendar date with no time at all (`2026-01-01`). It is ISO-8601,
+    // PostgreSQL casts it happily, and it is what every reporting API's
+    // `?from=&to=` carries — so refusing it made the most ordinary date
+    // filter in the language a 500.
+    chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
         .ok()
+        .and_then(|d| d.and_hms_opt(0, 0, 0))
         .map(|n| n.and_utc())
+}
+
+/// Names the statement a parameter error came from. An error raised by a
+/// host operation carries the runtime's frames, not the application's — so
+/// "which of my thirty queries" has to be in the message. The statement is
+/// code, not data: the parameters stay out of it.
+fn with_statement(error: ResourceError, sql: &str) -> ResourceError {
+    let ResourceError::Operation {
+        code,
+        message,
+        proof,
+    } = error
+    else {
+        return error;
+    };
+    let mut excerpt: String = sql.split_whitespace().collect::<Vec<_>>().join(" ");
+    if excerpt.chars().count() > 120 {
+        excerpt = excerpt.chars().take(117).collect::<String>() + "...";
+    }
+    ResourceError::Operation {
+        code,
+        message: format!("{message}\n  in: {excerpt}"),
+        proof,
+    }
 }
 
 fn param_error(index: usize, ty: &Type, detail: impl std::fmt::Display) -> ResourceError {
@@ -729,6 +761,20 @@ fn to_sql(
             other if !other.is_object() && !other.is_array() => {
                 Ok(Box::new(Some(TextParam(other.to_string()))) as Box<dyn ToSql + Sync + Send>)
             }
+            // An array type needs different advice from a scalar one: its
+            // "text form" is a PostgreSQL array literal, which nobody
+            // means to write, and the answer is to bind `text[]` and cast
+            // the column inside the statement. Saying `$1::text` to
+            // someone holding a list of timestamps sent them in circles.
+            _ if ty.name().starts_with('_') => Err(param_error(
+                index,
+                ty,
+                format!(
+                    "arrays bind as text[], int4[] or int8[]; for {} pass the values as strings and cast the column in SQL, e.g. `unnest($1::text[]) as u(t)` with `t::{}`",
+                    ty.name(),
+                    ty.name().trim_start_matches('_')
+                ),
+            )),
             _ => Err(param_error(
                 index,
                 ty,
@@ -897,7 +943,7 @@ async fn prepare_and_bind(
     }
     let mut params = Vec::with_capacity(types.len());
     for (i, (ty, value)) in types.iter().zip(&request.params).enumerate() {
-        params.push(to_sql(i, ty, value)?);
+        params.push(to_sql(i, ty, value).map_err(|e| with_statement(e, &request.sql))?);
     }
     Ok((statement, params))
 }
@@ -1685,6 +1731,40 @@ fn quote_literal(value: &str) -> String {
 mod tests {
     use super::*;
     use crate::definition::ResourceSpec;
+
+    /// Every form a `timestamptz` parameter is written in by hand or read
+    /// back from PostgreSQL. The bare calendar date is the one a reporting
+    /// API's `?from=&to=` carries, and refusing it turned the most ordinary
+    /// date filter there is into a 500.
+    #[test]
+    fn a_timestamp_parameter_takes_the_forms_people_write() {
+        let at = |s: &str| parse_timestamptz(s).map(|d| d.to_rfc3339());
+        assert_eq!(at("2026-01-01"), Some("2026-01-01T00:00:00+00:00".into()));
+        assert_eq!(at(" 2026-01-01 "), Some("2026-01-01T00:00:00+00:00".into()));
+        assert_eq!(
+            at("2026-01-01T09:30:00Z"),
+            Some("2026-01-01T09:30:00+00:00".into())
+        );
+        // PostgreSQL's own text output, with and without a colon in the zone.
+        assert_eq!(
+            at("2026-09-18 19:48:41.507406+07"),
+            Some("2026-09-18T12:48:41.507406+00:00".into())
+        );
+        assert_eq!(
+            at("2026-09-18 19:48:41+00:00"),
+            Some("2026-09-18T19:48:41+00:00".into())
+        );
+        // No zone at all is UTC, which the guide states.
+        assert_eq!(
+            at("2026-01-01T09:30:00"),
+            Some("2026-01-01T09:30:00+00:00".into())
+        );
+        // Still refused, and they should be: these are not dates.
+        assert_eq!(at("2026-01"), None);
+        assert_eq!(at("01/01/2026"), None);
+        assert_eq!(at("yesterday"), None);
+        assert_eq!(at(""), None);
+    }
 
     /// A server that accepts the connection and then says nothing must fail
     /// activation with a reason, not hang.

@@ -209,7 +209,7 @@ pub fn banner(
 }
 
 /// The full `usai inspect` view.
-pub fn inspect(definition: &ApplicationDefinition) -> String {
+pub fn inspect(definition: &ApplicationDefinition, default_timeout_ms: u64) -> String {
     let mut out = String::new();
     let m = definition.manifest();
     let _ = writeln!(out, "Application: {}", definition.name());
@@ -391,8 +391,27 @@ pub fn inspect(definition: &ApplicationDefinition) -> String {
                 );
             }
         }
-        if let Some(ms) = w.timeout_ms {
-            let _ = writeln!(out, "    timeout: {ms}ms");
+        // The **effective** deadline, not just a declared one. The
+        // OpenAPI document has carried both the number and where it came
+        // from since D2; inspect — the command that needs no server and is
+        // the first one a new project runs — printed nothing at all unless
+        // the workload happened to declare one.
+        match (w.timeout_ms, w.lifetime()) {
+            (Some(ms), _) => {
+                let _ = writeln!(out, "    timeout: {ms}ms  (declared)");
+            }
+            (None, LifetimeFamily::Finite) => {
+                let _ = writeln!(
+                    out,
+                    "    timeout: {default_timeout_ms}ms  (the runtime default)"
+                );
+            }
+            (None, _) => {
+                let _ = writeln!(
+                    out,
+                    "    timeout: none  (it runs until it ends or its connection does; declare one to bound it)"
+                );
+            }
         }
         if let Some(n) = w.max_concurrency {
             let _ = writeln!(

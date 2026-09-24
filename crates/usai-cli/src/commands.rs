@@ -746,7 +746,15 @@ pub async fn inspect(root: &Path, json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(definition.manifest())?);
     } else {
-        print!("{}", display::inspect(&definition));
+        print!(
+            "{}",
+            display::inspect(
+                &definition,
+                usai_runtime::RuntimeConfig::default()
+                    .default_timeout
+                    .as_millis() as u64
+            )
+        );
     }
     Ok(())
 }

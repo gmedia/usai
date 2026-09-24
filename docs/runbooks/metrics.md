@@ -23,6 +23,7 @@ refusals and *falls* while a bad-traffic flood rises. Volume is
 |---|---|---|---|
 | `usai_scheduler` | gauge | kind | 1 when this instance runs the scheduler of that kind (cron: exactly one replica should) |
 | `usai_worlds_live` | gauge | — | Execution worlds currently alive |
+| `usai_workload_worlds_live` | gauge | workload | The same, per workload, published only for workloads that have one alive. A stream, a socket or a service holds a world for as long as its connection or its life lasts and completes no requests while it does, so this is the only series that shows it running — a runaway export is invisible in every rate on this page |
 | `usai_worlds_created_total` | counter | — | Execution worlds created |
 | `usai_guest_cpu_seconds_total` | counter | — | Thread CPU time spent executing guest code, summed over worlds |
 | `usai_workload_cpu_seconds_total` | counter | workload | The same, per workload. CPU is accounted, not scheduled (ADR-0021): this is how you find the workload whose share does not match its importance, and `concurrency:` plus a deadline is how you cap it |
@@ -34,7 +35,7 @@ refusals and *falls* while a bad-traffic flood rises. Volume is
 | `usai_service` | gauge | revision, service, state | 1 per declared `service()`, at its current state (absent when the application declares none) |
 | `usai_queue_messages_total` | counter | revision, state | Queue messages by outcome, per revision |
 | `usai_cron_ticks_total` | counter | revision, state | Cron ticks per revision: due on this instance, skipped (previous still running), failed, taken by another instance (exclusive schedules) |
-| `usai_http_workload_request_seconds_sum` | counter | workload | Summed response time per workload. **`rate(sum)/rate(count)` is how you find a slow route** — the histogram below has no workload label, so a slow route that is a minority of traffic never moves its p99 (`slow-route.md`) |
+| `usai_http_workload_request_seconds_sum` | counter | workload | Summed response time per workload. **`rate(sum)/rate(count)` is how you find a slow route** — the histogram below has no workload label, so a slow route that is a minority of traffic never moves its p99 (`slow-route.md`). For a **stream** this is the world's whole lifetime, not the time to the head: a six-second export is six seconds here, and it is recorded when the world ends rather than when the response started |
 | `usai_http_workload_request_seconds_count` | counter | workload | Responses timed per workload (the denominator) |
 | `usai_resource_operations_total` | counter | kind, name | Operations leased from the resource |
 | `usai_resource_transactions_total` | counter | kind, name | Transactions opened on it |
@@ -64,7 +65,7 @@ refusals and *falls* while a bad-traffic flood rises. Volume is
 | `usai_http_request_seconds` | histogram | le | Time to the response, by bucket |
 | `usai_http_upgrades_total` | counter | — | WebSocket upgrades |
 | `usai_http_streams_total` | counter | — | Streaming responses |
-| `usai_http_streams_failed_total` | counter | — | Streams whose handler failed after the 200 and the head were sent (the body ended early) |
+| `usai_http_streams_failed_total` | counter | — | Streams whose body ended early after the 200 and the head were sent: the handler failed, or the stream reached a timeout it declared. The log line says which |
 
 Label values:
 
