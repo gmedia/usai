@@ -56,16 +56,16 @@ has used, and it is visible in the data exactly once:
 After that the campaigns stopped building images; the cells that followed run
 containers from images already present.
 
-## What has been observed so far (7.1 h)
+## What has been observed so far (9.5 h)
 
 | | |
 |---|---|
-| Requests | 37.2 M ok, 4 × 4xx, 0 × 5xx, 0 × 503 |
+| Requests | 50.1 M ok, 4 × 4xx, 0 × 5xx, 0 × 503 |
 | Errors | 12 client timeouts, all in the three seconds above |
 | p50 | 3.9 ms in the first hour, 4.0 ms now |
-| RSS (cgroup) | 52.0 → 53.2 MiB |
-| RSS (the process's own) | 87 MiB, PSS 64 |
-| Lifecycle | 0 detached work, 0 quarantined, 0 completions dropped or rejected |
+| Memory (cgroup charge) | 52.0 → 54.8 MiB |
+| Memory (the process's own) | 91 MiB RSS, 65 PSS |
+| Lifecycle | 0 detached work, 0 quarantined, 0 completions dropped or rejected, over 50.1 M worlds |
 | Open descriptors | 29 → 31 |
 
 **Two memory numbers that differ by 36 MiB, and neither is "what this
@@ -103,16 +103,16 @@ field).
 
 Throughput by hour, which is the question this run exists to answer:
 
-| hour | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
-|---|---|---|---|---|---|---|---|
-| mean req/s | 1 419 | 1 483 | 1 437 | 1 496 | 1 487 | 1 484 | 1 479 |
-| median p99 (ms) | 19.2 | 18.8 | 19.0 | 18.7 | 18.7 | 18.8 | 18.8 |
+| hour | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+|---|---|---|---|---|---|---|---|---|---|
+| mean req/s | 1 419 | 1 483 | 1 437 | 1 496 | 1 487 | 1 484 | 1 479 | 1 483 | 1 479 |
+| median p99 (ms) | 19.2 | 18.8 | 19.0 | 18.7 | 18.7 | 18.8 | 18.8 | 18.9 | 18.9 |
 
 **Flat.** The 72 h run with a growing dataset had lost a third of its
 throughput by this point on its way from 794 to 154 req/s; this one has no
 trend at all, at a *higher* rate, with an unchanged p50.
 
-Seven hours is not an answer to a question about seventy-two, and the
+Nine hours is not an answer to a question about seventy-two, and the
 hypothesis is not proven until the run ends — but the shape so far is the
 one the dataset explanation predicts.
 
