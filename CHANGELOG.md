@@ -100,6 +100,28 @@ the old artifact for a while (`SUPPORTED.md` → Versioning).
   build**, with exit 1 and the workload named. That is a CI failure, not a
   deploy failure. Nothing could have declared it before this release.
 
+**Before either of those, when you rebuild against the new SDK**, four
+things can stop a project that builds today. All four are refusals of
+something that never worked, and each names what it found:
+
+- **Your test suite.** `testApp` no longer runs cron, queue consumers or
+  services (a test run has to be deterministic, and parallel test files were
+  taking each other's queue messages). A test that asserts on the *real*
+  retry or dead-letter path needs `testApp({ schedulers: { queue: true } })`
+  and a database of its own. Everything driven explicitly — `app.cron().run()`,
+  `app.queue().deliver()`, `app.task().invoke()` — is unaffected.
+- **`usai test` typechecks** both the application's project and the test
+  files' project before it runs anything. A suite that was green over code
+  that does not compile now fails; `--no-typecheck` is the escape hatch.
+- **The SDK refuses declarations the runtime always refused**: `maxBodyBytes`
+  on a workload with no request body, `concurrency` meaning two things on a
+  queue consumer, `ctx.tasks.invoke(task)` without the input the task
+  declares. These were compile-time lies, not behaviour changes.
+- **An application composing modules** is refused when two modules declare
+  the same workload id or the same auth-scheme name with different
+  configuration, or when two *different* modules share a name. All three used
+  to pass — the third silently, the second corrupting the OpenAPI document.
+
 **Rolling back is two axes, not one**: the artifact and the binary. An
 application's identity is stable across a binary swap for the same artifact —
 verified for this release — so a rolling deployment comparing identities sees
