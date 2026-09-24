@@ -96,6 +96,22 @@ configs:
           # With more than one replica, give each its own address and keep
           # the ports identical — health_port is one value for the whole
           # handler (docs/runbooks/deploy-and-rollback.md).
+          #
+          # Streams and WebSockets pass through this handler as they are:
+          # Caddy forwards an upgrade without configuration, and **no sticky
+          # sessions are needed** — a socket world holds nothing, so fan-out
+          # goes through a resource and crosses replicas by itself
+          # (GUIDE §9). The runtime marks every stream `Cache-Control:
+          # no-cache` and `X-Accel-Buffering: no`, which is what a buffering
+          # proxy needs to be told.
+          #
+          # Measured through this block: SSE and WebSockets, in the
+          # connection campaign (500 cycles, 40 held connections across a
+          # revision replacement, an app restart and a proxy restart). **Not**
+          # measured: a stream with a content type other than
+          # `text/event-stream` — a CSV export, say. If such a response
+          # arrives at the client in one lump rather than as it is written,
+          # add `flush_interval -1` to this handler and measure again.
         }
       }
 
