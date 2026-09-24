@@ -11,8 +11,21 @@ PSS — most of the 4 MiB is copy-on-write image pages every slot shares) per
 touched slot, so a 48-world instance that has seen c=16 sits at ≈ 100 MiB
 and does not come back down while idle. Compiled images add ~30 MiB per
 held revision. The P6 soak reports the actual plateau for a workload
-(`rssMax` in the soak samples); `/_usai/status` reports `process.rssKib`
-and `process.pssKib` live.
+(its samples carry all three numbers below); `/_usai/status` reports
+`process.rssKib` and `process.pssKib` live, and the cgroup's charge against
+its limit when the process runs under one.
+
+**Read the right one.** The three disagree, and on this runtime they
+disagree by tens of MiB in both directions at once: `rssKib` counts the
+pooled Wasm image once per slot it is mapped into (over), while a cgroup is
+not charged for text pages another cgroup faulted in first (under). Measured
+side by side on the 24 h bounded soak: **89 MiB RSS, 66 PSS, 53 charged**
+(`../measurements/2026-09-24-bounded-soak.md`). Use RSS for *trend*, PSS for
+a process-level *level*, and the cgroup's charge for anything about a limit —
+it is the number that gets the container killed. `usai top` prints the
+charged/limit pair first for exactly that reason, and shouts when the window
+had reclaim events, which is how a too-small limit fails *without* an OOM
+kill.
 
 Two things sit on top of that plateau and are **not** the world pool:
 

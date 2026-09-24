@@ -85,6 +85,14 @@ the human summary.
   Declaring it on a workload that has no request body — a task, a cron tick,
   a stream, a socket — is **refused at install** with the reason, rather than
   accepted and ignored.
+- **An artifact keeps its identity across a runtime upgrade**, and a test
+  now holds the runtime to it. Identity is a hash of the manifest *as this
+  runtime serializes it*, so a new optional field that is written even when
+  absent silently changes the identity of every application built by the
+  previous SDK — and a rolling deployment, which compares identities, would
+  see two applications where there is one. `maxBodyBytes` below was one line
+  away from doing exactly that. The test keeps a real 0.0.9 manifest and
+  fails with the name of the attribute to add.
 - **The queue schema survives being prepared by several replicas at once.**
   `CREATE TABLE IF NOT EXISTS` is not race-free in PostgreSQL, and the losers
   fail in three ways depending on the catalog they lost on: 42P07 (the

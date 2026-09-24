@@ -1,5 +1,12 @@
 # Overload and capacity refusals
 
+**First command**: `usai top --addr <status listener>`. Refusals never reach
+a workload, so they are in no row of any per-route table — `usai top` puts
+them on their own line (`rejected before a world: capacity 42.0/s`), beside
+the `live` column that says which workload is holding the world budget and
+the pool's `in use` / `waiting`. That is the whole shape of this incident on
+one screen.
+
 ## What you see
 
 - Responses: **503 `capacity_exhausted`** as soon as every world slot the

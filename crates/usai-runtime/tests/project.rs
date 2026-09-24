@@ -37,6 +37,50 @@ fn out_dir(tag: &str) -> PathBuf {
     ))
 }
 
+/// An application's identity is `sha256(manifest as this runtime serializes
+/// it) + the code hash`, so a manifest written by the **previous** SDK has to
+/// serialize back byte-identically here — otherwise the same artifact has a
+/// different identity on each side of an upgrade, and a rolling deploy sees
+/// two applications where there is one. That is the shape of the N−1 promise
+/// in `SUPPORTED.md`, and it is quietly broken by adding a `Option<T>` field
+/// without `skip_serializing_if` (0.0.10 nearly did, with `maxBodyBytes`).
+///
+/// The fixture is a real 0.0.9 artifact's manifest: two routes and a
+/// PostgreSQL pool.
+#[test]
+fn a_manifest_from_the_previous_sdk_round_trips_unchanged() {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/manifests/0.0.9-two-routes-and-a-pool.json");
+    let raw = std::fs::read(&path).expect("the 0.0.9 manifest fixture");
+    let manifest: Manifest = serde_json::from_slice(&raw).expect("it parses here");
+    let before: Value = serde_json::from_slice(&raw).expect("as a value");
+    let after: Value =
+        serde_json::from_slice(&serde_json::to_vec(&manifest).expect("it serializes"))
+            .expect("as a value");
+    if before != after {
+        // Name the keys rather than dumping two documents: the failure is
+        // always "this runtime added or dropped a field".
+        let keys = |v: &Value| -> Vec<String> {
+            v["workloads"]
+                .as_array()
+                .map(|ws| {
+                    ws.first()
+                        .and_then(|w| w.as_object())
+                        .map(|o| o.keys().cloned().collect())
+                        .unwrap_or_default()
+                })
+                .unwrap_or_default()
+        };
+        panic!(
+            "a 0.0.9 manifest does not round-trip: workload keys {:?} became {:?}. \
+             A new Option field needs #[serde(default, skip_serializing_if = \"Option::is_none\")], \
+             or every artifact built by the previous SDK changes identity on upgrade.",
+            keys(&before),
+            keys(&after)
+        );
+    }
+}
+
 /// An artifact directory is a deploy mount and a rollback target, so a
 /// failed build must not touch it. It used to: the bundler wrote `app.js`
 /// first and a fault in `describe()` left that new bundle beside the

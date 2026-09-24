@@ -95,6 +95,14 @@ the answer is a resource — an existing one, or a case for a new kind.
   artifact. Rollback: activate the previous artifact on the previous runtime.
   The matrix runtime × artifact (N, N−1) is tested in CI on every push
   against the last published release.
+- **The same artifact keeps the same identity across the upgrade.** An
+  application's identity is a hash of its manifest as the runtime serializes
+  it, plus the code hash, and a rolling deployment compares identities — so a
+  runtime that adds a field when it reads an older manifest would turn one
+  application into two mid-rollout. A unit test holds a real manifest from
+  the previous SDK and asserts it serializes back unchanged; a new optional
+  field has to be omitted when absent, and the test says so by name when it
+  is not.
 - Migrations are immutable once applied (checksum-verified); a rollback of
   application code does not roll back the database — write migrations to be
   compatible with the previous code (add columns, do not drop them in the same

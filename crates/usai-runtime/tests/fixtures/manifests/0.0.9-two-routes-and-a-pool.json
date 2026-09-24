@@ -1,0 +1,113 @@
+{
+  "manifestVersion": 1,
+  "name": "verify009b",
+  "modules": [],
+  "workloads": [
+    {
+      "id": "http:GET /hello/:name",
+      "name": "GET /hello/:name",
+      "module": null,
+      "trigger": {
+        "kind": "http",
+        "method": "GET",
+        "path": "/hello/:name",
+        "raw": false
+      },
+      "contracts": {
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "name": {
+              "maxLength": 40,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": ["name"],
+          "type": "object"
+        },
+        "response": {
+          "200": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "additionalProperties": false,
+            "properties": {
+              "hello": {
+                "type": "string"
+              }
+            },
+            "required": ["hello"],
+            "type": "object"
+          }
+        },
+        "boundaryFinal": ["params"]
+      },
+      "errors": [],
+      "auth": null,
+      "resources": [],
+      "dispatches": [],
+      "publishes": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:GET /notes",
+      "name": "GET /notes",
+      "module": null,
+      "trigger": {
+        "kind": "http",
+        "method": "GET",
+        "path": "/notes",
+        "raw": false
+      },
+      "contracts": {
+        "response": {
+          "200": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "body": {
+                  "type": "string"
+                },
+                "id": {
+                  "maximum": 9007199254740991,
+                  "minimum": -9007199254740991,
+                  "type": "integer"
+                }
+              },
+              "required": ["id", "body"],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        }
+      },
+      "errors": [],
+      "auth": null,
+      "resources": ["db"],
+      "dispatches": [],
+      "publishes": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    }
+  ],
+  "resources": [
+    {
+      "name": "db",
+      "kind": "postgres",
+      "module": null,
+      "config": {
+        "urlEnv": "DATABASE_URL"
+      },
+      "env": ["DATABASE_URL"]
+    }
+  ],
+  "auth": [],
+  "env": [],
+  "codeSha256": "1036bd714991ec49c96deae0404a7bb53efffe9da27259799406f9e561395e4e",
+  "builtWith": {
+    "sdk": "0.0.9",
+    "runtime": "0.0.9",
+    "abi": 1
+  }
+}
