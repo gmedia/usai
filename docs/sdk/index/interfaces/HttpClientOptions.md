@@ -9,7 +9,7 @@ name the environment variables that hold them.
 
 | Property | Type | Description |
 | ------ | ------ | ------ |
-| <a id="baseurl"></a> `baseUrl?` | `string` | Every request is relative to it; another origin is refused. Without it the client may call any http(s) URL. |
+| <a id="baseurl"></a> `baseUrl?` | `string` | Every request is relative to it; another origin is refused. Without it the client may call any **public** http(s) URL — this host's own network is refused (see [HttpClientOptions.allowPrivateNetwork](#allowprivatenetwork)). |
 | <a id="baseurlenv"></a> `baseUrlEnv?` | `string` | Environment variable holding the base URL (staging and production differ; the declaration does not). |
 | <a id="timeoutms"></a> `timeoutMs?` | `number` | Per-request timeout in milliseconds (default 10 000). |
 | <a id="maxconcurrent"></a> `maxConcurrent?` | `number` | In-flight bound; the next request is refused with 503, not queued. |

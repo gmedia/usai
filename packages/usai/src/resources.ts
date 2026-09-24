@@ -217,7 +217,8 @@ export interface PostgresHandle extends SqlExecutor {
  * @category Resources */
 export interface HttpClientOptions {
   /** Every request is relative to it; another origin is refused. Without
-   * it the client may call any http(s) URL. */
+   * it the client may call any **public** http(s) URL — this host's own
+   * network is refused (see {@link HttpClientOptions.allowPrivateNetwork}). */
   baseUrl?: string;
   /** Environment variable holding the base URL (staging and production
    * differ; the declaration does not). */
