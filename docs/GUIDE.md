@@ -337,7 +337,7 @@ export default defineApp({ workloads: [listUsers], resources: [db], env: env({ D
 |---|---|
 | `COPY … TO STDOUT` / `FROM STDIN` | no COPY protocol on the wire (`postgres_error: unexpected message from server`); `insert … select` / `unnest($1::text[])` for bulk rows, or `psql \copy` from a job outside the runtime. **Arrays bind as `text[]`, `int4[]` or `int8[]` only**, so a bulk column of any other type goes in as `text[]` and is cast in the statement: `select i, c, t::timestamptz from unnest($1::int8[], $2::text[], $3::text[]) as u(i, c, t)`. Measured: 50 000 rows in ≈0.5 s of SQL, which is why the absence of COPY costs little at this scale |
 | `LISTEN` / `NOTIFY` as a delivery path | `listen` is accepted but nothing reads the notifications — and it pins them to a pooled connection nobody owns; use the queue (§8) for work, or poll |
-| Session-level state across calls (`SET` without `LOCAL`, session advisory locks, `PREPARE`) | every call leases a connection and gives it back — only `sql.transaction` keeps one; session state would leak to the next lessee |
+| Session-level state across calls (`SET` without `LOCAL`, session advisory locks, `PREPARE`) | every call leases a connection and gives it back, and **the session is reset on every checkout** — so a `SET` outside a transaction is not refused, it is simply gone before the next statement, and a session advisory lock is released. Nothing survives to the next lessee (measured: seven kinds of session state set on one backend, all clear on the next lease of the same pid). `sql.transaction` keeps one connection for its duration, which is where `SET LOCAL` belongs |
 | A `Uint8Array` result | `bytea` arrives as base64 (`bytes.fromBase64`) |
 
 ### Query builders, and what you can npm-install
@@ -368,6 +368,100 @@ export const list = http.get("/books", { query: Filter, resources: [db] }, async
 `drizzle-orm`'s `new QueryBuilder()` from `drizzle-orm/pg-core` works the same way (`.toSQL()` → `{ sql, params }`). Both were built and served real rows through `ctx.resources.db` on 0.0.7. **`knex` cannot be used at all**, in any configuration: it imports `events`, `util`, `fs` and friends at module load, so even the compile-only form fails to bundle.
 
 What you keep by compiling rather than connecting: typed, composable query building *and* the runtime's leased connections, terminal-proof reuse and quarantine. What you give up: the library's own migrations, connection pooling and result mapping — migrations are `.sql` files here (`usai db migrate`), and rows come back as plain objects.
+
+### Multi-tenancy
+
+One deployment, one database, many customer organisations, and a hard rule
+that no tenant sees another's data. The runtime helps with half of it and
+cannot help with the other half; know which is which.
+
+**What the model gives you for free.** A fresh world per unit of work means
+*nothing in process* carries forward: a module-level `let`, a module-scope
+`Map`, a memoised object, a class static, a `WeakMap`, `globalThis` — every
+world starts from the same build-time snapshot, whatever the previous one
+wrote. That holds for every kind of world (requests, tasks, cron ticks,
+queue messages, the lifetime of one stream or socket) and under
+concurrency. And a pooled PostgreSQL connection is **reset on every
+checkout**, so a `SET`, a temp table, a session advisory lock, a `SET ROLE`
+or a prepared statement from one world never reaches another — not even
+another statement in the *same* world, which is why `SET LOCAL` inside
+`sql.transaction` is the only session-scoped thing worth writing.
+
+**What it cannot give you.** The runtime will not stop you writing `select *
+from notes` without a `where tenant_id = …`. There is no ambient
+request-scoped value — no `AsyncLocalStorage`, no `process` — so the tenant
+must be threaded explicitly through every call, which is safer (nothing can
+be stale) and more work.
+
+**So make the database stop you.** Row-level security composes with the
+pool, and it is the shape to ship:
+
+```sql
+-- migration
+alter table notes enable row level security;
+alter table notes force row level security;
+create policy tenant_isolation on notes
+  using (tenant_id = nullif(current_setting('app.tenant', true), '')::uuid)
+  with check (tenant_id = nullif(current_setting('app.tenant', true), '')::uuid);
+create role app_tenant nologin;
+grant select, insert, update, delete on notes to app_tenant;
+```
+
+```ts
+const rows = await ctx.resources.main.transaction(async (tx) => {
+  // `SET LOCAL` cannot take a bind parameter (PostgreSQL's rule), and
+  // interpolating a tenant id into SQL is not the answer: `set_config`
+  // takes one, and `true` means "local to this transaction".
+  await tx.query("select set_config('app.tenant', $1, true)", [ctx.auth.tenantId]);
+  return tx.query("select id, body from notes");  // no WHERE, and correct
+});
+```
+
+Run the application's own pool as a **restricted role** (`DATABASE_URL`
+pointing at `app_tenant`) and the policy is enforced even when the handler
+forgets everything: a `select` with no predicate returns nothing, and an
+insert for another tenant is `sql_42501`. Write the policy with
+`nullif(current_setting('app.tenant', true), '')` — a reset connection
+reports the setting as `''` rather than `NULL`, and `''::uuid` raises where
+`NULL` fails closed quietly.
+
+Onboarding, back-office and reports need to cross tenants, so give them
+their own resource on a privileged role — `postgres("admin", { urlEnv:
+"ADMIN_DATABASE_URL" })` — and let the manifest police it: every workload
+lists the resources it leases, so `usai inspect --json` makes "which routes
+can cross tenants" a grep. The same file answers "which routes have no
+auth", which is the other question worth a CI gate:
+
+```bash
+usai inspect --json | jq -e '[.workloads[]
+  | select(.trigger.kind == "http" and .auth == null)] | length == 0'
+```
+
+Costs and sharp edges, in the order teams meet them:
+
+- **The RLS transaction is two extra round trips** per scoped read (`BEGIN`,
+  `set_config`, the query, `COMMIT`). Measured on loopback: +2 ms, +45 % on
+  a one-row read. It buys you the guarantee that a forgotten `WHERE` is not
+  an incident.
+- **`cache.local` is one flat key space** shared by every world in the
+  process — this is the one place a value written for tenant A is visible to
+  tenant B. Namespace every key with the tenant id, or do not use it for
+  tenant data.
+- **Admission is per workload, not per caller.** One tenant's burst can
+  consume the world budget and the connection pool for everyone; the lever
+  is the proxy in front, which sees addresses and not tenants.
+- **Outbound URLs that tenants choose** are attacker-influenced by
+  construction. A client declared without a `baseUrl` refuses this host's
+  own network (`destination_refused`); for anything stronger, put an egress
+  proxy in front and point `baseUrlEnv` at it.
+- **Nothing records which principal read what.** The log is per 5xx, the
+  metrics are per route (labelled with the route *template*, so no
+  per-tenant cardinality exists — and no per-tenant attribution either). An
+  audit trail is yours to write, in the handler or in triggers.
+- **Never compute anything at module scope.** `Math.random()` there is
+  evaluated once, at build, and baked into the artifact: identical on every
+  replica and every restart. Secrets and ids belong inside a handler, where
+  `crypto` has real entropy.
 
 ## 8. Queue
 
@@ -471,13 +565,13 @@ export const charge = http.post("/charge", { body: Charge, resources: [payments]
 });
 ```
 
-There is no global `fetch` in a world (calling it rejects with `fetch_not_available` and this advice). Outbound HTTP is a **declared resource**: the runtime owns the client (pool, TLS roots, redirects, timeouts) and every `fetch` is an operation owned by the world — cancelled with it, bounded by its deadline. `baseUrl`/`baseUrlEnv` pins the destination (another origin is `origin_refused`); without it the client may call any http(s) URL. `maxConcurrent` refuses (503) instead of queueing. Responses: `status`, `ok`, `headers`, `text()`, `json()`, `bytes()`; a non-2xx status is data, not an exception. The destination shows in `usai graph`, `usai inspect` and `/_usai/docs`, and its counters in `/_usai/status`.
+There is no global `fetch` in a world (calling it rejects with `fetch_not_available` and this advice). Outbound HTTP is a **declared resource**: the runtime owns the client (pool, TLS roots, redirects, timeouts) and every `fetch` is an operation owned by the world — cancelled with it, bounded by its deadline. `baseUrl`/`baseUrlEnv` pins the destination (another origin is `origin_refused`); without it the client may call any public http(s) URL, and **not this host's own network**: loopback, the private ranges, link-local (`169.254.169.254`) and unique-local are `destination_refused`, because the only reason such a client exists is that the destination comes from the application's data. `allowPrivateNetwork: true` opts out where the internal address really is chosen at runtime; a hostile URL wants an egress proxy in front and `baseUrlEnv` pointed at it. `maxConcurrent` refuses (503) instead of queueing. Responses: `status`, `ok`, `headers`, `text()`, `json()`, `bytes()`; a non-2xx status is data, not an exception. The destination shows in `usai graph`, `usai inspect` and `/_usai/docs`, and its counters in `/_usai/status`.
 
 ## 12. What a world can use
 
 A world is a bare JavaScript engine with exactly these globals, no more: `console`, `setTimeout`/`clearTimeout`/`setInterval`/`clearInterval`, `queueMicrotask`, `atob`/`btoa`, `TextEncoder`/`TextDecoder`, `URL`/`URLSearchParams`, `structuredClone`, `crypto` (below), plus the SDK's `ctx`. Put `"types": ["@sakaladev/usai/globals"]` in `tsconfig.json` (the scaffold does) instead of the `DOM` lib or `@types/node`, so the compiler knows the same set.
 
-`crypto` is a WebCrypto subset with a clear lifetime story: `crypto.randomUUID()`, `crypto.getRandomValues(typedArray)` (32 bytes of host entropy per world, expanded with SHA-256 — never the image's state), `crypto.subtle.digest("SHA-256" | "SHA-384" | "SHA-512", data)`, and HMAC through `subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-256" }, …)` + `subtle.sign`/`subtle.verify` (constant-time compare). Password hashing is `password.hash(plain)` / `password.verify(plain, hash)` from the SDK — Argon2id run by the host off the world's thread; store the returned PHC string.
+`crypto` is a WebCrypto subset with a clear lifetime story: `crypto.randomUUID()`, `crypto.getRandomValues(typedArray)` (32 bytes of host entropy per world, expanded with SHA-256 — never the image's state), `crypto.subtle.digest("SHA-256" | "SHA-384" | "SHA-512", data)`, and HMAC through `subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-256" }, …)` + `subtle.sign`/`subtle.verify` (constant-time compare). Password hashing is `password.hash(plain)` / `password.verify(plain, hash)` from the SDK — Argon2id run by the host off the world's thread; store the returned PHC string. **`Math.random()` is not that**, and the difference is only visible at module scope: `crypto` at module scope *refuses* (`this world received no entropy from the host`), because a value computed while the application is being defined belongs to the image, not to a world — while `Math.random()` there quietly returns the image's own state, so `const SALT = Math.random()…` is a constant baked into the artifact, identical on every replica and every restart, and readable by anyone who can read the artifact. Inside a handler both are per-world and fine.
 
 Deliberately absent, and why:
 

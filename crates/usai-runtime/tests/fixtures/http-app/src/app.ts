@@ -713,7 +713,42 @@ const upstream = httpClient("upstream", {
   timeoutMs: 2000,
   maxConcurrent: 2,
 });
+// A client that does *not* name its destination: the shape a webhook
+// consumer needs, and the shape whose destination is attacker-influenced by
+// construction. The runtime refuses this one's requests into the host's own
+// network unless the declaration opts in.
+const anywhere = httpClient("anywhere", { timeoutMs: 2000, maxConcurrent: 2 });
+const anywherePrivate = httpClient("anywhere-private", {
+  timeoutMs: 2000,
+  maxConcurrent: 2,
+  allowPrivateNetwork: true,
+});
 type Client = import("@sakaladev/usai").HttpClientHandle;
+export const fetchAnywhere = http.get(
+  "/fetch-anywhere",
+  { query: z.object({ url: z.string() }), resources: [anywhere] },
+  async (ctx) => {
+    try {
+      const r = await (ctx.resources["anywhere"] as Client).fetch(ctx.query.url);
+      return { status: r.status };
+    } catch (e) {
+      return { code: (e as { usai?: { code: string } }).usai?.code ?? "none" };
+    }
+  },
+);
+export const fetchAnywherePrivate = http.get(
+  "/fetch-anywhere-private",
+  { query: z.object({ url: z.string() }), resources: [anywherePrivate] },
+  async (ctx) => {
+    try {
+      const r = await (ctx.resources["anywhere-private"] as Client).fetch(ctx.query.url);
+      return { status: r.status };
+    } catch (e) {
+      return { code: (e as { usai?: { code: string } }).usai?.code ?? "none" };
+    }
+  },
+);
+
 const up = (ctx: { resources: Record<string, unknown> }) => ctx.resources["upstream"] as Client;
 
 export const egress = http.post(
@@ -868,6 +903,8 @@ export default defineApp({
     badEvent,
     chat,
     pushLoop,
+    fetchAnywhere,
+    fetchAnywherePrivate,
     socketLocalRead,
     memoryHog,
     crashy,

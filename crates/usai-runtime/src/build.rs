@@ -850,6 +850,17 @@ pub async fn load_artifact(dir: &Path) -> Result<Arc<ApplicationDefinition>, Bui
         None => definition,
     };
     if std::env::var("USAI_PRECOMPILED").as_deref() == Ok("0") {
+        // Not only a loader switch. Without the image, the application
+        // module is evaluated once per *process* instead of once at build,
+        // so anything computed at module scope — `Date.now()`,
+        // `Math.random()`, a memoised id — differs per instance and per
+        // restart where it was a constant baked into the artifact. Two
+        // supported configurations with two semantics for the same source
+        // is the difference that reproduces in staging and not in
+        // production; say it once, where an operator will see it.
+        tracing::warn!(
+            "USAI_PRECOMPILED=0: the application module is evaluated once per process,              not once at build — values computed at module scope now differ per instance              and per restart"
+        );
         return Ok(definition);
     }
     let Ok(meta) = tokio::fs::read(dir.join(IMAGE_META_FILE)).await else {

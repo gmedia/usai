@@ -2352,3 +2352,64 @@ async fn an_artifact_from_a_newer_sdk_serves_but_says_so() {
     );
     s.shutdown.cancel();
 }
+
+/// A client declared **without** a `baseUrl` takes its destination from the
+/// application's data — that is the whole reason it exists, and the guide
+/// endorses it for webhook consumers with tenant-chosen URLs. Which makes
+/// the destination attacker-influenced by construction: `169.254.169.254`,
+/// an internal service, or this runtime's own status listener are all
+/// requests the application would make on the caller's behalf. It is
+/// refused into the host's own network unless the declaration says
+/// otherwise.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_client_without_a_base_url_does_not_reach_the_hosts_own_network() {
+    let Some(s) = start().await else { return };
+    // The runtime's own listener, named exactly as an application would
+    // reach it: this is the leak, not a hypothetical.
+    let own = s.base.replace("http://", "");
+    for url in [
+        format!("http://{own}/hello/x"),
+        "http://127.0.0.1:9/".to_owned(),
+        "http://169.254.169.254/latest/meta-data/".to_owned(),
+        "http://[::1]:9/".to_owned(),
+        "http://0.0.0.0:9/".to_owned(),
+    ] {
+        let r = s
+            .client
+            .get(format!("{}/fetch-anywhere", s.base))
+            .query(&[("url", url.as_str())])
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 200);
+        let body: Value = r.json().await.unwrap();
+        assert_eq!(body["code"], "destination_refused", "{url}: {body}");
+    }
+    // A public name is not refused (it fails to connect here, which is a
+    // different code and proves the check let it through).
+    let r = s
+        .client
+        .get(format!("{}/fetch-anywhere", s.base))
+        .query(&[("url", "http://198.51.100.7:9/")])
+        .send()
+        .await
+        .unwrap();
+    let body: Value = r.json().await.unwrap();
+    assert_ne!(body["code"], "destination_refused", "{body}");
+
+    // And the deployment that really does call internal addresses by
+    // dynamic URL says so, and is not refused.
+    let r = s
+        .client
+        .get(format!("{}/fetch-anywhere-private", s.base))
+        .query(&[("url", format!("http://{own}/hello/x").as_str())])
+        .send()
+        .await
+        .unwrap();
+    let body: Value = r.json().await.unwrap();
+    assert!(
+        body["status"].is_number(),
+        "the opted-in client must reach it (whatever that path answers): {body}"
+    );
+    s.shutdown.cancel();
+}

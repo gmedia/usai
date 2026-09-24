@@ -230,6 +230,20 @@ export interface HttpClientOptions {
   headers?: Record<string, string>;
   /** Environment variable whose value is sent as `Authorization: Bearer …`. */
   bearerTokenEnv?: string;
+  /** Let a client **without** a `baseUrl` reach loopback, private,
+   * link-local and unique-local addresses. Off by default.
+   *
+   * The only reason a client without a `baseUrl` exists is that the
+   * destination comes from the application's own data — a
+   * tenant-configured webhook — which makes it attacker-influenced by
+   * construction, and `http://169.254.169.254/…`, `http://127.0.0.1:3900`
+   * and an internal service's name are all requests your application would
+   * make on the caller's behalf. Refused with `destination_refused`.
+   *
+   * Set it only when the client really does call internal addresses chosen
+   * at runtime. A client that names its destination (`baseUrl` /
+   * `baseUrlEnv`) is pinned to one origin already and is never checked. */
+  allowPrivateNetwork?: boolean;
 }
 
 /** Outbound HTTP, declared: the runtime owns the client (pool, TLS roots,
@@ -277,6 +291,8 @@ export function httpClient<const N extends string>(
   if (options.maxConcurrent !== undefined) config["maxConcurrent"] = options.maxConcurrent;
   if (options.headers !== undefined) config["headers"] = options.headers;
   if (options.bearerTokenEnv !== undefined) config["bearerTokenEnv"] = options.bearerTokenEnv;
+  if (options.allowPrivateNetwork !== undefined)
+    config["allowPrivateNetwork"] = options.allowPrivateNetwork;
   return {
     __usai: "resource",
     name,

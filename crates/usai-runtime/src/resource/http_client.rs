@@ -53,6 +53,17 @@ struct HttpClientConfig {
     headers: BTreeMap<String, String>,
     /// Environment variable whose value becomes `Authorization: Bearer …`.
     bearer_token_env: Option<String>,
+    /// Let a client **without** a `baseUrl` reach loopback, private,
+    /// link-local and unique-local addresses. Off by default: the only
+    /// reason such a client exists is that the destination comes from the
+    /// application's data — a tenant-configured webhook — and that is
+    /// exactly the input that turns `http://169.254.169.254/…` or the
+    /// runtime's own status listener into a request the application makes
+    /// on the caller's behalf. A client that names its destination
+    /// (`baseUrl`/`baseUrlEnv`) is already pinned to one origin and is not
+    /// affected.
+    #[serde(default)]
+    allow_private_network: bool,
 }
 
 #[async_trait]
@@ -135,6 +146,7 @@ impl ResourceProvider for HttpClientProvider {
             identity,
             client,
             base,
+            allow_private_network: config.allow_private_network,
             timeout,
             max: max as u32,
             slots: Arc::new(Semaphore::new(max)),
@@ -155,6 +167,7 @@ pub struct HttpClient {
     identity: ResourceIdentity,
     client: reqwest::Client,
     base: Option<reqwest::Url>,
+    allow_private_network: bool,
     timeout: Duration,
     max: u32,
     slots: Arc<Semaphore>,
@@ -173,6 +186,46 @@ struct FetchRequest {
     body: Option<String>,
     #[serde(default)]
     timeout_ms: Option<u64>,
+}
+
+/// Addresses an application must not reach *by accident* on behalf of a
+/// caller who chose the URL: the host's own loopback (which includes this
+/// runtime's status listener), the private ranges every cloud puts its
+/// internal services on, the link-local range that carries instance
+/// metadata (`169.254.169.254`), and their IPv6 equivalents.
+///
+/// This is the classic SSRF shape, and it is not hypothetical here: the
+/// generic client exists *because* the destination comes from the
+/// application's data (a tenant-configured webhook), so the destination is
+/// attacker-influenced by construction.
+fn is_internal(ip: std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                // Carrier-grade NAT, 100.64.0.0/10: a cloud's own fabric.
+                || (v4.octets()[0] == 100 && (64..128).contains(&v4.octets()[1]))
+                // 0.0.0.0/8 — "this network"; 0.0.0.0 itself reaches localhost
+                // on Linux, which is a well-worn bypass.
+                || v4.octets()[0] == 0
+        }
+        IpAddr::V6(v6) => {
+            // An IPv4-mapped address is an IPv4 address wearing a hat.
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_internal(IpAddr::V4(v4));
+            }
+            v6.is_loopback()
+                || v6.is_unspecified()
+                // fc00::/7 unique-local and fe80::/10 link-local; neither
+                // predicate is stable, so they are written out.
+                || (v6.segments()[0] & 0xfe00) == 0xfc00
+                || (v6.segments()[0] & 0xffc0) == 0xfe80
+        }
+    }
 }
 
 fn terminal(code: &str, message: impl Into<String>) -> ResourceError {
@@ -216,6 +269,63 @@ impl HttpClient {
     }
 }
 
+impl HttpClient {
+    /// Refuses a destination inside the host's own network for a client
+    /// that did not name its destination. A client with `baseUrl` is
+    /// already pinned to one origin — the operator chose it — and is never
+    /// checked; `allowPrivateNetwork: true` opts a generic client out, for
+    /// the deployment that really does call internal services by dynamic
+    /// URL.
+    ///
+    /// Resolution happens here, and the connection resolves again: a name
+    /// that answers differently between the two would slip past (DNS
+    /// rebinding). Refusing when *any* resolved address is internal closes
+    /// the common case; a deployment that must be airtight against a
+    /// hostile URL puts an egress proxy in front and points `baseUrlEnv` at
+    /// it (`docs/THREAT-MODEL.md`).
+    async fn check_destination(&self, url: &reqwest::Url) -> Result<(), ResourceError> {
+        if self.base.is_some() || self.allow_private_network {
+            return Ok(());
+        }
+        let Some(host) = url.host_str() else {
+            return Ok(());
+        };
+        let port = url.port_or_known_default().unwrap_or(80);
+        if let Ok(ip) = host.trim_matches(['[', ']']).parse::<std::net::IpAddr>() {
+            return if is_internal(ip) {
+                Err(refused(host, ip))
+            } else {
+                Ok(())
+            };
+        }
+        let resolved = tokio::net::lookup_host((host, port))
+            .await
+            .map_err(|e| terminal("http_connect", format!("{host}: {e}")))?;
+        for address in resolved {
+            if is_internal(address.ip()) {
+                return Err(refused(host, address.ip()));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn refused(host: &str, ip: std::net::IpAddr) -> ResourceError {
+    terminal(
+        "destination_refused",
+        format!(
+            "{host} resolves to {ip}, which is inside this host's own network. \
+             A client declared without a `baseUrl` takes its destination from the \
+             application's data, so it is refused there by default — that is the \
+             request an attacker-chosen webhook URL would make on your behalf \
+             (instance metadata, the runtime's own status listener, an internal \
+             service). Name the destination with `baseUrl`/`baseUrlEnv`, or, if \
+             this client really does call internal addresses chosen at runtime, \
+             declare `allowPrivateNetwork: true`."
+        ),
+    )
+}
+
 #[async_trait]
 impl ResourceManager for HttpClient {
     fn identity(&self) -> &ResourceIdentity {
@@ -236,6 +346,7 @@ impl ResourceManager for HttpClient {
         let request: FetchRequest = serde_json::from_value(call.args)
             .map_err(|e| terminal("invalid_args", e.to_string()))?;
         let url = self.resolve(&request.url)?;
+        self.check_destination(&url).await?;
         let method = request
             .method
             .as_deref()
@@ -363,5 +474,68 @@ impl ResourceManager for HttpClient {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_internal;
+    use std::net::IpAddr;
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().expect("address")
+    }
+
+    /// The addresses a tenant-chosen webhook URL must not reach. Each line
+    /// here is a documented SSRF target, not a hypothetical: the metadata
+    /// service, the runtime's own listeners, a cloud's internal fabric, and
+    /// the two spellings people forget (`0.0.0.0`, which reaches localhost
+    /// on Linux, and an IPv4-mapped IPv6 address).
+    #[test]
+    fn the_hosts_own_network_is_internal() {
+        for address in [
+            "127.0.0.1",
+            "127.1.2.3",
+            "0.0.0.0",
+            "0.1.2.3",
+            "10.0.0.1",
+            "172.16.0.1",
+            "172.31.255.255",
+            "192.168.1.1",
+            "169.254.169.254",
+            "100.64.0.1",
+            "100.127.255.255",
+            "255.255.255.255",
+            "::1",
+            "::",
+            "fd00::1",
+            "fc00::1",
+            "fe80::1",
+            "::ffff:127.0.0.1",
+            "::ffff:10.0.0.1",
+        ] {
+            assert!(is_internal(ip(address)), "{address} must be refused");
+        }
+    }
+
+    #[test]
+    fn ordinary_public_addresses_are_not() {
+        for address in [
+            "1.1.1.1",
+            "8.8.8.8",
+            "93.184.216.34",
+            "172.32.0.1",
+            // TEST-NET-3 is reserved, not internal: refusing it would be a
+            // policy about documentation rather than about this host's
+            // network, and it is the address a test reaches for when it
+            // wants "public and not connectable".
+            "198.51.100.7",
+            "100.128.0.1",
+            "100.63.255.255",
+            "2606:4700:4700::1111",
+            "::ffff:8.8.8.8",
+        ] {
+            assert!(!is_internal(ip(address)), "{address} must be allowed");
+        }
     }
 }

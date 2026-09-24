@@ -100,6 +100,13 @@ the old artifact for a while (`SUPPORTED.md` → Versioning).
   build**, with exit 1 and the workload named. That is a CI failure, not a
   deploy failure. Nothing could have declared it before this release.
 
+- **An `httpClient` declared without a `baseUrl` stops reaching private and
+  loopback addresses.** If any of yours calls an internal service through a
+  client that does not name its destination, it starts failing with
+  `destination_refused` — declare `allowPrivateNetwork: true` on it, or give
+  it a `baseUrl`, before the binary lands. Clients that name their
+  destination are unaffected, which is most of them.
+
 **Before either of those, when you rebuild against the new SDK**, four
 things can stop a project that builds today. All four are refusals of
 something that never worked, and each names what it found:
@@ -129,6 +136,54 @@ one application in both directions. Rolling back only the binary leaves the
 new artifact on the old runtime, which is not a supported combination.
 
 Everything else is additive or a fix to behaviour that was wrong.
+
+### Multi-tenancy and outbound requests
+
+- **An `httpClient` without a `baseUrl` no longer reaches this host's own
+  network.** That client exists precisely so the destination can come from
+  the application's data — a tenant-configured webhook, which the guide
+  endorses — which makes the destination attacker-influenced by
+  construction. Measured before the fix: a handler fetching
+  `http://127.0.0.1:<port>/_usai/status` from inside a request got the
+  status document back, RSS, per-route counters, revision identity and
+  resource fingerprints included; on a cloud host the same call reaches
+  `169.254.169.254`. Loopback, the private ranges, link-local, unique-local
+  and their IPv4-mapped spellings are now `destination_refused`.
+  `allowPrivateNetwork: true` opts out where the internal address really is
+  chosen at runtime, and a client with `baseUrl`/`baseUrlEnv` is pinned to
+  one origin already and is unaffected. **If your application calls an
+  internal service through a client that does not name it, declare the
+  opt-out before you deploy this.** The check resolves the name and refuses
+  if any address is internal; a hostile URL still wants an egress proxy,
+  and `docs/THREAT-MODEL.md` says so.
+- **`USAI_PRECOMPILED=0` warns that it changes when your code runs.** It is
+  documented as a loader and security switch, and it is also a semantic one:
+  with the image, module scope is evaluated once at *build* and frozen into
+  the artifact; without it, once per *process*. Two supported configurations,
+  two behaviours for the same source, and nothing said so — the shape of bug
+  that reproduces in staging and not in production.
+- **GUIDE → Multi-tenancy**, the page a SaaS team needs: what a fresh world
+  per unit of work already guarantees (measured: module scope, a
+  module-level `Map`, a class static, a `WeakMap` and `globalThis` all start
+  clean in every kind of world, under concurrency), row-level security with
+  `set_config` inside `sql.transaction` on a restricted role, a second
+  privileged resource for back-office work, the CI gates over `usai inspect
+  --json`, and the sharp edges — `cache.local` is one flat key space shared
+  by every tenant, admission is per workload rather than per caller, and
+  nothing computed at module scope is per-instance.
+- **The threat model no longer reads as "Usai does not isolate tenants".**
+  "No isolation between applications or tenants" was about hostile *code*,
+  and a reviewer deciding whether a SaaS may be built on this read it the
+  other way. It now separates the two and points at the guide.
+- **`docs/GUIDE.md`'s driver table said the pool leaks session state.** It
+  claimed `SET` without `LOCAL` "would leak to the next lessee" — the
+  opposite of what the runtime does, and pessimistic in the one direction
+  that kills an adoption review. The session is reset on **every checkout**:
+  measured with seven kinds of session state (a GUC, a temp table, a session
+  advisory lock, `SET ROLE`, a prepared statement, `statement_timeout`,
+  `search_path`) set on one backend and all clear on the next lease of the
+  same pid — including after a deadline cancellation and after an aborted
+  transaction.
 
 ### Modules and the shared layer
 

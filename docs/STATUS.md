@@ -242,6 +242,53 @@ capabilities (design), latency histogram in metrics, an API reference page — a
   side, rejections, pool `in use` and `waiting`, what the process costs —
   because totals since boot answer the wrong question during an incident.
 
+- **Round 26 (2026-09-24): multi-tenant isolation.** An engineer building
+  the shape most products have — one deployment, one database, many customer
+  organisations, and a hard rule that no tenant sees another's data — who
+  set out to prove with evidence that a normal developer *cannot* leak
+  across tenants, and to find where they can. Verdict: **yes, and for a
+  stronger reason than "it does not leak"** — the standard PostgreSQL answer
+  composes with the connection pool. With the pool on a restricted role and
+  `set_config('app.tenant', $1, true)` inside `sql.transaction`, a handler
+  that **forgot the WHERE clause entirely** returned no rows, a cross-tenant
+  read by explicit id returned nothing, and a cross-tenant insert was
+  `sql_42501`. Everything in-process that burns people on other runtimes was
+  measured clean in every kind of world and under 48-way concurrency across
+  3 000 requests: a module-level `let`, a module-scope `Map`, a nested
+  object, a class static, a `WeakMap`, `globalThis` — 0 stale reads, 0
+  principal mismatches. And the pool reset turned out **stronger than the
+  documentation promised**: seven kinds of session state (a GUC, a temp
+  table, a session advisory lock, `SET ROLE`, a prepared statement,
+  `statement_timeout`, `search_path`) set on one backend were all clear on
+  the next lease of the same pid, including after a deadline cancellation
+  and an aborted transaction. The findings were at the edges, and the worst
+  was real: **a client declared without a `baseUrl` could reach this host's
+  own network** — the round fetched `/_usai/status` from inside a handler
+  and got RSS, per-route counters, revision identity and resource
+  fingerprints back, and on a cloud host the same call reaches
+  `169.254.169.254`. That client exists *because* the destination comes from
+  the application's data, which the guide endorses for webhook consumers, so
+  the destination is attacker-influenced by construction; it now refuses
+  loopback, private, link-local and unique-local addresses, with
+  `allowPrivateNetwork: true` for the deployment that means it. Also fixed:
+  `USAI_PRECOMPILED=0` is documented as a loader switch and is a **semantic**
+  one (module scope evaluated per process rather than frozen at build), and
+  now says so; the GUIDE's driver table claimed the pool *leaks* session
+  state to the next lessee — the opposite of what it does, pessimistic in
+  the one direction that kills an adoption review; the threat model's "no
+  isolation between applications or tenants" read as "Usai does not isolate
+  tenants" to exactly the person deciding whether a SaaS may be built on it,
+  and now separates hostile *code* from ordinary tenant data; and GUIDE
+  gained **Multi-tenancy** — RLS with `set_config` (which appeared nowhere
+  in the docs, while `SET LOCAL` cannot take a bind parameter, leading every
+  reader toward interpolating a tenant id into SQL), a second privileged
+  resource for back-office work, the `usai inspect --json` CI gates for "a
+  route with no auth" and "a route that can cross tenants", and the sharp
+  edges: `cache.local` is one flat key space shared by every tenant,
+  admission is per workload rather than per caller, and `Math.random()` at
+  module scope is a constant baked into the artifact while `crypto` there
+  refuses outright.
+
 - **Round 25 (2026-09-24): the shared layer.** A platform engineer at a
   company with several services, whose first job is not a service but the
   **layer every service will depend on**: an auth module, a billing module,

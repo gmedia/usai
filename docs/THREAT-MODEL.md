@@ -36,13 +36,24 @@
 | Internal detail leaking in error responses | unexpected errors sanitized to `internal`; stacks only in logs; `expose_diagnostics` is development-only | `http/pipeline.rs` |
 | Configuration doing I/O at definition time | `usai.config.ts` and the app module are evaluated in a capability-less world (all host operations refused) | `engine/mod.rs` `RefusingBindings` |
 | Stale artifact served silently | CLI commands always rebuild unless `--artifact` is explicit; artifact code hash must match the manifest | `crates/usai-cli`, `definition.rs` |
+| A destination the application's data chose (SSRF) | an `httpClient` **without** a `baseUrl` refuses this host's own network — loopback, private, link-local (`169.254.169.254`), unique-local — with `destination_refused`; `allowPrivateNetwork: true` opts out. A client with `baseUrl`/`baseUrlEnv` is pinned to one origin already. The check resolves the name and refuses if **any** address is internal; the connection resolves again, so a name that answers differently between the two (DNS rebinding) is not covered — a hostile URL wants an egress proxy in front of the runtime, with `baseUrlEnv` pointed at it | `resource/http_client.rs` |
 
 ## What the runtime does not provide (v0)
 
 - **No HTTP TLS.** Run behind a TLS-terminating proxy or on a private network. PostgreSQL connections use TLS when the URL says `sslmode=require` (or `prefer`, the default, when the server offers it) and always verify the server certificate (Mozilla roots + `tls.caFile` / `PGSSLROOTCERT`).
 - **`/_usai/*` surfaces are operator information.** Status, metrics and the reference are served only when enabled (`--status`, `--status-addr`, `usai dev`). `USAI_STATUS_TOKEN` puts them behind a bearer token (constant-time compared; the probes `/_usai/live` and `/_usai/ready` stay open, the docs shell asks for the token); without a token, serve them only on a private listener; `USAI_SURFACES_OFF` removes the ones nobody consumes. What they reveal: RSS/PSS and fault counts, per-route request and error counts (a traffic map), the revision identity, resource fingerprints and pool sizes, the full OpenAPI profile (environment variable names, cron schedules, queue message schemas).
 - **What a response tells a client about the server.** By default: the status, the body the application produced, `x-request-id`, and nothing about the machine. Two flags change that, both off unless asked for. `--server-timing` (`USAI_SERVER_TIMING=1`) adds `Server-Timing: total;dur=…, world;dur=…, cpu;dur=…` — timing only, no stacks and no messages, but it is a side channel: a caller can see how long a handler took and how much CPU it spent, which is enough to distinguish "user found" from "user not found" on a route whose *body* is careful not to. Leave it off on a route whose timing is a secret, or accept that timing is already observable from the client's own clock (this header only makes it precise). `--diagnostics` (`USAI_DIAGNOSTICS=1`) is the one that must not face users: it puts error detail and source-mapped stacks in 500 bodies.
-- **No isolation between applications or tenants.** One runtime = one trust domain. Multi-application hosting needs a new ADR and threat model before untrusted co-tenancy.
+- **One runtime is one trust domain.** Every world runs the same
+  application's code with the same capabilities, so a world is not a
+  sandbox against *hostile code*: co-hosting applications you do not trust,
+  or letting tenants supply code, needs a new ADR and threat model.
+  **This is not a statement about ordinary SaaS tenancy.** Keeping tenant
+  A's *data* out of tenant B's request is an application concern that the
+  model supports directly — a fresh world per unit of work carries no
+  in-process state forward, and a pooled PostgreSQL connection is reset on
+  every checkout — and `docs/GUIDE.md` → "Multi-tenancy" is how to build
+  it, including row-level security on a restricted role. A reviewer reading
+  only the first sentence has drawn the wrong conclusion more than once.
 - **CPU is accounted, not scheduled.** Every world's guest CPU time is measured (thread CPU inside guest entries: `WorkResult.cpu`, the world trace's `cpu_us`, `usai_guest_cpu_seconds_total`) and one synchronous run is bounded by the CPU slice; there is no per-workload CPU share or fairness policy — a handler that awaits in a tight loop is bounded by its deadline, and by the `concurrency:` its workload declares. **ADR-0021** decides that and says why: the accounting is per workload (`usai_workload_cpu_seconds_total{workload}`) so an operator can see which workload spends the CPU and cap it with admission; scheduling it would need preemptible guest execution, which is the machinery that makes state survive a world.
 - **No durable tasks.** A crash loses locally dispatched tasks (ADR-0010); the queue substrate is durable because PostgreSQL is.
 - **No rate limiting per client.** Budgets are per workload/resource, not per caller.
