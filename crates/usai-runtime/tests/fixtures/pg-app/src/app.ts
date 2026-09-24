@@ -257,6 +257,20 @@ export const orders = queue.consume(
   },
   async (ctx) => {
     globalThis.__mutable = ((globalThis.__mutable as number | undefined) ?? 0) + 1;
+    // A message that takes real time and cooperates: the drain must *ask*
+    // it to stop (`ctx.signal`) and wait, not cancel it the moment the
+    // consumer is told to stop claiming.
+    if (ctx.message.orderId.startsWith("long")) {
+      let ticks = 0;
+      while (!ctx.signal.aborted && ticks < 600) {
+        await ctx.sleep("50ms");
+        ticks++;
+      }
+      await (ctx.resources["seen"] as Seen).increment(
+        ctx.signal.aborted ? "long:stopped" : "long:finished",
+      );
+      return { orderId: ctx.message.orderId, attempt: ctx.attempt, worldCounter: 0, seen: 0 };
+    }
     if (ctx.message.sleepMs) await ctx.sleep(ctx.message.sleepMs);
     const n = await (ctx.resources["seen"] as Seen).increment(`orders:${ctx.message.orderId}`);
     // The publisher's request id rides with the message: remember it under

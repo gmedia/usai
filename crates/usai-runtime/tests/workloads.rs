@@ -363,3 +363,81 @@ async fn service_state_persists_for_the_service_lifetime_and_stops_gracefully() 
     );
     baseline(&rt).await;
 }
+
+/// The documented drain contract for a long background job — "a long task
+/// that checks `ctx.signal.aborted` between steps records where it got to
+/// and returns, and the drain finishes when it does" (GUIDE §5) — has to
+/// hold for the path a production replica actually uses: a command or a task
+/// invoked through the control surface. Those were executed with **no stop
+/// token at all**, so `ctx.signal` never aborted; the job ran on through the
+/// whole drain and was killed at the bound, with its return value lost.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_control_invoked_task_sees_the_drain_and_returns() {
+    let Some(rt) = runtime().await else { return };
+    let a = rt.active().unwrap();
+    let running = Arc::clone(&rt);
+    let job = tokio::spawn(async move { running.run_task("long", json!(null)).await });
+    // Let the loop get going, then replace the revision under it.
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let b = rt.install(Arc::clone(&a.definition)).await.unwrap();
+    rt.activate(b.id).await.unwrap();
+    let started = std::time::Instant::now();
+    rt.drain(a.id).await.unwrap();
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "the drain waited for the bound instead of the task: {:?}",
+        started.elapsed()
+    );
+    let result = job.await.expect("task joined").expect("task ran");
+    assert!(
+        matches!(
+            result.termination,
+            usai_runtime::world::Termination::Completed
+        ),
+        "the job was killed rather than ending itself: {:?}",
+        result.termination
+    );
+    assert_eq!(
+        audit(&rt, "long:stopped").await,
+        json!(1),
+        "the task saw the stop and recorded where it got to"
+    );
+    baseline(&rt).await;
+}
+
+/// The same paragraph, the other direction: a cron tick already running got
+/// the scheduler's stop as its *cancel* token, so it was cancelled outright
+/// at the start of the drain — 1.5 ms after SIGTERM, mid-batch — instead of
+/// being asked to stop and given the drain window. "Stop scheduling" and
+/// "abandon what is running" are not the same instruction.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_running_cron_tick_is_asked_to_stop_not_cancelled() {
+    let Some(rt) = runtime_with(true).await else {
+        return;
+    };
+    let a = rt.active().unwrap();
+    // `long-tick` runs every second and would take 30 s; wait for one to be
+    // under way.
+    tokio::time::sleep(std::time::Duration::from_millis(1600)).await;
+    let b = rt.install(Arc::clone(&a.definition)).await.unwrap();
+    rt.activate(b.id).await.unwrap();
+    // What SIGTERM does, in the order the CLI does it: background work is
+    // told to stop claiming first, then the revision drains. Without that
+    // first step the scheduler's token never fires and the tick's cancel —
+    // which used to be a child of it — never fires either, so the bug is
+    // invisible.
+    a.stop_background_work();
+    let started = std::time::Instant::now();
+    rt.drain(a.id).await.unwrap();
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "the drain waited for the bound: {:?}",
+        started.elapsed()
+    );
+    assert_eq!(
+        audit(&rt, "long-tick:stopped").await,
+        json!(1),
+        "the tick was cancelled instead of being asked to stop"
+    );
+    baseline(&rt).await;
+}

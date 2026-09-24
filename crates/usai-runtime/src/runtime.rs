@@ -192,7 +192,10 @@ impl Revision {
     /// Stops this revision's background schedulers and consumers without
     /// touching its state: HTTP keeps serving, cron stops scheduling and
     /// queue consumers stop claiming.
-    fn stop_background_work(&self) {
+    /// Tells this revision's schedulers to stop claiming new work. It does
+    /// **not** end what is already running: that is asked to stop through
+    /// the revision's own stop token and cancelled only by the drain bound.
+    pub fn stop_background_work(&self) {
         if let Some(stop) = self.cron_stop.lock().expect("cron poisoned").take() {
             stop.cancel();
         }
@@ -918,8 +921,20 @@ impl Runtime {
         let admission = self.admit(&revision, &format!("command:{name}"))?;
         let input =
             crate::workloads::input(&revision, "command", serde_json::json!({ "args": args }));
-        self.execute(admission, input, CancellationToken::new())
-            .await
+        // The same graceful stop a dispatched task gets. Without it a
+        // command invoked through the control surface — the only way to run
+        // one inside a serving replica — never saw `ctx.signal` abort, so
+        // the documented idiom ("a long job checks `ctx.signal.aborted`
+        // between steps, records where it got to and returns") did nothing
+        // and the job was killed at the drain bound instead. A child token,
+        // so nothing this world does can cancel the revision's.
+        self.execute_with_stop(
+            admission,
+            input,
+            CancellationToken::new(),
+            Some(revision.connections_stop().child_token()),
+        )
+        .await
     }
 
     /// Runs a task directly (tests, tooling). Equivalent to an owned invoke
@@ -933,8 +948,13 @@ impl Runtime {
         let admission = self.admit(&revision, &format!("task:{name}"))?;
         let input =
             crate::workloads::input(&revision, "task", serde_json::json!({ "input": input }));
-        self.execute(admission, input, CancellationToken::new())
-            .await
+        self.execute_with_stop(
+            admission,
+            input,
+            CancellationToken::new(),
+            Some(revision.connections_stop().child_token()),
+        )
+        .await
     }
 
     /// Delivers one message to a topic's consumer directly, in a fresh
@@ -954,8 +974,13 @@ impl Runtime {
             "queue",
             serde_json::json!({ "message": message, "id": "direct", "attempt": 1 }),
         );
-        self.execute(admission, input, CancellationToken::new())
-            .await
+        self.execute_with_stop(
+            admission,
+            input,
+            CancellationToken::new(),
+            Some(revision.connections_stop().child_token()),
+        )
+        .await
     }
 
     /// Creates a world for admitted work and drives it to its terminal state.

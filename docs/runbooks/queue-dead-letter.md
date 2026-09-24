@@ -10,7 +10,11 @@ then **dead-lettered**: state `dead` in `usai_queue`, `last_error` set.
   delay_ms=<d> error=<message>` per attempt, then `message dead-lettered
   … attempt=<last> error=…`.
 - Metrics/status: `usai_queue_messages_total{state="retried"}` per attempt,
-  `{state="dead"}` once; in `/_usai/status`, `revisions[].queue`.
+  `{state="dead"}` once; in `/_usai/status`, `revisions[].queue`. A message
+  refused by the topic's **contract** never ran a world, so it is counted
+  `{state="invalid"}` and never `retried` — it is still `dead` in the table
+  and in `usai queue status`. Alert on both states or that case is silent;
+  it is the one a rolling deploy produces (`schema-change.md`).
 - Database: `select * from usai_queue where state = 'dead'` has the payload
   and the error; the application's own record (the invoicing example writes
   `webhook_deliveries` per attempt) shows what each attempt saw.

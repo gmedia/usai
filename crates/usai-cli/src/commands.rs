@@ -1089,9 +1089,16 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
 /// outcome. Shared by `usai app`, `usai cron run`, and `usai task run`.
 async fn one_shot(
     root: &Path,
+    artifact: Option<PathBuf>,
     run: impl AsyncFnOnce(&Runtime) -> Result<WorkResult, RuntimeError>,
 ) -> Result<()> {
-    let (definition, engine) = definition_for(root, None).await?;
+    // `--artifact` is what makes these verbs usable in production. A
+    // production image carries `.usai/build` and no source tree — that is
+    // the point of it — so `usai app <name>` inside one answered "not a Usai
+    // project: no package.json or usai.config.ts here", and the only route
+    // to a declared command was the control surface of a *serving* replica.
+    // The `db` verbs have taken an artifact since D5; the rest did not.
+    let (definition, engine) = definition_for(root, artifact).await?;
     let runtime = Runtime::new(
         engine,
         RuntimeConfig {
@@ -1153,21 +1160,52 @@ async fn one_shot(
                     .unwrap_or_default()
             )
         }
-        (termination, _) => anyhow::bail!("work ended without a result: {termination:?}"),
+        // A bare `DeadlineExceeded` told an operator nothing they could act
+        // on: not which workload, not how long it got, and not that the
+        // 30 s bound it hit is the runtime's default for a workload that
+        // declares none. A batched backfill run this way looks like a
+        // runtime fault rather than a deadline the author can raise.
+        (Termination::DeadlineExceeded, _) => anyhow::bail!(
+            "{} hit its deadline after {:.1}s ({:.1}s of it computing){}\n  \
+             the work it had already committed is committed; what was in flight was cancelled\n  \
+             hint: declare a longer one where the workload is declared (`timeout: \"30m\"`), \
+             and `usai inspect` prints every workload's effective deadline and where it came from",
+            result.workload,
+            result.duration.as_secs_f64(),
+            result.cpu.as_secs_f64(),
+            match result.request_id.as_deref() {
+                Some(id) if !id.is_empty() => format!(" [request {id}]"),
+                _ => String::new(),
+            }
+        ),
+        (termination, _) => anyhow::bail!(
+            "{} ended without a result: {termination:?}",
+            result.workload
+        ),
     }
 }
 
-pub async fn app(root: &Path, name: &str, args: Vec<String>) -> Result<()> {
-    one_shot(root, async |rt| rt.run_command(name, args).await).await
+pub async fn app(
+    root: &Path,
+    name: &str,
+    args: Vec<String>,
+    artifact: Option<PathBuf>,
+) -> Result<()> {
+    one_shot(root, artifact, async |rt| rt.run_command(name, args).await).await
 }
 
-pub async fn cron_run(root: &Path, name: &str) -> Result<()> {
-    one_shot(root, async |rt| rt.run_cron(name).await).await
+pub async fn cron_run(root: &Path, name: &str, artifact: Option<PathBuf>) -> Result<()> {
+    one_shot(root, artifact, async |rt| rt.run_cron(name).await).await
 }
 
-pub async fn task_run(root: &Path, name: &str, input: &str) -> Result<()> {
+pub async fn task_run(
+    root: &Path,
+    name: &str,
+    input: &str,
+    artifact: Option<PathBuf>,
+) -> Result<()> {
     let input: serde_json::Value = serde_json::from_str(input).context("--input must be JSON")?;
-    one_shot(root, async |rt| rt.run_task(name, input).await).await
+    one_shot(root, artifact, async |rt| rt.run_task(name, input).await).await
 }
 
 /// `usai probe live|ready`: one GET against the status listener, exit 0 on
@@ -1198,10 +1236,18 @@ pub async fn probe(which: &str, addr: &str, timeout: u64) -> Result<()> {
     }
 }
 
-pub async fn queue_run(root: &Path, topic: &str, message: &str) -> Result<()> {
+pub async fn queue_run(
+    root: &Path,
+    topic: &str,
+    message: &str,
+    artifact: Option<PathBuf>,
+) -> Result<()> {
     let message: serde_json::Value =
         serde_json::from_str(message).context("--message must be JSON")?;
-    one_shot(root, async |rt| rt.run_queue_message(topic, message).await).await
+    one_shot(root, artifact, async |rt| {
+        rt.run_queue_message(topic, message).await
+    })
+    .await
 }
 
 /// `usai queue status`: what is in the table, per topic and state.
@@ -1449,20 +1495,57 @@ fn report_applied(applied: &[String], total: usize) {
     }
 }
 
-fn print_migration_status(status: Vec<db::MigrationStatus>, json: bool) -> Result<()> {
+/// Prints the ledger against the files, and — with `check` — makes the
+/// command usable as a deploy gate: non-zero when anything is pending or
+/// drifted. Drift always fails, `check` or not: `usai db migrate` refuses
+/// that state outright, and the runbook sends an operator here first.
+fn print_migration_status(status: Vec<db::MigrationStatus>, json: bool, check: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(&status)?);
-        return Ok(());
+    } else {
+        println!("{:<40} {:<18} applied", "migration", "checksum");
+        for s in &status {
+            let applied = s.applied_at.as_deref().unwrap_or("pending");
+            let note = if s.path.is_none() {
+                "  (file missing)".to_owned()
+            } else if s.drifted() {
+                format!(
+                    "  (EDITED since it was applied: the ledger has {})",
+                    s.applied_checksum.as_deref().unwrap_or("?")
+                )
+            } else {
+                String::new()
+            };
+            println!("{:<40} {:<18} {applied}{note}", s.name, s.checksum);
+        }
     }
-    println!("{:<40} {:<18} applied", "migration", "checksum");
-    for s in status {
-        let applied = s.applied_at.as_deref().unwrap_or("pending");
-        let missing = if s.path.is_none() {
-            "  (file missing)"
-        } else {
-            ""
-        };
-        println!("{:<40} {:<18} {applied}{missing}", s.name, s.checksum);
+    let drifted: Vec<&str> = status
+        .iter()
+        .filter(|s| s.drifted())
+        .map(|s| s.name.as_str())
+        .collect();
+    if !drifted.is_empty() {
+        anyhow::bail!(
+            "these migrations were edited after they were applied: {}\n  \
+             migrations are immutable once applied; `usai db migrate` refuses this state. \
+             Restore the files from the commit that was deployed, or — if the change is \
+             genuinely needed — write a new migration",
+            drifted.join(", ")
+        );
+    }
+    if check {
+        let pending: Vec<&str> = status
+            .iter()
+            .filter(|s| s.applied_at.is_none())
+            .map(|s| s.name.as_str())
+            .collect();
+        if !pending.is_empty() {
+            anyhow::bail!(
+                "{} migration(s) pending: {}",
+                pending.len(),
+                pending.join(", ")
+            );
+        }
     }
     Ok(())
 }
@@ -1472,12 +1555,13 @@ pub async fn db_status(
     resource: Option<&str>,
     json: bool,
     artifact: Option<PathBuf>,
+    check: bool,
 ) -> Result<()> {
     if let Some(dir) = artifact {
         return with_artifact_runtime(&dir, async |runtime, files| {
             let revision = runtime.active()?;
             let manager = db::database(&revision, resource)?;
-            print_migration_status(db::status(manager.as_ref(), &files).await?, json)
+            print_migration_status(db::status(manager.as_ref(), &files).await?, json, check)
         })
         .await;
     }
@@ -1486,7 +1570,7 @@ pub async fn db_status(
         let globs = db::migration_globs(&revision.definition, &config.migrations.value);
         let files = db::discover_migrations(&config.root, &globs)?;
         let manager = db::database(&revision, resource)?;
-        print_migration_status(db::status(manager.as_ref(), &files).await?, json)
+        print_migration_status(db::status(manager.as_ref(), &files).await?, json, check)
     })
     .await
 }

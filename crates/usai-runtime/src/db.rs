@@ -283,9 +283,27 @@ pub fn database(
 #[serde(rename_all = "camelCase")]
 pub struct MigrationStatus {
     pub name: String,
+    /// The file's checksum as it is on disk now.
     pub checksum: String,
     pub applied_at: Option<String>,
+    /// The checksum recorded in the ledger when this migration was applied.
+    /// It is the *other* number: `checksum` above is what the file hashes to
+    /// today, and printing only that made a file edited after it was applied
+    /// indistinguishable from an untouched one — in the table and in
+    /// `--json` — while `usai db migrate` refuses the same state outright.
+    /// `db status` is the command the restore runbook designates as the
+    /// gate ("everything applied and nothing pending is the only state to
+    /// start from"), so it has to be able to see drift.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub applied_checksum: Option<String>,
     pub path: Option<PathBuf>,
+}
+
+impl MigrationStatus {
+    /// The file was applied and has been edited since.
+    pub fn drifted(&self) -> bool {
+        matches!(&self.applied_checksum, Some(applied) if applied != &self.checksum)
+    }
 }
 
 pub async fn status(
@@ -307,6 +325,10 @@ pub async fn status(
                 .iter()
                 .find(|a| a.name == f.name)
                 .map(|a| a.applied_at.clone()),
+            applied_checksum: applied
+                .iter()
+                .find(|a| a.name == f.name)
+                .map(|a| a.checksum.clone()),
             path: Some(f.path.clone()),
         })
         .collect();
@@ -314,13 +336,44 @@ pub async fn status(
         if !files.iter().any(|f| f.name == a.name) {
             out.push(MigrationStatus {
                 name: a.name,
-                checksum: a.checksum,
+                checksum: a.checksum.clone(),
                 applied_at: Some(a.applied_at),
+                applied_checksum: Some(a.checksum),
                 path: None,
             });
         }
     }
     Ok(out)
+}
+
+/// The pragma that takes a migration out of its transaction, for the
+/// statements PostgreSQL refuses to run inside one — `CREATE INDEX
+/// CONCURRENTLY` above all, which on a large table is the difference
+/// between a background build and a write outage for its duration. It is a
+/// line of its own, anywhere in the file:
+///
+/// ```sql
+/// -- usai: no-transaction
+/// create index concurrently if not exists invoices_due_at_idx on invoices (due_at);
+/// ```
+///
+/// The ledger row cannot then be written atomically with the work, so a
+/// process that dies between the two runs the file again: **the SQL must be
+/// idempotent**. `IF NOT EXISTS` is how, and a concurrent index build that
+/// fails leaves an invalid index that must be dropped by hand before the
+/// retry (PostgreSQL's rule, not this runtime's).
+pub fn runs_outside_a_transaction(sql: &str) -> bool {
+    sql.lines().any(|line| {
+        let line = line.trim();
+        let Some(rest) = line.strip_prefix("--") else {
+            return false;
+        };
+        let rest = rest.trim();
+        let Some(rest) = rest.strip_prefix("usai:") else {
+            return false;
+        };
+        rest.trim().eq_ignore_ascii_case("no-transaction")
+    })
 }
 
 /// Applies every pending migration in order. Stops at the first failure;
@@ -349,11 +402,16 @@ pub async fn migrate(
             continue;
         }
         let sql = tokio::fs::read_to_string(&file.path).await?;
-        tracing::info!(migration = %file.name, "applying");
-        if pg
-            .apply_migration(&file.name, &sql, &file.checksum, cancel.clone())
-            .await?
-        {
+        let unwrapped = runs_outside_a_transaction(&sql);
+        tracing::info!(migration = %file.name, transactional = !unwrapped, "applying");
+        let applied = if unwrapped {
+            pg.apply_migration_unwrapped(&file.name, &sql, &file.checksum, cancel.clone())
+                .await?
+        } else {
+            pg.apply_migration(&file.name, &sql, &file.checksum, cancel.clone())
+                .await?
+        };
+        if applied {
             done.push(file.name.clone());
         } else {
             tracing::info!(migration = %file.name, "already applied by another migrator");

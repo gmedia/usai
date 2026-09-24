@@ -167,6 +167,10 @@ enum Command {
     App {
         /// Command name as declared with `command("<name>", …)`
         name: String,
+        /// Run against a built artifact instead of a project (a production
+        /// image carries `.usai/build` and no source tree)
+        #[arg(long)]
+        artifact: Option<PathBuf>,
         /// Arguments passed to the command
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
@@ -287,6 +291,10 @@ enum DbAction {
         /// Use a built artifact's migrations (production image, no source)
         #[arg(long)]
         artifact: Option<PathBuf>,
+        /// Exit non-zero when anything is pending, so a deploy step can gate
+        /// on it. A migration edited after it was applied fails either way
+        #[arg(long)]
+        check: bool,
     },
     /// Run seeders (all, or one by name)
     Seed { name: Option<String> },
@@ -295,7 +303,13 @@ enum DbAction {
 #[derive(Subcommand)]
 enum CronAction {
     /// Run one invocation now, without waiting for the schedule
-    Run { name: String },
+    Run {
+        name: String,
+        /// Run against a built artifact instead of a project (a production
+        /// image carries `.usai/build` and no source tree)
+        #[arg(long)]
+        artifact: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -305,6 +319,10 @@ enum TaskAction {
         name: String,
         #[arg(long, default_value = "null")]
         input: String,
+        /// Run against a built artifact instead of a project (a production
+        /// image carries `.usai/build` and no source tree)
+        #[arg(long)]
+        artifact: Option<PathBuf>,
     },
 }
 
@@ -316,6 +334,10 @@ enum QueueAction {
         topic: String,
         #[arg(long, default_value = "null")]
         message: String,
+        /// Run against a built artifact instead of a project (a production
+        /// image carries `.usai/build` and no source tree)
+        #[arg(long)]
+        artifact: Option<PathBuf>,
     },
     /// What is in `usai_queue`: rows per topic and state, the oldest message
     /// still waiting and the oldest still claimed
@@ -608,16 +630,30 @@ async fn async_main() {
         Command::Inspect { json } => commands::inspect(&root, json).await,
         Command::Graph => commands::graph(&root).await,
         Command::Config { json } => commands::config(&root, json).await,
-        Command::App { name, args } => commands::app(&root, &name, args).await,
+        Command::App {
+            name,
+            args,
+            artifact,
+        } => commands::app(&root, &name, args, artifact).await,
         Command::Cron {
-            action: CronAction::Run { name },
-        } => commands::cron_run(&root, &name).await,
+            action: CronAction::Run { name, artifact },
+        } => commands::cron_run(&root, &name, artifact).await,
         Command::Task {
-            action: TaskAction::Run { name, input },
-        } => commands::task_run(&root, &name, &input).await,
+            action:
+                TaskAction::Run {
+                    name,
+                    input,
+                    artifact,
+                },
+        } => commands::task_run(&root, &name, &input, artifact).await,
         Command::Queue {
-            action: QueueAction::Run { topic, message },
-        } => commands::queue_run(&root, &topic, &message).await,
+            action:
+                QueueAction::Run {
+                    topic,
+                    message,
+                    artifact,
+                },
+        } => commands::queue_run(&root, &topic, &message, artifact).await,
         Command::Queue {
             action:
                 QueueAction::Status {
@@ -661,8 +697,9 @@ async fn async_main() {
                     resource,
                     json,
                     artifact,
+                    check,
                 },
-        } => commands::db_status(&root, resource.as_deref(), json, artifact).await,
+        } => commands::db_status(&root, resource.as_deref(), json, artifact, check).await,
         Command::Db {
             action: DbAction::Seed { name },
         } => commands::db_seed(&root, name.as_deref()).await,

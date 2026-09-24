@@ -1612,3 +1612,121 @@ async fn readiness_follows_the_database_unless_the_deployment_says_otherwise() {
     );
     f.runtime.shutdown().await;
 }
+
+/// The queue half of GUIDE §5's drain contract. A message already being
+/// handled used to take the consumer's stop token as its **cancel** token —
+/// and that token means "stop claiming", fired at the start of a drain — so
+/// a long handler was killed the instant the instance was asked to shut
+/// down, mid-work, instead of seeing `ctx.signal` and being given the drain
+/// window. "Stop claiming" and "abandon what you are holding" are not the
+/// same instruction.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_message_being_handled_is_asked_to_stop_not_cancelled() {
+    let Some(f) = fixture_with(true).await else {
+        return;
+    };
+    let rev = f.runtime.active().unwrap();
+    let (_, w) = rev
+        .definition
+        .workload("http:POST /orders")
+        .map(|(i, w)| (i, w.id.clone()))
+        .unwrap();
+    let input = json!({ "kind": "http", "request": { "method": "POST", "path": "/orders", "url": "/orders", "params": {}, "query": {}, "headers": {}, "body": { "json": { "orderId": "long-1" } } } });
+    let r = f.runtime.invoke(&w, input).await.unwrap();
+    assert_eq!(r.outcome.unwrap().unwrap()["status"], 200);
+    // Wait until the consumer has claimed it and the handler is looping.
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    // A replacement revision, so the counter can still be read over HTTP
+    // after the old one retires.
+    let b = f
+        .runtime
+        .install(std::sync::Arc::clone(&rev.definition))
+        .await
+        .unwrap();
+    f.runtime.activate(b.id).await.unwrap();
+    // What SIGTERM does, in the CLI's order: stop claiming first, then drain.
+    rev.stop_background_work();
+    let started = std::time::Instant::now();
+    f.runtime.drain(rev.id).await.unwrap();
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "the drain waited for its bound instead of the handler: {:?}",
+        started.elapsed()
+    );
+    let (_, body) = f
+        .http("GET", "/seen/:key", json!({ "key": "long:stopped" }))
+        .await;
+    assert_eq!(
+        body["n"],
+        json!(1),
+        "the handler was cancelled instead of being asked to stop"
+    );
+}
+
+/// `CREATE INDEX CONCURRENTLY` is the statement an online schema change is
+/// built on — on a large table the ordinary form holds `ACCESS EXCLUSIVE`
+/// for the whole build, which is a write outage — and PostgreSQL refuses it
+/// inside a transaction. Every migration file ran inside one, so an
+/// application had no way to build an index concurrently at all, while the
+/// runtime did exactly that for its own queue table. A `-- usai:
+/// no-transaction` pragma takes the file out of the transaction; the ledger
+/// row cannot then be atomic with the work, which is why the SQL must be
+/// idempotent and why applying it twice has to be a no-op.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_migration_can_opt_out_of_its_transaction() {
+    let Some(f) = fixture().await else {
+        return;
+    };
+    let rev = f.runtime.active().unwrap();
+    let manager = usai_runtime::db::database(&rev, None).unwrap();
+    let dir = std::env::temp_dir().join(format!("usai-notx-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let table = format!("notx_{}", std::process::id());
+    std::fs::write(
+        dir.join("001_table.sql"),
+        format!("create table if not exists {table} (id bigint primary key, sku text);"),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("002_index.sql"),
+        format!(
+            "-- usai: no-transaction\ncreate index concurrently if not exists {table}_sku on {table} (sku);"
+        ),
+    )
+    .unwrap();
+    let files = usai_runtime::db::discover_migrations(&dir, &[("*.sql".to_owned(), String::new())])
+        .unwrap();
+    assert_eq!(files.len(), 2, "{files:?}");
+    let applied = usai_runtime::db::migrate(manager.as_ref(), &files, CancellationToken::new())
+        .await
+        .expect("the concurrent index applies outside a transaction");
+    assert_eq!(applied.len(), 2, "{applied:?}");
+    // Idempotent: a second run applies nothing and does not fail.
+    let again = usai_runtime::db::migrate(manager.as_ref(), &files, CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(again.is_empty(), "{again:?}");
+
+    // Without the pragma the same statement is refused by PostgreSQL, which
+    // is what makes the pragma the thing that matters rather than the
+    // wording of the file.
+    let dir2 = dir.join("nopragma");
+    std::fs::create_dir_all(&dir2).unwrap();
+    std::fs::write(
+        dir2.join("003_index.sql"),
+        format!("create index concurrently if not exists {table}_id2 on {table} (id);"),
+    )
+    .unwrap();
+    let files2 =
+        usai_runtime::db::discover_migrations(&dir2, &[("*.sql".to_owned(), String::new())])
+            .unwrap();
+    let err = usai_runtime::db::migrate(manager.as_ref(), &files2, CancellationToken::new())
+        .await
+        .expect_err("a concurrent index inside a transaction must be refused");
+    assert!(
+        err.to_string().contains("25001") || err.to_string().contains("transaction block"),
+        "{err}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

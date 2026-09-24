@@ -639,7 +639,13 @@ pub fn start(
                         &id,
                         &claimed,
                         deadline,
-                        stop.child_token(),
+                        // Not a child of the consumer's stop: that token
+                        // means "stop claiming", and it fires at the start
+                        // of a drain. A message already being handled is
+                        // asked to stop (the revision's token, inside
+                        // `run_message`) and cancelled only by the drain
+                        // bound, like every other in-flight world.
+                        CancellationToken::new(),
                     )
                     .await;
                     match outcome {

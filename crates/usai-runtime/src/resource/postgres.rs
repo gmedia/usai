@@ -1514,6 +1514,96 @@ impl Postgres {
     /// so the loser's transaction fails on the primary key and its SQL
     /// never executes; that case returns `Ok(false)` (applied by another
     /// migrator), `Ok(true)` means this call applied it.
+    /// Applies one migration outside a transaction, for the statements
+    /// PostgreSQL refuses to run inside one: `CREATE INDEX CONCURRENTLY`,
+    /// `ALTER TYPE … ADD VALUE`, `VACUUM`, `REINDEX CONCURRENTLY`. On a
+    /// large table the concurrent index is not a nicety — built the ordinary
+    /// way it takes `ACCESS EXCLUSIVE` for the whole build, which is a write
+    /// outage. The runtime already does exactly this for its own table
+    /// (`usai queue prepare`); an application had no way to.
+    ///
+    /// The ledger row cannot be atomic with the work here, so the order is:
+    /// take a **session** advisory lock, check the ledger, run the file,
+    /// record it, unlock. If the process dies between the file and the
+    /// record, the migration runs again — which is why the SQL must be
+    /// idempotent (`CREATE INDEX CONCURRENTLY IF NOT EXISTS`), and why the
+    /// pragma says so where an author will read it.
+    pub async fn apply_migration_unwrapped(
+        &self,
+        name: &str,
+        sql: &str,
+        checksum: &str,
+        cancel: CancellationToken,
+    ) -> Result<bool, ResourceError> {
+        let object = self.lease(&cancel).await?;
+        let mut lease = Lease {
+            object: Some(object),
+            terminal: false,
+            counters: Arc::clone(&self.counters),
+        };
+        let insert = format!(
+            "INSERT INTO usai_migrations (name, checksum) VALUES ({}, {});",
+            quote_literal(name),
+            quote_literal(checksum)
+        );
+        let claimed = format!(
+            "SELECT 1 FROM usai_migrations WHERE name = {}",
+            quote_literal(name)
+        );
+        let sql = sql.to_owned();
+        let finished = {
+            let client = lease.client();
+            run_cancellable(client, &cancel, &self.counters, &self.tls, async {
+                client
+                    .batch_execute(&format!("SELECT pg_advisory_lock({MIGRATION_LOCK});"))
+                    .await?;
+                // Everything after the lock releases it before returning; a
+                // failure to release leaves the connection unreusable rather
+                // than a lock held by a pooled session nobody can name.
+                let outcome = async {
+                    if client.query_opt(&claimed, &[]).await?.is_some() {
+                        return Ok(false);
+                    }
+                    client.batch_execute(&sql).await?;
+                    client.batch_execute(&insert).await?;
+                    Ok::<bool, tokio_postgres::Error>(true)
+                }
+                .await;
+                let unlocked = client
+                    .batch_execute(&format!("SELECT pg_advisory_unlock({MIGRATION_LOCK});"))
+                    .await;
+                match (outcome, unlocked) {
+                    (Ok(applied), Ok(())) => Ok(applied),
+                    (Err(e), _) | (Ok(_), Err(e)) => Err(e),
+                }
+            })
+            .await
+        };
+        match finished {
+            Finished::Terminal(result) => {
+                // An ordinary SQL error is a terminal outcome like any
+                // other: the lock was released on the way out, so the
+                // connection is clean and reusable. Only an unproven
+                // outcome quarantines it (C5).
+                if !matches!(
+                    &result,
+                    Err(ResourceError::Operation {
+                        proof: TerminalProof::Ambiguous,
+                        ..
+                    })
+                ) {
+                    lease.mark_terminal();
+                }
+                result
+            }
+            Finished::Ambiguous => Err(ResourceError::Operation {
+                code: "cancel_unconfirmed".into(),
+                message: "the migration did not reach a terminal state after cancellation; connection quarantined".into(),
+                proof: TerminalProof::Ambiguous,
+            }),
+        }
+    }
+
     pub async fn apply_migration(
         &self,
         name: &str,
@@ -1527,29 +1617,57 @@ impl Postgres {
             terminal: false,
             counters: Arc::clone(&self.counters),
         };
-        let script = format!(
-            "BEGIN;\nSELECT pg_advisory_xact_lock({MIGRATION_LOCK});\nINSERT INTO usai_migrations (name, checksum) VALUES ({}, {});\n{sql}\n;COMMIT;",
+        let insert = format!(
+            "INSERT INTO usai_migrations (name, checksum) VALUES ({}, {});",
             quote_literal(name),
             quote_literal(checksum)
+        );
+        let claimed = format!(
+            "SELECT 1 FROM usai_migrations WHERE name = {};",
+            quote_literal(name)
         );
         let finished = {
             let client = lease.client();
             run_cancellable(client, &cancel, &self.counters, &self.tls, async {
-                match client.batch_execute(&script).await {
+                // The lock first, then the check, then the work. Letting the
+                // ledger's primary key settle the race worked — exactly one
+                // migrator applied each file — but the losers wrote a
+                // `duplicate key value violates unique constraint` **ERROR**
+                // into PostgreSQL's log for every file they lost, and the
+                // documented deployment shape (an initContainer on every
+                // replica) makes that every rollout. Thirty-five ERROR lines
+                // over sixty files, indistinguishable from a real constraint
+                // violation to anyone alerting on the database's error rate.
+                if let Err(e) = client
+                    .batch_execute(&format!(
+                        "BEGIN;\nSELECT pg_advisory_xact_lock({MIGRATION_LOCK});"
+                    ))
+                    .await
+                {
+                    let _ = client.batch_execute("ROLLBACK").await;
+                    return Err(e);
+                }
+                match client.query_opt(claimed.trim_end_matches(';'), &[]).await {
+                    Ok(Some(_)) => {
+                        let _ = client.batch_execute("ROLLBACK").await;
+                        return Ok(false);
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        let _ = client.batch_execute("ROLLBACK").await;
+                        return Err(e);
+                    }
+                }
+                match client
+                    .batch_execute(&format!("{insert}\n{sql}\n;COMMIT;"))
+                    .await
+                {
                     Ok(()) => Ok(true),
                     Err(e) => {
                         // The transaction is aborted; roll back explicitly so the
                         // connection is clean before it is judged reusable.
                         let _ = client.batch_execute("ROLLBACK").await;
-                        if e.code() == Some(&tokio_postgres::error::SqlState::UNIQUE_VIOLATION)
-                            && e.as_db_error()
-                                .and_then(|d| d.table())
-                                .is_some_and(|t| t == "usai_migrations")
-                        {
-                            Ok(false)
-                        } else {
-                            Err(e)
-                        }
+                        Err(e)
                     }
                 }
             })

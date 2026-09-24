@@ -269,7 +269,15 @@ pub fn start(
                 let stats = Arc::clone(&stats);
                 let id = id.clone();
                 let name = name.clone();
-                let cancel = stop.child_token();
+                // **Not** a child of the scheduler's stop. That token means
+                // "stop scheduling", and it is cancelled at the start of a
+                // drain — so a tick already running was cancelled outright
+                // 1.5 ms after SIGTERM, mid-batch, instead of being asked to
+                // stop and given the drain window. The graceful stop it does
+                // get is the revision's (`run_tick` below); the hard cancel
+                // is the runtime's shutdown token, which `execute_opts`
+                // merges in for every world.
+                let cancel = CancellationToken::new();
                 running.store(true, Ordering::SeqCst);
                 tokio::spawn(async move {
                     let outcome = run_tick(&runtime, &revision, &id, next, cancel).await;

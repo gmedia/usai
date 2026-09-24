@@ -66,7 +66,14 @@ serving process. On Kubernetes both of these are correct:
   once (measured with three concurrent migrators, `SUPPORTED.md`).
 
 `usai-app.yaml` ships the Job and shows the initContainer commented beside
-it. Pick one.
+it. Pick one — and note what the initContainer costs when a migration is
+slow: the lock is held for the whole run, so every other replica's
+initContainer **blocks for its full duration** (measured: 19.8 s against a
+20 s migration; minutes against a real one), and most schedulers have an
+opinion about init containers that sit for minutes. A long migration — a
+backfill above all — belongs in a `Job` ordered before the rollout, or, in
+the case of a backfill, in a `command()` run as its own Job with
+`--artifact` (`../../runbooks/schema-change.md`).
 
 ### 3. What a PodDisruptionBudget means during a database outage
 

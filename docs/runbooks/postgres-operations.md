@@ -25,15 +25,22 @@ migration must be undone, write the migration that undoes it.
 1. Restore into a database nothing is serving. The runtime opens its pool at
    activation, not at first request, so a restore under a running instance
    fights it.
-2. `usai db status --artifact /app/.usai/build` — the ledger against the
-   migrations the artifact carries. Everything applied and nothing pending is
-   the only state to start from.
+2. `usai db status --check --artifact /app/.usai/build` — the ledger against
+   the migrations the artifact carries. Everything applied and nothing
+   pending is the only state to start from, and `--check` makes that an exit
+   code instead of something to read. A migration **edited after it was
+   applied** fails the command with or without `--check`, and the line names
+   both checksums: restore the file from the commit that was deployed, or
+   write a new migration.
+
+   Changing the schema on a live deployment — expand/contract, a concurrent
+   index, a batched backfill — is its own page: [schema-change.md](schema-change.md).
 3. Decide about `usai_queue` **before** starting the instances:
    - keeping it replays the work it held (at-least-once, so a handler that is
      not idempotent will double-charge something);
    - emptying it (`truncate usai_queue`) loses that work silently.
    There is no third option the runtime can pick for you.
-4. Start one instance, check `/_usai/ready` and `resources[].ready`, then let
+4. Start one instance, check `/_usai/ready` (`{"ready":true,"resources":{}}` — `resources` is a **map of what is unhealthy**, so empty is good; `resources[].ready` is `/_usai/status`'s shape, not this one), then let
    the balancer in.
 
 A **point-in-time restore** is the same list, with one addition: the queue

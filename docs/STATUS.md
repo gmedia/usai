@@ -242,6 +242,52 @@ capabilities (design), latency histogram in metrics, an API reference page — a
   side, rejections, pool `in use` and `waiting`, what the process costs —
   because totals since boot answer the wrong question during an incident.
 
+- **Round 24 (2026-09-24): an online schema change.** A database-owning
+  engineer with a hard constraint — rename `invoices.due_date` (a `date`) to
+  `invoices.due_at` (a `timestamptz`) on a table of tens of millions of
+  rows, two replicas, one PostgreSQL, no downtime and no failed requests —
+  asking not "can PostgreSQL do this" but "does this runtime let me, and
+  does it tell me the truth while I do it". Verdict: yes, with two hard
+  prerequisites, and both are now closed. **There was no way to run `CREATE
+  INDEX CONCURRENTLY`** — every migration file is wrapped in a transaction
+  and PostgreSQL refuses it there — so on a large table the index behind the
+  new column had to be built under `ACCESS EXCLUSIVE`, which is the write
+  outage the whole exercise exists to avoid; the runtime meanwhile did
+  exactly that for its own queue table. There is a `-- usai: no-transaction`
+  pragma now. **And there was no supported place to run a long batched job
+  in production**: `usai app` / `task run` / `cron run` / `queue run` had no
+  `--artifact`, and a production image has no source tree, so the only route
+  to a declared command was the control surface of a serving replica — where
+  the third finding bit. GUIDE §5's drain paragraph ("a long task that checks
+  `ctx.signal.aborted` between steps records where it got to and returns")
+  was **wrong in both directions**: a control-invoked command or task was
+  executed with no stop token at all, so it never saw the signal and ran on
+  through the whole drain (58 000 more rows backfilled *after* SIGTERM) to be
+  killed at the bound with its return value lost; while a cron tick or queue
+  message already running took the *scheduler's* stop as its cancel token and
+  was killed 1.5 ms after SIGTERM, mid-batch. Also fixed: `usai db status`
+  printed the checksum the file hashes to now beside the ledger's
+  `applied_at`, so a migration edited after it was applied looked identical
+  to an untouched one — in the command the restore runbook designates as the
+  gate, which exited 0 on the exact state it exists to catch (it names the
+  drift now, and `--check` makes "nothing pending" an exit code); concurrent
+  `db migrate` left a `duplicate key` ERROR in PostgreSQL's log for every
+  file each loser lost, which the documented initContainer-per-replica shape
+  makes every rollout; the dead-letter alert in `metrics.md` counts
+  `state="dead"` and a contract-rejected message is `invalid`, so the alert
+  was silent for exactly the failure a rolling deploy produces (13 of 20
+  messages permanently dead-lettered in a measured mixed-version window); a
+  one-shot that hit its deadline said only `work ended without a result:
+  DeadlineExceeded`; and the restore runbook told operators to check
+  `resources[].ready` on `/_usai/ready`, which is `/_usai/status`'s shape.
+  **The documentation gap was the largest finding of all**: the round had to
+  invent the expand/contract procedure, and nothing anywhere stated the
+  migration transaction boundary — that each file is one transaction, that
+  the ledger row is written before the file's SQL, that the lock is per file
+  — which are the three facts that decide whether a change is safe or an
+  outage. `docs/runbooks/schema-change.md` is that page, written from the
+  round's own procedure.
+
 - **Round 23 (2026-09-24): a test-suite audit.** A senior engineer who lives
   in the test suite, answering one question for a team lead: *can we gate a
   deploy on a suite written against this harness?* Ten items — boundary

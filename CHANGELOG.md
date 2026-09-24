@@ -108,6 +108,51 @@ new artifact on the old runtime, which is not a supported combination.
 
 Everything else is additive or a fix to behaviour that was wrong.
 
+### Migrations and schema change
+
+- **A migration can opt out of its transaction.** `-- usai: no-transaction`
+  on a line of its own runs the file outside `BEGIN`/`COMMIT`, for the
+  statements PostgreSQL refuses inside one: `CREATE INDEX CONCURRENTLY`
+  above all, and `ALTER TYPE … ADD VALUE`, `VACUUM`, `REINDEX
+  CONCURRENTLY`. Without it an application had no way to build an index
+  concurrently at all — on a large table the ordinary form holds `ACCESS
+  EXCLUSIVE` for the whole build, which is a write outage — while the
+  runtime did exactly that for its own queue table (`usai queue prepare`).
+  The ledger row cannot be atomic with the work there, so **the SQL must be
+  idempotent** (`IF NOT EXISTS`): a process that dies between the file and
+  the record runs the file again.
+- **`usai db status` shows migration drift, and can gate a deploy.** It
+  printed the checksum the file hashes to *now* beside the `applied_at` from
+  the ledger, so a migration edited after it was applied was indistinguishable
+  from an untouched one — in the table and in `--json` — while `usai db
+  migrate` refuses that state outright. The runbook sends an operator to
+  `db status` first ("everything applied and nothing pending is the only
+  state to start from"), so it now names the drift, prints the ledger's
+  checksum, and exits non-zero. `--check` additionally fails when anything
+  is pending, which is the deploy gate everyone was writing in `jq`.
+- **Concurrent `usai db migrate` no longer writes `duplicate key` ERRORs into
+  PostgreSQL's log.** Exactly-once was settled by the ledger's primary key,
+  so every migrator that lost a race left a constraint violation in the
+  database's error log — and the documented deployment shape (an
+  initContainer on every replica) makes that every rollout, indistinguishable
+  from a real violation to anyone alerting on the error rate. The advisory
+  lock is now taken *before* the ledger is read, so the loser finds the row
+  and does nothing. Exactly-once is unchanged, and still per file, in its own
+  transaction.
+- **`usai app`, `usai task run`, `usai cron run` and `usai queue run` take
+  `--artifact`.** A production image carries `.usai/build` and no source tree
+  — that is the point of it — so `usai app import` inside one answered "not a
+  Usai project: no package.json or usai.config.ts here", with a hint telling
+  the operator to pass `--root`, which they already had. The only route to a
+  declared command in production was the control surface of a *serving*
+  replica. The `db` verbs have taken an artifact since D5; these now do too.
+- **A one-shot that hits its deadline says which workload, how long it got
+  and how to raise the bound.** It was `work ended without a result:
+  DeadlineExceeded` — no name, no elapsed, and no hint that the 30 s it hit
+  is the runtime's default for a workload that declares none. For a batched
+  backfill run with `usai app` that is the difference between "declare a
+  `timeout:`" and twenty minutes of believing the runtime faulted.
+
 ### Testing
 
 - **Several `usai` processes on one project no longer destroy each other's
@@ -313,6 +358,21 @@ Everything else is additive or a fix to behaviour that was wrong.
 
 ### Runtime
 
+- **A long background job sees the drain, in both directions.** GUIDE §5 says
+  "a long task that checks `ctx.signal.aborted` between steps records where
+  it got to and returns, and the drain finishes when it does". It was wrong
+  twice over. A **command or task invoked through the control surface** — the
+  only way to run one inside a serving replica — was executed with no stop
+  token at all, so `ctx.signal` never aborted: the job ran on through the
+  whole drain (measured: 58 000 more rows backfilled *after* SIGTERM), was
+  killed at the bound, and its return value was lost. A **cron tick or queue
+  message already running** had the opposite problem: its cancel token was a
+  child of the scheduler's stop, and that token means "stop claiming" and
+  fires at the *start* of a drain — so the tick was cancelled outright 1.5 ms
+  after SIGTERM, mid-batch. Now the one-shot paths get the same graceful stop
+  a dispatched task has, and background work already under way is asked to
+  stop and cancelled only by the drain bound, like every other in-flight
+  world.
 - **A socket or service stopped by its declared deadline gets five seconds to
   unwind, and a cut-off unwind is counted and named.** The grace was one
   second for every kind, which is not enough for an ending that has to do

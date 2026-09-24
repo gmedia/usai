@@ -381,6 +381,13 @@ export const slowTask = task("slow", {}, async (ctx) => {
 export const failingTask = task("failing", {}, async () => {
   throw errors.conflict("nope");
 });
+// A one-shot that runs past its own declared bound: `usai app` / `usai task
+// run` used to report it as "work ended without a result: DeadlineExceeded"
+// — no workload, no elapsed, and no hint that the bound is declarable.
+export const overDeadline = task("over-deadline", { timeout: "300ms" }, async (ctx) => {
+  await ctx.sleep("5s");
+  return { done: true };
+});
 export const invokesSlow = task("invokes-slow", {}, async (ctx) => ctx.tasks.invoke(slowTask));
 // One at a time: a second invoke while the first holds the slot is refused
 // with `capacity_exhausted` in the caller's world.
@@ -450,6 +457,24 @@ export const overlapping = cron(
 export const nightly = cron("nightly", { schedule: "0 3 * * *", timeout: "5m" }, async () => ({
   ran: true,
 }));
+// A tick that takes real time and cooperates: the batched backfill shape.
+// The scheduler's stop means "stop scheduling"; a tick already running must
+// be *asked* to stop and given the drain window, not cancelled outright at
+// the signal — it was killed 1.5 ms after SIGTERM, mid-batch.
+export const longTick = cron(
+  "long-tick",
+  { schedule: "* * * * * *", overlap: "skip", timeout: "5m", resources: [audit] },
+  async (ctx) => {
+    let ticks = 0;
+    while (!ctx.signal.aborted && ticks < 600) {
+      await ctx.sleep("50ms");
+      ticks++;
+    }
+    await (ctx.resources["audit"] as Audit).increment(
+      ctx.signal.aborted ? "long-tick:stopped" : "long-tick:finished",
+    );
+  },
+);
 
 // ---- D9: services ---------------------------------------------------------
 import { service } from "@sakaladev/usai";
@@ -806,6 +831,7 @@ export default defineApp({
     sendReceipt,
     record,
     slowTask,
+    overDeadline,
     longTask,
     startLong,
     echoRequestId,
@@ -826,6 +852,7 @@ export default defineApp({
     everySecond,
     overlapping,
     nightly,
+    longTick,
     reconcile,
     ledgerSync,
     serviceLocalRead,

@@ -20,6 +20,7 @@ and how recovery happens — without reading Rust.
 | Disk full | [disk-full.md](disk-full.md) |
 | A service gave up, `detached_work`, a 504, cron did not run, restart storms | [application-failures.md](application-failures.md) |
 | Database backup, restore, connection limits, password and CA rotation | [postgres-operations.md](postgres-operations.md) |
+| **Online schema change** (expand/contract, concurrent indexes, backfills, the mixed-version window) | [schema-change.md](schema-change.md) |
 | A token or a signing key is compromised | [key-and-token-compromise.md](key-and-token-compromise.md) |
 | Queue messages failing / dead letters | [queue-dead-letter.md](queue-dead-letter.md) |
 | Every metric, its labels, and the alerts to set | [metrics.md](metrics.md) |
