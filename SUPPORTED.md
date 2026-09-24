@@ -105,10 +105,17 @@ the answer is a resource — an existing one, or a case for a new kind.
   the previous SDK and asserts it serializes back unchanged; a new optional
   field has to be omitted when absent, and the test says so by name when it
   is not.
-- Migrations are immutable once applied (checksum-verified); a rollback of
-  application code does not roll back the database — write migrations to be
-  compatible with the previous code (add columns, do not drop them in the same
-  release).
+- Migrations are immutable once applied (checksum-verified —
+  `usai db status` names a file edited after it was applied and exits
+  non-zero, and `--check` also fails on anything pending). Each file is its
+  own transaction, so keep an `ALTER TABLE` and a backfill in separate files
+  and run a backfill as a `command()` rather than a migration; a file with
+  `-- usai: no-transaction` runs outside the transaction, for `CREATE INDEX
+  CONCURRENTLY` and its relatives. A rollback of application code does not
+  roll back the database — write migrations to be compatible with the
+  previous code (add columns, do not drop them in the same release).
+  Changing a live schema end to end is
+  [`docs/runbooks/schema-change.md`](docs/runbooks/schema-change.md).
 
 ## Not supported (and not planned before 1.0)
 
