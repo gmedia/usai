@@ -1,8 +1,9 @@
 # The control run: 24 h with a dataset that does not grow (2026-09-23/24)
 
-**Status: running.** Started 2026-09-23 16:49:22 UTC on VM 47, ends
-2026-09-24 16:49 UTC. This file carries the method and what has been observed
-so far; the verdict is appended when it finishes.
+**Status: complete.** 2026-09-23 16:49 → 2026-09-24 16:49 UTC on VM 47,
+24.01 h, 988 samples. **124 471 721 requests, 0 × 5xx, 0 × 503**, and
+throughput that did not decay: 1 416 req/s in the first hour, 1 480 in the
+last. The verdict is in "What it answered" below.
 
 ## The question it answers
 
@@ -56,7 +57,80 @@ has used, and it is visible in the data exactly once:
 After that the campaigns stopped building images; the cells that followed run
 containers from images already present.
 
-## What has been observed so far (9.5 h)
+## What it answered
+
+**Throughput does not decay with a bounded dataset.** That was the question,
+and the answer is unambiguous:
+
+| | hour 1 | hour 24 |
+|---|---:|---:|
+| requests/second | 1 416 | 1 480 |
+
+The 72 h run, on the same deployment and the same load with a table nobody
+pruned, went from **794 to 154 req/s** — a collapse of 81 % — with a flat
+p50 and a flat per-request CPU. With the dataset pruned there is no trend at
+all, at roughly twice the rate, over 124 million requests. **The decay was
+the application's table, not the runtime.**
+
+That was worth testing rather than asserting: a slow decline with flat
+per-request cost is also the signature of a runtime leaking something
+outside the CPU — a structure walked once per request, a pool that degrades,
+a table of live handles. It is not what is happening here.
+
+### The totals
+
+| | |
+|---|---|
+| Requests | **124 471 717 × 2xx**, 4 × 4xx, **0 × 5xx**, **0 × 503** |
+| Refused before a world | 2 (both `route` — the 4xx above) |
+| Mean latency | 4.39 ms over the whole run |
+| Client-side | 124 470 547 ok, **344 errors**, all of them 10 s timeouts (see below) |
+| Lifecycle over 124.47 M worlds | **0** detached work, **0** completions dropped late, **0** rejected stale, **0** quarantined connections |
+| Transactions rolled back for a world | 301, with 344 cancellations — the C4/C5 machinery doing its job, not a fault |
+| Cron | 1 tick due, 0 failed, 0 skipped |
+| Memory (process RSS) | 86.7 → 91.6 MiB |
+| Memory (cgroup charge) | 53.2 → 55.2 MiB |
+| Open descriptors | 29 → 31 |
+
+### Every bad second is the host, and they are all in two windows
+
+The 344 client timeouts fall in 91 distinct seconds, and they are not spread
+across the run:
+
+| hour | 1 | 2–15 | 16 | 17 | 18 | 19–24 |
+|---|---:|---:|---:|---:|---:|---:|
+| client timeouts | 12 | **0** | 133 | 184 | 15 | **0** |
+
+- **Hour 1** (t=2685–2713, a 28-second window) is the co-tenant `docker
+  build` disclosed above — attributable to the second.
+- **Hours 16–18** are a host-CPU event, not a runtime one: the sampler's
+  `cpuPct` for the container falls 415 → 250 → **64.9** at t=59023 and is
+  back to 409 by t=59468. A closed-loop client on a container given fewer
+  cycles sends fewer requests and eventually times out at its own 10 s
+  bound. The server recorded **no 5xx and no 503** through all of it, and
+  hourly throughput shows the same dip (1 228 and 1 098 req/s against a
+  ~1 470 baseline) before returning to 1 430–1 484 for the last six hours.
+
+No second outside those two windows produced an error, over 22 hours and
+114 million requests.
+
+### Memory is a step and a plateau, not a ramp
+
++4.9 MiB of process RSS over 24 hours and 124 million requests, in **two
+steps** (hour 8 and hour 16) with flat stretches between and after:
+
+```
+h1–h7    86.7 → 86.9 MiB      h16–h24  91.6 MiB (flat to the tenth)
+h8–h15   91.3 → 91.4 MiB
+```
+
+A per-request leak is monotonic against request count. This is not: the last
+nine hours and 45 million requests moved it by 0.0 MiB. The steps line up
+with the two co-tenant events above, which is the shape of a pool slot being
+touched for the first time under load and then kept resident — the residency
+policy `docs/upstream/wasmtime-idle-decommit.md` is about.
+
+## What was observed during the run (9.5 h)
 
 | | |
 |---|---|
@@ -113,8 +187,8 @@ throughput by this point on its way from 794 to 154 req/s; this one has no
 trend at all, at a *higher* rate, with an unchanged p50.
 
 Nine hours is not an answer to a question about seventy-two, and the
-hypothesis is not proven until the run ends — but the shape so far is the
-one the dataset explanation predicts.
+hypothesis was not proven until the run ended — it then ran another
+14.5 hours and finished at 1 480 req/s, above where it started.
 
 **The means are flat; the seconds underneath them are not perfectly even.**
 About 3–5 % of seconds serve under 1 000 requests (against a ~1 450 mean),

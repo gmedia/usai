@@ -129,15 +129,24 @@ bookkeeping, 0.02 create.
 
 ## In progress
 
-- **A 24 h soak with a bounded dataset** on VM 47 (started 2026-09-23 16:49 UTC,
-  ends 2026-09-24 16:49 UTC): the control run the 72 h soak never had, to
-  attribute that run's 794 → 154 req/s decay to the 7.4 M invoices it wrote
-  rather than to the runtime. At 3.9 h: 16.8 M requests, 0 × 5xx, 0 × 503,
-  flat p50 (4.6 → 4.1 ms), and **12 client timeouts in three seconds** —
-  attributable to the second: 17:34:07–17:34:35 UTC is when a co-tenant
-  `docker build` of ours wrote two image layers. Same host-I/O mechanism the
-  earlier soaks recorded, this time proven rather than inferred. Method and
-  running numbers: `docs/measurements/2026-09-24-bounded-soak.md`.
+- ~~**A 24 h soak with a bounded dataset**~~ — **done, and it settles the
+  question** (2026-09-23 16:49 → 2026-09-24 16:49 UTC, VM 47):
+  **124 471 721 requests, 0 × 5xx, 0 × 503**, mean 4.39 ms, and **1 416
+  req/s in the first hour against 1 480 in the last**. The 72 h run, same
+  deployment and same load with a table nobody pruned, fell from 794 to
+  154 req/s; with the dataset pruned there is no trend at all, at roughly
+  twice the rate. **That decay was the application's table, not the
+  runtime** — which was worth measuring rather than asserting, because a
+  slow decline with flat per-request cost is equally the signature of a
+  runtime leaking something outside the CPU. Over 124.47 M worlds: 0
+  detached work, 0 completions dropped late or rejected stale, 0 quarantined
+  connections. Memory moved +4.9 MiB RSS in two steps with flat plateaus,
+  not a ramp — the last nine hours and 45 M requests moved it by 0.0 MiB.
+  All 344 client-side errors were 10 s timeouts inside two host-level
+  windows (a co-tenant `docker build` in hour 1, a host-CPU starvation in
+  hours 16–18, `cpuPct` 415 → 64.9 → 409); **no second outside them produced
+  an error, over 22 hours and 114 M requests**.
+  `docs/measurements/2026-09-24-bounded-soak.md`.
 - **The comparator floors**, queued behind it on the idle host
   (`DROP_CACHES=1`, the complete cold-cache method): `node` 48/64/96/128 and
   `hello` 48/56/64/80 to place our technical floor exactly between the 48 MiB
