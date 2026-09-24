@@ -413,6 +413,12 @@ pub fn inspect(definition: &ApplicationDefinition, default_timeout_ms: u64) -> S
                 );
             }
         }
+        if let Some(n) = w.max_body_bytes {
+            let _ = writeln!(
+                out,
+                "    body bound: {n} bytes  (declared; capped by USAI_MAX_BODY_BYTES)"
+            );
+        }
         if let Some(n) = w.max_concurrency {
             let _ = writeln!(
                 out,

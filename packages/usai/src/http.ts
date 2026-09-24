@@ -159,6 +159,7 @@ function declare<O extends HttpOptions>(
   const policies: WorkloadPolicies = {};
   if (options.timeout !== undefined) policies.timeout = options.timeout;
   if (options.concurrency !== undefined) policies.concurrency = options.concurrency;
+  if (options.maxBodyBytes !== undefined) policies.maxBodyBytes = options.maxBodyBytes;
   return {
     __usai: "workload",
     kind: "http",
@@ -231,6 +232,7 @@ function raw(path: string, a: RawOptions | RawHandler, b?: RawHandler): Workload
   const policies: WorkloadPolicies = {};
   if (options.timeout !== undefined) policies.timeout = options.timeout;
   if (options.concurrency !== undefined) policies.concurrency = options.concurrency;
+  if (options.maxBodyBytes !== undefined) policies.maxBodyBytes = options.maxBodyBytes;
   return {
     __usai: "workload",
     kind: "http",

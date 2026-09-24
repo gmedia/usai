@@ -102,6 +102,7 @@ export function task<
   const policies: WorkloadPolicies = {};
   if (options.timeout !== undefined) policies.timeout = options.timeout;
   if (options.concurrency !== undefined) policies.concurrency = options.concurrency;
+  if (options.maxBodyBytes !== undefined) policies.maxBodyBytes = options.maxBodyBytes;
   return {
     __usai: "workload",
     kind: "task",
@@ -186,6 +187,7 @@ export function cron<R extends ResourceDeclaration[] = ResourceDeclaration[]>(
   const policies: WorkloadPolicies = {};
   if (options.timeout !== undefined) policies.timeout = options.timeout;
   if (options.concurrency !== undefined) policies.concurrency = options.concurrency;
+  if (options.maxBodyBytes !== undefined) policies.maxBodyBytes = options.maxBodyBytes;
   return {
     __usai: "workload",
     kind: "cron",

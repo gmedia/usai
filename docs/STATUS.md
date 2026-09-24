@@ -269,13 +269,14 @@ capabilities (design), latency histogram in metrics, an API reference page — a
   export as zeros), the effective deadline in `usai inspect`, and a
   parameter error that names its statement (a host operation's error is not
   thrown from the handler's frames, so there is no application stack to
-  map). **Recorded as breadth, not built**: a per-route body limit
-  (`USAI_MAX_BODY_BYTES` is process-global, so a 5 MB import route raises
-  the bound for every route in the process), and a streaming request body
-  (`RawRequestBody` is `bytes`/`text`/`json`, so an import is always
-  buffered — `unnest` did 50 000 rows in 491 ms, so the absence of `COPY`
-  costs little at this scale, but the row ceiling is a memory decision
-  rather than a streaming one).
+  map). Built after the report: **`maxBodyBytes` per route** — a cap and never a
+  raise, so the operator keeps the process ceiling and each route says how
+  much of it to accept, and declaring it where there is no request body is
+  refused at install rather than ignored. **Left as breadth**: a streaming
+  request body (`RawRequestBody` is `bytes`/`text`/`json`, so an import is
+  always buffered — `unnest` did 50 000 rows in 491 ms, so the absence of
+  `COPY` costs little at this scale, but the row ceiling is a memory
+  decision rather than a streaming one).
 
 - `usai dev` compiles each rebuilt image once (the build's compiled form is installed directly). Measured 2026-09-23 on an idle dev box: **a source change is serving again in ≈3 s**, of which ≈1.6 s is the image compile; a change that does not alter the manifest is recognised and keeps the running revision. (Round 13 reported 9–12 s — measured on a box that still had the session's own load on it, like its first-request numbers.) The compile still takes every core for those seconds on a small host, and the obvious way to make it faster — skipping the pre-initialisation that makes worlds cheap — would make `dev` and `run` behave differently, which is the one thing a development loop must not do.
 

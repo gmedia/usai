@@ -47,6 +47,11 @@ the human summary.
   by tens of MiB (measured on the 24 h soak: 89 MiB RSS, 66 PSS, 53 charged).
   A window in which the box hit its ceiling says so in its own line, since
   that is how a too-small limit fails *without* an OOM kill.
+  Two lines sit above the table: the window's **p50 and p99 over all routes**
+  (bucket bounds from the global histogram — the per-workload numbers are a
+  sum and a count, and a mean hides a bimodal route), and **totals since
+  boot**, because a rate screen cannot show an event that happened before its
+  first sample and `-c 1` run right after an incident is exactly that case.
   `-n <seconds>` is the window, `-c 1` prints one screen and exits,
   `--addr`/`--status-token` read `USAI_STATUS_ADDR`/`USAI_STATUS_TOKEN` like
   `usai probe`. Counters that go backwards (a restarted instance) read zero,
@@ -70,6 +75,16 @@ the human summary.
 
 ### Runtime
 
+- **`maxBodyBytes` on a route.** `USAI_MAX_BODY_BYTES` is one number for the
+  whole process, so an import route that takes 5 MB opened every other route
+  in the application to 5 MB as well — where an Express application would put
+  `express.json({ limit })` on the one route. A route's bound is a **cap**,
+  never a raise (the effective bound is the smaller of the two), so the
+  operator keeps the ceiling and the application says how much of it each
+  route may use; the 413 message names which of the two refused the request.
+  Declaring it on a workload that has no request body — a task, a cron tick,
+  a stream, a socket — is **refused at install** with the reason, rather than
+  accepted and ignored.
 - **The queue schema survives being prepared by several replicas at once.**
   `CREATE TABLE IF NOT EXISTS` is not race-free in PostgreSQL, and the losers
   fail in three ways depending on the catalog they lost on: 42P07 (the

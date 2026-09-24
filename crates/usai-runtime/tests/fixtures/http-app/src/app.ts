@@ -260,6 +260,15 @@ export const decodeBig = http.raw("/decode", { method: "POST" }, async (ctx) => 
     { "content-type": "application/json" },
   );
 });
+// A route that accepts only a small body, while the process bound is large:
+// the two are independent, and the smaller one wins.
+export const smallBody = http.raw("/small", { method: "POST", maxBodyBytes: 1024 }, async (ctx) => {
+  const bytes = await ctx.request.bytes();
+  return http.rawResponse(200, JSON.stringify({ bytes: bytes.length }), {
+    "content-type": "application/json",
+  });
+});
+
 // A raw GET with a path parameter: the document must not invent a request
 // body for it and must list `{id}`.
 export const rawImage = http.raw(
@@ -751,6 +760,7 @@ export default defineApp({
     events,
     endless,
     csvExport,
+    smallBody,
     plainStream,
     boundedStream,
     badEvent,

@@ -119,6 +119,42 @@ fn ms(value: f64) -> String {
     }
 }
 
+/// A quantile from the global latency histogram, over the window. The
+/// buckets are cumulative counts, so the difference between two samples is
+/// still cumulative and the answer is the first bucket that covers the
+/// quantile — reported as an upper bound (`≤ 5ms`), because that is what a
+/// bucket knows. Per-workload percentiles would need a histogram per
+/// workload, which is a cardinality decision, not a display one.
+fn window_quantile(before: &Sample, now: &Sample, q: f64) -> Option<String> {
+    let le = now.get(&["http", "latency_cumulative", "le"])?.as_array()?;
+    let after = now
+        .get(&["http", "latency_cumulative", "count"])?
+        .as_array()?;
+    let prior = before
+        .get(&["http", "latency_cumulative", "count"])
+        .and_then(Value::as_array);
+    let at = |list: Option<&Vec<Value>>, i: usize| -> u64 {
+        list.and_then(|l| l.get(i))
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    };
+    let total = at(Some(after), after.len().checked_sub(1)?)
+        .saturating_sub(at(prior, after.len().checked_sub(1)?));
+    if total == 0 {
+        return None;
+    }
+    let want = (total as f64 * q).ceil() as u64;
+    for (i, bound) in le.iter().enumerate() {
+        if at(Some(after), i).saturating_sub(at(prior, i)) >= want {
+            return Some(match bound.as_f64() {
+                Some(seconds) => ms(seconds * 1000.0),
+                None => "over 10s".to_owned(),
+            });
+        }
+    }
+    None
+}
+
 fn render(before: &Sample, now: &Sample) -> String {
     let seconds = now.at.duration_since(before.at).as_secs_f64();
     let mut out = String::new();
@@ -211,6 +247,30 @@ fn render(before: &Sample, now: &Sample) -> String {
             }
         ));
     }
+
+    // The table below is means, which hide a bimodal route. The global
+    // histogram has no workload label but it does have buckets, so the
+    // window's p50 and p99 belong on the screen beside them.
+    if let (Some(p50), Some(p99)) = (
+        window_quantile(before, now, 0.50),
+        window_quantile(before, now, 0.99),
+    ) {
+        out.push_str(&format!(
+            "  all routes this window: p50 ≤ {p50}, p99 ≤ {p99}\n"
+        ));
+    }
+    // A rate screen cannot show what happened before its first sample, and
+    // `-c 1` run right after an incident is exactly that case: the 504 that
+    // started the page shows as `5xx 0`. Totals since boot answer "did
+    // anything fail at all", which is a different question from "is it
+    // failing now" and the one an arriving responder asks first.
+    out.push_str(&format!(
+        "  since boot: {} requests, {} × 4xx, {} × 5xx, {} refused before a world\n",
+        now.u64(&["http", "requests"]),
+        now.u64(&["http", "responses_4xx"]),
+        now.u64(&["http", "responses_5xx"]),
+        now.u64(&["http", "rejected_before_world"]),
+    ));
 
     // Worlds alive per workload, summed over revisions. A stream or a
     // socket holds one for as long as its connection lives and completes no
@@ -563,6 +623,43 @@ mod tests {
             .unwrap_or_else(|| panic!("no row for the served workload:\n{screen}"));
         assert!(served.contains("100.0"), "{served}");
         assert!(served.split_whitespace().any(|f| f == "1"), "{served}");
+    }
+
+    /// A rate screen cannot show what happened before its first sample, and
+    /// the means in the table hide a bimodal route. Two lines answer both:
+    /// totals since boot (did anything fail at all) and the window's
+    /// percentiles from the global histogram, which has buckets where the
+    /// per-workload numbers have only a sum and a count.
+    #[test]
+    fn the_screen_answers_did_anything_fail_and_how_bad_is_the_tail() {
+        let mut before = status(1_000, 10.0, 1_000_000_000, 5.0);
+        before["http"]["latency_cumulative"] = json!({
+            "le": [0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, "+Inf"],
+            "count": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        });
+        let mut after = status(1_200, 10.5, 1_200_000_000, 5.2);
+        // 200 requests in the window: 100 under 2.5 ms, 80 more under 5 ms,
+        // 19 more under 50 ms, and one that took over a second.
+        after["http"]["latency_cumulative"] = json!({
+            "le": [0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, "+Inf"],
+            "count": [0, 0, 100, 180, 180, 180, 199, 199, 199, 199, 199, 200, 200, 200, 200],
+        });
+        after["http"]["requests"] = json!(1_200);
+        after["http"]["responses_4xx"] = json!(7);
+        after["http"]["responses_5xx"] = json!(1);
+        after["http"]["rejected_before_world"] = json!(3);
+        let screen = render(&sample(2, before), &sample(0, after));
+        // The 100th request is in the 2.5 ms bucket and the 198th in the
+        // 50 ms one — the single slow request does not move the median, and
+        // the mean in the table below does not show the tail at all.
+        assert!(screen.contains("p50 ≤ 2.50ms"), "{screen}");
+        assert!(screen.contains("p99 ≤ 50.0ms"), "{screen}");
+        // The 5xx happened before this window and is still reported.
+        assert!(
+            screen
+                .contains("since boot: 1200 requests, 7 × 4xx, 1 × 5xx, 3 refused before a world"),
+            "{screen}"
+        );
     }
 
     /// A restarted instance's counters go backwards. That is a fact about

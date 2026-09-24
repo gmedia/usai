@@ -120,6 +120,15 @@ export interface WorkloadPolicies {
    * same code in the caller's world, a queue consumer simply claims fewer
    * messages (ADR-0012). */
   concurrency?: number;
+  /** Request body bound for this route, in bytes. A **cap**, never a raise:
+   * the effective bound is the smaller of this and the process's
+   * `USAI_MAX_BODY_BYTES` (1 MiB by default), so the operator keeps the
+   * ceiling and each route decides how much of it to accept. Declare a small
+   * one on ordinary routes and raise the process bound for the one that
+   * takes uploads, instead of opening every route to the largest body any
+   * of them needs. Above the bound the request is `413 payload_too_large`,
+   * decided before a world exists. */
+  maxBodyBytes?: number;
 }
 
 /** The schema slots of an HTTP endpoint. Any Standard Schema

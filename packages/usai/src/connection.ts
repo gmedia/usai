@@ -133,6 +133,7 @@ function stream<O extends StreamOptions>(
   const policies: WorkloadPolicies = {};
   if (options.timeout !== undefined) policies.timeout = options.timeout;
   if (options.concurrency !== undefined) policies.concurrency = options.concurrency;
+  if (options.maxBodyBytes !== undefined) policies.maxBodyBytes = options.maxBodyBytes;
   return {
     __usai: "workload",
     kind: "stream",
@@ -272,6 +273,7 @@ export function socket<
   if (options.outgoing) contracts.response = { 200: options.outgoing };
   const policies: WorkloadPolicies = {};
   if (options.concurrency !== undefined) policies.concurrency = options.concurrency;
+  if (options.maxBodyBytes !== undefined) policies.maxBodyBytes = options.maxBodyBytes;
   return {
     __usai: "workload",
     kind: "socket",

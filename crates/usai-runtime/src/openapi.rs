@@ -483,6 +483,9 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
             if let Some(n) = workload.max_concurrency {
                 operation["x-usai-max-concurrency"] = json!(n);
             }
+            if let Some(n) = workload.max_body_bytes {
+                operation["x-usai-max-body-bytes"] = json!(n);
+            }
             if let Some(auth) = &workload.auth {
                 operation["x-usai-auth"] = json!(auth);
             }
@@ -872,6 +875,7 @@ mod tests {
             dispatches: vec![],
             publishes: vec![],
             max_concurrency: None,
+            max_body_bytes: None,
             timeout_ms: None,
         };
         assert_eq!(operation_id(&w), "getUsersId");

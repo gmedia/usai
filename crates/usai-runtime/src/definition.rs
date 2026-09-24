@@ -326,6 +326,20 @@ pub struct WorkloadSpec {
     /// Per-invocation deadline. `None` = inherit application default.
     #[serde(default)]
     pub timeout_ms: Option<u64>,
+    /// Request body bound for this route, in bytes. A **cap**, never a
+    /// raise: the effective bound is the smaller of this and the process's
+    /// `USAI_MAX_BODY_BYTES`, so the operator's ceiling stays the ceiling
+    /// and the application decides how much of it each route may use.
+    /// `None` = the process bound.
+    ///
+    /// Omitted from the serialized manifest when absent, unlike the two
+    /// fields above it: the manifest is hashed into the application's
+    /// identity, so a field that always appears would change the identity of
+    /// every application that does not use it — and would make an artifact
+    /// built by the previous SDK hash differently under this runtime, which
+    /// is the one thing the N−1 compatibility promise must not do.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_body_bytes: Option<u64>,
 }
 
 impl WorkloadSpec {
@@ -523,6 +537,10 @@ pub enum DefinitionError {
     UnknownResource { workload: String, resource: String },
     #[error("workload {0} has an empty name")]
     EmptyName(String),
+    #[error(
+        "workload {0} declares maxBodyBytes, but it has no request body to bound.          It applies to HTTP and raw routes only; a task, a cron tick, a queue message,          a stream, a socket, a service, a command, a migration and a seeder all take their          input another way. Remove it — an option that is accepted and ignored is worse than one that is refused."
+    )]
+    BodyBoundWithoutABody(String),
 }
 
 /// Immutable, validated, shareable. Constructed from a manifest plus the code
@@ -657,6 +675,15 @@ impl ApplicationDefinition {
             }
             if index.insert(workload.id.clone(), i).is_some() {
                 return Err(DefinitionError::DuplicateWorkload(workload.id.clone()));
+            }
+            // Round 17's lesson, applied here rather than learned again: a
+            // declared policy that the runtime quietly drops is the shape of
+            // bug that costs a day (the stream `timeout:` it found was
+            // accepted, published to consumers, and ignored).
+            if workload.max_body_bytes.is_some()
+                && !matches!(workload.trigger, Trigger::Http { .. })
+            {
+                return Err(DefinitionError::BodyBoundWithoutABody(workload.id.clone()));
             }
             if let Some(auth) = &workload.auth
                 && !manifest.auth.iter().any(|a| &a.name == auth)
@@ -809,6 +836,7 @@ mod tests {
                 dispatches: vec![],
                 publishes: vec![],
                 max_concurrency: None,
+                max_body_bytes: None,
                 timeout_ms: None,
             }],
             resources: vec![],

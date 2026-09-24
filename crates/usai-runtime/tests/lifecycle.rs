@@ -99,6 +99,7 @@ fn task(id: &str) -> WorkloadSpec {
         dispatches: vec![],
         publishes: vec![],
         max_concurrency: None,
+        max_body_bytes: None,
         timeout_ms: None,
     }
 }

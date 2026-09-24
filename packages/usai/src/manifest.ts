@@ -66,6 +66,7 @@ export interface ManifestWorkload {
   publishes: string[];
   maxConcurrency?: number;
   timeoutMs?: number;
+  maxBodyBytes?: number;
 }
 
 /** What `usai build` writes to `manifest.json`: the application as data —
@@ -241,6 +242,8 @@ export function describe(app: AppDeclaration): Manifest {
     if (workload.policies.concurrency !== undefined)
       entry.maxConcurrency = workload.policies.concurrency;
     if (timeoutMs !== undefined) entry.timeoutMs = timeoutMs;
+    if (workload.policies.maxBodyBytes !== undefined)
+      entry.maxBodyBytes = workload.policies.maxBodyBytes;
     return entry;
   });
   const env = app.env

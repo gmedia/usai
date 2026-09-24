@@ -988,17 +988,33 @@ impl HttpHost {
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("")
                 .to_ascii_lowercase();
-            let raw_body = Limited::new(body, self.config.max_body_bytes)
+            // The route's own bound when it declares one, and never above
+            // the process's: an operator's ceiling stays the ceiling, and a
+            // route that takes uploads no longer forces every other route
+            // in the process to accept the same size.
+            let declared = workload.max_body_bytes.map(|n| n as usize);
+            let bound = declared
+                .map(|n| n.min(self.config.max_body_bytes))
+                .unwrap_or(self.config.max_body_bytes);
+            let raw_body = Limited::new(body, bound)
                 .collect()
                 .await
                 .map_err(|_| {
+                    let source = match declared {
+                        Some(n) if n <= self.config.max_body_bytes => {
+                            "this route's own `maxBodyBytes`".to_owned()
+                        }
+                        Some(n) => format!(
+                            "the runtime's request body bound; this route asks for {n} but USAI_MAX_BODY_BYTES caps it"
+                        ),
+                        None => {
+                            "the runtime's request body bound; USAI_MAX_BODY_BYTES raises it, or declare `maxBodyBytes` on this route".to_owned()
+                        }
+                    };
                     Reply::error(
                         StatusCode::PAYLOAD_TOO_LARGE,
                         "payload_too_large",
-                        format!(
-                            "body exceeds {} bytes (the runtime's request body bound; USAI_MAX_BODY_BYTES raises it)",
-                            self.config.max_body_bytes
-                        ),
+                        format!("body exceeds {bound} bytes ({source})"),
                     )
                 })?
                 .to_bytes();

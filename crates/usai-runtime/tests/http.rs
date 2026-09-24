@@ -756,6 +756,56 @@ async fn server_timing_is_opt_in_and_is_only_timing() {
     s.shutdown.cancel();
 }
 
+/// `USAI_MAX_BODY_BYTES` is one number for the whole process, so a single
+/// import route that takes 5 MB used to open every other route in the
+/// application to 5 MB as well. A route's own `maxBodyBytes` is a cap, never
+/// a raise: the operator keeps the ceiling and the application says how much
+/// of it each route may use.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_route_can_accept_less_than_the_process_allows() {
+    let Some(s) = start().await else { return };
+    // This server's process bound is 8 MiB (the decode test needs it).
+    let big = vec![b'x'; 64 * 1024];
+    let ok = s
+        .client
+        .post(format!("{}/decode", s.base))
+        .body(big.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok.status(), 200, "the process bound should allow 64 KiB");
+
+    // The same body to a route that declared 1 KiB.
+    let refused = s
+        .client
+        .post(format!("{}/small", s.base))
+        .body(big)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), 413);
+    let body: Value = refused.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "payload_too_large", "{body}");
+    let message = body["error"]["message"].as_str().unwrap_or("").to_owned();
+    assert!(message.contains("1024 bytes"), "{message}");
+    // The message has to say *which* bound refused it, or the operator
+    // raises USAI_MAX_BODY_BYTES and nothing changes.
+    assert!(message.contains("maxBodyBytes"), "{message}");
+
+    // And it still accepts what fits.
+    let fits = s
+        .client
+        .post(format!("{}/small", s.base))
+        .body(vec![b'x'; 512])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(fits.status(), 200);
+    let body: Value = fits.json().await.unwrap();
+    assert_eq!(body["bytes"], 512);
+    s.shutdown.cancel();
+}
+
 /// A stream's cost is how long its **world** lived, not how long the head
 /// took. Recorded the other way, a six-second export was filed as two
 /// milliseconds: the slowest route on the box sat at the bottom of every
