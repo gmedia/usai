@@ -89,6 +89,15 @@ Label values:
   declared name, `socket:chat`, `task:send-reset-email`. One series per
   workload that has answered; a request that never matched a route is under
   `usai_http_rejections_total{reason="route"}` and has no workload.
+- **What "latency" means per kind**, because the three are not the same
+  clock and reading them as one is how an export looked idle. An **HTTP**
+  workload's is the request, end to end. A **stream**'s is its *world's
+  lifetime* — the whole export, recorded when the world ends rather than when
+  the head commits. A **socket**'s is the **upgrade handshake only**: the
+  connection that follows can live for hours, and folding that into a
+  latency series would swamp every other number in it. For how long a socket
+  or a service has been running, read `usai_workload_worlds_live{workload}`,
+  which is the series that shows work in flight rather than work finished.
 - `usai_queue_messages_total{state}`: `claimed`, `done`, `retried`, `dead`,
   `invalid`, `reclaimed` (claimed by a consumer that died, returned for
   another attempt or dead-lettered). Per instance and revision, cumulative.
