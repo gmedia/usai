@@ -302,6 +302,32 @@ Everything else is additive or a fix to behaviour that was wrong.
 
 ### Observability
 
+- **A pool that could not be acquired is `dependency saturated`, not an
+  application error.** A resource refused within `acquireTimeoutSeconds`
+  was logged as `application error` with a JavaScript stack, **once per
+  occurrence**, for as long as the saturation lasted — so an overload round
+  watched 158 pool timeouts get filed against the application team, and
+  `docs/runbooks/metrics.md`'s "5xx minus rejections is the route's own
+  failures" agreed, because a resource refusal is not counted in
+  `usai_http_rejections_total`. It is a rate-limited WARN now, like the
+  *unavailable* case it sits beside, and the message says which of the two
+  it is.
+- **`children` and `violations` are JSON arrays** on the `world trace` line
+  under `--log-format json`. They were the *string* `"[]"`, because a
+  tracing field has no array type — while the runbook's own example showed
+  an array, so anything indexing them broke on the difference.
+- **`duration_ms` is fractional**, to microsecond resolution. As an integer
+  every world under a millisecond read `0`, and the runbook's own
+  waiting-or-computing ratio (`cpu_us` over `duration_ms`) came out at 123 %
+  and 259 % for the fast routes — on the one page that teaches a division.
+- **Every revision transition logs its identity**, not only `revision
+  installed`. A filtered or rotated log could state a bad revision's blast
+  radius to the millisecond and not say which build it was.
+- **A socket ending at its own deadline writes a line.** A stream at its
+  declared deadline got a named WARN with its duration and a socket got
+  silence — no line at any level, nothing in the metrics but the close frame
+  the client saw.
+
 - **A workload spending CPU is visible while it spends it.** A world
   reported its whole guest-CPU total once, when it ended, so a stream, a
   socket or a service burning a core for hours was attributed **nothing**
@@ -601,6 +627,25 @@ Everything else is additive or a fix to behaviour that was wrong.
   they were hitting was already fixed.
 
 ### CLI
+
+- **`usai inspect --artifact <dir>` answers "which build is in this
+  directory".** `CONTROL-API.md` warns that a restart brings back whatever
+  `--artifact` points at, so rewriting that path is part of a deploy — and
+  there was no way to check that you had. The identity was in the process
+  (`/_usai/status` → `revisions[].identity`) and nowhere in the artifact;
+  `usai inspect` needed a project, which a production image does not carry.
+  An on-call round demonstrated the cost: a fix deployed through the control
+  plane, a restart on the same command line, and the break back with every
+  probe green. The two halves meet now:
+
+  ```bash
+  running=$(curl -sf -H "$H" $C/health | jq -r '.active.identity')
+  on_disk=$(usai inspect --artifact /srv/app/current | awk '/^Identity:/{print $2}')
+  [ "$running" = "$on_disk" ] || echo "a restart will change the running build"
+  ```
+- **`--artifact` written after a command's own argument is refused with the
+  order that works**, instead of being swallowed by the variadic tail and
+  answering "not a Usai project" — the error the flag exists to remove.
 
 - **`usai queue prune --dry-run` applies `--older-than`.** It counted by
   state alone and ignored the age, so the flag that exists precisely so an
@@ -1015,6 +1060,40 @@ Everything else is additive or a fix to behaviour that was wrong.
 
 ### Documentation
 
+- **`postgres-down.md` names the third reason a queue message comes back.**
+  It listed two — never claimed, or the claim's transaction never committed
+  — and the one that actually fires after an outage is the third: the
+  handler ran to completion and the database went away before its outcome
+  could be recorded. The message stays `processing`, the sweep redelivers
+  it, and the handler runs **again**. An on-call round's payments handler
+  was not idempotent and settled 5 of 21 828 messages twice. Delivery has
+  always been at-least-once and `GUIDE.md` §8 says so; the page an operator
+  opens at 02:40 did not, so they would have closed the incident without
+  reconciling. It now carries the WARN to grep for and says to count the
+  effects rather than the messages.
+- **`overload.md` says to read `waiting` before the refusal body.** The body
+  names the level that filled, which is not always the level that caused it:
+  a slow dependency fills the world budget *through* the pool, so the body
+  says `runtime.worlds` while the fix is `pool.max`. A drill produced 108 063
+  `capacity_exhausted` and zero `resource_exhausted` in a scenario whose
+  cause was eight connections — and the page's first instruction produced
+  the wrong action (raising `--max-worlds`, which adds worlds to pile onto
+  the same connections and cost 1 023 MiB RSS at 256 of them).
+- **The "pool saturated" alert is gated on the resource being ready.** It
+  fired during a *total* database outage — worlds really are queued, for
+  connections that will never come — alongside the correct "database
+  unreachable" alert, prescribing the opposite fix, with nothing saying
+  which wins.
+- **`slow-route.md` no longer prescribes a ratio that cannot be computed.**
+  `usai_resource_operation_seconds_total` has no workload label, so dividing
+  it by one route's `request_seconds_sum` mixes every route into the
+  numerator; a drill got 1.405 against a scale the page describes as 0 to 1.
+  `Server-Timing` and the `world trace` line answer the same question per
+  request, and the page now says so.
+- **`metrics.md` says `payload_too_large` is counted as
+  `reason="validation"`.** For an API, "clients sending 20 MB bodies" and
+  "clients sending malformed JSON" are different incidents sharing one
+  counter.
 - **`docs/deploy/grafana-dashboard.json`** — twenty panels built from
   `runbooks/metrics.md`, including the two an operator has no other way to
   see: what the cgroup is charged against its limit, and the ceiling hits
