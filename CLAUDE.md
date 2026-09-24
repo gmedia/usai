@@ -49,6 +49,14 @@ docker build -f docker/runtime.Dockerfile -t sakaladev/usai:local . && docker bu
 scripts/container-smoke.sh sakaladev/usai:local sakaladev/usai:local-dev            # scaffold → app image → read-only non-root → 200 → SIGTERM → compose path (what CI runs)
 ```
 
+With a database (the PostgreSQL-dependent suites skip without one, so `make check` can be green here and red in CI):
+
+```bash
+eval "$(scripts/dev-postgres.sh start)"   # exports USAI_TEST_DATABASE_URL and DATABASE_URL
+make check
+scripts/dev-postgres.sh stop
+```
+
 Single tests:
 
 ```bash

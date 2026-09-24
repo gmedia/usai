@@ -137,6 +137,7 @@ Production readiness requires production-shaped evidence: soak, overload, crash/
 4. **State verification limits.** "Inspected source but did not run it" is useful information.
 5. **Finish the milestone slice you started.** Tests, docs, and `docs/STATUS.md` are part of the change, not follow-ups.
 6. **When you find a defect in your own earlier work, say so and fix it.** Do not rewrite history to hide it.
+7. **`make check` passing locally is not the same as CI passing.** Every suite that needs PostgreSQL — the runtime's `postgres` test, the example projects' tests, the queue campaigns — *skips* when there is no database, silently and by design. CI has one. Before pushing anything that touches the resources, the queue, the migrations or the test harness, run with a database: `eval "$(scripts/dev-postgres.sh start)"`, then `make check`, then `scripts/dev-postgres.sh stop`. It reuses (or downloads once) the portable server the Rust tests cache, so this works without Docker. A change to `testApp` passed `make check` here and failed CI on `examples/invoicing` — which was precisely the test it should have broken.
 
 ---
 
