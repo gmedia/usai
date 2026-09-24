@@ -132,6 +132,13 @@ pub struct WorkResult {
     pub request_id: Option<String>,
 }
 
+/// How long a connection-bound or persistent world has to unwind after its
+/// **declared** deadline: long enough to finish the write it is in and run
+/// a socket's `close`, short enough that a handler ignoring `ctx.signal`
+/// still stops near the bound its author asked for. Past it the world is
+/// cancelled, exactly as a finite one is at its deadline.
+const DEADLINE_UNWIND_GRACE: Duration = Duration::from_secs(1);
+
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct LogLine {
     pub level: String,
@@ -620,7 +627,13 @@ impl WorldDriver {
                         && let Some(token) = self.stop.clone()
                     {
                         stopped_at_deadline = true;
-                        deadline.set(None);
+                        // Re-armed, not disarmed: the stop only ends work
+                        // that checks `ctx.signal`, and a declared deadline
+                        // is a bound the developer asked for — a loop that
+                        // ignores the signal must still stop. One second to
+                        // unwind (finish the write, run `close`), then the
+                        // cancel below.
+                        deadline.set(Some(tokio::time::sleep(DEADLINE_UNWIND_GRACE)));
                         tracing::debug!(world = %self.id, "declared deadline reached: stopping the world");
                         // Cancelling the world's own stop token, rather than
                         // asking the guest directly, is what makes this a

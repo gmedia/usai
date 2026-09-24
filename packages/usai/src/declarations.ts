@@ -116,10 +116,12 @@ export interface WorkloadPolicies {
    * would be useless. A deadline you declare is honoured, and it **stops**
    * the world rather than cancelling it: `ctx.signal` aborts, a pending
    * `ctx.sleep` returns, the handler can finish what it is doing, and a
-   * socket's connection is closed so its `close` handler runs. For a stream
-   * the client keeps the `200` it already has and the body stops there —
-   * with no trailer and no error, so end an export with a sentinel the
-   * reader requires. */
+   * socket's connection is closed so its `close` handler runs. It has one
+   * second to unwind and is then cancelled, so a handler that never checks
+   * `ctx.signal` still stops near the bound you declared. For a stream the
+   * client keeps the `200` it already has and the body stops there — with no
+   * trailer and no error, so end an export with a sentinel the reader
+   * requires. */
   timeout?: string | number;
   /** How many worlds of this workload may run at once. Past the bound the
    * next one is refused, never queued: an HTTP request gets 503

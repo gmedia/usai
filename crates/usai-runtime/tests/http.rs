@@ -903,9 +903,19 @@ async fn a_declared_timeout_bounds_a_stream() {
     assert_eq!(r.status(), 200);
     let body = r.text().await.unwrap();
     let took = started.elapsed();
+    // The fixture's loop never checks `ctx.signal`, which is the point: a
+    // declared deadline stops the world first so it can finish cleanly, and
+    // cancels it a second later whether or not the handler cooperated.
+    // Without that second half a handler that ignores the signal runs to its
+    // own end — sixty seconds here — and the bound its author declared means
+    // nothing.
     assert!(
         took < Duration::from_secs(5),
         "the declared timeout did not end the stream: {took:?}"
+    );
+    assert!(
+        took >= Duration::from_millis(300),
+        "the stream ended before its declared 300 ms: {took:?}"
     );
     // It ran, and it ended early — the client's body stops mid-export,
     // which is what a bound on a stream means.
