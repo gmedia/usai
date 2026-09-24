@@ -44,6 +44,7 @@ impl ResourceProvider for CacheLocalProvider {
             identity,
             max_entries,
             entries: Mutex::new(HashMap::new()),
+            operation_ns: std::sync::atomic::AtomicU64::new(0),
         }))
     }
 }
@@ -57,6 +58,12 @@ pub struct CacheLocal {
     identity: ResourceIdentity,
     max_entries: usize,
     entries: Mutex<HashMap<String, Entry>>,
+    /// Nanoseconds spent inside this resource's operations, added by the op
+    /// layer (`ResourceManager::operation_ns`). In-process and fast, but a
+    /// resource is a resource: the share of a request it accounts for is the
+    /// question, and guessing is how people blame the database for a lock
+    /// contention in memory.
+    operation_ns: std::sync::atomic::AtomicU64,
 }
 
 fn arg<'a>(args: &'a Value, name: &str) -> Result<&'a Value, ResourceError> {
@@ -71,6 +78,10 @@ fn arg<'a>(args: &'a Value, name: &str) -> Result<&'a Value, ResourceError> {
 impl ResourceManager for CacheLocal {
     fn identity(&self) -> &ResourceIdentity {
         &self.identity
+    }
+
+    fn operation_ns(&self) -> Option<&std::sync::atomic::AtomicU64> {
+        Some(&self.operation_ns)
     }
 
     async fn call(

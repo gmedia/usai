@@ -213,8 +213,15 @@ async fn resource(ctx: OpContext, payload: String) -> OpOutcome {
     // other half, and nothing measured it.
     let started = std::time::Instant::now();
     let outcome = manager.call(call, ctx.cancel.clone()).await;
-    let identity = manager.identity();
-    crate::resource::record_operation_time(&identity.kind, &identity.name, started.elapsed());
+    if let Some(ns) = manager.operation_ns() {
+        // One relaxed add on the resource's own counter: no lock, no map,
+        // no allocation on a path every query and every outbound call takes
+        // (C13).
+        ns.fetch_add(
+            started.elapsed().as_nanos() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
     match outcome {
         Ok(value) => OpOutcome::ok(&value),
         Err(error) => OpOutcome::from_resource_error(&error),

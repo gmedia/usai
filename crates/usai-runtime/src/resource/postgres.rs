@@ -260,6 +260,9 @@ impl ResourceProvider for PostgresProvider {
 
 #[derive(Default)]
 struct Counters {
+    /// Nanoseconds spent inside this resource's operations, added by the op
+    /// layer (`ResourceManager::operation_ns`).
+    operation_ns: AtomicU64,
     operations: AtomicU64,
     returned: AtomicU64,
     quarantined: AtomicU64,
@@ -980,6 +983,10 @@ async fn prepare_and_bind(
 impl ResourceManager for Postgres {
     fn identity(&self) -> &ResourceIdentity {
         &self.identity
+    }
+
+    fn operation_ns(&self) -> Option<&AtomicU64> {
+        Some(&self.counters.operation_ns)
     }
 
     async fn call(

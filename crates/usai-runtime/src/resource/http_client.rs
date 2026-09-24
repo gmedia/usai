@@ -157,6 +157,9 @@ impl ResourceProvider for HttpClientProvider {
 
 #[derive(Default)]
 struct Counters {
+    /// Nanoseconds spent inside this resource's operations, added by the op
+    /// layer (`ResourceManager::operation_ns`).
+    operation_ns: AtomicU64,
     requests: AtomicU64,
     failures: AtomicU64,
     cancelled: AtomicU64,
@@ -353,6 +356,10 @@ fn refused(host: &str, ip: std::net::IpAddr) -> ResourceError {
 impl ResourceManager for HttpClient {
     fn identity(&self) -> &ResourceIdentity {
         &self.identity
+    }
+
+    fn operation_ns(&self) -> Option<&AtomicU64> {
+        Some(&self.counters.operation_ns)
     }
 
     async fn call(

@@ -922,15 +922,18 @@ async fn a_declared_timeout_bounds_a_stream() {
     // runs to its own end — sixty seconds here — and the bound its author
     // declared means nothing.
     //
-    // The bound here is **two seconds**, not five, and that is the point of
-    // the number: a stream's client is still reading while the world
+    // The bound here is **three seconds**, not five, and that is the point
+    // of the number: a stream's client is still reading while the world
     // unwinds, so a handler that ignores the signal writes to it for the
     // whole grace. A socket's is closed at the stop and a service has no
     // client, so those get the full `deadline_unwind_grace` for their
     // `close`; a stream's grace is the overrun on a bound the OpenAPI
-    // document publishes to consumers, and it stays at a second.
+    // document publishes to consumers, and it stays at a second. Declared
+    // 300 ms plus a 1 s grace is ~1.3 s; the slack above it is for a loaded
+    // machine, and a 5 s grace measured 5.39 s, so three still separates
+    // the two.
     assert!(
-        took < Duration::from_secs(2),
+        took < Duration::from_secs(3),
         "the declared timeout did not end the stream: {took:?}"
     );
     assert!(

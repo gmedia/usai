@@ -153,6 +153,14 @@ pub trait ResourceManager: Send + Sync {
         cancel: CancellationToken,
     ) -> Result<serde_json::Value, ResourceError>;
     fn status(&self) -> ResourceStatus;
+    /// Where this manager keeps the nanoseconds its operations have spent,
+    /// so the one place every operation passes through can add to it
+    /// without a lock, a map lookup or an allocation on the hot path. A
+    /// manager that returns `None` reports no time (and no
+    /// `operationSecondsTotal` in its status).
+    fn operation_ns(&self) -> Option<&std::sync::atomic::AtomicU64> {
+        None
+    }
     /// A bounded readiness probe (`/_usai/ready`): `Ok` when the resource
     /// can serve an operation now. Default: ready.
     async fn probe(&self) -> Result<(), String> {
@@ -180,41 +188,6 @@ pub trait ResourceProvider: Send + Sync {
 pub struct ResourceRegistry {
     providers: RwLock<BTreeMap<String, Arc<dyn ResourceProvider>>>,
     managers: RwLock<BTreeMap<ResourceIdentity, Arc<dyn ResourceManager>>>,
-}
-
-/// Nanoseconds spent inside each resource's operations, keyed by (kind,
-/// name). Counting operations answered "how many"; nothing answered "how
-/// long", so "the handler is waiting — on what?" resolved to *a connection*
-/// (the pool's `waiting` gauge) and never to *the query*.
-///
-/// Process-wide rather than per-registry because a resource's identity is
-/// stable across revisions by design (ADR-0011): a counter that reset on
-/// every deploy is the defect this is meant to avoid, not a shape to copy.
-/// Bounded by the declarations, like every other resource series.
-static OPERATION_NS: std::sync::OnceLock<
-    RwLock<BTreeMap<(String, String), std::sync::atomic::AtomicU64>>,
-> = std::sync::OnceLock::new();
-
-fn operation_ns() -> &'static RwLock<BTreeMap<(String, String), std::sync::atomic::AtomicU64>> {
-    OPERATION_NS.get_or_init(Default::default)
-}
-
-/// Adds the time one operation spent inside a resource. Called from the
-/// single place every operation passes through, so no provider has to
-/// remember to do it.
-pub fn record_operation_time(kind: &str, name: &str, elapsed: std::time::Duration) {
-    let key = (kind.to_owned(), name.to_owned());
-    let nanos = elapsed.as_nanos() as u64;
-    if let Some(counter) = operation_ns().read().expect("timing poisoned").get(&key) {
-        counter.fetch_add(nanos, std::sync::atomic::Ordering::Relaxed);
-        return;
-    }
-    operation_ns()
-        .write()
-        .expect("timing poisoned")
-        .entry(key)
-        .or_default()
-        .fetch_add(nanos, std::sync::atomic::Ordering::Relaxed);
 }
 
 impl ResourceRegistry {
@@ -306,15 +279,13 @@ impl ResourceRegistry {
     }
 
     pub fn statuses(&self) -> Vec<ResourceStatus> {
-        let spent = operation_ns().read().expect("timing poisoned");
         self.managers
             .read()
             .expect("managers poisoned")
             .values()
             .map(|m| {
                 let mut status = m.status();
-                let key = (status.identity.kind.clone(), status.identity.name.clone());
-                if let Some(ns) = spent.get(&key) {
+                if let Some(ns) = m.operation_ns() {
                     status.detail.insert(
                         "operationSecondsTotal".into(),
                         serde_json::json!(
