@@ -1,36 +1,68 @@
 <!-- A draft for a person to read, edit and post. Not to be filed by a tool:
      bytecodealliance/governance AI_TOOL_POLICY.md asks for a human who is the
      author, has read it, and can answer questions during review. #14399 was
-     closed because that was not true of the first attempt. -->
+     closed because that was not true of the first attempt.
+
+     Use the "Improvement" template (a feature request); its four headings
+     are below. The other three are bug reports and do not fit. -->
 
 **Title:** pooling allocator: a way to release a slot's kept-resident memory when it goes idle
 
-Follow-up from #14357. Same embedder: one instance per application, a fresh
+#### Feature
+
+A way for an embedder to release the memory the pooling allocator keeps
+resident for slots that are **not in use** (`*_keep_resident`), at a moment
+the embedder chooses.
+
+Follow-up from #14357, same embedder: one instance per application, a fresh
 instance per request, so the pooling allocator is on the hot path.
 
-We set `linear_memory_keep_resident` to 8 MiB because letting those pages go
-costs about 2× the CPU per request on one vCPU when the next instance faults
-them back in. That is the right trade while slots are reused every few
-milliseconds. It is the wrong one for a slot nothing has touched for an hour:
-resident memory follows the **peak** concurrency the process has ever seen,
-not the current load, so a box sized for a daily peak carries that peak all
-night. We measure ~0.5 GiB of resident slots at c=64 and it does not come
-back down.
+#### Benefit
 
-We cannot do this from outside. The kept-resident region belongs to the pool
-and there is no handle to an idle slot's memory, and
-`linear_memory_keep_resident` is fixed when the `Engine` is built — so an
-embedder can say "always keep 8 MiB" or "never keep any", but not "keep it
-while the load lasts".
+Resident memory follows the **peak** concurrency a process has ever seen
+rather than its current load. We measure ~0.5 GiB of resident slots at c=64,
+and it does not come back down when the burst ends — a box sized for a daily
+peak carries that peak all night.
 
-Would you take a way for the embedder to release it? We already know when we
-are idle, so we do not need a timer inside wasmtime — something like
-`Engine::release_idle_pool_memory()` would be enough. A
-`decommit_idle_slots_after(Duration)` on `PoolingAllocationConfig` would also
-solve it; we have no preference and will follow whichever shape you prefer.
+This is not a leak; it is `linear_memory_keep_resident` doing exactly what it
+is for. We set it to 8 MiB because letting those pages go costs about 2× the
+CPU per request on one vCPU when the next instance faults them back in. That
+is the right trade while slots are reused every few milliseconds, and the
+wrong one for a slot nothing has touched for an hour. Today there is no way
+to say "keep it while the load lasts".
+
+#### Implementation
+
+Something like:
+
+```rust
+impl Engine {
+    /// Releases memory the pooling allocator keeps resident for slots that
+    /// are not in use. The next instantiation in those slots re-faults the
+    /// pages. No effect on other allocators.
+    pub fn release_idle_pool_memory(&self) -> usize; // bytes released
+}
+```
+
+An embedder that already knows when it is idle needs no timer inside
+wasmtime — we park our own watchdog when no instance is live, so one call
+from that path is enough.
+
+#### Alternatives
+
+- **`PoolingAllocationConfig::decommit_idle_slots_after(Duration)`** — puts
+  the policy in wasmtime and needs a timer there. It solves our problem
+  equally well; we have no preference and will follow whichever shape you
+  prefer.
+- **`linear_memory_keep_resident = 0`** — expressible today, and costs the
+  ~2× CPU per request above on every request, not just the first after a
+  quiet period.
+- **Doing it from outside wasmtime** — we looked and could not: the region
+  belongs to the pool, there is no handle to an idle slot's memory, and
+  `linear_memory_keep_resident` is fixed when the `Engine` is built.
 
 Happy to do the before/after measurement (a burst, then idle, sampling
-RSS/PSS) on whichever one you pick.
+RSS/PSS) on whichever shape you pick.
 
 <!-- Optional, if you think it helps rather than hurts: a line saying you
      wrote this yourself and can answer questions about it. The policy does
