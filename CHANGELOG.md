@@ -30,6 +30,21 @@ Everything else is additive or a fix to behaviour that was wrong.
 
 ### CLI
 
+- **`usai queue prune --dry-run` applies `--older-than`.** It counted by
+  state alone and ignored the age, so the flag that exists precisely so an
+  operator can read the number before typing `--yes` reported every finished
+  row on the table — "this would delete 4.1 M rows" when the answer was 900.
+  It runs the delete's own predicate now.
+- **`usai inspect` prints a consumer's retry policy and concurrency.** The
+  retry policy is the single most operational fact about a consumer and it
+  was in `manifest.json` and nowhere a person would look, while cron in the
+  same output printed `overlap:` and `exclusive:`.
+- **`usai top` shows background work.** Its table was built from HTTP
+  responses alone, so a queue consumer, a cron tick and a service were absent
+  however hard they were working — measured, a consumer driving 441 worlds/s
+  on a box at 126 % CPU read as a row of zeros and vanished entirely whenever
+  no world happened to be live at the sample instant. Every workload that
+  spent guest CPU in the window now has a row.
 - **`usai inspect` prints the effective deadline** for every workload and
   where it came from (`timeout: 30000ms  (the runtime default)`,
   `(declared)`, or `none  (it runs until it ends or its connection does)`).
@@ -89,6 +104,14 @@ Everything else is additive or a fix to behaviour that was wrong.
 
 ### SDK
 
+- **`WorkOutcome.termination` is typed**, not `unknown` — it is the thing a
+  lifecycle test asserts on, and asserting on it needed a cast. Its `logs`
+  now carry the parsed `fields`, the workload and the request id, so a test
+  holding an outcome no longer has to go back to `app.logs()` for them.
+- **`LogFilter` admits `undefined`.** Its own doc comment recommends
+  `res.headers["x-request-id"]`, which is `string | undefined`, and that did
+  not compile under `exactOptionalPropertyTypes` — which this repository's
+  `tsconfig.base.json` sets, so every example inherited the problem.
 - **`WorkloadPolicies.timeout` says what it actually does** for each
   lifetime, now that a declared one is honoured on a stream, a socket and a
   service.
@@ -111,6 +134,17 @@ Everything else is additive or a fix to behaviour that was wrong.
   Declaring it on a workload that has no request body — a task, a cron tick,
   a stream, a socket — is **refused at install** with the reason, rather than
   accepted and ignored.
+- **A message dead-lettered by its contract writes a log line.** It was
+  dead *silently*: a row in a table and a counter, with nothing on stderr and
+  so nothing in a log pipeline. That is the shape of the commonest queue
+  incident there is — a producer deployed with a new payload before the
+  consumer's schema knew about it — and
+  `docs/runbooks/queue-dead-letter.md` had promised the line all along. It is
+  an ERROR now, like a handler that fails.
+- **`usai_queue_topic_messages_total{topic,state}`**, and `queueByTopic` per
+  revision in `/_usai/status`. An alert on dead letters could not name the
+  queue, so whoever it woke had to look through every topic the application
+  has — while HTTP has carried its per-workload dimension since D2.
 - **A socket's upgrade is validated before the world exists.** `socket()`
   now takes `params` and `query` contracts, and the runtime checks them the
   way it checks an HTTP route's: a bad `/live/:board` is a `400` naming the
@@ -132,6 +166,11 @@ Everything else is additive or a fix to behaviour that was wrong.
   was skipped exactly when it mattered: 717 presence rows were left behind in
   one session. `close` now runs after a failed `open` too, and a client
   leaving is no longer reported as a handler failure.
+- **A connection quarantined during shutdown is a debug line.** The drain
+  cancels whatever a consumer had in flight and nothing can prove it
+  terminal afterwards, so C5 quarantines it — correct, and the connection is
+  being destroyed anyway. Logging it at WARN meant every green `usai test`
+  run printed the one warning an operator must never learn to ignore.
 - **A client going away is logged at debug, not ERROR.** A stream already
   said so; a socket logged `socket handler failed` per connection — 506 lines
   in the minute a round closed 250 dashboard tabs, which pages whoever alerts

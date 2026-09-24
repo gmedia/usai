@@ -40,9 +40,21 @@ usai --root /srv/app queue status                 # per topic and state, with ag
 usai --root /srv/app queue status --json | jq     # for a script or an alert
 ```
 
-`ready` is depth. A `processing` row older than the consumer's deadline is a
-lost consumer — the sweeper reclaims it; you do not have to. `dead` is what
+`ready` is depth. A `processing` row is a lost consumer once it is older
+than the consumer's deadline **plus a margin** — 10 s, so a row claimed by a
+consumer with the default 30 s timeout is reclaimed at 40 s, and the sweep
+itself runs on the poll interval, which adds up to a second or two more. The
+margin exists so a consumer that is merely at its deadline is not reclaimed
+out from under itself. Do not build an alert on the deadline alone: it fires
+on healthy in-flight rows. The log line carries the number it used
+(`lost_after_ms=`). The sweeper reclaims; you do not have to. `dead` is what
 this page is about.
+
+**Ages are measured from different columns, deliberately.** `queue status`
+reports the oldest *wait* from `available_at`, which is when a message became
+eligible — the right lag for `ready` and `processing`, and meaningless for
+`done` and `dead`, where it is the last attempt's timestamp. `queue prune
+--older-than` ages from `created_at`, the one column a retry does not move.
 
 Fix the cause (the endpoint, the payload), then requeue. There is no verb for
 this on purpose: requeueing is a decision about *which* failures were

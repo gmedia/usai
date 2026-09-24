@@ -435,7 +435,33 @@ pub fn inspect(definition: &ApplicationDefinition, default_timeout_ms: u64) -> S
                 "    delivery: local, non-durable  (a crash before it finishes loses it; publish to a topic for durability)"
             );
         }
-        if let Trigger::Queue { topic, .. } = &w.trigger {
+        if let Trigger::Queue {
+            topic,
+            concurrency,
+            retry,
+            ..
+        } = &w.trigger
+        {
+            // The retry policy is the single most operational fact about a
+            // consumer, and it was in `manifest.json` and nowhere a person
+            // would look. Cron already prints `overlap:` and `exclusive:`
+            // here; C8 says this command is the one source of truth.
+            let _ = writeln!(
+                out,
+                "    retry: {} attempt(s), {} backoff from {}ms{}",
+                retry.max_attempts,
+                retry.backoff,
+                retry.base_ms,
+                if retry.max_attempts <= 1 {
+                    "  (one attempt: a failure is dead-lettered at once)"
+                } else {
+                    ""
+                }
+            );
+            let _ = writeln!(
+                out,
+                "    consumers: {concurrency} message(s) of this topic at a time on this instance"
+            );
             let _ = writeln!(
                 out,
                 "    delivery: durable  (PostgreSQL, at least once; the row for {topic} outlives this process)"

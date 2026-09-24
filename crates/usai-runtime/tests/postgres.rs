@@ -505,6 +505,19 @@ async fn the_queue_can_be_inspected_pruned_and_indexed_without_blocking_writers(
         .await
         .expect("prune");
     assert_eq!(kept, 0, "prune took a row younger than its age filter");
+    // And the dry run must say the same number the delete would. It used to
+    // count by state alone and ignore the age, so `--dry-run` — the flag
+    // that exists so an operator can read the count before typing `--yes` —
+    // reported every finished row on the table and the delete then took
+    // none of them.
+    let would = ops::prune_count(manager.as_ref(), &["done"], 3_600, None)
+        .await
+        .expect("prune_count");
+    assert_eq!(would, kept, "the dry run's number is not the delete's");
+    let would_all = ops::prune_count(manager.as_ref(), &["done"], 0, None)
+        .await
+        .expect("prune_count");
+    assert_eq!(would_all, done, "the dry run undercounts what would go");
     // With no age bound it takes exactly the finished ones.
     let deleted = ops::prune(manager.as_ref(), &["done"], 0, None)
         .await

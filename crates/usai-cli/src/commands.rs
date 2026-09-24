@@ -1277,24 +1277,15 @@ pub async fn queue_prune(
         let revision = runtime.active()?;
         let manager = db::database(&revision, resource)?;
         if dry_run {
-            let rows = usai_runtime::workloads::queue::ops::stats(manager.as_ref()).await?;
-            let n: i64 = rows
-                .as_array()
-                .map(|r| {
-                    r.iter()
-                        .filter(|row| {
-                            let s = row.get("state").and_then(|v| v.as_str()).unwrap_or("");
-                            states.contains(&s)
-                                && topic.is_none_or(|t| {
-                                    row.get("topic").and_then(|v| v.as_str()) == Some(t)
-                                })
-                        })
-                        .filter_map(|row| row.get("rows").and_then(|v| v.as_i64()))
-                        .sum()
-                })
-                .unwrap_or(0);
+            let n = usai_runtime::workloads::queue::ops::prune_count(
+                manager.as_ref(),
+                &states,
+                seconds,
+                topic,
+            )
+            .await?;
             println!(
-                "dry run: up to {n} row(s) in state {} would be considered; the age filter (older than {older_than}) is applied by the delete itself\n  nothing was deleted — add --yes to delete",
+                "dry run: {n} row(s) in state {} older than {older_than} would be deleted\n  nothing was deleted — add --yes to delete",
                 states.join("/")
             );
             return Ok(());

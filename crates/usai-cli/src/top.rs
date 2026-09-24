@@ -317,6 +317,27 @@ fn render(before: &Sample, now: &Sample) -> String {
         .and_then(Value::as_object)
         .unwrap_or(&empty);
     // (workload, req/s, live, 4xx, 5xx, ms/request, share of one core)
+    // Every workload that spent guest CPU in the window, whether or not it
+    // answers HTTP. Reading `http.by_workload` alone left a queue consumer,
+    // a cron tick and a service out of the table however hard they were
+    // working — measured by a jobs round: a consumer driving 441 worlds/s on
+    // a box at 126 % CPU showed as one row of zeros, and vanished entirely
+    // whenever no world happened to be live at the sample instant.
+    let mut background: BTreeMap<String, f64> = BTreeMap::new();
+    if let Some(cpu) = now
+        .get(&["gauges", "guestCpuNsByWorkload"])
+        .and_then(Value::as_object)
+    {
+        for (workload, ns) in cpu {
+            if by_workload.contains_key(workload) {
+                continue;
+            }
+            let delta = (ns.as_f64().unwrap_or(0.0)
+                - before.f64(&["gauges", "guestCpuNsByWorkload", workload.as_str()]))
+            .max(0.0);
+            background.insert(workload.clone(), delta);
+        }
+    }
     let mut rows: Vec<(String, f64, u64, u64, u64, f64, f64)> = Vec::new();
     for (workload, stats) in by_workload {
         let count = stats.get("count").and_then(Value::as_u64).unwrap_or(0);
@@ -364,9 +385,24 @@ fn render(before: &Sample, now: &Sample) -> String {
             cpu_ns / seconds / 1e9 * 100.0,
         ));
     }
-    // A workload that has live worlds and has completed nothing yet — the
-    // first long export, a socket that just connected — has no row in the
-    // response table at all. It is exactly the one to show.
+    // Background work, and anything with a live world but no completed
+    // response: a first long export, a socket that just connected, a queue
+    // consumer that answers no HTTP at all. Exactly the rows to show.
+    for (workload, cpu_ns) in background {
+        let alive = live.remove(workload.as_str()).unwrap_or(0);
+        if alive == 0 && cpu_ns <= 0.0 {
+            continue;
+        }
+        rows.push((
+            workload,
+            0.0,
+            alive,
+            0,
+            0,
+            f64::NAN,
+            cpu_ns / seconds / 1e9 * 100.0,
+        ));
+    }
     for (workload, n) in live {
         rows.push((workload, 0.0, n, 0, 0, f64::NAN, 0.0));
     }
@@ -706,6 +742,29 @@ mod tests {
         // to the wrong knob — capacity, a bad route and a failed schema have
         // nothing in common.
         assert!(screen.contains("(validation 4)"), "{screen}");
+    }
+
+    /// A queue consumer, a cron tick and a service answer no HTTP at all, so
+    /// reading `http.by_workload` alone left them out of the table however
+    /// hard they were working: a jobs round measured a consumer driving 441
+    /// worlds/s on a box at 126 % CPU showing as a row of zeros, and
+    /// disappearing whenever no world happened to be live at the sample.
+    #[test]
+    fn background_work_is_in_the_table_even_though_it_answers_no_requests() {
+        let mut before = status(1_000, 10.0, 1_000_000_000, 5.0);
+        before["gauges"]["guestCpuNsByWorkload"]["queue:order.confirm"] = json!(1_000_000_000u64);
+        let mut after = status(1_200, 10.5, 1_200_000_000, 5.2);
+        // 1.4 CPU-seconds of consumer work over a 2 s window: 70 % of a core.
+        after["gauges"]["guestCpuNsByWorkload"]["queue:order.confirm"] = json!(2_400_000_000u64);
+        // No live world at the sample instant, and no HTTP row ever.
+        let screen = render(&sample(2, before), &sample(0, after));
+        let row = screen
+            .lines()
+            .find(|l| l.contains("queue:order.confirm"))
+            .unwrap_or_else(|| panic!("the consumer is not on the screen:\n{screen}"));
+        assert!(row.trim_end().ends_with("70%"), "{row}");
+        // It completed nothing, so there is no average to report.
+        assert!(row.contains('—'), "{row}");
     }
 
     /// A restarted instance's counters go backwards. That is a fact about

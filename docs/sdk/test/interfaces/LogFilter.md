@@ -8,7 +8,7 @@ What `TestApp.logs` / `waitForLog` select on; every given field must match.
 
 | Property | Type | Description |
 | ------ | ------ | ------ |
-| <a id="requestid"></a> `requestId?` | `string` | - |
+| <a id="requestid"></a> `requestId?` | `string` | Written as `res.headers["x-request-id"]`, which is `string | undefined` — so the type has to admit `undefined` explicitly, or the idiom this comment recommends does not compile under `exactOptionalPropertyTypes` (which `tsconfig.base.json` here sets, and every example inherits). |
 | <a id="workload"></a> `workload?` | `string` | - |
 | <a id="level"></a> `level?` | `"TRACE"` \| `"DEBUG"` \| `"INFO"` \| `"WARN"` \| `"ERROR"` | - |
 | <a id="target"></a> `target?` | `string` | `app` for the application's lines. |

@@ -297,6 +297,9 @@ pub struct RevisionStatus {
     /// Queue consumers of this revision: messages claimed, done, retried,
     /// dead-lettered, refused by contract.
     pub queue: QueueCounters,
+    /// The same, per topic. Empty until a message has been seen.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub queue_by_topic: Vec<QueueTopicStatus>,
     /// Cron schedules of this revision: ticks due, skipped (overlap), failed,
     /// taken by another instance (exclusive schedules).
     pub cron: CronCounters,
@@ -314,6 +317,20 @@ pub struct CronCounters {
 #[derive(Clone, Copy, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueueCounters {
+    pub claimed: u64,
+    pub done: u64,
+    pub retried: u64,
+    pub dead: u64,
+    pub invalid: u64,
+    pub reclaimed: u64,
+}
+
+/// The same counts per topic, so an alert on dead letters can name the
+/// queue. Only topics that have seen a message appear.
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueTopicStatus {
+    pub topic: String,
     pub claimed: u64,
     pub done: u64,
     pub retried: u64,
@@ -1089,6 +1106,24 @@ impl Runtime {
                         invalid: q.invalid.load(Ordering::Relaxed),
                         reclaimed: q.reclaimed.load(Ordering::Relaxed),
                     }
+                },
+                queue_by_topic: {
+                    use std::sync::atomic::Ordering;
+                    r.queue_stats
+                        .by_topic
+                        .read()
+                        .expect("queue stats poisoned")
+                        .iter()
+                        .map(|(topic, c)| QueueTopicStatus {
+                            topic: topic.clone(),
+                            claimed: c.claimed.load(Ordering::Relaxed),
+                            done: c.done.load(Ordering::Relaxed),
+                            retried: c.retried.load(Ordering::Relaxed),
+                            dead: c.dead.load(Ordering::Relaxed),
+                            invalid: c.invalid.load(Ordering::Relaxed),
+                            reclaimed: c.reclaimed.load(Ordering::Relaxed),
+                        })
+                        .collect()
                 },
             })
             .collect();

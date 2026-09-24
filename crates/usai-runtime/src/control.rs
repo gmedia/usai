@@ -146,7 +146,22 @@ fn work_result_json(result: &crate::world::WorkResult) -> Value {
         "world": result.world,
         "durationMs": result.duration.as_millis() as u64,
         "violations": result.violations,
-        "logs": result.logs,
+        // The world knows which workload wrote these and under which
+        // request; a test that had the outcome in its hand used to have to
+        // go back to `app.logs()` for either. `fields` is an object here,
+        // as it is on every other surface — it is a string inside the
+        // world's own record only because that is how it crosses the guest
+        // boundary.
+        "logs": result.logs.iter().map(|line| json!({
+            "level": line.level,
+            "message": line.message,
+            "fields": line.fields.as_deref()
+                .and_then(|f| serde_json::from_str::<Value>(f).ok())
+                .unwrap_or(Value::Null),
+            "workload": result.workload,
+            "world": result.world.to_string(),
+            "requestId": result.request_id,
+        })).collect::<Vec<_>>(),
         "children": result.children,
     })
 }

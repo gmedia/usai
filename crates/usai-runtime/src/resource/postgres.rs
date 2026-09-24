@@ -267,6 +267,13 @@ struct Counters {
     transactions: AtomicU64,
     /// Transactions the world left open; rolled back on its behalf.
     rolled_back_for_world: AtomicU64,
+    /// Set once the pool is closing. A quarantine during a shutdown is
+    /// expected — the drain cancels whatever a consumer had in flight and
+    /// nothing can prove it terminal after the fact — and the connection is
+    /// being destroyed anyway, so the line is a debug rather than the WARN
+    /// an operator must never learn to ignore. A jobs round saw it on every
+    /// green `usai test` run.
+    closing: std::sync::atomic::AtomicBool,
 }
 
 /// What the last contact with the server said. `/_usai/status` reports it as
@@ -384,7 +391,11 @@ impl Drop for Lease {
         if let Some(object) = self.object.take() {
             // Permanent removal; the pool creates a replacement lazily.
             let wrapper = Object::take(object);
-            tracing::warn!(resource = %"postgres", "connection quarantined: original query has no terminal outcome");
+            if self.counters.closing.load(Ordering::SeqCst) {
+                tracing::debug!(resource = %"postgres", "connection quarantined during shutdown: the drain cancelled it and nothing can prove it terminal now");
+            } else {
+                tracing::warn!(resource = %"postgres", "connection quarantined: original query has no terminal outcome");
+            }
             drop(wrapper);
         }
     }
@@ -992,6 +1003,7 @@ impl ResourceManager for Postgres {
     }
 
     async fn shutdown(&self) {
+        self.counters.closing.store(true, Ordering::SeqCst);
         self.pool.close();
     }
 

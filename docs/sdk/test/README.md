@@ -26,3 +26,10 @@ clock, no external server. Start with [testApp](functions/testApp.md).
 | [LogFilter](interfaces/LogFilter.md) | What `TestApp.logs` / `waitForLog` select on; every given field must match. |
 | [UsaiTestError](classes/UsaiTestError.md) | Thrown when the harness itself fails: the binary is missing, the runtime did not start, a control request was refused. |
 | [testApp](functions/testApp.md) | Start the application under the real runtime for a test: the same artifact, the same boundaries, the same worlds production will run. The harness spawns the `usai` binary (`USAI_BIN`, `binary`, or `usai` on PATH) on random ports with a control token, waits for it to announce itself, and talks HTTP to the application and to the control surface. Tasks, cron ticks and commands run deterministically through the control surface — no wall clock, no external server — and answer with a [WorkOutcome](interfaces/WorkOutcome.md) that includes the world's lifecycle violations, so a test can fail on detached work the way production would. |
+
+## Other
+
+| Name | Description |
+| ------ | ------ |
+| [WorldLogLine](interfaces/WorldLogLine.md) | One line a world wrote, as the outcome carries it. |
+| [Termination](type-aliases/Termination.md) | How a world ended. The four the runtime names, plus the open form so a future one is a value and not a type error. |

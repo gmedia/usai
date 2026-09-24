@@ -242,6 +242,41 @@ capabilities (design), latency histogram in metrics, an API reference page — a
   side, rejections, pool `in use` and `waiting`, what the process costs —
   because totals since boot answer the wrong question during an incident.
 
+- **Round 19 (2026-09-24): a background-jobs developer** (nine years of
+  BullMQ, `node-cron`, Sidekiq) built an order pipeline — publish, consume,
+  retry with backoff, dead-letter, replay, idempotency, two crons on two
+  replicas, dispatch vs invoke, SIGTERM and `kill -9` — in **62 minutes**.
+  Verdict: **"yes, for a team that already wants PostgreSQL as its only
+  stateful dependency — but not yet for a team whose job system is the
+  product"**, and what stood in the way was observability rather than
+  mechanics. The mechanics measured *exactly* as documented: backoff
+  538/1051/2064 ms against a declared 500 ms exponential, `exclusive: true`
+  cron running once per tick across two replicas with `taken` on the loser,
+  SIGTERM waking a sleeping 25 s task so it finished, `kill -9` losing the
+  dispatched task and leaving the message to a sweep that reclaimed it, and
+  506 dead letters replayed with the runbook's SQL in 2.06 s. Fixed the same
+  day: **a message dead-lettered by its contract wrote no log line at all**
+  (the commonest queue incident there is — a producer deployed ahead of its
+  consumer's schema — and the runbook promised the line); **`queue prune
+  --dry-run` ignored `--older-than`**, so the safety flag added after an
+  incident reported a number the delete would not honour; **`usai top` was
+  built from HTTP responses alone**, so a consumer driving 441 worlds/s on a
+  box at 126 % CPU read as a row of zeros; `usai_queue_messages_total` had no
+  `topic` label; `usai inspect` hid a consumer's retry policy; the
+  `connection quarantined` WARN fired on every green `usai test` run; and
+  `WorkOutcome.termination` was `unknown`. Corrected in the docs: the
+  lost-consumer threshold is the deadline **plus 10 s** (not the deadline),
+  `queue status` and `queue prune` age rows by different columns
+  deliberately, and **the GUIDE's idempotency idiom silently dropped work** —
+  claiming the key before doing the work loses the job when the attempt dies
+  between the two, which it measured under both documented failure modes.
+  One finding did not survive checking: `usai_cron_ticks` does not grow
+  unbounded — it prunes its own rows past seven days on every claim, which
+  no document said, so the docs were the bug. **Recorded, not built**: a
+  `queue list/peek` verb, a bulk-replay verb (argued against in the runbook),
+  jitter and a delay cap on `RetryOptions`, and a way to assert queue state
+  from the test harness.
+
 - **Round 18 (2026-09-24): a realtime developer** (eight years of `ws`,
   Socket.IO, Redis pub-sub and sticky sessions) built a live dashboard —
   WebSocket subscribe, fan-out from an HTTP write, presence, heartbeat,

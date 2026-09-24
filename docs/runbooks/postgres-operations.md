@@ -14,7 +14,7 @@ Three plain tables in the resource's database, all in `public`:
 |---|---|---|
 | `usai_migrations` | `usai db migrate` | **Must match the schema.** It is the ledger: a restore that has the tables but not the ledger will re-run every migration; one with the ledger but an older schema will skip migrations it never applied. |
 | `usai_queue` | a publish or a consumer, created on first use | Restoring it replays work: rows in `ready` are delivered again, rows in `processing` are reclaimed by the sweeper after their deadline. Decide before the restore whether you want that. |
-| `usai_cron_ticks` | the first tick of an `exclusive: true` schedule | Only the recent rows matter (they are the "who ran this minute" claims). Losing it means one duplicate tick at most. |
+| `usai_cron_ticks` | the first tick of an `exclusive: true` schedule | Only the recent rows matter (they are the "who ran this minute" claims). Losing it means one duplicate tick at most. **It prunes itself** — each successful claim deletes that schedule's rows older than seven days — so unlike `usai_queue` it needs no retention policy. |
 
 They are in the same dump as the rest of the schema; nothing special is
 needed to back them up. **Never edit `usai_migrations` by hand** — if a

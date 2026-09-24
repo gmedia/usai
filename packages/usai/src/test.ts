@@ -80,11 +80,37 @@ export interface WorkOutcome<T = unknown> {
     message: string;
     usai?: { code: string; status: number; details?: unknown };
   } | null;
-  termination: unknown;
+  /** How the world ended: `"completed"`, `"deadline-exceeded"`,
+   * `"cancelled: <reason>"` or `"faulted: <detail>"`. This is what a
+   * lifecycle test asserts on, and it used to be `unknown` — so asserting on
+   * it needed a cast, which is the defect this release fixed for
+   * `ctx.tasks.invoke`. The string form is open on purpose: a new
+   * termination must not fail to typecheck in an existing test. */
+  termination: Termination;
   durationMs: number;
   violations: Array<{ code: string; message: string }>;
-  logs: Array<{ level: string; message: string }>;
+  /** Everything the world logged: the parsed `fields`, the workload and the
+   * request id included, so a test that has the outcome does not have to go
+   * back to `app.logs()` for them. (`app.logs()` adds the timestamp and the
+   * runtime's own lines; this is only what the world wrote.) */
+  logs: WorldLogLine[];
 }
+
+/** One line a world wrote, as the outcome carries it. */
+export interface WorldLogLine {
+  level: string;
+  message: string;
+  /** The trailing object of `ctx.log.info("paid", { id })`, parsed. */
+  fields: Record<string, unknown> | null;
+  workload: string;
+  world: string;
+  /** The request the world ran under, when it had one. */
+  requestId: string | null;
+}
+
+/** How a world ended. The four the runtime names, plus the open form so a
+ * future one is a value and not a type error. */
+export type Termination = "completed" | "deadline-exceeded" | (string & {});
 
 /** A running application under test; see {@link testApp}.
  *
@@ -247,15 +273,19 @@ export class TestSocketRefused extends Error {
  * @category Testing
  */
 export interface LogFilter {
-  requestId?: string;
-  workload?: string;
-  level?: LogLine["level"];
+  /** Written as `res.headers["x-request-id"]`, which is `string | undefined`
+   * — so the type has to admit `undefined` explicitly, or the idiom this
+   * comment recommends does not compile under `exactOptionalPropertyTypes`
+   * (which `tsconfig.base.json` here sets, and every example inherits). */
+  requestId?: string | undefined;
+  workload?: string | undefined;
+  level?: LogLine["level"] | undefined;
   /** `app` for the application's lines. */
-  target?: string;
+  target?: string | undefined;
   /** A substring of the message, or a pattern. */
-  message?: string | RegExp;
+  message?: string | RegExp | undefined;
   /** Any predicate over the parsed line. */
-  where?: (line: LogLine) => boolean;
+  where?: ((line: LogLine) => boolean) | undefined;
 }
 
 /** Thrown when the harness itself fails: the binary is missing, the

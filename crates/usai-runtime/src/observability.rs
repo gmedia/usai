@@ -718,6 +718,46 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
             &queue,
         );
     }
+    // The same, per topic. An alert on dead letters that cannot name the
+    // queue sends whoever it woke looking through every topic the
+    // application has — and the line that would have said which was, until
+    // this release, not written at all for a contract failure.
+    let by_topic: Vec<(String, f64)> = status
+        .revisions
+        .iter()
+        .flat_map(|r| {
+            r.queue_by_topic.iter().flat_map(move |t| {
+                [
+                    ("claimed", t.claimed),
+                    ("done", t.done),
+                    ("retried", t.retried),
+                    ("dead", t.dead),
+                    ("invalid", t.invalid),
+                    ("reclaimed", t.reclaimed),
+                ]
+                .into_iter()
+                .map(move |(state, n)| {
+                    (
+                        format!(
+                            "revision=\"{}\",topic=\"{}\",state=\"{state}\"",
+                            r.id,
+                            label(&t.topic)
+                        ),
+                        n as f64,
+                    )
+                })
+            })
+        })
+        .collect();
+    if !by_topic.is_empty() {
+        metric(
+            &mut out,
+            "usai_queue_topic_messages_total",
+            "Queue messages by outcome, per topic",
+            "counter",
+            &by_topic,
+        );
+    }
     let cron: Vec<(String, f64)> = status
         .revisions
         .iter()

@@ -108,6 +108,32 @@ pub mod ops {
         Ok(affected.as_i64().unwrap_or(0))
     }
 
+    /// Exactly what `prune` would delete, without deleting it. The same
+    /// predicate, because a dry run whose number is not the delete's number
+    /// is worse than no dry run: `--dry-run` exists so an operator can read
+    /// the count before typing `--yes`, and it used to count by state alone
+    /// and ignore the age — "this would delete 4.1 M rows" when the answer
+    /// was 900.
+    pub async fn prune_count(
+        manager: &dyn ResourceManager,
+        states: &[&str],
+        older_than_seconds: i64,
+        topic: Option<&str>,
+    ) -> Result<i64, ResourceError> {
+        let list: Vec<Value> = states.iter().map(|s| json!(s)).collect();
+        let row = sql(
+            manager,
+            "one",
+            "SELECT count(*)::bigint AS rows FROM usai_queue
+             WHERE state = ANY($1::text[])
+               AND created_at < now() - ($2::bigint * interval '1 second')
+               AND ($3::text IS NULL OR topic = $3)",
+            vec![json!(list), json!(older_than_seconds), json!(topic)],
+        )
+        .await?;
+        Ok(row.get("rows").and_then(Value::as_i64).unwrap_or(0))
+    }
+
     /// Creates the schema's indexes with `CREATE INDEX CONCURRENTLY`, so an
     /// upgrade does not build them under a write-blocking lock on a table
     /// that may hold millions of rows. Safe to run repeatedly and while the
@@ -174,6 +200,40 @@ pub struct QueueStats {
     /// Messages a vanished consumer had claimed, put back for another
     /// attempt (or dead-lettered when it was the last one).
     pub reclaimed: AtomicU64,
+    /// The same six counts per topic. An alert on dead letters that cannot
+    /// name the queue sends whoever it woke to look through every topic the
+    /// application has, and HTTP has carried its per-workload dimension
+    /// since D2 — this was an inconsistency, not a design stance. Bounded by
+    /// the topics the definition declares, never by message data.
+    pub by_topic: std::sync::RwLock<std::collections::BTreeMap<String, QueueTopicCounters>>,
+}
+
+/// One topic's counts. Same six as above.
+#[derive(Debug, Default)]
+pub struct QueueTopicCounters {
+    pub claimed: AtomicU64,
+    pub done: AtomicU64,
+    pub retried: AtomicU64,
+    pub dead: AtomicU64,
+    pub invalid: AtomicU64,
+    pub reclaimed: AtomicU64,
+}
+
+impl QueueStats {
+    /// Adds one to a counter, for the revision and for the topic.
+    pub fn count(&self, topic: &str, pick: fn(&QueueTopicCounters) -> &AtomicU64) {
+        if let Some(counters) = self
+            .by_topic
+            .read()
+            .expect("queue stats poisoned")
+            .get(topic)
+        {
+            pick(counters).fetch_add(1, Ordering::SeqCst);
+            return;
+        }
+        let mut map = self.by_topic.write().expect("queue stats poisoned");
+        pick(map.entry(topic.to_owned()).or_default()).fetch_add(1, Ordering::SeqCst);
+    }
 }
 
 pub(crate) fn database_for(
@@ -448,6 +508,12 @@ pub fn start(
                     if retried + dead > 0 {
                         stats.reclaimed.fetch_add(retried + dead, Ordering::SeqCst);
                         stats.dead.fetch_add(dead, Ordering::SeqCst);
+                        for _ in 0..(retried + dead) {
+                            stats.count(&name, |c| &c.reclaimed);
+                        }
+                        for _ in 0..dead {
+                            stats.count(&name, |c| &c.dead);
+                        }
                         tracing::warn!(queue = %name, retried, dead, lost_after_ms, "messages a lost consumer had claimed were reclaimed");
                     }
                 }
@@ -521,6 +587,7 @@ pub fn start(
                     };
                     empty_claims = 0;
                     stats.claimed.fetch_add(1, Ordering::SeqCst);
+                    stats.count(&name, |c| &c.claimed);
 
                     // Boundary validation before any world exists (C6).
                     if let Some(validator) = &validator {
@@ -530,7 +597,24 @@ pub fn start(
                             .collect();
                         if !issues.is_empty() {
                             stats.invalid.fetch_add(1, Ordering::SeqCst);
-                            let _ = sql(manager.as_ref(), "execute", "UPDATE usai_queue SET state = 'dead', last_error = $2 WHERE id = $1", vec![json!(claimed.id), json!(format!("message contract: {}", issues.join("; ")))]).await;
+                            stats.count(&name, |c| &c.invalid);
+                            let detail = issues.join("; ");
+                            // A message rejected by its contract is dead on
+                            // arrival, and used to be dead *silently*: a row
+                            // in a table and a counter with no topic on it.
+                            // That is the shape of the commonest queue
+                            // incident there is — a producer deployed with a
+                            // new payload before the consumer's schema knew
+                            // about it — and nothing reached the log, so
+                            // nothing reached a log pipeline. A handler that
+                            // fails logs an ERROR; so does this.
+                            tracing::error!(
+                                queue = %name,
+                                id = claimed.id,
+                                error = %detail,
+                                "message dead-lettered: it does not match the topic's contract, so no world ran for it"
+                            );
+                            let _ = sql(manager.as_ref(), "execute", "UPDATE usai_queue SET state = 'dead', last_error = $2 WHERE id = $1", vec![json!(claimed.id), json!(format!("message contract: {detail}"))]).await;
                             continue;
                         }
                     }
@@ -550,6 +634,7 @@ pub fn start(
                     match outcome {
                         Ok(()) => {
                             stats.done.fetch_add(1, Ordering::SeqCst);
+                            stats.count(&name, |c| &c.done);
                             mark_outcome(
                                 manager.as_ref(),
                                 &name,
@@ -564,6 +649,7 @@ pub fn start(
                             let attempt = claimed.attempts.max(1) as u32;
                             if attempt < retry.max_attempts {
                                 stats.retried.fetch_add(1, Ordering::SeqCst);
+                                stats.count(&name, |c| &c.retried);
                                 let delay = retry.delay_ms(attempt);
                                 tracing::warn!(queue = %name, id = claimed.id, attempt, delay_ms = delay, error = %error, "message failed; retrying");
                                 mark_outcome(
@@ -577,6 +663,7 @@ pub fn start(
                                 .await;
                             } else {
                                 stats.dead.fetch_add(1, Ordering::SeqCst);
+                                stats.count(&name, |c| &c.dead);
                                 tracing::error!(queue = %name, id = claimed.id, attempt, error = %error, "message dead-lettered");
                                 mark_outcome(
                                     manager.as_ref(),
