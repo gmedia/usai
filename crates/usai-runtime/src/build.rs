@@ -545,7 +545,7 @@ impl BuildLock {
             tokio::fs::create_dir_all(parent).await?;
         }
         // `flock` blocks, and a build takes seconds: off the async threads.
-        let file = tokio::task::spawn_blocking(move || -> std::io::Result<std::fs::File> {
+        let acquire = tokio::task::spawn_blocking(move || -> std::io::Result<std::fs::File> {
             let file = std::fs::OpenOptions::new()
                 .create(true)
                 .truncate(false)
@@ -558,9 +558,26 @@ impl BuildLock {
                 return Err(std::io::Error::last_os_error());
             }
             Ok(file)
-        })
-        .await
-        .map_err(|e| BuildError::Io(std::io::Error::other(e.to_string())))??;
+        });
+        tokio::pin!(acquire);
+        // Waiting on a lock is invisible, and a command that has printed
+        // nothing for ten seconds looks hung rather than polite. Say who we
+        // are waiting for, once, after long enough that an ordinary build
+        // never prints it.
+        let file = loop {
+            tokio::select! {
+                joined = &mut acquire => {
+                    break joined
+                        .map_err(|e| BuildError::Io(std::io::Error::other(e.to_string())))??;
+                }
+                _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {
+                    tracing::info!(
+                        out_dir = %out_dir.display(),
+                        "waiting for another usai process to finish building this project"
+                    );
+                }
+            }
+        };
         Ok(Self { _file: file })
     }
 }
