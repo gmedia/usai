@@ -80,8 +80,13 @@ Label values:
 - `usai_revision_in_flight{state}`: `installed`, `active`, `draining`,
   `retired` — lowercase here and in `/_usai/status` alike.
 - `usai_service{state}`: `starting`, `running`, `stopping`, `stopped`,
-  `failed` — `failed` stays 1 when the restart policy is exhausted (log line
-  `service gave up`); it does not make the instance unready.
+  `restarting`, `failed`. **`restarting`** is the backoff between two
+  ordinary attempts — it clears itself, and it doubles, so a service on its
+  eighth restart sits there for 128 s. **`failed`** stays 1 when the
+  supervisor gave up: the restart policy is exhausted, or the service failed
+  under a policy that does not restart (log line `service gave up`). Neither
+  makes the instance unready. Before 0.0.10 a backoff was published as
+  `failed`, so the alert below fired on every transient restart.
 - `usai_http_workload_responses_total{workload}`: the workload id,
   `<kind>:<name>` as `usai inspect` lists it — for an HTTP or stream route
   the **method and path**, `http:GET /invoices`, `http:POST /invoices/:id/pay`
@@ -127,11 +132,18 @@ Label values:
   `usai_http_workload_responses_total{workload,class}`: `2xx`, `3xx`, `4xx`,
   `5xx`; a WebSocket upgrade (101) is a success and counts in
   `usai_http_upgrades_total`, a committed stream in `usai_http_streams_total`.
-  A request cancelled by its client's disconnect or by the drain bound is
-  recorded as **499** (`4xx`, code `cancelled`): the client did not receive
-  it, the log has `request cancelled` at debug. It is not a 5xx because the
-  runtime did not fail; count `increase(…{class="4xx"})` around a restart
-  with that in mind.
+  A request cancelled by the **drain bound** is recorded as **499** (`4xx`,
+  code `cancelled`) and the client receives it — `{"error":{"code":"cancelled"}}`.
+  It is not a 5xx because the runtime did not fail; count
+  `increase(…{class="4xx"})` around a restart with that in mind. A request
+  cancelled by its **client's own disconnect** is recorded **nowhere**: the
+  world is retired (`world retired reason="dropped without finishing"`, at
+  debug on `usai_runtime::observability`) and no response class, no
+  per-workload series and no latency sample is written — so
+  `usai_worlds_created_total` runs ahead of `usai_http_request_seconds_count`
+  by the number of client hang-ups, and that difference is the only place the
+  count exists. Measured by a claims audit; recorded here rather than
+  promised away.
 - `usai_process_page_faults_total{kind}`: `minor`, `major`.
 
 A **Grafana dashboard built from this page** is
@@ -151,7 +163,7 @@ it executes from.
 | Pool saturated | `usai_resource{metric="waiting"} > 0` for 1 m | requests are queueing **for a connection**: size `pool.max` against `--max-worlds`, or make the queries faster. `in_use == max` on its own is healthy saturation and is not worth waking anyone for — read `waiting` beside it (`slow-route.md`) |
 | A route got slow | `topk(5, rate(usai_http_workload_request_seconds_sum[5m]) / rate(usai_http_workload_request_seconds_count[5m])) > 0.5` | per-workload mean latency. The global histogram's p99 cannot see a slow route that is a minority of traffic — measured at 2.5 ms while a route took 204 ms |
 | Detached work | `increase(usai_detached_work_total[1h]) > 0` | an application bug: a handler returned with work in flight (`500 detached_work`) |
-| Service gave up | `usai_service{state="failed"} == 1` | the restart policy is exhausted; the instance stays ready, the service is down |
+| Service gave up | `usai_service{state="failed"} == 1` | the restart policy is exhausted (or there was none); the instance stays ready, the service is down. **Not** `restarting`, which is an ordinary backoff between attempts and clears itself |
 | Cron on two replicas | `sum(usai_scheduler{kind="cron"}) > 1` and the schedule is not `exclusive` | the schedule fires on each — declare it `exclusive: true` or start the others with `--no-cron` |
 | **At the memory ceiling** | `increase(usai_process_memory_ceiling_hits_total[5m]) > 100` | the container is pinned at its limit and reclaiming the pages it is executing from — *not* an OOM kill, nothing is logged, and throughput collapses (measured: 1 req/s at p50 4.7 s in a box 16 MiB too small). Raise the limit or lower `--max-worlds` (`memory-pressure.md`) |
 | Memory drift | `usai_process_proportional_memory_bytes` rising over hours while `usai_worlds_live` is flat and no revision was installed | the plateau is `base + touched slots × 4 MiB` (`memory-pressure.md`); a password-hashing burst or a held revision raises RSS for minutes, not hours — growth beyond that is a leak — report it with the soak samples |

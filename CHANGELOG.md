@@ -17,6 +17,17 @@ the old artifact for a while (`SUPPORTED.md` → Versioning).
 
 **When the binary lands, before you rebuild:**
 
+- **One stream reaching its declared deadline used to break every other
+  connection on the instance** — for one day, between two commits in this
+  release. A stream was handed the revision's own drain token rather than a
+  child of it, so its deadline cancelled the drain signal for the whole
+  process: later sockets opened with `ctx.signal` already aborted and were
+  closed `1012 server draining`, later streams were truncated to their first
+  event, `/_usai/ready` kept answering 200 and the failure counter stopped
+  counting. Fixed, and the test fails without the fix. It never reached a
+  release; it is written down because the shape — a per-connection signal
+  taken from a shared token — is one to watch for.
+
 - **A `timeout:` declared on a stream is honoured — including in an artifact
   built by the previous SDK.** It used to be accepted and dropped. The world
   is stopped at the deadline, so the handler's loop sees `ctx.signal` abort
@@ -57,6 +68,28 @@ the old artifact for a while (`SUPPORTED.md` → Versioning).
 
 **When the rebuilt artifact lands:**
 
+- **A service's declared deadline is how it ends, not a failure.** It was
+  recorded as `DeadlineExceeded`, logged `ERROR service ended with failure`
+  and charged against the restart policy — so a bounded service was dead for
+  good after its **first** cycle under the default policy, and under
+  `restart: { mode: "always" }` it ran 3 s out of every 131 and was exhausted
+  after ten. It now ends as `stopped`, and the restart policy sees a normal
+  end. The give-up line no longer says "restart policy exhausted" when there
+  was no policy to exhaust.
+- **A service waiting out a restart backoff is `restarting`, not `failed`.**
+  `failed` is what an operator alerts on — `docs/runbooks/application-failures.md`
+  says so — and it was published for the whole doubling backoff between two
+  ordinary attempts, so the documented alert fired on every transient restart
+  and the documented health check took a healthy instance out of rotation for
+  as long as 128 s.
+- **`/_usai/status` → `revisions[].services[].restarts` is that service's own
+  count.** It was the supervisor's single counter reported per service, so a
+  service that had never failed showed its neighbour's number.
+- **A SQL parameter that will not encode is described, not quoted.**
+  `cannot encode a 22-character string`, not the string — the value is
+  request data (a token in a query string, an id from a body) and
+  `docs/THREAT-MODEL.md` promises the log carries none of it. The statement
+  is still named, and the other parameters are still excluded.
 - **A `timeout:` declared on a socket or a service is honoured too** — the
   SDK used to drop it before it reached the manifest, so the runtime never
   saw it. A socket ends at its deadline the way it ends when its client

@@ -26,6 +26,14 @@ pub enum ServiceState {
     Running,
     Stopping,
     Stopped,
+    /// Ended, and the restart policy is waiting out its backoff. Published
+    /// for the whole delay — `failed` used to be, so an alert written from
+    /// the runbook fired on every ordinary restart and a health check built
+    /// on it took a healthy instance out of rotation for two minutes.
+    Restarting,
+    /// The supervisor gave up: the restart policy is exhausted, or the
+    /// service failed under a policy that does not restart. It stays this
+    /// way until the next activation.
     Failed,
 }
 
@@ -45,6 +53,10 @@ struct ServiceEntry {
     state: ServiceState,
     world: Option<WorldId>,
     last_error: Option<String>,
+    /// This service's own restarts. It used to be one counter for the whole
+    /// supervisor, reported per service — so a service that had never
+    /// failed showed its neighbour's count.
+    restarts: u64,
 }
 
 /// One supervisor per revision. Owns the stop token every service world
@@ -85,6 +97,7 @@ impl Supervisor {
                     state: ServiceState::Starting,
                     world: None,
                     last_error: None,
+                    restarts: 0,
                 });
             let sup = Arc::clone(&supervisor);
             let runtime = runtime.clone();
@@ -128,6 +141,13 @@ impl Supervisor {
                                     Some(format!("{}: {}", e.name, e.message)),
                                 ),
                                 (Termination::Cancelled { .. }, _) => (ServiceState::Stopped, None),
+                                // The service ran out its **declared**
+                                // deadline. Nothing failed: it ended as it
+                                // was asked to, and charging that to the
+                                // restart policy made a bounded service
+                                // dead for good after its first cycle under
+                                // the default policy.
+                                (Termination::DeadlineExceeded, _) => (ServiceState::Stopped, None),
                                 (t, _) => (ServiceState::Failed, Some(format!("{t:?}"))),
                             };
                             (state, error, Some(r.world))
@@ -155,17 +175,29 @@ impl Supervisor {
                             // The supervisor gives up here: the state stays
                             // `failed` in /_usai/status and the metrics until
                             // the next activation; readiness is unaffected.
+                            // "restart policy exhausted" with `restarts=0`
+                            // was incoherent: under `never` there was never
+                            // a restart to exhaust.
+                            let why = match restart.mode.as_str() {
+                                "always" | "on-failure" => "restart policy exhausted",
+                                _ => "this service declares no restart policy",
+                            };
                             tracing::error!(
                                 service = %name,
                                 restarts,
                                 max_restarts = restart.max_restarts,
-                                "service gave up: restart policy exhausted (state failed until the next activation; /_usai/ready does not depend on services)"
+                                mode = %restart.mode,
+                                "service gave up: {why} (state failed until the next activation; /_usai/ready does not depend on services)"
                             );
                         }
                         return;
                     }
                     restarts += 1;
                     sup.restarts.fetch_add(1, Ordering::SeqCst);
+                    sup.bump_restarts(index);
+                    // The service is between runs, not gone: `failed` has to
+                    // keep meaning "gave up" or nothing can alert on it.
+                    sup.set(index, ServiceState::Restarting, None, None);
                     let delay = Duration::from_millis(
                         restart
                             .backoff_ms
@@ -185,6 +217,13 @@ impl Supervisor {
                 .push(handle);
         }
         supervisor
+    }
+
+    fn bump_restarts(&self, index: usize) {
+        let mut entries = self.entries.lock().expect("services poisoned");
+        if let Some(entry) = entries.get_mut(index) {
+            entry.restarts += 1;
+        }
     }
 
     fn set(
@@ -213,7 +252,7 @@ impl Supervisor {
                 name: e.name.clone(),
                 state: e.state,
                 world: e.world,
-                restarts: self.restarts.load(Ordering::SeqCst),
+                restarts: e.restarts,
                 last_error: e.last_error.clone(),
             })
             .collect()

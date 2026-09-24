@@ -74,12 +74,14 @@ the answer is a resource — an existing one, or a case for a new kind.
   version; the runtime refuses an artifact of another **manifest format or
   guest ABI** before serving, with a message that names both versions.
   **That check is on the format, not on the version stamp**: an artifact
-  built by a *newer* SDK than the runtime serves without complaint whenever
-  the format did not change — 0.0.9's artifact runs on the 0.0.8 runtime
-  today, unsupported and silent. Shipping the artifact before the binary is
-  the commonest rolling-deploy mistake, and nothing will tell you; the
-  manifest records `builtWith`, so a deploy script that compares it against
-  `usai --version` is worth the three lines.
+  built by a *newer* SDK than the runtime still *serves* whenever the format
+  and the guest ABI did not change, which is the commonest rolling-deploy
+  mistake — shipping the artifact before the binary. Since 0.0.10 it is not
+  silent: the runtime logs `WARN this artifact was built by a newer SDK than
+  the runtime serving it … deploy the runtime first`, naming both versions
+  from the manifest's `builtWith`. It is a warning and not a refusal on
+  purpose, because the artifact is usually fine and refusing would strand a
+  rollback. Alert on that line.
 - **`@sakaladev/create-usai` has its own version line** and is deliberately
   ahead (0.0.11 while the runtime and SDK were at 0.0.8): it is a scaffolder,
   not part of the runtime contract, and a fix to the template it writes does

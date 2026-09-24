@@ -378,6 +378,55 @@ async fn recv_json(
     }
 }
 
+/// One stream reaching its declared deadline must not touch any other
+/// connection. It did: a stream was handed the **revision's** drain token
+/// rather than a child of it, so its deadline cancelled the drain signal for
+/// the whole instance — every later socket opened with `ctx.signal` already
+/// aborted and was closed `1012 server draining`, every later stream was
+/// truncated to its first event, readiness kept answering 200, and the
+/// failure counter stopped counting. Permanent until the process restarted.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_streams_deadline_does_not_touch_other_connections() {
+    let Some(s) = start().await else { return };
+    // A stream with a declared timeout runs and ends at its deadline.
+    let bounded = s
+        .client
+        .get(format!("{}/bounded", s.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bounded.status(), 200);
+    let _ = bounded.text().await.unwrap();
+
+    // Now an ordinary stream, declaring nothing: it must run to its own end.
+    let after = s
+        .client
+        .get(format!("{}/events?n=6", s.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(after.status(), 200);
+    let body = after.text().await.unwrap();
+    assert!(
+        body.contains("event: done"),
+        "a later stream was truncated by another stream's deadline: {body:?}"
+    );
+    // And a socket, which the poisoning closed at once with 1012.
+    let (mut ws, response) = tokio_tungstenite::connect_async(format!("{}/chat?user=after", s.ws))
+        .await
+        .expect("upgrade");
+    assert_eq!(response.status(), 101);
+    ws.send(Message::Text(json!({ "text": "alive" }).to_string().into()))
+        .await
+        .unwrap();
+    let echoed = recv_json(&mut ws).await;
+    assert_eq!(
+        echoed["echo"], "after: alive",
+        "a later socket was closed by another stream's deadline"
+    );
+    s.shutdown.cancel();
+}
+
 /// A socket gets no *default* deadline. One it declares must reach the
 /// manifest and end the world — the runtime was ready to enforce it and the
 /// SDK dropped it, so "a `timeout:` declared on a stream, a socket or a

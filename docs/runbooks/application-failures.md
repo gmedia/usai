@@ -18,6 +18,15 @@ the one application state nothing else reports.
 according to its policy, and ran out of restarts. It is not running now, and
 nothing will start it again until the **revision is activated again**.
 
+**`failed` means gave up, and only that.** A service waiting out the backoff
+between two ordinary restarts is `restarting`, not `failed` — it was
+`failed` until 0.0.10, so an alert written from this page fired on every
+transient restart and the health check below took a healthy instance out of
+rotation for the whole delay (which doubles: a service on its eighth restart
+is 128 s from its next attempt). `restarts` in `/_usai/status` is that
+service's own count; it used to be the supervisor's, so a service that had
+never failed reported its neighbour's number.
+
 **What to do.**
 
 1. Read why it died: `journalctl -u usai@myapp | grep -E 'service (starting|stopped|failed|gave up)'`
@@ -27,7 +36,9 @@ nothing will start it again until the **revision is activated again**.
    dead ingest loop should not take the API down) and occasionally wrong. If
    this service is the application's reason to exist, fail the instance
    yourself: your health check can read
-   `/_usai/status` → `revisions[].services[].state` and refuse on `failed`.
+   `/_usai/status` → `revisions[].services[].state` and refuse on `failed`
+   — on `failed` alone, not on `restarting`, or a backoff takes the instance
+   out of rotation for no reason.
 3. Restart the work without restarting the process: activate the revision
    again through the control surface
    (`POST /revisions/{id}/activate` — `docs/CONTROL-API.md`), or deploy the

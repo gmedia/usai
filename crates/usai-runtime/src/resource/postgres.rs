@@ -630,6 +630,22 @@ fn with_statement(error: ResourceError, sql: &str) -> ResourceError {
     }
 }
 
+/// What a parameter *is*, without saying what it holds. A request's values
+/// reach this function — a token in a query string, an id from a body — and
+/// `docs/THREAT-MODEL.md` promises the log carries no request data. Printing
+/// the value put whatever failed to encode straight into an ERROR line; the
+/// shape is what diagnoses the mistake anyway.
+fn shape(value: &Value) -> String {
+    match value {
+        Value::Null => "null".into(),
+        Value::Bool(_) => "a boolean".into(),
+        Value::Number(_) => "a number".into(),
+        Value::String(s) => format!("a {}-character string", s.chars().count()),
+        Value::Array(a) => format!("an array of {}", a.len()),
+        Value::Object(o) => format!("an object with {} field(s)", o.len()),
+    }
+}
+
 fn param_error(index: usize, ty: &Type, detail: impl std::fmt::Display) -> ResourceError {
     ResourceError::Operation {
         code: "invalid_param".into(),
@@ -667,8 +683,9 @@ fn to_sql(
             if value.is_null() {
                 Ok(Box::new(None::<$t>) as Box<dyn ToSql + Sync + Send>)
             } else {
-                let converted: $t = $conv
-                    .ok_or_else(|| param_error(index, ty, format!("cannot encode {value}")))?;
+                let converted: $t = $conv.ok_or_else(|| {
+                    param_error(index, ty, format!("cannot encode {}", shape(value)))
+                })?;
                 Ok(Box::new(Some(converted)) as Box<dyn ToSql + Sync + Send>)
             }
         }};
@@ -1743,6 +1760,35 @@ fn quote_literal(value: &str) -> String {
 mod tests {
     use super::*;
     use crate::definition::ResourceSpec;
+
+    /// `docs/THREAT-MODEL.md` promises the log carries no request data, and
+    /// a parameter that fails to encode is request data — a token in a query
+    /// string, an id from a body. The error says what the value *was*, never
+    /// what it held; a claims audit found the value itself in an ERROR line.
+    #[test]
+    fn a_parameter_error_describes_the_value_without_quoting_it() {
+        assert_eq!(
+            shape(&json!("MY-SECRET-TOKEN-abc123")),
+            "a 22-character string"
+        );
+        assert_eq!(shape(&json!(42)), "a number");
+        assert_eq!(shape(&json!(true)), "a boolean");
+        assert_eq!(shape(&json!(null)), "null");
+        assert_eq!(shape(&json!(["a", "b"])), "an array of 2");
+        assert_eq!(
+            shape(&json!({ "card": "4111111111111111" })),
+            "an object with 1 field(s)"
+        );
+        // The point of the test: nothing above repeats a secret.
+        for probe in ["MY-SECRET-TOKEN-abc123", "4111111111111111"] {
+            for value in [json!(probe), json!([probe]), json!({ "k": probe })] {
+                assert!(
+                    !shape(&value).contains(probe),
+                    "{value} leaked through shape()"
+                );
+            }
+        }
+    }
 
     /// Every form a `timestamptz` parameter is written in by hand or read
     /// back from PostgreSQL. The bare calendar date is the one a reporting

@@ -1279,7 +1279,16 @@ impl HttpHost {
     ) -> Result<HttpResponse, Reply> {
         let (sink, head_rx, body_rx) = StreamSink::new(&content_type);
         let cancel = CancellationToken::new();
-        let stop = compiled.revision.connections_stop();
+        // Per connection, and a child of the revision's drain token — the
+        // same rule a socket follows. Handing a stream the revision's own
+        // token meant its declared deadline cancelled the **drain signal
+        // for the whole instance**: every later socket opened with
+        // `ctx.signal` already aborted and was closed `1012 server
+        // draining`, every later stream was truncated to its first event,
+        // `/_usai/ready` kept answering 200 and `usai_http_streams_failed_total`
+        // stopped counting — permanent until the process restarted. A
+        // claims audit found it the day it was written.
+        let stop = compiled.revision.connections_stop().child_token();
         let runtime = Arc::clone(&self.runtime);
         let input = json!({ "kind": "stream", "request": request });
         let world_cancel = cancel.clone();

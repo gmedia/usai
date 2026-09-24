@@ -242,6 +242,39 @@ capabilities (design), latency histogram in metrics, an API reference page — a
   side, rejections, pool `in use` and `waiting`, what the process costs —
   because totals since boot answer the wrong question during an incident.
 
+- **Round 21 (2026-09-24): a claims audit.** Not a developer building an
+  app — a staff engineer doing due diligence, who harvested **~310
+  falsifiable statements** from `SUPPORTED.md`, the GUIDE, the runbooks and
+  the 0.0.10 notes, ranked them by (cost if false) × (chance nobody checked),
+  and tried to falsify the top band. **44 tested, 35 true, 9 not.** It found
+  the worst defect of the day, and it was **one written that morning**: a
+  stream was handed the revision's own drain token instead of a child of it,
+  so **one stream reaching its declared deadline cancelled the drain signal
+  for the entire instance** — every later socket opened with `ctx.signal`
+  already aborted and was closed `1012 server draining`, every later stream
+  was truncated to its first event, `/_usai/ready` kept answering 200 and
+  `usai_http_streams_failed_total` stopped counting. Permanent until the
+  process restarted, and the release note put the bullet under "deploy this
+  before you rebuild". Also found and fixed: a service's declared deadline
+  was recorded as a failure, so a bounded service was dead for good after
+  one cycle; `failed` was published throughout an ordinary restart backoff,
+  so the runbook's own alert fired on every transient restart and its health
+  check took healthy instances out of rotation; `restarts` was the
+  supervisor's counter reported per service; and a SQL parameter that failed
+  to encode was written to the ERROR log **verbatim**, which is request data
+  the threat model promises is never logged. Corrected rather than fixed: a
+  request cancelled by its client's disconnect is recorded nowhere (the docs
+  claimed a 499 and a log line that does not exist), and `SUPPORTED.md` still
+  told operators that a newer-SDK artifact was silent three sections after
+  0.0.10 made it warn. Nine of the nine are now closed. **What the round
+  could not check** is the whole cgroup-conditioned envelope — the 192 MiB
+  supported floor, the 64 MiB technical floor, `1 100 req/s at c=16` — which
+  needs a memory limit it had no permission to set: the most load-bearing
+  numbers in the document set are the ones an adopter cannot verify. Its
+  suggestion is on the list: a `make verify-envelope` that re-runs the floor
+  cells under a limit and asserts the published numbers, so the envelope is a
+  test and not a dated measurement.
+
 - **Round 20 (2026-09-24): an operator upgrading a live 0.0.9 deployment**
   to the current build, with the real 0.0.9 release binary and SDK on one
   side. **44 minutes.** Verdict: **"no, not on a Friday"** — and the reason
