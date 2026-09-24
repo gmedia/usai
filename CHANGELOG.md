@@ -70,6 +70,16 @@ the human summary.
 
 ### Runtime
 
+- **The queue schema survives being prepared by several replicas at once.**
+  `CREATE TABLE IF NOT EXISTS` is not race-free in PostgreSQL, and the losers
+  fail in three ways depending on the catalog they lost on: 42P07 (the
+  relation), **42710** (the table's implicit row type) and 23505 (a unique
+  violation on `pg_type`). The retry covered the first and the third. A CI
+  run with several consumers starting together against a fresh database hit
+  the second — `type "usai_queue" already exists` — which is exactly what the
+  first publish from a new multi-replica deployment does. The test that
+  exists for this raced nothing, because the table already existed when it
+  ran; it drops the table first now, and fails without the fix.
 - **A stream's latency is its world's lifetime.** It was recorded when the
   head committed, so a 6.5-second CSV export was filed as 2.8 ms — in the
   per-workload sum, in the global histogram and in `usai top`, which showed

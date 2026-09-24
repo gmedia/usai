@@ -300,9 +300,15 @@ pub async fn ensure_schema_once(manager: &dyn ResourceManager) -> Result<(), Str
 
 /// Prepares the queue table on the backing database. Idempotent, and safe
 /// to run from several workers at once: `CREATE TABLE IF NOT EXISTS` is not
-/// race-free in PostgreSQL (two sessions can both pass the existence check
-/// and the loser gets 42P07 or a 23505 on `pg_type`), so a loser simply
-/// runs the statements again, by which time the winner's objects exist.
+/// race-free in PostgreSQL. Two sessions can both pass the existence check,
+/// and the loser fails in one of three ways depending on which catalog it
+/// lost on — **42P07** (the relation), **42710** (the table's implicit row
+/// type, `duplicate_object`) or **23505** (a unique violation on `pg_type`).
+/// A loser simply runs the statements again, by which time the winner's
+/// objects exist. Missing 42710 from that list is how a CI run with several
+/// consumers starting together failed on
+/// `type "usai_queue" already exists` — which is what the first publish
+/// from a fresh multi-replica deployment does.
 pub async fn ensure_schema(manager: &dyn ResourceManager) -> Result<(), String> {
     let mut attempts = 0;
     loop {
@@ -332,8 +338,13 @@ pub async fn ensure_schema(manager: &dyn ResourceManager) -> Result<(), String> 
         }
         match result {
             Ok(()) => return Ok(()),
-            Err(e) if attempts < 3 && (e.contains("sql_42p07") || e.contains("sql_23505")) => {
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            Err(e)
+                if attempts < 5
+                    && ["sql_42p07", "sql_42710", "sql_23505"]
+                        .iter()
+                        .any(|code| e.contains(code)) =>
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(50 * attempts)).await;
             }
             Err(e) => return Err(e),
         }

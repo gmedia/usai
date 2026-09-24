@@ -1254,6 +1254,12 @@ async fn the_queue_table_upgrades_in_place_and_the_previous_version_keeps_workin
     f.baseline();
 }
 
+/// The first publish from a fresh multi-replica deployment: several
+/// consumers prepare the queue schema at the same moment against a database
+/// that has never seen it. `CREATE TABLE IF NOT EXISTS` is not race-free —
+/// the losers get 42P07, 42710 or 23505 depending on which catalog they lost
+/// on — and a CI run with a shared database found the one code the retry did
+/// not cover (`type "usai_queue" already exists`).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn queue_schema_survives_concurrent_preparation() {
     let Some(f) = fixture_with(false).await else {
@@ -1261,8 +1267,20 @@ async fn queue_schema_survives_concurrent_preparation() {
     };
     let rev = f.runtime.active().unwrap();
     let manager = rev.resources().get("main").cloned().unwrap();
+    // Without this the table already exists and every worker takes the
+    // catalog-lookup path: the test passes without ever racing anything.
+    manager
+        .call(
+            ResourceCall {
+                method: "execute".into(),
+                args: json!({ "sql": "DROP TABLE IF EXISTS usai_queue", "params": [] }),
+            },
+            CancellationToken::new(),
+        )
+        .await
+        .expect("drop the queue table");
     let mut handles = Vec::new();
-    for _ in 0..8 {
+    for _ in 0..16 {
         let m = Arc::clone(&manager);
         handles.push(tokio::spawn(async move {
             usai_runtime::workloads::queue::ensure_schema(m.as_ref()).await
