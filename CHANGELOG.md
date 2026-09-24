@@ -10,6 +10,24 @@ the human summary.
 
 ## 0.0.10 — Unreleased
 
+**If you are upgrading**, three things behave differently rather than
+better, and each is deliberate:
+
+- **A `timeout:` declared on a stream, a socket or a service is now
+  honoured.** It used to be accepted and dropped. An application that
+  declared one and relied on it being ignored will start ending that work at
+  the deadline. (There is still no *default* deadline for those kinds.)
+- **A stream's latency is now its world's lifetime**, not the time to its
+  head, in `usai_http_workload_request_seconds_*` and in the global
+  histogram. Every dashboard and alert built on those for a streaming
+  application reads differently — that is the fix, but it is a number people
+  build on.
+- **Declaring `maxBodyBytes` on a workload with no request body is refused
+  at install.** Nothing could have done so before this release, so this can
+  only bite an artifact built against a pre-release of it.
+
+Everything else is additive or a fix to behaviour that was wrong.
+
 ### CLI
 
 - **`usai inspect` prints the effective deadline** for every workload and
