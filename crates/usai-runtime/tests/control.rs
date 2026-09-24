@@ -459,6 +459,78 @@ async fn a_deployer_that_retries_cannot_undo_someone_elses_deploy() {
     runtime.shutdown().await;
 }
 
+/// **The rollback handle the document promised is not one.** The state table
+/// said `activate` again on a `draining` revision is a rollback, and the
+/// deploy recipe's last line said the same — so an operator reads it, does
+/// not keep the previous artifact directory mounted, and discovers on a bad
+/// deploy that every request is a 500, readiness is 200 and the rollback is
+/// a `404`. A revision with nothing in flight drains and retires at once;
+/// the window exists only while something long-running holds it.
+///
+/// What always works is installing the previous artifact again, which is
+/// why `CONTROL-API.md` now says to keep its directory.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_replaced_idle_revision_is_not_a_rollback_handle() {
+    let Some((runtime, hello, _fixture_dir, base, shutdown, client)) = setup().await else {
+        return;
+    };
+    let auth = |r: reqwest::RequestBuilder| r.bearer_auth("s3cret");
+    let replaced = runtime.active().unwrap().id.0;
+    let install: Value = auth(client.post(format!("{base}/revisions")))
+        .json(&json!({ "artifact": hello.to_string_lossy(), "ifAbsent": true }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let next = install["id"].as_u64().unwrap();
+    let r = auth(client.post(format!("{base}/revisions/rev{next}/activate")))
+        .json(&json!({ "allowApplicationChange": true }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200, "{}", r.text().await.unwrap());
+
+    // Nothing was in flight, so the revision it replaced is already gone.
+    let r = auth(client.post(format!("{base}/revisions/rev{replaced}/activate")))
+        .json(&json!({ "allowApplicationChange": true }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        r.status(),
+        404,
+        "the documented rollback answered: {}",
+        r.text().await.unwrap()
+    );
+
+    // And the rollback the document now describes does work: the artifact
+    // directory is the handle, so it has to still be on disk.
+    let again: Value = auth(client.post(format!("{base}/revisions")))
+        .json(&json!({ "artifact": hello.to_string_lossy(), "ifAbsent": true }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let back = again["id"].as_u64().unwrap();
+    let r = auth(client.post(format!("{base}/revisions/rev{back}/activate")))
+        .json(&json!({ "allowApplicationChange": true }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        r.status(),
+        200,
+        "reinstall-and-activate is the rollback that always works: {}",
+        r.text().await.unwrap()
+    );
+    shutdown.cancel();
+    runtime.shutdown().await;
+}
+
 /// Draining the only revision there is takes the runtime out of service with
 /// nothing to put back: 503 for everything, and the only way back is a fresh
 /// install with an artifact path this process no longer remembers. One call,
