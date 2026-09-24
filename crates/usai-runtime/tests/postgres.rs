@@ -526,6 +526,74 @@ async fn the_queue_can_be_inspected_pruned_and_indexed_without_blocking_writers(
     f.baseline();
 }
 
+/// The drain grace is for a load balancer and for requests already in
+/// flight. Nothing watches a queue consumer, so claiming through the grace
+/// only takes work this instance then has to finish inside `--drain-timeout`
+/// while it is leaving — a jobs round measured a message claimed 1.67 s into
+/// a 2 s grace. Background work stops at the start of the drain now.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_draining_instance_claims_no_more_messages() {
+    let Some(f) = fixture_with(true).await else {
+        return;
+    };
+    let manager = f.manager();
+    use usai_runtime::workloads::queue::ops;
+
+    // Let the consumer prove it is running: one message in, one done.
+    let rev = f.runtime.active().unwrap();
+    let (_, w) = rev
+        .definition
+        .workload("http:POST /orders")
+        .map(|(i, w)| (i, w.id.clone()))
+        .unwrap();
+    let publish = |id: &str| {
+        let w = w.clone();
+        let input = json!({ "kind": "http", "request": { "method": "POST", "path": "/orders", "url": "/orders", "params": {}, "query": {}, "headers": {}, "body": { "json": { "orderId": id } } } });
+        let rt = Arc::clone(&f.runtime);
+        async move { rt.invoke(&w, input).await.unwrap() }
+    };
+    publish("before-drain").await;
+    assert_eq!(
+        wait_for(&f, "orders:before-drain", 1, Duration::from_secs(5)).await,
+        json!(1),
+        "the consumer is not running, so this test proves nothing"
+    );
+    let claimed_before = rev
+        .queue_stats
+        .claimed
+        .load(std::sync::atomic::Ordering::SeqCst);
+
+    // The drain begins. HTTP keeps serving — publishing still works — and
+    // the consumer must stop claiming.
+    f.runtime.stop_background_work();
+    publish("after-drain").await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let claimed_after = rev
+        .queue_stats
+        .claimed
+        .load(std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(
+        claimed_after,
+        claimed_before,
+        "a draining instance claimed {} more message(s)",
+        claimed_after - claimed_before
+    );
+    // And the message is still there for the instance that is staying.
+    let stats = ops::stats(manager.as_ref()).await.expect("stats");
+    let ready: i64 = stats
+        .as_array()
+        .map(|rows| {
+            rows.iter()
+                .filter(|r| r["state"] == json!("ready"))
+                .filter_map(|r| r["rows"].as_i64())
+                .sum()
+        })
+        .unwrap_or(0);
+    assert!(ready >= 1, "the unclaimed message is gone: {stats}");
+    f.runtime.shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_message_can_be_delivered_to_a_consumer_directly() {
     let Some(f) = fixture().await else { return };
