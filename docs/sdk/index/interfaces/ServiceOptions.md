@@ -20,3 +20,4 @@ Options for [service](../functions/service.md).
 | `restart.mode` | `"never"` \| `"on-failure"` \| `"always"` | - |
 | `restart.backoffMs?` | `number` | - |
 | `restart.maxRestarts?` | `number` | - |
+| <a id="timeout"></a> `timeout?` | `string` \| `number` | How long this service may run before the world is cancelled (`"30m"`, `"4s"`, or milliseconds). **Undeclared there is none**, which is what a service usually wants — it runs until the revision retires. Declare one for a loop that should not outlive a bound (a nightly importer written as a service, say); with `restart: { mode: "always" }` it becomes a supervised cycle rather than a runaway. |

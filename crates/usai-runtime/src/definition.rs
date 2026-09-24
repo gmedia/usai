@@ -538,7 +538,7 @@ pub enum DefinitionError {
     #[error("workload {0} has an empty name")]
     EmptyName(String),
     #[error(
-        "workload {0} declares maxBodyBytes, but it has no request body to bound.          It applies to HTTP and raw routes only; a task, a cron tick, a queue message,          a stream, a socket, a service, a command, a migration and a seeder all take their          input another way. Remove it — an option that is accepted and ignored is worse than one that is refused."
+        "workload {0} declares maxBodyBytes, but it has no request body to bound. It applies to HTTP and raw routes only; a task, a cron tick, a queue message, a stream, a socket, a service, a command, a migration and a seeder all take their input another way. Remove it — an option that is accepted and ignored is worse than one that is refused."
     )]
     BodyBoundWithoutABody(String),
 }

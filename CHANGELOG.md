@@ -10,21 +10,68 @@ the human summary.
 
 ## 0.0.10 — Unreleased
 
-**If you are upgrading**, three things behave differently rather than
-better, and each is deliberate:
+**If you are upgrading**, read this in two halves: what changes when the
+**binary** lands, and what changes when the **rebuilt artifact** lands. They
+are separate deployments, and the supported path runs the new binary against
+the old artifact for a while (`SUPPORTED.md` → Versioning).
 
-- **A `timeout:` declared on a stream, a socket or a service is now
-  honoured.** It used to be accepted and dropped. An application that
-  declared one and relied on it being ignored will start ending that work at
-  the deadline. (There is still no *default* deadline for those kinds.)
-- **A stream's latency is now its world's lifetime**, not the time to its
-  head, in `usai_http_workload_request_seconds_*` and in the global
-  histogram. Every dashboard and alert built on those for a streaming
-  application reads differently — that is the fix, but it is a number people
-  build on.
-- **Declaring `maxBodyBytes` on a workload with no request body is refused
-  at install.** Nothing could have done so before this release, so this can
-  only bite an artifact built against a pre-release of it.
+**When the binary lands, before you rebuild:**
+
+- **A `timeout:` declared on a stream is honoured — including in an artifact
+  built by the previous SDK.** It used to be accepted and dropped. The world
+  is stopped at the deadline, so the handler's loop sees `ctx.signal` abort
+  and can finish; a handler that does not check simply stops writing. The
+  client **keeps the `200` it already has**, the body ends, and there is no
+  trailer and no error — a downstream consumer sees a complete, successful
+  response over a truncated file. Measured: an export that took 16.1 s and
+  wrote 41 rows on the old binary wrote 21 rows in 8.0 s on the new one, and
+  `curl` exited 0. **If anything of yours parses a streamed export, make it
+  fail loudly on a short file before you deploy this.** `usai inspect` lists
+  every workload's effective deadline and where it came from; run it first.
+- **A stream's latency becomes its world's lifetime in the global latency
+  histogram** — `usai_http_request_seconds_{bucket,sum,count}`, the series
+  the Latency alert in `docs/runbooks/metrics.md` is built on. Measured on
+  identical traffic (20 short requests plus one 8-second export): `_sum` went
+  from **0.019 to 8.029**, and the p99 moved from the `le="0.005"` bucket to
+  `le="10"`. **Your latency alert will fire on the first export after the
+  upgrade.** Exclude streaming routes or widen the alert before you deploy.
+  (The per-workload series named elsewhere in these notes is *new* here, so
+  nothing of yours reads it yet.)
+- **`usai_http_streams_failed_total` now counts a declared stream timeout as
+  well as a handler failure**, and no counter separates them; the WARN line
+  says which. If you alert on it, it goes from zero to one per export.
+- **The socket `close` fix is not in the binary.** A push loop whose client
+  left still skips `close` — and still leaks whatever the connection held —
+  until the rebuilt artifact lands. Worse: the `ERROR socket handler failed`
+  line that used to appear on every such disconnect is a debug line in this
+  binary, so between the two deployments the leak is **silent**. If your
+  sockets hold per-connection state, deploy the binary and the artifact
+  together.
+- **Four `process.*` keys leave `/_usai/status` on a host with no cgroup
+  memory limit**: `memoryChargedBytes`, `memoryLimitBytes`,
+  `memoryCeilingHits`, `memoryOomKills`. They were `0` before and `0` was
+  false, but anything reading them by name must tolerate their absence — and
+  they will be present on your containers and absent on your bare metal.
+- **The JSON log timestamp goes from millisecond to microsecond precision.**
+  A shipper with a strict `%3f` format stops parsing.
+
+**When the rebuilt artifact lands:**
+
+- **A `timeout:` declared on a socket or a service is honoured too** — the
+  SDK used to drop it before it reached the manifest, so the runtime never
+  saw it. A socket ends at its deadline the way it ends when its client
+  leaves: the connection is closed and **`close` runs**. A service ends and,
+  with `restart: { mode: "always" }`, starts again. There is still no
+  *default* deadline for any of the three kinds.
+- **Declaring `maxBodyBytes` where there is no request body fails the
+  build**, with exit 1 and the workload named. That is a CI failure, not a
+  deploy failure. Nothing could have declared it before this release.
+
+**Rolling back is two axes, not one**: the artifact and the binary. An
+application's identity is stable across a binary swap for the same artifact —
+verified for this release — so a rolling deployment comparing identities sees
+one application in both directions. Rolling back only the binary leaves the
+new artifact on the old runtime, which is not a supported combination.
 
 Everything else is additive or a fix to behaviour that was wrong.
 
@@ -74,6 +121,9 @@ Everything else is additive or a fix to behaviour that was wrong.
   average and the guest CPU per workload side by side (waiting or
   computing, answered in one screen), rejections that never reached a
   workload, pool `in use` and `waiting`, and what the process costs.
+  A queue consumer's `req/s` is messages finished per second, from the
+  per-topic counters: an upgrade round watched one finish 36 a second and
+  read `0.0`, because the column was HTTP-derived.
   Memory is shown as the number that actually kills the process — the
   cgroup's charge against its limit, with RSS and PSS beside it, because RSS
   counts the pooled Wasm image once per slot it is mapped into and overstates
@@ -132,8 +182,10 @@ Everything else is additive or a fix to behaviour that was wrong.
   operator keeps the ceiling and the application says how much of it each
   route may use; the 413 message names which of the two refused the request.
   Declaring it on a workload that has no request body — a task, a cron tick,
-  a stream, a socket — is **refused at install** with the reason, rather than
-  accepted and ignored.
+  a stream, a socket — **fails the build** with the reason and the workload
+  named, rather than being accepted and ignored. (The refusal is in the
+  definition, so an artifact that somehow carried one would be refused at
+  install too; in practice you meet it in CI.)
 - **Cron and queue consumers stop at the start of a drain, not after the
   grace.** The grace period exists so a load balancer notices the instance
   is unready while requests already in flight finish — nothing is watching
@@ -149,7 +201,10 @@ Everything else is additive or a fix to behaviour that was wrong.
   `docs/runbooks/queue-dead-letter.md` had promised the line all along. It is
   an ERROR now, like a handler that fails.
 - **`usai_queue_topic_messages_total{topic,state}`**, and `queueByTopic` per
-  revision in `/_usai/status`. An alert on dead letters could not name the
+  revision in `/_usai/status`. Every declared topic's series exists from boot
+  at zero, like the aggregate beside it — a dead-letter alert scoped to a
+  topic had no series at all on a healthy idle instance, so the panel read
+  "No data" rather than zero. An alert on dead letters could not name the
   queue, so whoever it woke had to look through every topic the application
   has — while HTTP has carried its per-workload dimension since D2.
 - **A socket's upgrade is validated before the world exists.** `socket()`
@@ -219,7 +274,15 @@ Everything else is additive or a fix to behaviour that was wrong.
 - **A `timeout:` declared on a stream, a socket or a service is honoured.**
   It was accepted, published to API consumers as
   `x-usai-timeout-source: "declared"`, and dropped — while `concurrency:` in
-  the same options object was enforced. An unbounded export whose contract
+  the same options object was enforced. The runtime half of this shipped
+  first and the claim was two-thirds false for a day: `socket()` dropped the
+  option before it reached the manifest and `service()` had no such option at
+  all, so only a stream was ever bounded and `usai inspect` told a socket
+  that declared a deadline to declare one. Found by an upgrade round reading
+  the release note against the tool. A connection-bound or persistent world
+  is **stopped** at its deadline rather than cancelled, so a socket closes
+  its connection and runs `close` — a declared ending is an ending, not a
+  crash. An unbounded export whose contract
   promised it stopped after 8 s is worse than an unbounded export. There is
   still no *default* deadline for those kinds (one that ended a service
   after 30 s would be useless); a declared one ends the world, and for a

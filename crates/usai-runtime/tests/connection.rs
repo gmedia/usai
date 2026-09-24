@@ -378,6 +378,53 @@ async fn recv_json(
     }
 }
 
+/// A socket gets no *default* deadline. One it declares must reach the
+/// manifest and end the world — the runtime was ready to enforce it and the
+/// SDK dropped it, so "a `timeout:` declared on a stream, a socket or a
+/// service is honoured" was true for one of the three, and `usai inspect`
+/// told a socket that declared one to declare one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_declared_timeout_bounds_a_socket() {
+    let Some(s) = start().await else { return };
+    let started = std::time::Instant::now();
+    let (mut ws, response) = tokio_tungstenite::connect_async(format!("{}/push?who=bounded", s.ws))
+        .await
+        .expect("upgrade");
+    assert_eq!(response.status(), 101);
+    // The handler pushes every 50 ms for up to 400 iterations (20 s); the
+    // declaration says 600 ms.
+    let mut frames = 0;
+    // A five-second bound on each frame: when the deadline ends the socket
+    // the stream closes, and if it merely went quiet the timeout catches it
+    // rather than hanging the test.
+    while let Ok(Some(Ok(message))) = tokio::time::timeout(Duration::from_secs(5), ws.next()).await
+    {
+        if message.is_text() {
+            frames += 1;
+        }
+        if message.is_close() {
+            break;
+        }
+    }
+    let took = started.elapsed();
+    assert!(
+        took < Duration::from_secs(5),
+        "the socket ran {took:?} past a declared 600 ms"
+    );
+    assert!(frames > 0, "nothing was pushed, so this proves nothing");
+    // And `close` still ran: the deadline is an ending, not a crash.
+    let mut closed = Value::Null;
+    for _ in 0..40 {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        closed = audit(&s.runtime, "push-closed:bounded").await;
+        if closed != Value::Null {
+            break;
+        }
+    }
+    assert_eq!(closed, json!(true), "close did not run at the deadline");
+    s.shutdown.cancel();
+}
+
 /// A socket's upgrade used to skip boundary validation entirely — the one
 /// place on an HTTP surface where C6 ("fail before the world exists") did
 /// not reach, and it was the path segment or query that decides what the

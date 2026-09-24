@@ -591,6 +591,10 @@ export const pushLoop = socket(
     outgoing: z.object({ i: z.number() }),
     resources: [audit],
     query: z.object({ who: z.string().min(1).max(32) }),
+    // A socket gets no default deadline; this one declares 600 ms, which
+    // must reach the manifest and end the world — it used to be dropped by
+    // the SDK before the runtime ever saw it.
+    timeout: "600ms",
   },
   {
     async open(ctx) {

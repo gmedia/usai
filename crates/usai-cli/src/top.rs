@@ -323,6 +323,33 @@ fn render(before: &Sample, now: &Sample) -> String {
     // working — measured by a jobs round: a consumer driving 441 worlds/s on
     // a box at 126 % CPU showed as one row of zeros, and vanished entirely
     // whenever no world happened to be live at the sample instant.
+    // A queue consumer's throughput is messages finished per second, which
+    // the per-topic counters carry — the CPU column alone still read as a
+    // consumer doing nothing at 36 msg/s.
+    let topic_done = |sample: &Sample| -> BTreeMap<String, u64> {
+        let mut out = BTreeMap::new();
+        if let Some(revisions) = sample.get(&["revisions"]).and_then(Value::as_array) {
+            for revision in revisions {
+                for row in revision
+                    .get("queueByTopic")
+                    .and_then(Value::as_array)
+                    .unwrap_or(&Vec::new())
+                {
+                    let Some(topic) = row.get("topic").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    let finished = row.get("done").and_then(Value::as_u64).unwrap_or(0)
+                        + row.get("dead").and_then(Value::as_u64).unwrap_or(0)
+                        + row.get("invalid").and_then(Value::as_u64).unwrap_or(0);
+                    *out.entry(format!("queue:{topic}")).or_insert(0) += finished;
+                }
+            }
+        }
+        out
+    };
+    let finished_now = topic_done(now);
+    let finished_before = topic_done(before);
+
     let mut background: BTreeMap<String, f64> = BTreeMap::new();
     if let Some(cpu) = now
         .get(&["gauges", "guestCpuNsByWorkload"])
@@ -393,9 +420,14 @@ fn render(before: &Sample, now: &Sample) -> String {
         if alive == 0 && cpu_ns <= 0.0 {
             continue;
         }
+        let finished = rate(
+            finished_now.get(&workload).copied().unwrap_or(0),
+            finished_before.get(&workload).copied().unwrap_or(0),
+            seconds,
+        );
         rows.push((
             workload,
-            0.0,
+            finished,
             alive,
             0,
             0,
@@ -765,6 +797,30 @@ mod tests {
         assert!(row.trim_end().ends_with("70%"), "{row}");
         // It completed nothing, so there is no average to report.
         assert!(row.contains('—'), "{row}");
+    }
+
+    /// A queue consumer answers no HTTP, so its rate had to come from
+    /// somewhere else: an upgrade round watched one finish 36 messages a
+    /// second and read `0.0 req/s`. The per-topic counters carry it.
+    #[test]
+    fn a_queue_consumer_has_a_throughput() {
+        let mut before = status(1_000, 10.0, 1_000_000_000, 5.0);
+        before["revisions"][0]["queueByTopic"] = json!([
+            { "topic": "payment.settle", "done": 500, "dead": 0, "invalid": 0 }
+        ]);
+        before["gauges"]["guestCpuNsByWorkload"]["queue:payment.settle"] = json!(1_000_000_000u64);
+        let mut after = status(1_200, 10.5, 1_200_000_000, 5.2);
+        // 72 messages finished over a 2 s window, two of them dead.
+        after["revisions"][0]["queueByTopic"] = json!([
+            { "topic": "payment.settle", "done": 570, "dead": 2, "invalid": 0 }
+        ]);
+        after["gauges"]["guestCpuNsByWorkload"]["queue:payment.settle"] = json!(1_100_000_000u64);
+        let screen = render(&sample(2, before), &sample(0, after));
+        let row = screen
+            .lines()
+            .find(|l| l.contains("queue:payment.settle"))
+            .unwrap_or_else(|| panic!("no consumer row:\n{screen}"));
+        assert!(row.contains("36.0"), "{row}");
     }
 
     /// A restarted instance's counters go backwards. That is a fact about

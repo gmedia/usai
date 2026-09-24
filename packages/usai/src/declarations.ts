@@ -104,15 +104,22 @@ export type ResourcesOf<R> = R extends readonly ResourceDeclaration[]
  * @category Application
  */
 export interface WorkloadPolicies {
-  /** Per-invocation deadline (`"5s"`, `"500ms"`, or milliseconds). The
-   * world is cancelled when it passes: an HTTP caller gets 504, an
-   * `invoke` rejects with `deadline_exceeded`, a queue message counts as
-   * a failed attempt, and a **stream** ends — the client keeps the 200 it
-   * already has and the body stops there. Undeclared: the runtime default
-   * (30 s) for requests, tasks, cron ticks, queue messages, commands,
-   * migrations and seeders; **none** for a stream, a socket or a service,
-   * which would be useless with one. A deadline you declare is honoured
-   * whatever the kind — it is the only way to bound an export. */
+  /** Per-invocation deadline (`"5s"`, `"500ms"`, or milliseconds).
+   *
+   * For **finite** work the world is cancelled when it passes: an HTTP
+   * caller gets 504, an `invoke` rejects with `deadline_exceeded`, a queue
+   * message counts as a failed attempt. Undeclared, finite work gets the
+   * runtime default of 30 s.
+   *
+   * For **connection-bound and persistent** work — a stream, a socket, a
+   * service — there is **no default**, because one that ended after 30 s
+   * would be useless. A deadline you declare is honoured, and it **stops**
+   * the world rather than cancelling it: `ctx.signal` aborts, a pending
+   * `ctx.sleep` returns, the handler can finish what it is doing, and a
+   * socket's connection is closed so its `close` handler runs. For a stream
+   * the client keeps the `200` it already has and the body stops there —
+   * with no trailer and no error, so end an export with a sentinel the
+   * reader requires. */
   timeout?: string | number;
   /** How many worlds of this workload may run at once. Past the bound the
    * next one is refused, never queued: an HTTP request gets 503

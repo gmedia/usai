@@ -445,6 +445,17 @@ pub fn start(
             tracing::error!(queue = %workload.name, "no postgres resource backs this queue; consumer not started");
             continue;
         };
+        // Seed this topic's counters at zero so its series exist from boot,
+        // the way the aggregate `usai_queue_messages_total` always has. A
+        // dead-letter alert scoped to a topic had no series at all on a
+        // healthy idle instance, so the panel read "No data" rather than
+        // zero — two counters for the same thing, one seeded and one not.
+        stats
+            .by_topic
+            .write()
+            .expect("queue stats poisoned")
+            .entry(topic.clone())
+            .or_default();
         let validator = workload
             .contracts
             .message

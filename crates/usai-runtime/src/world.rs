@@ -559,11 +559,21 @@ impl WorldDriver {
         let deadline = self.deadline.map(|d| tokio::time::sleep(d));
         tokio::pin!(deadline);
         let mut stop = self.stop.clone();
+        // A connection-bound or persistent world that reached its declared
+        // deadline is asked to stop rather than cancelled, and then ends
+        // through its own path — so a socket runs `close`, which is the one
+        // handler that releases what the connection held. The termination it
+        // reports is still the deadline's.
+        let mut stopped_at_deadline = false;
         loop {
             match self.instance.state().await {
                 Ok(state) if state.outcome.is_some() => {
                     self.last_state = Some(state);
-                    return Termination::Completed;
+                    return if stopped_at_deadline {
+                        Termination::DeadlineExceeded
+                    } else {
+                        Termination::Completed
+                    };
                 }
                 Ok(_) => {}
                 // The same rule as at the invoke site and in the routing
@@ -599,6 +609,31 @@ impl WorldDriver {
                     }
                 }
                 _ = async { match deadline.as_mut().as_pin_mut() { Some(d) => d.await, None => std::future::pending().await } } => {
+                    // Connection-bound and persistent work has no *default*
+                    // deadline, so this one was declared — and a declared
+                    // ending is an ending, not a crash: ask the guest to
+                    // stop, let its loop unwind and its `close` run, and
+                    // disarm the timer. A handler that ignores the stop is
+                    // still caught by the drain bound above.
+                    if !stopped_at_deadline
+                        && !matches!(self.workload().lifetime(), crate::definition::LifetimeFamily::Finite)
+                        && let Some(token) = self.stop.clone()
+                    {
+                        stopped_at_deadline = true;
+                        deadline.set(None);
+                        tracing::debug!(world = %self.id, "declared deadline reached: stopping the world");
+                        // Cancelling the world's own stop token, rather than
+                        // asking the guest directly, is what makes this a
+                        // *closing*: for a socket that token is the one the
+                        // connection's pump watches, so the client gets a
+                        // close frame and the handler's receive loop ends —
+                        // without it the loop left `open` and then waited
+                        // for a message that was never coming, so the socket
+                        // went quiet and stayed open. The stop arm above
+                        // does the guest half on the next turn.
+                        token.cancel();
+                        continue;
+                    }
                     return match self.cancel_world("deadline exceeded").await {
                         Ok(_) => Termination::DeadlineExceeded,
                         // The unwind itself failed after the deadline: the

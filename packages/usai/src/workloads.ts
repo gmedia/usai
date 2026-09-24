@@ -300,6 +300,13 @@ export interface ServiceOptions<R extends ResourceDeclaration[] = ResourceDeclar
    * until the next revision. `on-failure` restarts after a throw; `always`
    * restarts whenever it ends. Backoff doubles per restart. */
   restart?: { mode: "never" | "on-failure" | "always"; backoffMs?: number; maxRestarts?: number };
+  /** How long this service may run before the world is cancelled
+   * (`"30m"`, `"4s"`, or milliseconds). **Undeclared there is none**, which
+   * is what a service usually wants — it runs until the revision retires.
+   * Declare one for a loop that should not outlive a bound (a nightly
+   * importer written as a service, say); with `restart: { mode: "always" }`
+   * it becomes a supervised cycle rather than a runaway. */
+  timeout?: string | number;
 }
 
 /**
@@ -350,7 +357,7 @@ export function service(name: string, a: unknown, b?: unknown): Workload {
     resources: options.resources ?? [],
     dispatches: [],
     publishes: [],
-    policies: {},
+    policies: options.timeout !== undefined ? { timeout: options.timeout } : {},
     handler,
   };
 }

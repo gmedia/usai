@@ -306,6 +306,12 @@ export function socket<
   if (options.incoming) contracts.message = options.incoming;
   if (options.outgoing) contracts.response = { 200: options.outgoing };
   const policies: WorkloadPolicies = {};
+  // A declared deadline reaches the manifest for every other kind. Dropping
+  // it here is why "a `timeout:` declared on a stream, a socket or a service
+  // is honoured" was true for one of the three: the runtime was ready to
+  // enforce it and the declaration never arrived, so `usai inspect` told a
+  // socket that declared one to declare one.
+  if (options.timeout !== undefined) policies.timeout = options.timeout;
   if (options.concurrency !== undefined) policies.concurrency = options.concurrency;
   if (options.maxBodyBytes !== undefined) policies.maxBodyBytes = options.maxBodyBytes;
   return {

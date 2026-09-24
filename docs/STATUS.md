@@ -242,6 +242,44 @@ capabilities (design), latency histogram in metrics, an API reference page — a
   side, rejections, pool `in use` and `waiting`, what the process costs —
   because totals since boot answer the wrong question during an incident.
 
+- **Round 20 (2026-09-24): an operator upgrading a live 0.0.9 deployment**
+  to the current build, with the real 0.0.9 release binary and SDK on one
+  side. **44 minutes.** Verdict: **"no, not on a Friday"** — and the reason
+  was this project's own release note. It found that the note's headline
+  bullet, *"a `timeout:` declared on a stream, a socket or a service is now
+  honoured"*, was **two-thirds false**: the runtime half had shipped, but
+  `socket()` dropped the option before it reached the manifest and
+  `service()` had no such option at all, so only a stream was ever bounded —
+  and `usai inspect` told a socket that declared a deadline to declare one.
+  Three documents stated the fix as fact. That is the exact failure this
+  runtime punishes applications for (a declared policy accepted and
+  dropped), committed in its own release notes, and no persona round before
+  this one was pointed at the notes. Fixed: the SDK carries the deadline for
+  both kinds, a service can declare one, and a connection-bound or persistent
+  world is **stopped** at its deadline rather than cancelled — so a socket
+  closes its connection and runs `close`, because a declared ending is an
+  ending and not a crash. Also fixed from the round: the per-topic queue
+  series now exist from boot at zero (an alert scoped to a topic had no
+  series at all on a healthy instance), a queue consumer's `req/s` in
+  `usai top` comes from the per-topic counters instead of reading `0.0` at
+  36 msg/s, and the `maxBodyBytes` refusal no longer carries runs of ten
+  spaces from an undedented string literal. **The release note was rewritten
+  from the round's own draft**: it is now in two halves — what changes when
+  the binary lands and what changes when the rebuilt artifact lands — and it
+  names the things that actually move for an existing deployment: the global
+  latency histogram (measured 0.019 → 8.029 on identical traffic, enough to
+  fire the documented Latency alert on the first export), a truncated export
+  that looks like a complete `200` to its reader, the socket `close` fix
+  arriving only with the artifact so the binary alone makes a live leak
+  *quieter* without fixing it, and four `process.*` keys leaving
+  `/_usai/status` on hosts with no cgroup limit. `deploy-and-rollback.md`
+  gained the section it never had: rolling back is two axes, and rolling back
+  only the binary lands on the untested half of the matrix. What the round
+  found working: the rollback path itself, byte-stable identity across a
+  binary swap in both directions, `maxBodyBytes`' 413 naming which bound
+  refused ("the best error message in the release"), `queue prune --dry-run`,
+  the microsecond log timestamp, and the `504` WARN.
+
 - **Round 19 (2026-09-24): a background-jobs developer** (nine years of
   BullMQ, `node-cron`, Sidekiq) built an order pipeline — publish, consume,
   retry with backoff, dead-letter, replay, idempotency, two crons on two

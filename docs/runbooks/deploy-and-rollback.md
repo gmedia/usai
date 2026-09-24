@@ -3,6 +3,29 @@
 The endpoints, their bodies and every error code are in
 `docs/CONTROL-API.md`; this page is what happens when you use them.
 
+## Rolling back is two axes
+
+The artifact and the binary move independently, and this page is about the
+first. The second is `SUPPORTED.md` → Versioning: the supported pair is a
+runtime with an artifact built by the **same or the previous** version, so a
+version rollback is *activate the previous artifact, then run the previous
+binary* — in that order, because the old binary may not understand the new
+artifact.
+
+Two things make it safe, and both were verified for this release:
+
+- **The same artifact keeps the same identity across a binary swap**, so a
+  rolling deployment comparing identities sees one application in both
+  directions rather than two.
+- **A failed build leaves the previous artifact servable**, so the thing you
+  roll back to is still there.
+
+And one thing to watch: rolling back only the **binary** leaves the new
+artifact on the old runtime. That is the unsupported half of the matrix — it
+may work, nothing tests it, and the refusal that would tell you is on the
+manifest format and the guest ABI, which do not move every release. Roll both
+back or neither.
+
 ## A broken artifact
 
 `POST /revisions {"artifact": …}` on the control surface answers **422
