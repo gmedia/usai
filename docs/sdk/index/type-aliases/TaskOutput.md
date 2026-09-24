@@ -3,7 +3,7 @@
 # Type Alias: TaskOutput\<W\>
 
 ```ts
-type TaskOutput<W> = W extends TypedWorkload<infer Out> ? Out : unknown;
+type TaskOutput<W> = W extends TypedWorkload<infer Out, infer _In> ? Out : unknown;
 ```
 
 What `ctx.tasks.invoke` resolves to for a given task declaration.

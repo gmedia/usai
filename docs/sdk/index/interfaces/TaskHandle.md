@@ -10,7 +10,7 @@ between them is who owns the child world.
 ### invoke()
 
 ```ts
-invoke<W extends Workload>(task: W, input?: unknown): Promise<TaskOutput<W>>;
+invoke<W extends Workload>(task: W, ...input: TaskInputArgs<W>): Promise<TaskOutput<W>>;
 ```
 
 An **owned** invocation: the task runs in a fresh world, this world waits
@@ -29,7 +29,7 @@ response depends on the task.
 | Parameter | Type |
 | ------ | ------ |
 | `task` | `W` |
-| `input?` | `unknown` |
+| ...`input` | `TaskInputArgs`\<`W`\> |
 
 #### Returns
 
@@ -40,7 +40,7 @@ response depends on the task.
 ### dispatch()
 
 ```ts
-dispatch(task: Workload, input?: unknown): Promise<{
+dispatch<W extends Workload>(task: W, ...input: TaskInputArgs<W>): Promise<{
   id: string;
 }>;
 ```
@@ -55,12 +55,18 @@ exist. Nobody receives the child's return value. Not durable across a
 runtime restart (publish to a queue for that). Declare the edge with
 `dispatches(from, task)`.
 
+#### Type Parameters
+
+| Type Parameter |
+| ------ |
+| `W` *extends* [`Workload`](Workload.md) |
+
 #### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
-| `task` | [`Workload`](Workload.md) |
-| `input?` | `unknown` |
+| `task` | `W` |
+| ...`input` | `TaskInputArgs`\<`W`\> |
 
 #### Returns
 

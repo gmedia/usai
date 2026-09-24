@@ -108,6 +108,61 @@ new artifact on the old runtime, which is not a supported combination.
 
 Everything else is additive or a fix to behaviour that was wrong.
 
+### Modules and the shared layer
+
+- **A module installed as a package owns its migrations.** The bundler
+  skipped `node_modules` when it stamped each module's source directory, so
+  a module *shipped as a package* — the way a shared layer is actually
+  shared — had its `./migrations/*.sql` resolve from nowhere: `matches no
+  file`, no `migrations/` in the artifact, and `usai db migrate` reporting
+  success. A green deploy whose first request said `column does not exist`.
+  A module inside `src/` or in a sibling workspace package was unaffected,
+  which is what made it look like it worked.
+- **`defineModule({ env })`.** A module can declare what it needs from the
+  environment, and it is merged into the application's contract — so a
+  missing value fails **activation**, like the application's own. There was
+  no way to say it at all: every consumer had to mirror the variable into
+  its own `env({})` by hand, nothing checked that it had, and `ctx.env.X`
+  was `undefined` even with the variable set in the process environment. The
+  application's own declaration of a key wins; two modules declaring one key
+  differently is a build error.
+- **Two auth schemes with one name is refused.** The name *is* the OpenAPI
+  security scheme, so the first declaration seen described both: a cookie
+  scheme documented as HTTP bearer, and every generated client for the other
+  route sending `Authorization: Bearer` and getting 401 forever. The
+  resolvers ran correctly, which is what made it invisible. Two modules each
+  calling their scheme `session` is the default outcome, not an exotic one.
+- **The same module listed twice is one module**, not a collision — the
+  diamond every shared layer grows (`auth` and `billing` both re-export
+  `base`) was a hard `duplicate workload id` with no de-duplication even for
+  the identical object. Two *different* modules with one name, which used to
+  pass in silence and made `inspect` attribute workloads to an ambiguous
+  label, is now an error.
+- **A duplicate workload id names who declared it**, on both sides
+  (`declared by module "auth" and by module "billing"`). It was the id
+  alone, which with two vendored module packages means a grep.
+- **A declaration mistake reads like one.** `compile failed: validator
+  warm-up failed: guest fault: Error: resource "main" is declared twice…`
+  sent readers to the wrong place entirely; the application's declarations
+  are evaluated in the guest, so a `defineApp`/`defineModule` error arrives
+  as a guest throw. It is now printed as itself, and the resource conflict
+  names its declarers the same way everywhere (`module "a"` and `the
+  application`, not `a` and `app`).
+- **`usai config` answers the question for a modular project.** It printed
+  only the project's own globs — which in an application whose every
+  migration comes from a module match nothing at all — and never mentioned
+  the modules. It now lists each module, its source directory, its globs,
+  and the effective migration glob list in order with where each came from.
+- **`usai dev` watches a workspace module package's sources.** A module at
+  `../../packages/auth` is outside the directory the watcher covered, so
+  editing the shared layer changed nothing until you also touched a file in
+  the application.
+- **A task's input is typed at the call site.** `invoke(task, input?:
+  unknown)` typed the output precisely and the input not at all, so calling
+  a task that declares an `input` schema with no input — or with `42` —
+  compiled, and the refusal arrived at the first run. For a module's task
+  that is the half of its surface a consumer most wants held.
+
 ### Migrations and schema change
 
 - **A migration can opt out of its transaction.** `-- usai: no-transaction`

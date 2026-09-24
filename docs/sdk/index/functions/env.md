@@ -11,7 +11,12 @@ read by the host when a revision **activates** — a missing required
 variable or an unparsable value fails activation, never the first
 request — and reach handlers as `ctx.env`, parsed. Variables a resource
 names (`DATABASE_URL`, `baseUrlEnv`) are required by that resource and
-need no declaration here. `usai run` never reads `.env`; `usai dev` does.
+need no declaration here. Everything else works the other way round: a
+variable **not** declared here is `undefined` in `ctx.env` even when it is
+set in the process environment — the contract is the whole of what a world
+can see. A module states its own with `defineModule({ env })`, which is
+merged into this one, so its consumers do not have to mirror it.
+`usai run` never reads `.env`; `usai dev` does.
 
 Field constructors (all required unless wrapped in `env.optional`):
 

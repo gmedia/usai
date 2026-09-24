@@ -1,6 +1,6 @@
 [@sakaladev/usai](../../README.md) / [index](../README.md) / TypedWorkload
 
-# Interface: TypedWorkload\<Out = `unknown`\>
+# Interface: TypedWorkload\<Out = `unknown`, In = `unknown`\>
 
 A [Workload](Workload.md) that remembers what its handler returns, so
 `ctx.tasks.invoke(thatTask)` is typed instead of `unknown`. The parameter
@@ -16,6 +16,7 @@ is a phantom: nothing carries it at runtime, and a `TypedWorkload` is a
 | Type Parameter | Default type |
 | ------ | ------ |
 | `Out` | `unknown` |
+| `In` | `unknown` |
 
 ## Properties
 

@@ -9,6 +9,7 @@ import {
   parseDuration,
   workloadId,
 } from "./declarations.ts";
+import type { EnvField } from "./env.ts";
 import { jsonSchemaOf } from "./schema.ts";
 import { hostFinal } from "./runtime/prepare.ts";
 
@@ -201,18 +202,47 @@ function trigger(workload: Workload): ManifestWorkload["trigger"] {
  * workload, a conflicting resource redeclaration, or a hole in a list.
  *
  * @category Build */
+/** The part of a field that has to agree between declarers: what it parses
+ * to, whether it is required, and the values it admits. The `parse` closure
+ * itself is not comparable and does not need to be. */
+function describeField(f: EnvField<unknown>): {
+  kind: string;
+  required: boolean;
+  values: string[];
+} {
+  return { kind: f.kind, required: f.required, values: [...(f.values ?? [])] };
+}
+
 export function describe(app: AppDeclaration): Manifest {
-  const { workloads, resources } = flatten(app);
+  const { workloads, resources, modules } = flatten(app);
   const authByName = new Map<string, Manifest["auth"][number]>();
+  const authOwner = new Map<string, string>();
   const manifestWorkloads: ManifestWorkload[] = workloads.map(({ workload, module }) => {
-    if (workload.auth && !authByName.has(workload.auth.name)) {
-      authByName.set(workload.auth.name, {
+    if (workload.auth) {
+      const entry = {
         name: workload.auth.name,
         scheme: workload.auth.scheme,
         ...(workload.auth.header ? { header: workload.auth.header } : {}),
         ...(workload.auth.description ? { description: workload.auth.description } : {}),
         ...(workload.auth.credential ? { credential: workload.auth.credential } : {}),
-      });
+      };
+      const existing = authByName.get(entry.name);
+      const owner = module === undefined ? "the application" : `module "${module}"`;
+      // An auth scheme's name *is* the OpenAPI security scheme, so two
+      // declarations sharing one name do not merely coexist: the first one
+      // seen describes both, and a cookie scheme documented as HTTP bearer
+      // sends every generated client to a permanent 401. Two modules each
+      // calling their scheme `session` is the default outcome, not an
+      // exotic one, and it used to pass in silence.
+      if (existing && JSON.stringify(existing) !== JSON.stringify(entry)) {
+        throw new Error(
+          `auth scheme "${entry.name}" is declared twice with different configuration (${authOwner.get(entry.name) ?? "the application"} and ${owner}); the name is the OpenAPI security scheme, so it has to mean one thing in an application`,
+        );
+      }
+      if (!existing) {
+        authByName.set(entry.name, entry);
+        authOwner.set(entry.name, owner);
+      }
     }
     const timeoutMs = parseDuration(workload.policies.timeout);
     const entry: ManifestWorkload = {
@@ -247,8 +277,34 @@ export function describe(app: AppDeclaration): Manifest {
       entry.maxBodyBytes = workload.policies.maxBodyBytes;
     return entry;
   });
-  const env = app.env
-    ? Object.entries(app.env.fields).map(([name, f]) => ({
+  // A module's environment contract is the application's: the point is that
+  // a value the module needs fails **activation** when it is missing, the
+  // way the application's own do, instead of reaching the first request
+  // that touches the module as a 500. The application's own declaration of
+  // a key wins; two modules declaring the same key differently is a build
+  // error, because one of them would silently take the other's parse.
+  const fields: Record<string, EnvField<unknown>> = {};
+  const fieldOwner = new Map<string, string>();
+  for (const m of modules) {
+    for (const [name, field] of Object.entries(m.env?.fields ?? {})) {
+      const existing = fields[name];
+      if (
+        existing &&
+        JSON.stringify(describeField(existing)) !== JSON.stringify(describeField(field))
+      ) {
+        throw new Error(
+          `environment variable ${name} is declared differently by ${fieldOwner.get(name)} and module "${m.name}"; a module's declaration is the application's, so one of them would take the other's parse`,
+        );
+      }
+      if (!existing) {
+        fields[name] = field;
+        fieldOwner.set(name, `module "${m.name}"`);
+      }
+    }
+  }
+  for (const [name, field] of Object.entries(app.env?.fields ?? {})) fields[name] = field;
+  const env = Object.keys(fields).length
+    ? Object.entries(fields).map(([name, f]) => ({
         name,
         kind: f.kind,
         required: f.required,
@@ -260,7 +316,7 @@ export function describe(app: AppDeclaration): Manifest {
     name: app.name,
     ...(app.description !== undefined ? { description: app.description } : {}),
     ...(app.headers !== undefined ? { headers: { ...app.headers } } : {}),
-    modules: app.modules.map((m) => ({
+    modules: modules.map((m) => ({
       name: m.name,
       ...(m.sourceDir === undefined ? {} : { sourceDir: m.sourceDir }),
       migrations: [...m.migrations],

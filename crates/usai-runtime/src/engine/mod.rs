@@ -62,6 +62,14 @@ pub const GUEST_BRIDGE: &str = include_str!("guest-bridge.js");
 pub enum EngineError {
     #[error("compile failed: {0}")]
     Compile(String),
+    /// The application's own declarations are evaluated inside the guest, so
+    /// a `defineApp`/`defineModule` mistake — a duplicate workload id, two
+    /// modules disagreeing about a resource — arrives as a guest throw
+    /// during compilation. It is not a compiler failure and must not read
+    /// like one: `compile failed: validator warm-up failed: guest fault:
+    /// Error: …` sent readers to the wrong place entirely.
+    #[error("{0}")]
+    Declaration(String),
     #[error("instantiate failed: {0}")]
     Instantiate(String),
     #[error("guest fault: {0}")]

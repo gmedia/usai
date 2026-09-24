@@ -474,3 +474,92 @@ async fn concurrent_builds_of_one_project_cooperate() {
     );
     let _ = std::fs::remove_dir_all(&out);
 }
+
+/// A module **shipped as a package** — the way a shared layer is actually
+/// shared — must own its migrations the way a module inside `src/` does.
+/// The bundler skipped `node_modules` when it stamped each module's source
+/// directory, so an installed module's `./migrations/*.sql` resolved from
+/// nowhere: `matches no file`, no `migrations/` in the artifact, and
+/// `usai db migrate` reporting success. A green deploy whose first request
+/// says `column does not exist`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_module_installed_as_a_package_still_owns_its_migrations() {
+    let Some(fixture) = root() else { return };
+    // The SDK the fixture resolves, reached through its own node_modules.
+    let sdk = fixture.join("node_modules/@sakaladev/usai");
+    let Ok(sdk) = std::fs::canonicalize(&sdk) else {
+        return;
+    };
+    let project = std::env::temp_dir().join(format!("usai-vendored-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&project);
+    let module = project.join("node_modules/@acme/notes/src/migrations");
+    std::fs::create_dir_all(&module).unwrap();
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::create_dir_all(project.join("node_modules/@sakaladev")).unwrap();
+    std::os::unix::fs::symlink(&sdk, project.join("node_modules/@sakaladev/usai")).unwrap();
+    std::fs::write(
+        project.join("package.json"),
+        r#"{"name":"vendored","private":true,"type":"module"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        project.join("node_modules/@acme/notes/package.json"),
+        r#"{"name":"@acme/notes","version":"1.0.0","type":"module","exports":{".":"./src/module.ts"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        project.join("node_modules/@acme/notes/src/module.ts"),
+        "import { defineModule, http } from \"@sakaladev/usai\";\n\
+         export const notes = defineModule({\n\
+         \x20 name: \"notes\",\n\
+         \x20 migrations: \"./migrations/*.sql\",\n\
+         \x20 workloads: [http.get(\"/notes/ping\", {}, async () => ({ ok: true }))],\n\
+         });\n",
+    )
+    .unwrap();
+    std::fs::write(
+        module.join("004_vendor_notes.sql"),
+        "create table if not exists vendor_notes (id bigserial primary key);",
+    )
+    .unwrap();
+    std::fs::write(
+        project.join("src/app.ts"),
+        "import { defineApp } from \"@sakaladev/usai\";\n\
+         import { notes } from \"@acme/notes\";\n\
+         export default defineApp({ name: \"vendored\", modules: [notes] });\n",
+    )
+    .unwrap();
+
+    let out = out_dir("vendored");
+    let engine = usai_runtime::engine::from_env(8).unwrap();
+    let built = build(
+        engine.as_ref(),
+        &BuildOptions {
+            out_dir: out.clone(),
+            ..BuildOptions::for_project(&project)
+        },
+    )
+    .await
+    .expect("the project builds");
+    let module_spec = built
+        .definition
+        .manifest()
+        .modules
+        .iter()
+        .find(|m| m.name == "notes")
+        .expect("the module is in the manifest");
+    let source_dir = module_spec
+        .source_dir
+        .as_deref()
+        .expect("a module reached through node_modules is stamped like any other");
+    assert!(
+        source_dir.contains("node_modules/@acme/notes/src"),
+        "{source_dir}"
+    );
+    assert!(
+        out.join("migrations/004_vendor_notes.sql").exists(),
+        "the package's SQL must travel into the artifact"
+    );
+    let _ = std::fs::remove_dir_all(&project);
+    let _ = std::fs::remove_dir_all(&out);
+}

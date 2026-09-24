@@ -242,6 +242,45 @@ capabilities (design), latency histogram in metrics, an API reference page — a
   side, rejections, pool `in use` and `waiting`, what the process costs —
   because totals since boot answer the wrong question during an incident.
 
+- **Round 25 (2026-09-24): the shared layer.** A platform engineer at a
+  company with several services, whose first job is not a service but the
+  **layer every service will depend on**: an auth module, a billing module,
+  shared schemas, and two applications composing them against separate
+  databases. Verdict: *plain TypeScript package, unless your shared layer is
+  workspace packages inside the application monorepo* — because the one
+  thing `defineModule` uniquely owns, migrations, was exactly the thing that
+  stopped working where sharing actually happens. **A module shipped as an
+  npm package silently lost its SQL**: the bundler skipped `node_modules`
+  when stamping each module's source directory, so `./migrations/*.sql`
+  resolved from nowhere, the artifact carried no `migrations/`, and `usai db
+  migrate` printed success — a green deploy whose first request said
+  `column does not exist`. The same source as a workspace sibling worked
+  perfectly, which is what made it invisible. Second: **a module could not
+  declare its environment at all**, so every consumer mirrored the variable
+  into its own `env({})` by hand with nothing checking, and the failure was
+  a 500 on the first request that reached the module rather than a failed
+  activation — the round's second application still did not declare it and
+  activated cleanly. Third: **two auth schemes with one name merged in
+  silence**, the first describing both, so a cookie scheme was documented as
+  HTTP bearer and every generated client for the other route sent
+  `Authorization: Bearer` and got 401 forever. All three fixed, with the
+  rest: a duplicate workload id now names both declarers; the same module
+  reached twice (the diamond every shared layer grows) is one module rather
+  than a hard error; two different modules with one name is an error rather
+  than an ambiguous label; a declaration mistake no longer arrives dressed
+  as `compile failed: validator warm-up failed: guest fault:`; `usai config`
+  lists the modules and the effective glob order instead of only the
+  project's own globs, which in a modular application match nothing; `usai
+  dev` watches a workspace module package's sources, so editing the shared
+  layer no longer needs a stray `touch` in the application; and a task's
+  **input** is typed at the call site, which for a module's task is the half
+  of its surface a consumer most wants held. GUIDE §3 gained "A module as a
+  shared package" — the page the round said would have saved it most of the
+  session. Recorded rather than built: a module's resource configuration is
+  final (a consumer cannot widen its pool without the module agreeing), a
+  module carries no version into the manifest, and there is no `requires:`
+  to state that one module needs another.
+
 - **Round 24 (2026-09-24): an online schema change.** A database-owning
   engineer with a hard constraint — rename `invoices.due_date` (a `date`) to
   `invoices.due_at` (a `timestamptz`) on a table of tens of millions of

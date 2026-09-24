@@ -583,7 +583,13 @@ impl WasmEngine {
                 "usai:warm",
             )
             .await
-            .map_err(|e| EngineError::Compile(format!("validator warm-up failed: {e}")))?;
+            .map_err(|e| {
+                let text = e.to_string();
+                match text.strip_prefix("guest fault: Error: ") {
+                    Some(message) => EngineError::Declaration(message.to_owned()),
+                    None => EngineError::Compile(format!("validator warm-up failed: {text}")),
+                }
+            })?;
         guest.run_jobs(&mut store).await?;
         tracing::debug!(parses = warmed, "validators warmed before snapshot");
         // Collect the warm-up's garbage before the snapshot. QuickJS triggers

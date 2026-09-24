@@ -120,6 +120,53 @@ export default defineApp({
 
 The rule has one consequence worth stating plainly: **auto-discovery cannot work.** `fs.readdirSync("./routes")`, a glob, `import.meta.glob`, `require.context` and a dynamic `import(\`./routes/${name}\`)` all fail at build — the application is bundled and its manifest is read by evaluating the module in a world that has no filesystem, before any work runs (top-level `await` is out for the same reason). A route file nobody imports is not served; a build that produced no workloads says so, and so does the runtime at activation.
 
+### A module as a shared package
+
+A module is a directory, a workspace package or an installed npm package —
+all three load and run, and `defineModule` behaves the same in each. It is
+how a company with several services shares an auth layer or a billing layer,
+and there are four things to know before you build one.
+
+**A module is organisation, not a namespace.** Workload ids, queue topics,
+resource names and auth-scheme names are **global to the application**. Two
+modules with a `cleanup` task, or two modules whose auth scheme is called
+`session`, are refused at build with both owners named — a module cannot
+protect you from the collision, only tell you about it. Prefix what you
+declare (`billing.cleanup`, `billing-session`).
+
+**Its migrations live beside its own file.** Write `migrations:
+"./migrations/*.sql"` and put the SQL in the same directory as the
+`defineModule` call — the build stamps that directory, so the glob follows
+the module wherever it is installed, including under `node_modules`. If you
+publish the module, make sure its `files`/`exports` actually ship the `.sql`:
+a package that declares migrations and ships none warns at build and then
+deploys green with no table. `usai config` prints every module's source
+directory and the effective glob list, in order, with where each came from.
+
+**It declares what it needs from the environment.** `defineModule({ env:
+env({ BILLING_TAX_RATE: env.string() }) })` is merged into the application's
+contract, so a missing value fails **activation** rather than surfacing as a
+500 on the first request that reaches the module. The consuming application
+does not have to mirror anything; if it declares the same key itself, its
+declaration wins. Two modules declaring one key differently is a build
+error.
+
+**Its resources are shared by name and configured once.** A module that
+declares `postgres("main")` shares that resource with every other declarer
+of `main` — and every declaration must be *identical*, so a consuming
+application cannot give the module a bigger pool without the module
+agreeing. If a module needs its own database, give it its own name
+(`postgres("billing", { urlEnv: "BILLING_DATABASE_URL" })`).
+
+What a module does **not** give you: a version in the manifest (put it in
+`defineApp({ headers })` if you need one at runtime), a way to declare that
+it depends on another module (list both in the application; the same module
+reached twice is de-duplicated), and any isolation at all from the
+application's other workloads. What it does give you: `module:` on every
+workload in `usai inspect`, an OpenAPI tag per module, and ownership of the
+SQL. `usai dev` watches a workspace module package's sources, so editing the
+shared layer rebuilds without touching the application.
+
 ### Routes, services, repositories
 
 Handlers that hold business logic get ugly fast, and the layering most Express or Fastify teams end up with ports here unchanged — `routes.ts` declares, `service.ts` decides, `queries.ts` talks to the database, `schemas.ts` holds the contracts, `mapper.ts` shapes the response:

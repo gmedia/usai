@@ -263,16 +263,49 @@ export interface HttpOptions extends HttpContracts, WorkloadPolicies {
  *
  * @category Declarations
  */
-export interface TypedWorkload<Out = unknown> extends Workload {
+export interface TypedWorkload<Out = unknown, In = unknown> extends Workload {
   /** @internal phantom — never present at runtime */
   readonly __output?: Out;
+  /** @internal phantom — never present at runtime.
+   *
+   * A task's **input** is the half of its surface a consumer most wants the
+   * compiler to hold, and it was `unknown`: `ctx.tasks.invoke(issueInvoice)`
+   * with no input at all compiled, and so did passing `42`. The runtime's
+   * refusal is good (`input failed validation`, with the failing pointers),
+   * but it arrives at the first run rather than at the call. */
+  readonly __input?: In;
 }
 
 /** What `ctx.tasks.invoke` resolves to for a given task declaration.
  *
  * @category Declarations
  */
-export type TaskOutput<W> = W extends TypedWorkload<infer Out> ? Out : unknown;
+export type TaskOutput<W> = W extends TypedWorkload<infer Out, infer _In> ? Out : unknown;
+
+/** What `ctx.tasks.invoke`/`dispatch` accept for a given task declaration:
+ * the task's declared `input` schema, or anything when it declares none.
+ *
+ * @category Declarations
+ */
+export type TaskInput<W> = W extends TypedWorkload<infer _Out, infer In> ? In : unknown;
+
+/** The argument list of `ctx.tasks.invoke`/`dispatch` for a given task: the
+ * input is **required** when the task declares an `input` schema and absent
+ * when it does not, so neither "forgot the input" nor "passed one to a task
+ * that takes none" reaches the runtime. A task declared without a schema —
+ * or a bare `Workload`, which is what a module's consumer sees when it
+ * imports the declaration untyped — keeps the old permissive shape.
+ *
+ * @category Declarations
+ */
+export type TaskInputArgs<W> =
+  W extends TypedWorkload<infer _Out, infer In>
+    ? [In] extends [unknown]
+      ? unknown extends In
+        ? [input?: unknown]
+        : [input: In]
+      : [input: In]
+    : [input?: unknown];
 
 export interface Workload {
   /** @internal */
@@ -323,6 +356,9 @@ export interface ModuleDeclaration {
   readonly resources: readonly ResourceDeclaration[];
   readonly migrations: readonly string[];
   readonly seeders: readonly string[];
+  /** What this module needs from the environment, merged into the
+   * application's contract at build. */
+  readonly env?: EnvDeclaration<Record<string, EnvField<unknown>>>;
   /** The directory the declaration was written in (stamped by the build). */
   readonly sourceDir?: string;
 }
@@ -364,6 +400,18 @@ export interface DefineModuleOptions {
   /** Glob(s) for this module's seeder files, relative to the module's own
    * file or to the project root (the same rule as `migrations`). */
   seeders?: string | string[];
+  /** What this module needs from the environment, declared the same way an
+   * application declares its own (`env({ BILLING_TAX_RATE: env.string() })`).
+   *
+   * It is merged into the application's contract, so a missing or
+   * unparsable value **fails activation** rather than surfacing as a 500 on
+   * the first request that reaches the module — which is what happened when
+   * a module had no way to say this and every consumer had to mirror the
+   * variable into its own `env({})` by hand, with nothing checking that
+   * they had. A key declared by two modules must be declared identically;
+   * the application's own declaration of the same key wins, so a consumer
+   * can still widen or rename nothing but can tighten what it needs. */
+  env?: EnvDeclaration<Record<string, EnvField<unknown>>>;
   /** Filled in by the build, not by you: the directory the `defineModule`
    * call was written in, relative to the project root. It is what lets a
    * module's globs be written relative to the module itself — the runtime
@@ -397,6 +445,7 @@ export function defineModule(options: DefineModuleOptions): ModuleDeclaration {
     resources: options.resources ?? [],
     migrations: toList(options.migrations),
     seeders: toList(options.seeders),
+    ...(options.env === undefined ? {} : { env: options.env }),
     ...(options.sourceDir === undefined ? {} : { sourceDir: options.sourceDir }),
   };
 }
@@ -488,6 +537,8 @@ function toList(value: string | string[] | undefined): string[] {
 export function flatten(app: AppDeclaration): {
   workloads: Array<{ workload: Workload; module?: string }>;
   resources: Array<{ resource: ResourceDeclaration; module?: string }>;
+  /** The modules actually composed, each once, in declaration order. */
+  modules: ModuleDeclaration[];
 } {
   const workloads: Array<{ workload: Workload; module?: string }> = [];
   const resources: Array<{ resource: ResourceDeclaration; module?: string }> = [];
@@ -506,7 +557,7 @@ export function flatten(app: AppDeclaration): {
       JSON.stringify(existing.resource.env) === JSON.stringify(resource.env);
     if (!same) {
       throw new Error(
-        `resource "${resource.name}" is declared twice with different configuration (${existing.module ?? "app"} and ${where})`,
+        `resource "${resource.name}" is declared twice with different configuration (${existing.module === undefined ? "the application" : `module "${existing.module}"`} and ${where}). A resource is shared by name, so every declarer must configure it identically — a consumer cannot widen a module's pool without the module agreeing`,
       );
     }
   };
@@ -523,20 +574,38 @@ export function flatten(app: AppDeclaration): {
       }
     });
   };
+  // The same module reached twice — listed directly and re-exported by
+  // another module, the diamond every shared layer grows — is one module,
+  // not a collision. Identity, not name: two *different* modules calling
+  // themselves the same thing is a mistake worth naming, and it used to be
+  // accepted in silence, with `inspect` attributing workloads to an
+  // ambiguous label and OpenAPI merging their tags.
+  const seen = new Map<string, ModuleDeclaration>();
+  const listed: ModuleDeclaration[] = [];
   for (const module of app.modules ?? []) {
     if (!module || typeof module !== "object")
       throw new Error(
         `defineApp: modules contains ${module === undefined ? "undefined" : typeof module} — declared after use or a circular import?`,
       );
+    const already = seen.get(module.name);
+    if (already === module) continue;
+    if (already !== undefined)
+      throw new Error(
+        `two different modules are both called "${module.name}"; a module's name is what \`usai inspect\` and the OpenAPI tags attribute its workloads to, so it has to be unique in an application`,
+      );
+    seen.set(module.name, module);
+    listed.push(module);
+  }
+  for (const module of listed) {
     check(module.workloads, "workloads", `module "${module.name}"`);
     check(module.resources, "resources", `module "${module.name}"`);
     for (const workload of module.workloads) workloads.push({ workload, module: module.name });
-    for (const resource of module.resources) add(resource, module.name, `module ${module.name}`);
+    for (const resource of module.resources) add(resource, module.name, `module "${module.name}"`);
   }
   check(app.workloads, "workloads", `app "${app.name}"`);
   check(app.resources, "resources", `app "${app.name}"`);
   for (const workload of app.workloads) workloads.push({ workload });
-  for (const resource of app.resources) add(resource, undefined, "app");
+  for (const resource of app.resources) add(resource, undefined, "the application");
   // Resources referenced by workloads but declared nowhere are implicitly
   // application-level, so a developer can declare once and reference.
   for (const { workload, module } of workloads) {
@@ -544,10 +613,26 @@ export function flatten(app: AppDeclaration): {
       add(
         resource,
         undefined,
-        module ? `workload ${workload.name} in ${module}` : `workload ${workload.name}`,
+        module ? `workload ${workload.name} in module "${module}"` : `workload ${workload.name}`,
       );
   }
-  return { workloads, resources };
+  // Two workloads with the same id is refused by the runtime at install, by
+  // id alone: `duplicate workload id task:cleanup` and nothing about where
+  // either came from. Here the owners are still known — so say them, which
+  // with two vendored module packages is the difference between a grep and
+  // a glance.
+  const byId = new Map<string, string>();
+  for (const { workload, module } of workloads) {
+    const id = workloadId(workload);
+    const owner = module === undefined ? `the application` : `module "${module}"`;
+    const previous = byId.get(id);
+    if (previous !== undefined)
+      throw new Error(
+        `duplicate workload id ${id}: declared by ${previous} and by ${owner}. A module is organisation, not a namespace — ids are global to the application, so rename one of them`,
+      );
+    byId.set(id, owner);
+  }
+  return { workloads, resources, modules: listed };
 }
 
 export function workloadId(workload: Workload): string {

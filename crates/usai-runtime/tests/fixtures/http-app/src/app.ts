@@ -12,6 +12,7 @@ import {
   env,
   task,
   UsaiError,
+  type Workload,
 } from "@sakaladev/usai";
 import { z } from "zod";
 
@@ -431,7 +432,9 @@ export const undeclaredDispatch = http.get("/undeclared-dispatch", {}, async (ct
 
 export const badDispatch = http.get("/bad-dispatch", {}, async (ctx) => {
   try {
-    await ctx.tasks.dispatch({ name: "does-not-exist" } as never);
+    // A `Workload`-shaped value naming a task that does not exist: the
+    // compiler cannot know, and the runtime refuses it by name.
+    await ctx.tasks.dispatch({ name: "does-not-exist" } as unknown as Workload);
     return { ok: true };
   } catch (e) {
     return { code: (e as { usai: { code: string } }).usai.code };

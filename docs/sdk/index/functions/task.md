@@ -7,7 +7,7 @@ function task<I extends AnySchema | undefined = undefined, R extends ResourceDec
    name: string, 
    options: TaskOptions<I, R>, 
    handler: (ctx: TaskContext<I extends AnySchema ? Output<I> : unknown, R>) => Out
-): TypedWorkload<Awaited<Out>>;
+): TypedWorkload<Awaited<Out>, I extends AnySchema ? Output<I> : unknown>;
 ```
 
 Declare a task: a named unit of finite work that other workloads invoke
@@ -41,7 +41,7 @@ restart; for durable hand-off publish to a queue.
 
 ## Returns
 
-[`TypedWorkload`](../interfaces/TypedWorkload.md)\<`Awaited`\<`Out`\>\>
+[`TypedWorkload`](../interfaces/TypedWorkload.md)\<`Awaited`\<`Out`\>, `I` *extends* [`AnySchema`](../type-aliases/AnySchema.md) ? [`Output`](../type-aliases/Output.md)\<`I`\> : `unknown`\>
 
 ## Example
 

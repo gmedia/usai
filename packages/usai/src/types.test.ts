@@ -267,3 +267,54 @@ test("ctx.log offers every level the guest emits", () => {
   });`);
   assert.equal(out, "", out);
 });
+
+test("a task's input is typed at the call site, not only at the first run", () => {
+  // `invoke<W extends Workload>(task: W, input?: unknown)` typed the output
+  // precisely and the input not at all: calling a task that declares an
+  // `input` schema with **no input**, or with `42`, compiled. The runtime's
+  // refusal is good — `input failed validation` with the failing pointers —
+  // but it arrives at the first run, and for a module's task that is the
+  // half of its surface a consumer most wants held.
+  const ok = check(`
+    import { defineApp, http, task } from "@sakaladev/usai";
+    import { z } from "zod";
+    const issue = task("issue", { input: z.object({ customerId: z.string() }) }, async (ctx) => ({
+      id: ctx.input.customerId,
+    }));
+    export const r = http.get("/r", { response: z.object({ id: z.string() }) }, async (ctx) => {
+      return await ctx.tasks.invoke(issue, { customerId: "c1" });
+    });
+    export default defineApp({ name: "typed-input", workloads: [issue, r] });
+  `);
+  assert.equal(ok, "", ok);
+  for (const call of [
+    "await ctx.tasks.invoke(issue);",
+    "await ctx.tasks.invoke(issue, 42);",
+    "await ctx.tasks.dispatch(issue);",
+  ]) {
+    const out = check(`
+      import { http, task } from "@sakaladev/usai";
+      import { z } from "zod";
+      const issue = task("issue", { input: z.object({ customerId: z.string() }) }, async (ctx) => ({
+        id: ctx.input.customerId,
+      }));
+      export const r = http.get("/r", { response: z.object({}) }, async (ctx) => {
+        ${call}
+        return {};
+      });
+    `);
+    assert.notEqual(out, "", `should not compile: ${call}`);
+  }
+  // A task with no declared input keeps the permissive shape.
+  const bare = check(`
+    import { http, task } from "@sakaladev/usai";
+    import { z } from "zod";
+    const sweep = task("sweep", {}, async () => 1);
+    export const r = http.get("/r", { response: z.object({}) }, async (ctx) => {
+      await ctx.tasks.invoke(sweep);
+      await ctx.tasks.dispatch(sweep, { anything: true });
+      return {};
+    });
+  `);
+  assert.equal(bare, "", bare);
+});

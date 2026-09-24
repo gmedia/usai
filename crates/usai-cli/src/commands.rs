@@ -818,6 +818,35 @@ pub async fn config(root: &Path, json: bool) -> Result<()> {
         config.seeders.value.join("\n  "),
         config.seeders.source
     );
+    // The globs above are the *project's*. In a modular application they
+    // may match nothing at all — every migration comes from a module, whose
+    // globs are resolved relative to where its `defineModule` was written.
+    // A command whose whole job is "what is in effect and why" has to say
+    // so, or it answers wrongly for exactly the shape that needs it most.
+    let (definition, _) = definition_for_with(root, None, 8).await?;
+    let modules = &definition.manifest().modules;
+    if !modules.is_empty() {
+        println!("\nModules");
+        for module in modules {
+            println!("  {}", module.name);
+            if let Some(dir) = &module.source_dir {
+                println!("    source: ./{dir}");
+            }
+            for what in [
+                ("migrations", &module.migrations),
+                ("seeders", &module.seeders),
+            ] {
+                for glob in what.1 {
+                    println!("    {}: {glob}", what.0);
+                }
+            }
+        }
+        let globs = db::migration_globs(&definition, &config.migrations.value);
+        println!("\nEffective migration globs, in order");
+        for (glob, source) in globs {
+            println!("  {glob}\n    from: {source}");
+        }
+    }
     Ok(())
 }
 
@@ -895,6 +924,11 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
             ) {
                 return;
             }
+            // `.usai` is the build's own output; `node_modules` changes on
+            // `install`, which a rebuild follows anyway. A module shipped as
+            // a *workspace* package is reached through a symlink and its
+            // real path is not under either, so it is watched (above) and
+            // matched here like any other source.
             if event.paths.iter().any(|p| {
                 p.components()
                     .any(|c| c.as_os_str() == ".usai" || c.as_os_str() == "node_modules")
@@ -917,6 +951,38 @@ pub async fn dev(root: &Path, host: &str, port: u16) -> Result<()> {
     })?;
     use notify::Watcher as _;
     watcher.watch(&watch_root, notify::RecursiveMode::Recursive)?;
+    // A module shipped as a workspace package lives *outside* the
+    // application directory — `../../packages/auth/src/module.ts` — so
+    // nothing watched it: editing the shared layer changed nothing until
+    // you touched a file in the application as well. The build already
+    // knows where every input came from; watch the directories that are not
+    // under the root it is already watching.
+    let outside: std::collections::BTreeSet<PathBuf> = {
+        // Lexically, `<root>/../packages/auth/src` starts with `<root>` — and
+        // an input reached through a symlink out of the project is written
+        // exactly that way, so the comparison has to be on real paths.
+        let real_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+        let real_watch = std::fs::canonicalize(&watch_root).unwrap_or_else(|_| watch_root.clone());
+        let paths = watched.lock().expect("watched poisoned");
+        paths
+            .iter()
+            .filter_map(|p| std::fs::canonicalize(p).ok())
+            .filter(|p| !p.starts_with(&real_watch) && !p.starts_with(&real_root))
+            .filter_map(|p| p.parent().map(Path::to_path_buf))
+            .collect()
+    };
+    for dir in &outside {
+        if let Err(e) = watcher.watch(dir, notify::RecursiveMode::Recursive) {
+            tracing::debug!(dir = %dir.display(), error = %e, "could not watch a module's directory");
+        }
+    }
+    if !outside.is_empty() {
+        eprintln!(
+            "watching {} director{} outside the project (module packages)",
+            outside.len(),
+            if outside.len() == 1 { "y" } else { "ies" }
+        );
+    }
     // `.env` lives at the project root, which the application directory
     // need not contain: watch the root's own entries too (non-recursively),
     // so creating or editing `.env` re-activates without a source change.

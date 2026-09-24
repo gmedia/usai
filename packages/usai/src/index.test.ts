@@ -23,6 +23,7 @@ const {
   cron,
   queue,
   command,
+  auth,
 } = await import("./index.ts");
 
 const stringSchema = {
@@ -237,5 +238,154 @@ test("a declared admission budget reaches the manifest for every kind that takes
     "timeoutMs" in (byId["cron:sweep"]!.trigger as Record<string, unknown>),
     false,
     "the schedule states no second deadline",
+  );
+});
+
+test("a module reached twice is one module, and two of the same name is an error", () => {
+  // The diamond every shared layer grows: `auth` and `billing` both
+  // re-export `base`, and the application lists all three. It was a hard
+  // `duplicate workload id`, with no de-duplication even for the identical
+  // `ModuleDeclaration` object — a structural limit on how deep a shared
+  // layer can go.
+  const base = defineModule({ name: "base", workloads: [task("ping", {}, async () => 1)] });
+  const app = defineApp({ name: "diamond", modules: [base, base] });
+  assert.equal(describe(app).workloads.length, 1);
+  assert.deepEqual(describe(app).modules, [{ name: "base", migrations: [], seeders: [] }]);
+  // Two *different* modules with one name was accepted in silence, and
+  // `inspect` then attributed workloads to an ambiguous label.
+  assert.throws(
+    () =>
+      describe(
+        defineApp({
+          name: "twins",
+          modules: [
+            defineModule({ name: "same", workloads: [task("a", {}, async () => 1)] }),
+            defineModule({ name: "same", workloads: [task("b", {}, async () => 1)] }),
+          ],
+        }),
+      ),
+    /two different modules are both called "same"/,
+  );
+});
+
+test("a duplicate workload id names who declared it", () => {
+  // The runtime refuses it at install by id alone. Here the owners are
+  // still known, and with two vendored module packages that is the
+  // difference between a grep and a glance.
+  assert.throws(
+    () =>
+      describe(
+        defineApp({
+          name: "collide",
+          modules: [
+            defineModule({ name: "auth", workloads: [task("cleanup", {}, async () => 1)] }),
+            defineModule({ name: "billing", workloads: [task("cleanup", {}, async () => 1)] }),
+          ],
+        }),
+      ),
+    /duplicate workload id task:cleanup: declared by module "auth" and by module "billing"/,
+  );
+  assert.throws(
+    () =>
+      describe(
+        defineApp({
+          name: "collide2",
+          modules: [defineModule({ name: "m", workloads: [task("x", {}, async () => 1)] })],
+          workloads: [task("x", {}, async () => 1)],
+        }),
+      ),
+    /declared by module "m" and by the application/,
+  );
+});
+
+test("two auth schemes with one name is an error, not a silent merge", () => {
+  // The name *is* the OpenAPI security scheme. Two modules each calling
+  // theirs `session` used to pass in silence: the first one seen described
+  // both, so a cookie scheme was documented as HTTP bearer and every
+  // generated client for the second route sent `Authorization: Bearer` and
+  // got 401 forever. The resolvers ran correctly — which is what made it
+  // invisible.
+  const bearer = auth.bearer({
+    name: "session",
+    description: "module one",
+    resolve: async () => ({ userId: "x" }),
+  });
+  const cookie = auth.cookie({
+    name: "session",
+    cookie: "sid",
+    description: "module two",
+    resolve: async () => ({ userId: "x" }),
+  });
+  assert.throws(
+    () =>
+      describe(
+        defineApp({
+          name: "schemes",
+          modules: [
+            defineModule({
+              name: "one",
+              workloads: [http.get("/one", { auth: bearer }, async () => ({}))],
+            }),
+            defineModule({
+              name: "two",
+              workloads: [http.get("/two", { auth: cookie }, async () => ({}))],
+            }),
+          ],
+        }),
+      ),
+    /auth scheme "session" is declared twice with different configuration \(module "one" and module "two"\)/,
+  );
+  // One declaration reused by reference is the documented shape and stays fine.
+  const shared = describe(
+    defineApp({
+      name: "shared-scheme",
+      modules: [
+        defineModule({
+          name: "one",
+          workloads: [http.get("/one", { auth: bearer }, async () => ({}))],
+        }),
+        defineModule({
+          name: "two",
+          workloads: [http.get("/two", { auth: bearer }, async () => ({}))],
+        }),
+      ],
+    }),
+  );
+  assert.equal(shared.auth.length, 1);
+});
+
+test("a module declares what it needs from the environment", () => {
+  // A module had no way to say this, so every consuming application had to
+  // mirror the variable into its own `env({})` by hand and nothing checked
+  // that it had: `ctx.env.BILLING_TAX_RATE` was `undefined` even with the
+  // variable set in the process environment, and the failure was a 500 on
+  // the first request that reached the module — not at build, not at
+  // activation.
+  const billing = defineModule({
+    name: "billing",
+    env: env({ BILLING_TAX_RATE: env.string(), BILLING_CURRENCY: env.enum(["IDR", "USD"]) }),
+    workloads: [task("issue", {}, async () => 1)],
+  });
+  const m = describe(defineApp({ name: "shop", modules: [billing] }));
+  assert.deepEqual(m.env.map((e) => e.name).sort(), ["BILLING_CURRENCY", "BILLING_TAX_RATE"]);
+  // The application's own declaration of a key wins.
+  const tightened = describe(
+    defineApp({
+      name: "shop2",
+      modules: [billing],
+      env: env({ BILLING_TAX_RATE: env.optional(env.string()) }),
+    }),
+  );
+  assert.equal(tightened.env.find((e) => e.name === "BILLING_TAX_RATE")?.required, false);
+  // Two modules declaring one key differently would mean one silently takes
+  // the other's parse.
+  const other = defineModule({
+    name: "other",
+    env: env({ BILLING_TAX_RATE: env.int() }),
+    workloads: [task("x", {}, async () => 1)],
+  });
+  assert.throws(
+    () => describe(defineApp({ name: "shop3", modules: [billing, other] })),
+    /BILLING_TAX_RATE is declared differently by module "billing" and module "other"/,
   );
 });

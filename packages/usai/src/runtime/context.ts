@@ -2,7 +2,7 @@
 // (`docs/GUEST-ABI.md`). Everything asynchronous here is a host-owned
 // operation; nothing escapes the world's ownership.
 
-import type { ResourceDeclaration, TaskOutput, Workload } from "../declarations.ts";
+import type { ResourceDeclaration, TaskInputArgs, TaskOutput, Workload } from "../declarations.ts";
 import type {
   CacheLocalHandle,
   FetchInit,
@@ -72,7 +72,7 @@ export interface TaskHandle {
    * for its result, and cancelling this world cancels the child. The
    * child's thrown {@link UsaiError} is rethrown here. Use it when the
    * response depends on the task. */
-  invoke<W extends Workload>(task: W, input?: unknown): Promise<TaskOutput<W>>;
+  invoke<W extends Workload>(task: W, ...input: TaskInputArgs<W>): Promise<TaskOutput<W>>;
   /** An **ownership transfer**: the task runtime owns the child, which
    * starts once this world commits (its handler returned; for HTTP, the
    * response is committed) — a world that throws hands nothing off. This
@@ -82,7 +82,7 @@ export interface TaskHandle {
    * exist. Nobody receives the child's return value. Not durable across a
    * runtime restart (publish to a queue for that). Declare the edge with
    * `dispatches(from, task)`. */
-  dispatch(task: Workload, input?: unknown): Promise<{ id: string }>;
+  dispatch<W extends Workload>(task: W, ...input: TaskInputArgs<W>): Promise<{ id: string }>;
 }
 
 /**
@@ -351,8 +351,9 @@ export function makeBase(
   return {
     resources: makeResources(resources),
     tasks: {
-      invoke: (task, input) => op("task.invoke", { name: task.name, input: input ?? null }),
-      dispatch: (task, input) => op("task.dispatch", { name: task.name, input: input ?? null }),
+      invoke: (task, ...input) => op("task.invoke", { name: task.name, input: input[0] ?? null }),
+      dispatch: (task, ...input) =>
+        op("task.dispatch", { name: task.name, input: input[0] ?? null }),
     },
     queue: {
       publish: (topic, message, options) =>

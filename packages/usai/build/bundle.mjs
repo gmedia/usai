@@ -26,10 +26,21 @@ const stampModuleSource = {
   name: "usai-module-source",
   setup(build) {
     build.onLoad({ filter: /\.(ts|tsx|js|mjs|jsx)$/ }, async (args) => {
-      if (args.path.includes(`${sep}node_modules${sep}`)) return null;
+      // `node_modules` used to be skipped here, which meant a module
+      // *shipped as a package* — the way a shared layer is actually shared —
+      // never had its source directory stamped, so its migrations resolved
+      // from nowhere: `matches no file`, no `migrations/` in the artifact,
+      // and `db migrate` reporting success. A green deploy whose first
+      // request said `column does not exist`. The `defineModule` text check
+      // below is the cheap filter; the path no longer is.
       const { readFile } = await import("node:fs/promises");
       const text = await readFile(args.path, "utf8");
       if (!text.includes("defineModule")) return null;
+      // esbuild resolves symlinks, so a pnpm/yarn link lands on the real
+      // directory — which is where the package's SQL is. The path may be
+      // outside the project root (a workspace sibling, a store), and
+      // `relative` expresses that with `..`, which is exactly what the
+      // runtime's module-relative fallback joins against the root.
       const dir = relative(root, dirname(resolve(args.path)))
         .split(sep)
         .join("/");

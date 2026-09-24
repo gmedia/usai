@@ -170,7 +170,7 @@ Vocabulary used throughout:
 | [EnvField](interfaces/EnvField.md) | One declared variable: kind, whether it is required, and its parser. |
 | [EnvDeclaration](interfaces/EnvDeclaration.md) | The application's environment contract (`defineApp({ env })`). |
 | [EnvValues](type-aliases/EnvValues.md) | The typed values of a declaration: `EnvValues<typeof spec>`, where `spec` is what `env({...})` returned (a bare field map works too). |
-| [env](functions/env.md) | Declare what the application needs from its environment. Values are read by the host when a revision **activates** — a missing required variable or an unparsable value fails activation, never the first request — and reach handlers as `ctx.env`, parsed. Variables a resource names (`DATABASE_URL`, `baseUrlEnv`) are required by that resource and need no declaration here. `usai run` never reads `.env`; `usai dev` does. |
+| [env](functions/env.md) | Declare what the application needs from its environment. Values are read by the host when a revision **activates** — a missing required variable or an unparsable value fails activation, never the first request — and reach handlers as `ctx.env`, parsed. Variables a resource names (`DATABASE_URL`, `baseUrlEnv`) are required by that resource and need no declaration here. Everything else works the other way round: a variable **not** declared here is `undefined` in `ctx.env` even when it is set in the process environment — the contract is the whole of what a world can see. A module states its own with `defineModule({ env })`, which is merged into this one, so its consumers do not have to mirror it. `usai run` never reads `.env`; `usai dev` does. |
 | [resolveEnv](functions/resolveEnv.md) | Resolve declared values from a raw map (what the host does at activation). Throws on the first violation, naming the variable. |
 
 ## Passwords
@@ -203,7 +203,6 @@ Vocabulary used throughout:
 | [MANIFEST\_VERSION](variables/MANIFEST_VERSION.md) | The manifest format this SDK writes; the runtime states which formats it understands and refuses the others with a rebuild hint. |
 | [GUEST\_ABI](variables/GUEST_ABI.md) | The host↔guest contract this SDK's in-world runtime speaks (`docs/GUEST-ABI.md`). Stamped into `builtWith.abi`; a runtime with a different bridge refuses the artifact at install instead of faulting every world. |
 | [Manifest](interfaces/Manifest.md) | What `usai build` writes to `manifest.json`: the application as data — every workload with its trigger, contracts (JSON Schema) and policies, every resource with its secret-free configuration, the auth schemes, the environment contract. Mirrors the runtime's `Manifest` exactly. |
-| [describe](functions/describe.md) | Turn an [AppDeclaration](interfaces/AppDeclaration.md) into its [Manifest](interfaces/Manifest.md). The build phase calls it inside a capability-less world; call it yourself to assert on an application's shape in a unit test. Throws on a duplicate workload, a conflicting resource redeclaration, or a hole in a list. |
 
 ## Declarations
 
@@ -222,4 +221,5 @@ Vocabulary used throughout:
 | [RawRequestBody](interfaces/RawRequestBody.md) | The exact bytes of a raw request, decoded on demand: `await ctx.request.bytes()`, `await ctx.request.text()`, or `await ctx.request.json()`. Each is a method (the body is not read until asked for). |
 | [Declare](type-aliases/Declare.md) | The signature of `http.get`/`post`/…. |
 | [RawHandler](type-aliases/RawHandler.md) | The handler of `http.raw`. |
+| [describe](functions/describe.md) | - |
 | [StandardSchemaV1](namespaces/StandardSchemaV1/README.md) | - |

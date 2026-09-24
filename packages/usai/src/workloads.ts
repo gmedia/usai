@@ -100,7 +100,7 @@ export function task<
   name: string,
   options: TaskOptions<I, R>,
   handler: (ctx: TaskContext<I extends AnySchema ? Output<I> : unknown, R>) => Out,
-): TypedWorkload<Awaited<Out>> {
+): TypedWorkload<Awaited<Out>, I extends AnySchema ? Output<I> : unknown> {
   const policies: WorkloadPolicies = {};
   if (options.timeout !== undefined) policies.timeout = options.timeout;
   if (options.concurrency !== undefined) policies.concurrency = options.concurrency;
