@@ -58,7 +58,7 @@ research or a different product.
    policy (return a slot's pages after N seconds unused, pay the faults only
    on the first world after a quiet period) gives a small box both curves.
    Contained, measurable with the P8E cells, no ABI change. **Investigated
-   2026-09-23 (`docs/upstream/wasmtime-idle-decommit.md`), opened upstream as [#14399](https://github.com/bytecodealliance/wasmtime/issues/14399) on 2026-09-24: the kept region is
+   2026-09-23 (`docs/upstream/wasmtime-idle-decommit.md`), open upstream as [#14413](https://github.com/bytecodealliance/wasmtime/issues/14413) (2026-09-24; a first attempt, #14399, was closed under the Bytecode Alliance AI tool policy): the kept region is
    anonymous memory the pool zeroes — not the module's image, which arrives
    through the COW mapping — so releasing it has no correctness consequence.
    But its address belongs to Wasmtime's allocator and `keep_resident` is

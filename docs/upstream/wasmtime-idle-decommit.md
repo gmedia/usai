@@ -1,8 +1,12 @@
 # Releasing a pooling slot's kept-resident memory when it goes idle
 
-Status (2026-09-25): **opened as
-[bytecodealliance/wasmtime#14399](https://github.com/bytecodealliance/wasmtime/issues/14399)
-and closed the same day by a maintainer** under the Bytecode Alliance
+Status (2026-09-25): **open as
+[bytecodealliance/wasmtime#14413](https://github.com/bytecodealliance/wasmtime/issues/14413)**,
+filed by the maintainer of this repository under wasmtime's *Improvement*
+template — the four headings it answers are theirs. It is the second
+attempt; the first was
+[#14399](https://github.com/bytecodealliance/wasmtime/issues/14399),
+closed the same day by a maintainer under the Bytecode Alliance
 [AI tool policy](https://github.com/bytecodealliance/governance/blob/main/AI_TOOL_POLICY.md):
 *"This issue doesn't appear to comply with our policy on tool-generated
 content, and requires additional justification for why it is valuable enough
@@ -18,14 +22,16 @@ same week's #14357 was merged within a day — a small change, with tests,
 whose value was obvious against the time it cost to review. The difference
 is the policy's golden rule, not the subject matter.
 
-**What a compliant second attempt needs** (a maintainer decision, not an
-assistant's): someone here reads it, is satisfied it is worth a maintainer's
-time, posts it in their own words, and is ready to answer questions.
-`wasmtime-idle-decommit-issue-draft.md` beside this file is a starting
-point — about a fifth the length of the first attempt, because what got it
-closed was the cost of reading it, not the subject. Edit it until it is
-yours; if that is not worth the time right now, the honest answer is to
-leave it closed, because this is P9 scope and nothing depends on it.
+**What the second attempt did differently**: a person read it and judged it
+worth a maintainer's time before it was posted, and posted it themselves. It
+is also less than half the length, fitted to wasmtime's own template, and
+asks a question ("would you take a way for the embedder to release it?")
+rather than presenting a design. The draft it came from is
+`wasmtime-idle-decommit-issue-draft.md` beside this file.
+
+**If it is declined again**, that is their call about their own review time
+and nothing here depends on it: this is P9 scope. What we owe the thread if
+it is taken up is the before/after measurement below.
 
 The original framing follows, as a follow-up from the same embedder as the
 merged #14357. This is the second
