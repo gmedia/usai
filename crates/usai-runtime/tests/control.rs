@@ -492,38 +492,51 @@ async fn a_replaced_idle_revision_is_not_a_rollback_handle() {
         .unwrap();
     assert_eq!(r.status(), 200, "{}", r.text().await.unwrap());
 
-    // Nothing was in flight, so the revision it replaced retires itself —
-    // "at once" in the sense the page means, which is not the same as
-    // instantaneously. Poll for it rather than assert on the losing side of
-    // the very race this test exists to describe: the first version of this
-    // asserted the 404 straight away and became the most frequent red on
-    // main, failing on loaded runners and never here.
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    let status = loop {
-        let r = auth(client.post(format!("{base}/revisions/rev{replaced}/activate")))
-            .json(&json!({ "allowApplicationChange": true }))
+    // Nothing was in flight, so the revision it replaced retires itself.
+    // **Watch it, do not poke it.** The first version asserted the 404
+    // immediately and failed whenever the retirement had not landed yet; the
+    // second re-activated things in a loop to get back to a known state and
+    // just moved the race one revision along (`unknown revision rev2`).
+    // Reading `/revisions` changes nothing and cannot race with itself.
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let gone = loop {
+        let listed: Value = auth(client.get(format!("{base}/revisions")))
             .send()
             .await
+            .unwrap()
+            .json()
+            .await
             .unwrap();
-        let status = r.status();
-        if status == 404 || std::time::Instant::now() > deadline {
-            break status;
+        let still_there = listed
+            .as_array()
+            .map(|rs| rs.iter().any(|r| r["id"] == json!(replaced)))
+            .unwrap_or(false);
+        if !still_there {
+            break true;
         }
-        // It answered 200: it was still draining, so it *was* a rollback
-        // handle for that instant — and we have just used it. Put the new
-        // revision back and ask again.
-        let r = auth(client.post(format!("{base}/revisions/rev{next}/activate")))
-            .json(&json!({ "allowApplicationChange": true }))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(r.status(), 200, "{}", r.text().await.unwrap());
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        if std::time::Instant::now() > deadline {
+            break false;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
     };
+    assert!(
+        gone,
+        "a replaced revision with nothing in flight was still listed ten \
+         seconds later; the page tells operators it is not a rollback handle"
+    );
+
+    // And now that it is unlisted, the documented rollback is a 404 — which
+    // is the thing an operator discovers at the worst moment.
+    let r = auth(client.post(format!("{base}/revisions/rev{replaced}/activate")))
+        .json(&json!({ "allowApplicationChange": true }))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(
-        status, 404,
-        "a replaced revision with nothing in flight is still a rollback handle \
-         five seconds later; the page tells operators it is not"
+        r.status(),
+        404,
+        "the documented rollback answered: {}",
+        r.text().await.unwrap()
     );
 
     // And the rollback the document now describes does work: the artifact
