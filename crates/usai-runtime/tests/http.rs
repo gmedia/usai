@@ -2839,14 +2839,20 @@ async fn a_resource_reports_how_long_its_operations_took() {
     });
     let addr = rx.await.unwrap();
     let base = format!("http://{addr}");
-    // A route that leases the audit cache: an operation with real time in it.
-    let r = s
-        .client
-        .get(format!("{base}/counter"))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(r.status(), 200);
+    // A route that leases the audit cache. **Many** of them: one in-memory
+    // increment is hundreds of nanoseconds, and on a virtualised runner with
+    // a coarse monotonic clock a single operation can round to zero — which
+    // made the `> 0` assertion below fail on CI and never here. The contract
+    // is that the time is accounted, not that one cache hit is measurable.
+    for _ in 0..100 {
+        let r = s
+            .client
+            .get(format!("{base}/counter"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 200);
+    }
     let status: Value = s
         .client
         .get(format!("{base}/_usai/status"))
@@ -2871,8 +2877,8 @@ async fn a_resource_reports_how_long_its_operations_took() {
         timed
             .iter()
             .any(|r| r["detail"]["operationSecondsTotal"].as_f64().unwrap_or(0.0) > 0.0),
-        "{:?}",
-        timed
+        "a hundred leased operations accounted for no time at all, so the \
+         counter is not being added to: {timed:?}"
     );
     let metrics = s
         .client
