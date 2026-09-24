@@ -1634,8 +1634,14 @@ async fn a_message_being_handled_is_asked_to_stop_not_cancelled() {
     let input = json!({ "kind": "http", "request": { "method": "POST", "path": "/orders", "url": "/orders", "params": {}, "query": {}, "headers": {}, "body": { "json": { "orderId": "long-1" } } } });
     let r = f.runtime.invoke(&w, input).await.unwrap();
     assert_eq!(r.outcome.unwrap().unwrap()["status"], 200);
-    // Wait until the consumer has claimed it and the handler is looping.
-    tokio::time::sleep(Duration::from_millis(1200)).await;
+    // Wait until the handler is actually running: it says so before its
+    // loop. A fixed sleep here was flaky under a loaded suite, where
+    // claiming the message and creating its world can take seconds.
+    assert_eq!(
+        wait_for(&f, "long:started", 1, Duration::from_secs(20)).await,
+        json!(1),
+        "the consumer never started the message"
+    );
     // A replacement revision, so the counter can still be read over HTTP
     // after the old one retires.
     let b = f

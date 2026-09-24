@@ -261,6 +261,11 @@ export const orders = queue.consume(
     // it to stop (`ctx.signal`) and wait, not cancel it the moment the
     // consumer is told to stop claiming.
     if (ctx.message.orderId.startsWith("long")) {
+      // Said before the loop, so a test can wait for the handler to be
+      // *running* instead of sleeping a guessed interval — under a loaded
+      // suite, claiming the message and creating its world can take longer
+      // than any fixed sleep worth writing.
+      await (ctx.resources["seen"] as Seen).increment("long:started");
       let ticks = 0;
       while (!ctx.signal.aborted && ticks < 600) {
         await ctx.sleep("50ms");
