@@ -4,7 +4,14 @@
      closed because that was not true of the first attempt.
 
      Use the "Improvement" template (a feature request); its four headings
-     are below. The other three are bug reports and do not fit. -->
+     are below. The other three are bug reports and do not fit.
+
+     **Do not hard-wrap the paragraphs when pasting.** GitHub renders a
+     single newline inside an issue body as a <br>, unlike a .md file in a
+     repository — #14413 went up wrapped at 76 characters and came out with
+     21 forced line breaks. Nothing is lost, but the paragraphs read narrow
+     on a wide screen and wrap twice on a phone. Put each paragraph on one
+     long line; leave the code fence and the bullets alone. -->
 
 **Title:** pooling allocator: a way to release a slot's kept-resident memory when it goes idle
 
