@@ -242,6 +242,41 @@ capabilities (design), latency histogram in metrics, an API reference page — a
   side, rejections, pool `in use` and `waiting`, what the process costs —
   because totals since boot answer the wrong question during an incident.
 
+- **Round 18 (2026-09-24): a realtime developer** (eight years of `ws`,
+  Socket.IO, Redis pub-sub and sticky sessions) built a live dashboard —
+  WebSocket subscribe, fan-out from an HTTP write, presence, heartbeat,
+  reconnect, tests — from the public docs alone, in **20 minutes**. Verdict:
+  **"no, and the reason is one API, not the model"** — the sharpest verdict
+  any round has given, and the most useful. What the model got *right* is the
+  part that is hard in Node: because a world holds nothing, fan-out has to go
+  through a resource, and that means **the fan-out crosses replicas and needs
+  no sticky sessions** (measured: a client on replica A received an event
+  written on replica B in 1.28 s, presence counted cluster-wide, nothing
+  configured — where Socket.IO needs Redis, an adapter and `ip_hash`). The
+  documentation never said so, and the word "fan-out" appeared nowhere in it.
+  What it got wrong was `socket()`: a server-push loop can only live in
+  `open`, and while `open` ran the world never learned its client had left
+  (`ctx.signal` clear for 5.8 s past the close frame), `close` never ran
+  (717 leaked presence rows in one session — the normal end of a push loop is
+  `ctx.send` rejecting), and each disconnect was an ERROR line (506 in the
+  minute 250 tabs closed). All three fixed the same day, with a test that
+  fails without the fix; the remaining limitation — a socket either pushes or
+  converses, not both — is now stated where a socket developer reads rather
+  than left to be discovered. Also written from the round: the **fan-out
+  chapter** in GUIDE §9 with its price (≈4.8 queries per second per idle
+  viewer at a 200 ms poll, measured), the no-sticky-sessions paragraph in
+  §14, a corrected `USAI_SOCKET_IDLE_TIMEOUT` (server→client frames reset it
+  too, and a browser cannot send a ping frame from JavaScript), and a
+  realtime sizing paragraph — 3 000 viewers is 3 000 resident worlds, which
+  nothing has measured and the page now says so. Fixed on the way: a **race
+  between two commands in one project** on the config bundle, which had been
+  failing CI intermittently with "the module has no default export" on a
+  project that was fine. Recorded, not built: `socket()` has no `params`
+  contract (the one place C6 does not reach), a refused upgrade is
+  indistinguishable from a network failure at the browser, and `usai top`'s
+  per-request `cpu` column reads 0.00 for a connection-bound workload that is
+  spending CPU.
+
 - **Round 17 (2026-09-24): a data/reporting developer** (ten years of
   Node/PostgreSQL: Express, Knex, `pg-copy-streams`, BullMQ) built a
   reporting service from the public docs alone — bulk import, keyset-paginated

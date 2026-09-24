@@ -264,12 +264,35 @@ fn render(before: &Sample, now: &Sample) -> String {
     // started the page shows as `5xx 0`. Totals since boot answer "did
     // anything fail at all", which is a different question from "is it
     // failing now" and the one an arriving responder asks first.
+    // "6 refused before a world" without a reason sends the reader to the
+    // wrong knob — capacity, a bad route and a failed schema have nothing in
+    // common. The reasons are six fixed labels, so naming the non-zero ones
+    // costs nothing and finishes the sentence.
+    let mut why: Vec<String> = Vec::new();
+    for kind in [
+        "route",
+        "validation",
+        "auth",
+        "capacity",
+        "draining",
+        "other",
+    ] {
+        let n = now.u64(&["http", "rejections", kind]);
+        if n > 0 {
+            why.push(format!("{kind} {n}"));
+        }
+    }
     out.push_str(&format!(
-        "  since boot: {} requests, {} × 4xx, {} × 5xx, {} refused before a world\n",
+        "  since boot: {} requests, {} × 4xx, {} × 5xx, {} refused before a world{}\n",
         now.u64(&["http", "requests"]),
         now.u64(&["http", "responses_4xx"]),
         now.u64(&["http", "responses_5xx"]),
         now.u64(&["http", "rejected_before_world"]),
+        if why.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", why.join(", "))
+        }
     ));
 
     // Worlds alive per workload, summed over revisions. A stream or a
@@ -350,9 +373,12 @@ fn render(before: &Sample, now: &Sample) -> String {
             .then_with(|| b.2.cmp(&a.2))
             .then_with(|| a.0.cmp(&b.0))
     });
+    // Characters, not bytes: a workload id is a path and a path can carry
+    // anything, and `{:<width$}` pads by characters. Measuring in bytes
+    // makes one non-ASCII route shove every column right.
     let width = rows
         .iter()
-        .map(|r| r.0.len())
+        .map(|r| r.0.chars().count())
         .max()
         .unwrap_or(8)
         .clamp(8, 44);
@@ -660,6 +686,10 @@ mod tests {
                 .contains("since boot: 1200 requests, 7 × 4xx, 1 × 5xx, 3 refused before a world"),
             "{screen}"
         );
+        // And it names the reason: "3 refused" without one sends the reader
+        // to the wrong knob — capacity, a bad route and a failed schema have
+        // nothing in common.
+        assert!(screen.contains("(validation 4)"), "{screen}");
     }
 
     /// A restarted instance's counters go backwards. That is a fact about

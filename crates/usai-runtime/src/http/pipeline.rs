@@ -1459,7 +1459,15 @@ impl HttpHost {
         let (inbound_tx, inbound_rx) = tokio::sync::mpsc::channel::<Inbound>(64);
         let (outbound_tx, outbound_rx) = tokio::sync::mpsc::channel(64);
         let (link, accepted) = SocketLink::new(inbound_rx, outbound_tx);
-        let stop = compiled.revision.connections_stop();
+        // Per connection, and a child of the revision's drain token: a drain
+        // still stops every socket at once, and **this** socket also stops
+        // when *its own* client goes away. Without the child the only stop
+        // signal was the drain, so a handler looping in `open` never saw
+        // `ctx.signal` abort — it kept running, kept writing to the database
+        // and kept its world for as long as its loop lasted, with the client
+        // already gone. Measured by a realtime round: 5.8 s past the close
+        // frame, and 717 presence rows left behind over a session.
+        let stop = compiled.revision.connections_stop().child_token();
         let pump_stop = stop.clone();
         let cancel = CancellationToken::new();
         let pump_cancel = cancel.clone();
@@ -1529,7 +1537,18 @@ impl HttpHost {
                         tracing::warn!(world = %result.world, workload, code = v.code, "{}", v.message);
                     }
                     if let Some(Err(e)) = &result.outcome {
-                        tracing::error!(world = %result.world, workload, name = %e.name, error = %e.message, "socket handler failed");
+                        // A client that goes away is how most connections
+                        // end — a closed tab, a reconnect, a wifi blip — and
+                        // a stream says so at debug. A socket used to log an
+                        // ERROR per connection: 506 of them in the minute a
+                        // realtime round closed 250 dashboard tabs, which
+                        // pages whoever alerts on the error rate.
+                        if e.name == "client_gone" || e.message.contains("the connection is closed")
+                        {
+                            tracing::debug!(world = %result.world, workload, "socket ended with its client");
+                        } else {
+                            tracing::error!(world = %result.world, workload, name = %e.name, error = %e.message, "socket handler failed");
+                        }
                     }
                 }
                 Ok(Err(e)) => tracing::error!(workload, error = %e, "socket world failed"),

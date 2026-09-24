@@ -52,6 +52,9 @@ the human summary.
   sum and a count, and a mean hides a bimodal route), and **totals since
   boot**, because a rate screen cannot show an event that happened before its
   first sample and `-c 1` run right after an incident is exactly that case.
+  The refusal lines name the reason on both clocks (`capacity 42.0/s` for the
+  window, `(capacity 6)` since boot), because "6 refused" without one sends
+  the reader to the wrong knob.
   `-n <seconds>` is the window, `-c 1` prints one screen and exits,
   `--addr`/`--status-token` read `USAI_STATUS_ADDR`/`USAI_STATUS_TOKEN` like
   `usai probe`. Counters that go backwards (a restarted instance) read zero,
@@ -85,6 +88,32 @@ the human summary.
   Declaring it on a workload that has no request body — a task, a cron tick,
   a stream, a socket — is **refused at install** with the reason, rather than
   accepted and ignored.
+- **A WebSocket world learns that its own client left.** The only stop
+  signal a socket had was the revision's drain, so a handler looping in
+  `open` — which is how server push is written, and the only place to write
+  it — never saw `ctx.signal` abort: measured by a realtime round, the loop
+  kept running for 5.8 s past the client's close frame and kept writing to
+  the database with nobody there. Each connection now has its own stop token,
+  a child of the drain, and the connection ending cancels it.
+- **`close` runs however the connection ended.** It ran only after the
+  receive loop, which an `open` that threw never reached — and the normal end
+  of a push loop is `ctx.send` rejecting with `client_gone` once the client is
+  gone. So the one place an application can release what a connection held
+  was skipped exactly when it mattered: 717 presence rows were left behind in
+  one session. `close` now runs after a failed `open` too, and a client
+  leaving is no longer reported as a handler failure.
+- **A client going away is logged at debug, not ERROR.** A stream already
+  said so; a socket logged `socket handler failed` per connection — 506 lines
+  in the minute a round closed 250 dashboard tabs, which pages whoever alerts
+  on the error rate.
+- **Two commands in one project no longer race on the config bundle.**
+  `usai.config.ts` was bundled to a fixed path, so a `usai dev` rebuilding
+  while another command started could hand it a half-written module: the
+  truncated config evaluated to a wrong application entry and the build
+  failed with "the module has no default export" on a project that was fine.
+  The bundle is written to a unique path and the evaluated cache through a
+  rename. Found as an intermittent CI failure; it is a user-facing race, not
+  a test one.
 - **An artifact keeps its identity across a runtime upgrade**, and a test
   now holds the runtime to it. Identity is a hash of the manifest *as this
   runtime serializes it*, so a new optional field that is written even when

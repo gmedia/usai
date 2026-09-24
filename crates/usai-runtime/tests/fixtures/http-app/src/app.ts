@@ -581,6 +581,34 @@ export const chat = socket(
     },
   },
 );
+// The shape every realtime application needs: a push loop in `open`. It
+// must see its own client leave (`ctx.signal`), and `close` must run so the
+// connection's row is released — the normal end of such a loop is `ctx.send`
+// rejecting once the client is gone.
+export const pushLoop = socket(
+  "/push",
+  { outgoing: z.object({ i: z.number() }), resources: [audit] },
+  {
+    async open(ctx) {
+      const who = ctx.query["who"] ?? "anon";
+      await (ctx.resources["audit"] as Audit).set(`push:${who}`, "open");
+      let i = 0;
+      while (!ctx.signal.aborted) {
+        await ctx.send({ i: i++ });
+        await ctx.sleep("50ms");
+        if (i > 400) break;
+      }
+      await (ctx.resources["audit"] as Audit).set(`push:${who}`, `aborted after ${i}`);
+    },
+    async close(ctx) {
+      await (ctx.resources["audit"] as Audit).set(
+        `push-closed:${ctx.query["who"] ?? "anon"}`,
+        true,
+      );
+    },
+  },
+);
+
 export const socketLocalRead = http.get("/socket-local", {}, async () => ({
   sees: globalThis.__socketLocal ?? null,
 }));
@@ -765,6 +793,7 @@ export default defineApp({
     boundedStream,
     badEvent,
     chat,
+    pushLoop,
     socketLocalRead,
     memoryHog,
     crashy,

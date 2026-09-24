@@ -130,6 +130,12 @@ pub async fn pump(
         }
     }
     let _ = sink.close().await;
+    // However this connection ended — a close frame, an error, the client
+    // vanishing, the idle timeout — the world that serves it is done. `stop`
+    // is this connection's own token (a child of the revision's drain), so
+    // cancelling it aborts `ctx.signal` and returns `ctx.sleep` in that one
+    // world, which is how a handler looping in `open` learns its client left.
+    stop.cancel();
 }
 
 fn link(ctx: &OpContext) -> Result<Arc<SocketLink>, OpOutcome> {

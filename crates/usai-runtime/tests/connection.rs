@@ -378,6 +378,54 @@ async fn recv_json(
     }
 }
 
+/// The shape every realtime application needs — a server-push loop in
+/// `open` — and the three things that used to be wrong with it, measured by
+/// a realtime round on 0.0.10:
+///
+/// 1. the loop never saw its own client leave (`ctx.signal` stayed clear for
+///    5.8 s past the close frame, and the world kept writing to the database);
+/// 2. `close` never ran, because the normal end of such a loop is `ctx.send`
+///    rejecting with `client_gone` and an `open` that threw skipped it — 717
+///    presence rows were left behind over one session;
+/// 3. the disconnect was an ERROR line per connection (506 in the minute
+///    250 dashboard tabs closed).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_push_loop_sees_its_client_leave_and_its_close_handler_runs() {
+    let Some(s) = start().await else { return };
+    let (mut ws, response) = tokio_tungstenite::connect_async(format!("{}/push?who=dash", s.ws))
+        .await
+        .expect("upgrade");
+    assert_eq!(response.status(), 101);
+    // It is pushing.
+    assert_eq!(recv_json(&mut ws).await["i"], 0);
+    assert_eq!(recv_json(&mut ws).await["i"], 1);
+    assert_eq!(audit(&s.runtime, "push:dash").await, json!("open"));
+
+    // The client goes away without a handshake, the way a killed tab does.
+    drop(ws);
+
+    // The loop is bounded at 400 iterations × 50 ms = 20 s, so anything
+    // under a second proves the abort reached it rather than the loop
+    // running itself out.
+    let mut closed = Value::Null;
+    for _ in 0..40 {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        closed = audit(&s.runtime, "push-closed:dash").await;
+        if closed != Value::Null {
+            break;
+        }
+    }
+    assert_eq!(closed, json!(true), "close did not run for a push loop");
+    let after = audit(&s.runtime, "push:dash").await;
+    assert!(
+        after
+            .as_str()
+            .is_some_and(|v| v.starts_with("aborted after")),
+        "the loop did not see ctx.signal abort: {after}"
+    );
+    s.shutdown.cancel();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn socket_state_is_connection_local_and_ends_with_the_connection() {
     let Some(s) = start().await else { return };

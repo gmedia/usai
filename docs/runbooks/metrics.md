@@ -98,6 +98,10 @@ Label values:
   latency series would swamp every other number in it. For how long a socket
   or a service has been running, read `usai_workload_worlds_live{workload}`,
   which is the series that shows work in flight rather than work finished.
+  One consequence worth knowing when the numbers are reconciled: a stream is
+  **counted when its world ends**, so one still running is in
+  `usai_workload_worlds_live` and in no response counter yet — and one still
+  running when the process stops is never counted at all.
 - `usai_queue_messages_total{state}`: `claimed`, `done`, `retried`, `dead`,
   `invalid`, `reclaimed` (claimed by a consumer that died, returned for
   another attempt or dead-lettered). Per instance and revision, cumulative.

@@ -352,6 +352,8 @@ const CONFIG_FILE: &str = "usai.config.ts";
 /// Resolves `usai.config.ts` (if present) into the effective configuration.
 /// The file is bundled and evaluated in a capability-less world, so it can
 /// use TypeScript syntax but cannot perform I/O (contract C9).
+static CONFIG_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 pub async fn load_config(engine: &dyn Engine, root: &Path) -> Result<ProjectConfig, BuildError> {
     let config_path = root.join(CONFIG_FILE);
     let package_json = root.join("package.json");
@@ -370,9 +372,22 @@ pub async fn load_config(engine: &dyn Engine, root: &Path) -> Result<ProjectConf
         });
     }
     let (raw, source): (RawConfig, &'static str) = if config_path.exists() {
-        let outfile = root.join(".usai/config/usai.config.js");
+        // Unique per call. Two `usai` commands in one project — a `dev`
+        // rebuilding while a `db migrate` starts, or two tests — used to
+        // bundle the config to the *same* path and read each other's
+        // half-written file: the truncated module evaluated to a config
+        // whose `app` entry was wrong, and the build then failed with "the
+        // module has no default export" on a project that was fine.
+        let outfile = root.join(format!(
+            ".usai/config/usai.config.{}-{}.js",
+            std::process::id(),
+            CONFIG_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
         bundle(root, &config_path, &outfile).await?;
-        let code = Code::new(tokio::fs::read_to_string(&outfile).await?);
+        let bundled = tokio::fs::read_to_string(&outfile).await?;
+        let _ = tokio::fs::remove_file(&outfile).await;
+        let _ = tokio::fs::remove_file(outfile.with_extension("js.map")).await;
+        let code = Code::new(bundled);
         // Evaluating the config means building an image (hundreds of ms);
         // the result only depends on the bundled source, so cache it by its
         // digest next to the bundle.
@@ -410,14 +425,27 @@ pub async fn load_config(engine: &dyn Engine, root: &Path) -> Result<ProjectConf
                     Ok(v) => v,
                     Err(e) => return Err(not_declarative(&e).unwrap_or(BuildError::Engine(e))),
                 };
-                let _ = tokio::fs::write(
-                    &cached,
+                // Written through a unique temporary file and renamed:
+                // the cache is shared by every command in the project, and a
+                // reader must never see half of it.
+                let staging = cached.with_extension(format!(
+                    "json.{}-{}",
+                    std::process::id(),
+                    CONFIG_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                ));
+                if tokio::fs::write(
+                    &staging,
                     serde_json::to_vec(
                         &serde_json::json!({ "sha256": code.sha256, "config": value }),
                     )
                     .unwrap_or_default(),
                 )
-                .await;
+                .await
+                .is_ok()
+                {
+                    let _ = tokio::fs::rename(&staging, &cached).await;
+                }
+                let _ = tokio::fs::remove_file(&staging).await;
                 value
             }
         };

@@ -496,7 +496,28 @@ async function runSocket(workload: Workload, input: SocketInput): Promise<unknow
       await op("socket.close", { reason: reason ?? "" });
     },
   };
-  if (handlers.open) await handlers.open(ctx);
+  // `close` is the only place an application can release what the
+  // connection held — a presence row, a subscription, a counter — so it has
+  // to run however the connection ended. It used to run only after the
+  // receive loop, which an `open` that threw never reached: a realtime round
+  // left 717 presence rows behind because the normal end of a push loop is
+  // `ctx.send` rejecting with `client_gone` once the client is gone.
+  let failure: unknown;
+  if (handlers.open) {
+    try {
+      await handlers.open(ctx);
+    } catch (error) {
+      failure = error;
+    }
+  }
+  const clientGone = (error: unknown): boolean =>
+    isUsaiError(error) && (error as { usai?: { code?: string } }).usai?.code === "client_gone";
+  // A handler that failed for a real reason stops serving this connection;
+  // one that failed *because* the client left is the ordinary ending, and
+  // its close event is already waiting to be read below.
+  if (failure !== undefined && !clientGone(failure)) {
+    await op("socket.close", { reason: "" }).catch(() => {});
+  }
   for (;;) {
     const event = await op<SocketEvent>("socket.recv", "");
     if (!event || event.type === "close") {
@@ -531,9 +552,20 @@ async function runSocket(workload: Workload, input: SocketInput): Promise<unknow
       }).catch(() => {});
       continue;
     }
+    // A connection whose handler has already failed is drained, not served:
+    // the loop is only still here to learn how the connection ended.
+    if (failure !== undefined) continue;
     if (handlers.message) await handlers.message(ctx);
   }
-  if (handlers.close) await handlers.close(ctx);
+  if (handlers.close) {
+    try {
+      await handlers.close(ctx);
+    } catch (error) {
+      if (failure === undefined) failure = error;
+    }
+  }
+  // The client leaving is not a failure to report; every other error is.
+  if (failure !== undefined && !clientGone(failure)) throw failure;
   return null;
 }
 

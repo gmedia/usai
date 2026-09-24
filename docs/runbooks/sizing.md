@@ -28,6 +28,24 @@ Measured: 48 worlds served a 16-client burst of a PostgreSQL read at
 16 clients refused ≈half (admission working as designed); the production
 compose runs 48.
 
+**A realtime application is sized differently, and the arithmetic surprises
+people.** A dashboard's connections are not throughput, they are *residents*:
+3 000 viewers is 3 000 worlds held for hours, so `--max-worlds` has to be
+above the peak **viewer** count before a single HTTP request has a slot, and
+the memory rule (`40 MiB + touched slots × 4…8 MiB`) puts that at several
+gigabytes. The worked examples on this page stop at 48 because that is what
+the qualification campaigns ran; nothing here has been measured at thousands
+of connections, and a deployment that needs it should measure its own before
+promising it. Two knobs make the number smaller: give the socket workload its
+own `concurrency:` so a flood of viewers cannot take the budget an API route
+needs, and put the fan-out on SSE (`http.stream`) rather than a WebSocket
+where the screen is one-way — it costs the same world but resumes by itself
+with `last-event-id` and needs no heartbeat (GUIDE §9). Past the budget an
+upgrade is refused with `503` before the `101`, counted in
+`usai_http_rejections_total{reason="capacity"}`; the browser sees
+`close 1006` with an empty reason, which its reconnect logic cannot tell
+from a network failure.
+
 ## 2. `pool.max` — how many worlds may hold a connection
 
 `postgres("db", { pool: { max } })` (default 16) bounds the connections an
