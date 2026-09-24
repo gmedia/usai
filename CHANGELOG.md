@@ -153,10 +153,11 @@ Everything else is additive or a fix to behaviour that was wrong.
   the terminal is the `app` target plus WARN and above; everything is still
   kept for `app.logs()`. `USAI_TEST_LOGS=all` or `=none` to change it.
 - **`usai test` typechecks first** (`--no-typecheck` skips it), like `usai
-  build` already did. A suite could be green over code that does not compile,
-  and the mistakes TypeScript catches here are the ones the runtime cannot:
-  an option key that is not in the shape is dropped by the SDK, so `retry: {
-  delay: "100ms" }` for `baseMs` ran the default and said nothing.
+  build` already did — **both** projects, the application's and the test
+  files'. A suite could be green over code that does not compile, and the
+  mistakes TypeScript catches here are the ones the runtime cannot: an option
+  key that is not in the shape is dropped by the SDK, so `retry: { delay:
+  "100ms" }` for `baseMs` ran the default and said nothing.
 - **A failed `usai db migrate` in `testApp` shows what the command printed**,
   both streams, instead of `exited with code 1` alone.
 - **`usai inspect` says where each contract is actually checked.** It printed

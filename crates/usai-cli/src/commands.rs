@@ -30,14 +30,27 @@ fn engine_with(capacity: u32) -> Arc<dyn usai_runtime::engine::Engine> {
 /// without checking them, so this is the only place a type error is caught
 /// before it ships. `None` when the project has no tsconfig or no typescript.
 pub async fn typecheck(root: &Path) -> Option<Result<(), String>> {
-    let tsconfig = root.join("tsconfig.json");
+    typecheck_project(root, "tsconfig.json").await
+}
+
+/// The test files' own project, when the scaffold's split exists. A test
+/// lives outside the application's `tsconfig.json` — it imports `node:test`,
+/// which a world does not have — so checking only that one leaves every test
+/// file unchecked, including a colocated `src/**/*.test.ts`, which `usai
+/// test` runs.
+pub async fn typecheck_tests(root: &Path) -> Option<Result<(), String>> {
+    typecheck_project(root, "tsconfig.test.json").await
+}
+
+async fn typecheck_project(root: &Path, project: &str) -> Option<Result<(), String>> {
+    let tsconfig = root.join(project);
     let tsc = root.join("node_modules/typescript/bin/tsc");
     if !tsconfig.exists() || !tsc.exists() {
         return None;
     }
     let output = tokio::process::Command::new("node")
         .arg(&tsc)
-        .args(["-p", "tsconfig.json", "--noEmit", "--pretty", "false"])
+        .args(["-p", project, "--noEmit", "--pretty", "false"])
         .current_dir(root)
         .output()
         .await
@@ -1773,8 +1786,15 @@ pub async fn test(root: &Path, args: Vec<String>, no_typecheck: bool) -> Result<
     // catches here are exactly the ones the runtime cannot: an option key
     // that is not in the shape is dropped by the SDK, so a `retry: { delay }`
     // for `baseMs` runs the declared default and nothing says a word.
-    if !no_typecheck && let Some(Err(report)) = typecheck(&config.root).await {
-        anyhow::bail!("TypeScript errors (run with --no-typecheck to skip):\n{report}");
+    if !no_typecheck {
+        for checked in [
+            typecheck(&config.root).await,
+            typecheck_tests(&config.root).await,
+        ] {
+            if let Some(Err(report)) = checked {
+                anyhow::bail!("TypeScript errors (run with --no-typecheck to skip):\n{report}");
+            }
+        }
     }
     usai_runtime::build::build(engine.as_ref(), &BuildOptions::from_config(&config)).await?;
     let me = std::env::current_exe().context("cannot locate the usai binary")?;

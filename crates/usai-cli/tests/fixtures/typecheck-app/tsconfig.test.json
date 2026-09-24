@@ -1,9 +1,5 @@
 {
   "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "types": ["node"],
-    "lib": ["ES2022", "DOM"]
-  },
   // `exclude` is inherited, and the application's project excludes
   // `**/*.test.ts` — which would leave this project with no inputs at all.
   // This is the test files' project; it excludes nothing.
