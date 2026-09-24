@@ -4,5 +4,5 @@
     "types": ["node"],
     "lib": ["ES2022", "DOM"]
   },
-  "include": ["test"]
+  "include": ["test", "src/**/*.test.ts"]
 }

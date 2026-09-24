@@ -254,6 +254,21 @@ impl TaskQueue {
                 let cancel = shutdown.child_token();
                 tokio::spawn(async move {
                     let _permit = permit;
+                    // Named on every line below, because `id` is
+                    // `task:send-welcome#d7` — the dispatch's own id — and
+                    // `LogFilter.workload` in the test harness matches the
+                    // workload, not that. The request id is what joins a
+                    // dispatched task's failure to the request that handed it
+                    // off, which is the documented way to assert on
+                    // fire-and-forget work and did not work for the half that
+                    // matters.
+                    let workload = dispatched.workload.clone();
+                    let request_id = dispatched
+                        .input
+                        .get("requestId")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_owned();
                     let admitted =
                         runtime.admit_in_flight(&dispatched.revision, &dispatched.workload);
                     // The queue's hold on the revision ends here; the
@@ -263,7 +278,7 @@ impl TaskQueue {
                         Ok(a) => a,
                         Err(e) => {
                             queue.failed.fetch_add(1, Ordering::SeqCst);
-                            tracing::error!(task = %id, error = %e, "dispatched task could not be admitted");
+                            tracing::error!(task = %id, workload = %workload, request_id = %request_id, error = %e, "dispatched task could not be admitted");
                             return;
                         }
                     };
@@ -278,7 +293,7 @@ impl TaskQueue {
                         Ok(result) => match (&result.termination, &result.outcome) {
                             (Termination::Completed, Some(Ok(_))) => {
                                 queue.completed.fetch_add(1, Ordering::SeqCst);
-                                tracing::debug!(task = %id, world = %result.world, parent = %dispatched.parent, "task completed");
+                                tracing::debug!(task = %id, workload = %workload, request_id = %request_id, world = %result.world, parent = %dispatched.parent, "task completed");
                             }
                             (termination, outcome) => {
                                 queue.failed.fetch_add(1, Ordering::SeqCst);
@@ -300,12 +315,12 @@ impl TaskQueue {
                                     }
                                     (Termination::Completed, _) => ("completed".to_owned(), "no outcome".to_owned()),
                                 };
-                                tracing::warn!(task = %id, world = %result.world, %termination, %error, "task failed");
+                                tracing::warn!(task = %id, workload = %workload, request_id = %request_id, world = %result.world, %termination, %error, "task failed");
                             }
                         },
                         Err(e) => {
                             queue.failed.fetch_add(1, Ordering::SeqCst);
-                            tracing::error!(task = %id, error = %e, "task execution failed");
+                            tracing::error!(task = %id, workload = %workload, request_id = %request_id, error = %e, "task execution failed");
                         }
                     }
                 });

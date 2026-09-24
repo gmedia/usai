@@ -242,6 +242,47 @@ capabilities (design), latency histogram in metrics, an API reference page — a
   side, rejections, pool `in use` and `waiting`, what the process costs —
   because totals since boot answer the wrong question during an incident.
 
+- **Round 23 (2026-09-24): a test-suite audit.** A senior engineer who lives
+  in the test suite, answering one question for a team lead: *can we gate a
+  deploy on a suite written against this harness?* Ten items — boundary
+  validation, PostgreSQL with cleanup between tests, auth and its 401, an
+  invoked and a dispatched task, a queue consumer through retry to
+  dead-letter, a cron tick without the clock, SSE, a WebSocket, a lifecycle
+  violation, a log assertion — covered by one 180-line file that went green
+  **on its first run in under seven minutes** and stayed stable across
+  repeats. Verdict: yes for that surface, with four conditions, and the
+  conditions were the findings. The worst: **`testApp({ migrate: true })`
+  failed in three of four test files** — `usai test` runs files in parallel,
+  each shells out to `usai db migrate`, and the staging directory is one path
+  under `.usai/build`, so each build deleted the files the others were
+  writing; the CI recipe printed in GUIDE §15 did not work for any project
+  with a second test file. Builds take a lock now, and four concurrent
+  `usai inspect` on a cold project is a passing test. Next: the schedulers
+  were **live** inside a harness that documents itself as deterministic — a
+  `* * * * *` cron fired mid-run, and two files' queue consumers took each
+  other's messages (four attempts seen by one, two by its neighbour) — so
+  they are off by default, with `schedulers: true` for the tests that need
+  the real retry path; a runner killed by a CI cancel **orphaned the
+  runtime**, which went on holding its database pool (`--exit-with-parent`);
+  the runtime's `task failed` line carried neither the request id nor the
+  workload, so the documented way to observe a dispatched task covered only
+  the case that went right; `RUST_LOG=warn` silently deleted every
+  application log line and with it `app.logs()`; and `usai inspect` claimed
+  "validated before world creation" for a task's `input` and a socket's
+  `message`, which have no host-side validator at all — `inspect` is C8's one
+  source of truth and was describing a boundary the runtime does not have.
+  Also fixed: `usai test` now typechecks (a suite could be green over code
+  that does not compile, and an option key the SDK drops is exactly what only
+  `tsc` catches), the harness prints the application's log rather than the
+  runtime's narration, a failed `db migrate` shows what it printed, and
+  `docs/sdk/` says it describes `main` rather than the last release — a
+  reader on the published 0.0.9 was being told the bug they had just hit was
+  already fixed. Recorded, not built: **there is no coverage story** —
+  handlers run in the guest, so `--experimental-test-coverage` reports
+  nothing about the application at all, which is a decision for a team lead
+  rather than a defect; and no transaction-per-test rollback, because the
+  harness has no database handle by design.
+
 - **Round 22 (2026-09-24): a TypeScript type-surface audit.** A developer
   who reads the `.d.ts` before the guide, asking one question of every
   public type: *does the compiler say what the runtime says?* Thirteen

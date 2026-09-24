@@ -30,6 +30,21 @@ export interface TestAppOptions {
    * configured database before starting — for tests on a throwaway
    * database. Migrations are never run at startup by the runtime itself. */
   migrate?: boolean | { seed?: boolean | string };
+  /** Run the background schedulers: cron, queue consumers and services.
+   *
+   * **Off by default**, because a test run is supposed to be deterministic
+   * and they are not: a `* * * * *` schedule fires in the middle of a test
+   * from the wall clock, and — since `usai test` runs test files in
+   * parallel against one database — two files' consumers take each other's
+   * queue messages, so a retry test sees four attempts and its neighbour
+   * sees two. `app.cron(name).run()`, `app.queue(topic).deliver(msg)` and
+   * `app.task(name).invoke()` drive that work explicitly instead, one
+   * delivery at a time.
+   *
+   * Turn them on for the tests that need the real scheduler — retry,
+   * backoff and dead-lettering end to end — and give those a database of
+   * their own (`env: { DATABASE_URL }`). */
+  schedulers?: boolean | { cron?: boolean; queue?: boolean; services?: boolean };
 }
 
 /** One HTTP response from the application under test: `body` is the
@@ -46,7 +61,12 @@ export interface TestResponse {
   bytes: Uint8Array;
   /** Lifecycle violations the request's world committed (`detached_work`,
    * …), from the `x-usai-lifecycle` header the harness's runtime exposes.
-   * A request that followed the rules has `[]`; assert on it. */
+   * A request that followed the rules has `[]`; assert on it.
+   *
+   * **Codes only**, because a response header is all a client gets. The
+   * other `violations` — {@link WorkOutcome.violations}, from `invoke` and
+   * `run` — is `{ code, message }[]`: there the harness holds the world's
+   * own result, and a violation's message *is* its explanation. */
   violations: string[];
 }
 
@@ -88,6 +108,9 @@ export interface WorkOutcome<T = unknown> {
    * termination must not fail to typecheck in an existing test. */
   termination: Termination;
   durationMs: number;
+  /** The world's lifecycle violations, with the message that explains each
+   * one. The response-side {@link TestResponse.violations} is `string[]` —
+   * codes only — because a response header is all a client gets. */
   violations: Array<{ code: string; message: string }>;
   /** Everything the world logged: the parsed `fields`, the workload and the
    * request id included, so a test that has the outcome does not have to go
@@ -306,10 +329,16 @@ function runCli(binary: string, args: string[], env: Record<string, string>): Pr
   return new Promise((resolve, reject) => {
     const child = spawn(binary, args, {
       env: { ...process.env, ...env },
-      stdio: ["ignore", "ignore", "pipe"],
+      stdio: ["ignore", "pipe", "pipe"],
     });
+    // Both streams: a command that failed before it could log writes its
+    // reason wherever it got to, and `exited with code 1` on its own names
+    // nothing a test author can act on.
     let stderr = "";
     child.stderr!.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.stdout!.on("data", (chunk: Buffer) => {
       stderr += chunk.toString();
     });
     child.once("error", (error) =>
@@ -318,7 +347,13 @@ function runCli(binary: string, args: string[], env: Record<string, string>): Pr
     child.once("exit", (code) =>
       code === 0
         ? resolve()
-        : reject(new UsaiTestError(`usai ${args.join(" ")} exited with code ${code}\n${stderr}`)),
+        : reject(
+            new UsaiTestError(
+              `usai ${args.join(" ")} exited with code ${code}\n${
+                stderr.trim() === "" ? "  (it printed nothing)" : stderr
+              }`,
+            ),
+          ),
     );
   });
 }
@@ -374,6 +409,16 @@ export async function testApp(options: TestAppOptions = {}): Promise<TestApp> {
   const token = `test-${Math.random().toString(36).slice(2)}`;
   // --diagnostics: the runtime reports lifecycle violations and error details
   // to the client, which is what a test wants to assert on.
+  const schedulers =
+    options.schedulers === true
+      ? { cron: true, queue: true, services: true }
+      : options.schedulers === undefined || options.schedulers === false
+        ? { cron: false, queue: false, services: false }
+        : {
+            cron: options.schedulers.cron ?? false,
+            queue: options.schedulers.queue ?? false,
+            services: options.schedulers.services ?? false,
+          };
   const args = [
     "--log-format",
     "json",
@@ -386,6 +431,9 @@ export async function testApp(options: TestAppOptions = {}): Promise<TestApp> {
     "127.0.0.1:0",
     "--announce",
     "--diagnostics",
+    ...(schedulers.cron ? [] : ["--no-cron"]),
+    ...(schedulers.queue ? [] : ["--no-queue"]),
+    ...(schedulers.services ? [] : ["--no-services"]),
     ...(options.args ?? []),
   ];
   const child: ChildProcess = spawn(binary, args, {
@@ -394,6 +442,10 @@ export async function testApp(options: TestAppOptions = {}): Promise<TestApp> {
       USAI_CONTROL_TOKEN: token,
       // No load balancer in front of a test runtime: stop at once on SIGINT.
       USAI_DRAIN_GRACE: "0",
+      // `close()` covers the happy path; a CI cancel or a `kill -9` on the
+      // test runner does not call it, and the runtime it started would go on
+      // serving — holding its database pool — until the machine is rebooted.
+      USAI_EXIT_WITH_PARENT: "1",
       // The runtime's own lines at WARN; the application's at INFO so
       // `app.logs()` sees what the handlers wrote.
       RUST_LOG: process.env["RUST_LOG"] ?? "warn,app=info",
@@ -406,16 +458,31 @@ export async function testApp(options: TestAppOptions = {}): Promise<TestApp> {
   // words in the terminal.
   const kept: LogLine[] = [];
   const waiters = new Set<(line: LogLine) => void>();
+  // What reaches the terminal: the application's own lines (a `console.log`
+  // in a handler is a debugging tool and must show), and anything the
+  // runtime says at WARN or above. Its INFO narration is kept for
+  // `app.logs()` but not printed — it was a wall of JSON between every two
+  // test results. `USAI_TEST_LOGS=all` prints everything; `=none` prints
+  // nothing.
+  const forward = process.env["USAI_TEST_LOGS"] ?? "problems";
   createInterface({ input: child.stderr! }).on("line", (raw) => {
-    process.stderr.write(`${raw}\n`);
-    if (!raw.startsWith("{")) return;
+    if (!raw.startsWith("{")) {
+      if (forward !== "none") process.stderr.write(`${raw}\n`);
+      return;
+    }
     let line: LogLine;
     try {
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       line = normalizeLogLine(parsed);
     } catch {
+      if (forward !== "none") process.stderr.write(`${raw}\n`);
       return;
     }
+    const interesting =
+      forward === "all" ||
+      (forward !== "none" &&
+        (line.target === "app" || line.level === "WARN" || line.level === "ERROR"));
+    if (interesting) process.stderr.write(`${raw}\n`);
     kept.push(line);
     if (kept.length > 10_000) kept.splice(0, kept.length - 10_000);
     for (const waiter of waiters) waiter(line);

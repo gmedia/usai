@@ -11,5 +11,11 @@
     "types": ["@sakaladev/usai/globals"],
     "skipLibCheck": true
   },
-  "include": ["src", "usai.config.ts"]
+  "include": ["src", "usai.config.ts"],
+  // A test file is not application code: it imports `node:test` and the
+  // `node` types, which the application's own build must not have. Tests
+  // live in `test/` (tsconfig.test.json) — and colocating one under
+  // `src/` is allowed too, because `usai test` finds `src/**/*.test.ts`
+  // and a file the runner runs must not be one the build refuses.
+  "exclude": ["**/*.test.ts"]
 }

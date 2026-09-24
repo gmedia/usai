@@ -336,6 +336,21 @@ export const handOff = dispatches(
   }),
   echoRequestId,
 );
+// The other half of a hand-off: the task that *fails*. Nothing the
+// application writes survives it, so the only record is the runtime's own
+// `task failed` line — which has to carry the request id and the workload,
+// or the documented way to assert on fire-and-forget work covers only the
+// case that went right.
+export const throwingDispatched = task("always-throws", {}, async () => {
+  throw new Error("the dispatched task failed");
+});
+export const handOffFailing = dispatches(
+  http.get("/request-id/hand-off-failing", {}, async (ctx) => {
+    await ctx.tasks.dispatch(throwingDispatched);
+    return { id: ctx.requestId };
+  }),
+  throwingDispatched,
+);
 export const lastDispatched = http.get("/request-id/last", { resources: [audit] }, async (ctx) => ({
   last: await (ctx.resources["audit"] as Audit).get("last-request-id"),
 }));
@@ -795,6 +810,8 @@ export default defineApp({
     startLong,
     echoRequestId,
     handOff,
+    handOffFailing,
+    throwingDispatched,
     lastDispatched,
     single,
     invokesSingle,

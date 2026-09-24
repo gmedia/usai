@@ -320,6 +320,30 @@ pub fn inspect(definition: &ApplicationDefinition, default_timeout_ms: u64) -> S
             ("message", c.message.is_some()),
         ] {
             if present {
+                // Only the kinds with a host-side boundary are checked
+                // before a world exists: HTTP and stream routes (params,
+                // query, headers, body), a socket's upgrade (params, query,
+                // headers) and a queue message. A task's `input` and a
+                // socket's `message` are parsed **in the world** — there is
+                // no host validator for them — and saying otherwise made
+                // `inspect` claim a C6 boundary the runtime does not have,
+                // and then explain the in-world parse as "the schema
+                // transforms or refines" about schemas that do neither.
+                let host_checked = match &w.trigger {
+                    Trigger::Http { .. } | Trigger::Stream { .. } => {
+                        matches!(slot, "params" | "query" | "headers" | "body")
+                    }
+                    Trigger::Socket { .. } => matches!(slot, "params" | "query" | "headers"),
+                    Trigger::Queue { .. } => slot == "message",
+                    _ => false,
+                };
+                if !host_checked {
+                    let _ = writeln!(
+                        out,
+                        "    {slot}: validated in the world (this kind has no host-side boundary)"
+                    );
+                    continue;
+                }
                 let once = c.boundary_final.iter().any(|f| f == slot);
                 let _ = writeln!(
                     out,

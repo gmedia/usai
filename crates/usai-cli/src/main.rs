@@ -30,6 +30,13 @@ struct Cli {
     /// Show the runtime's INFO logs for one-shot commands too (RUST_LOG overrides)
     #[arg(long, short = 'v', global = true)]
     verbose: bool,
+    /// Exit when the process that started this one does. For a supervisor
+    /// that cannot clean up after itself — a test runner killed by a CI
+    /// cancel, an editor task — which otherwise leaves a runtime serving,
+    /// holding its database pool, for as long as the machine lives
+    /// (USAI_EXIT_WITH_PARENT)
+    #[arg(long, global = true, env = "USAI_EXIT_WITH_PARENT", value_parser = clap::builder::FalseyValueParser::new())]
+    exit_with_parent: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -221,6 +228,10 @@ enum Command {
     },
     /// Run the project's tests with `usai/test` pointed at this binary
     Test {
+        /// Skip the TypeScript check (`tsc --noEmit`) that runs when the
+        /// project has a tsconfig.json and typescript installed
+        #[arg(long)]
+        no_typecheck: bool,
         /// Arguments passed to `node --test` (default: the project's test files)
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
@@ -409,6 +420,24 @@ fn bound_malloc_arenas() {
 #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
 fn bound_malloc_arenas() {}
 
+/// Asks the kernel to signal this process when its parent dies, and checks
+/// once in case the parent died between the fork and this call. Linux only;
+/// elsewhere it is a no-op and the caller keeps whatever supervision it has.
+fn exit_when_parent_dies() {
+    #[cfg(target_os = "linux")]
+    {
+        let started_under = unsafe { libc::getppid() };
+        // SAFETY: PR_SET_PDEATHSIG takes the signal number by value.
+        unsafe {
+            libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+        }
+        // The parent may already have gone; the signal would never come.
+        if unsafe { libc::getppid() } != started_under {
+            std::process::exit(0);
+        }
+    }
+}
+
 fn main() {
     bound_malloc_arenas();
     tokio::runtime::Builder::new_multi_thread()
@@ -420,6 +449,9 @@ fn main() {
 
 async fn async_main() {
     let cli = Cli::parse();
+    if cli.exit_with_parent {
+        exit_when_parent_dies();
+    }
     // Servers narrate (revisions, images, listeners); one-shot commands print
     // their result and stay quiet unless asked.
     let serves = matches!(
@@ -434,8 +466,23 @@ async fn async_main() {
     } else {
         "usai=warn,usai_runtime=warn,app=info"
     };
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| default_filter.into())
+    // A `RUST_LOG` that names no level for `app` keeps the application's own
+    // lines at INFO. `RUST_LOG=warn` is the most ordinary thing an operator
+    // or a CI job types, and without this it silently removed every
+    // `ctx.log`/`console.*` line the application wrote — which also blinds
+    // `app.logs()` and `app.waitForLog()` in the test harness, whose failure
+    // then reads "0 lines seen" and points at the application. An explicit
+    // `app=` directive still wins.
+    let from_env = std::env::var("RUST_LOG").ok().filter(|v| !v.is_empty());
+    let names_app = from_env
+        .as_deref()
+        .is_some_and(|v| v.split(',').any(|d| d.trim_start().starts_with("app")));
+    let mut filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| default_filter.into());
+    if from_env.is_some() && !names_app {
+        filter = filter.add_directive("app=info".parse().expect("directive"));
+    }
+    let filter = filter
         .add_directive("cranelift_codegen=warn".parse().expect("directive"))
         .add_directive("cranelift_frontend=warn".parse().expect("directive"))
         .add_directive("wasmtime_cranelift=warn".parse().expect("directive"))
@@ -619,7 +666,7 @@ async fn async_main() {
         Command::Db {
             action: DbAction::Seed { name },
         } => commands::db_seed(&root, name.as_deref()).await,
-        Command::Test { args } => commands::test(&root, args).await,
+        Command::Test { no_typecheck, args } => commands::test(&root, args, no_typecheck).await,
         Command::Bench {
             path,
             concurrency,

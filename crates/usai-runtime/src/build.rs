@@ -73,6 +73,16 @@ pub enum BuildError {
     Bundle(String),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
+    /// A bare `io: No such file or directory (os error 2)` names nothing an
+    /// operator can act on — not the file, not the step. Every read of a
+    /// built artifact says which file and what it was doing.
+    #[error("could not {op} {path}: {source}")]
+    IoAt {
+        op: &'static str,
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error(transparent)]
     Engine(#[from] EngineError),
     #[error("manifest produced by the SDK is invalid: {0}")]
@@ -508,7 +518,90 @@ impl BuildOptions {
     }
 }
 
+/// An exclusive lock on one project's build directory, held for as long as
+/// the guard lives.
+///
+/// Two processes building the same project at once used to destroy each
+/// other: the staging directory is one path under `out_dir`, so the first
+/// thing each build does — `remove_dir_all(.staging)` — deleted the files
+/// the other was writing, and a third process reading `app.js` mid-rename
+/// loaded half a bundle (`the application bundle did not register
+/// __usai_sdk.describe`). That is not an exotic case: `usai test` runs test
+/// files **in parallel** and each `testApp({ migrate: true })` shells out to
+/// `usai db migrate`, so a project's second test file was enough. Measured
+/// before this lock: four concurrent `usai inspect` on a cold `.usai`, one
+/// succeeded and three failed.
+pub struct BuildLock {
+    _file: std::fs::File,
+}
+
+impl BuildLock {
+    /// Blocks until no other process is building into `out_dir`. The lock
+    /// file sits beside the directory rather than inside it, because a build
+    /// may replace the directory's contents wholesale.
+    pub async fn acquire(out_dir: &Path) -> Result<Self, BuildError> {
+        let path = lock_path(out_dir);
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        // `flock` blocks, and a build takes seconds: off the async threads.
+        let file = tokio::task::spawn_blocking(move || -> std::io::Result<std::fs::File> {
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .write(true)
+                .open(&path)?;
+            // SAFETY: a valid fd owned by `file` for the duration of the call.
+            let rc =
+                unsafe { libc::flock(std::os::unix::io::AsRawFd::as_raw_fd(&file), libc::LOCK_EX) };
+            if rc != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(file)
+        })
+        .await
+        .map_err(|e| BuildError::Io(std::io::Error::other(e.to_string())))??;
+        Ok(Self { _file: file })
+    }
+}
+
+fn lock_path(out_dir: &Path) -> PathBuf {
+    let name = out_dir
+        .file_name()
+        .map(|n| format!("{}.lock", n.to_string_lossy()))
+        .unwrap_or_else(|| "build.lock".to_owned());
+    match out_dir.parent() {
+        Some(parent) => parent.join(name),
+        None => PathBuf::from(name),
+    }
+}
+
 pub async fn build(engine: &dyn Engine, options: &BuildOptions) -> Result<BuildOutput, BuildError> {
+    let _lock = BuildLock::acquire(&options.out_dir).await?;
+    build_locked(engine, options).await
+}
+
+/// The definition a command should execute: the artifact already in
+/// `out_dir` when it is newer than every source it was built from, a fresh
+/// build otherwise — **decided and performed under one lock**, so several
+/// `usai` processes on one project cooperate instead of deleting each
+/// other's staging directory. Checking outside the lock is not enough: two
+/// processes both read "stale" and both build.
+pub async fn load_or_build(
+    engine: &dyn Engine,
+    options: &BuildOptions,
+) -> Result<Arc<ApplicationDefinition>, BuildError> {
+    let _lock = BuildLock::acquire(&options.out_dir).await?;
+    if options.out_dir.join("manifest.json").exists() && artifact_is_current(&options.out_dir) {
+        return load_artifact(&options.out_dir).await;
+    }
+    Ok(build_locked(engine, options).await?.definition)
+}
+
+async fn build_locked(
+    engine: &dyn Engine,
+    options: &BuildOptions,
+) -> Result<BuildOutput, BuildError> {
     let code_path = options.out_dir.join("app.js");
     let manifest_path = options.out_dir.join("manifest.json");
     // Everything that can fail happens against a staging directory, because
@@ -715,9 +808,25 @@ pub async fn load_artifact_trusted(
 }
 
 pub async fn load_artifact(dir: &Path) -> Result<Arc<ApplicationDefinition>, BuildError> {
+    let manifest_path = dir.join("manifest.json");
     let manifest: Manifest =
-        serde_json::from_slice(&tokio::fs::read(dir.join("manifest.json")).await?)?;
-    let code = Code::new(tokio::fs::read_to_string(dir.join("app.js")).await?);
+        serde_json::from_slice(&tokio::fs::read(&manifest_path).await.map_err(|source| {
+            BuildError::IoAt {
+                op: "read the artifact's manifest",
+                path: manifest_path,
+                source,
+            }
+        })?)?;
+    let code_path = dir.join("app.js");
+    let code = Code::new(
+        tokio::fs::read_to_string(&code_path)
+            .await
+            .map_err(|source| BuildError::IoAt {
+                op: "read the artifact's bundle",
+                path: code_path,
+                source,
+            })?,
+    );
     let definition = ApplicationDefinition::new(manifest, code)?;
     let definition = match read_source_map(&dir.join("app.js")).await {
         Some(map) => definition.with_source_map(map),

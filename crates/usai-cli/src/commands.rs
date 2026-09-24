@@ -203,15 +203,15 @@ async fn definition_for_with(
         return Ok((definition, engine));
     }
     let config = load_config(engine.as_ref(), root).await?;
-    let dir = config.out_dir.value.clone();
+    // Deciding and building under one lock, rather than checking here and
+    // building after: `usai test` runs test files in parallel and each
+    // `testApp({ migrate: true })` shells out to `usai db migrate`, so a
+    // project's *second* test file was enough for two of these to race on
+    // one `.usai/build`. Measured before the lock: four concurrent `usai
+    // inspect` on a cold project, one succeeded and three failed.
     let definition =
-        if dir.join("manifest.json").exists() && usai_runtime::build::artifact_is_current(&dir) {
-            load_artifact(&dir).await?
-        } else {
-            usai_runtime::build::build(engine.as_ref(), &BuildOptions::from_config(&config))
-                .await?
-                .definition
-        };
+        usai_runtime::build::load_or_build(engine.as_ref(), &BuildOptions::from_config(&config))
+            .await?;
     Ok((definition, engine))
 }
 
@@ -1765,9 +1765,17 @@ pub async fn bench(root: &Path, path: &str, concurrency: usize, duration: Durati
 
 /// `usai test`: builds the project once (so the first `testApp` is fast),
 /// then runs `node --test` with USAI_BIN pointing at this binary.
-pub async fn test(root: &Path, args: Vec<String>) -> Result<()> {
+pub async fn test(root: &Path, args: Vec<String>, no_typecheck: bool) -> Result<()> {
     let engine = engine();
     let config = load_config(engine.as_ref(), root).await?;
+    // `usai build` typechecks and `usai test` did not, so a suite could be
+    // green over code that does not compile — and the things TypeScript
+    // catches here are exactly the ones the runtime cannot: an option key
+    // that is not in the shape is dropped by the SDK, so a `retry: { delay }`
+    // for `baseMs` runs the declared default and nothing says a word.
+    if !no_typecheck && let Some(Err(report)) = typecheck(&config.root).await {
+        anyhow::bail!("TypeScript errors (run with --no-typecheck to skip):\n{report}");
+    }
     usai_runtime::build::build(engine.as_ref(), &BuildOptions::from_config(&config)).await?;
     let me = std::env::current_exe().context("cannot locate the usai binary")?;
     let mut command = tokio::process::Command::new("node");

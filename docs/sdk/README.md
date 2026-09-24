@@ -1,5 +1,12 @@
 # @sakaladev/usai v0.0.9
 
+> **These pages describe `main`, not the last release.** They are generated
+> from the SDK sources in this repository, so they can document a surface a
+> published package does not have yet; `CHANGELOG.md` says what is still
+> unreleased. For the reference that matches what you installed, read the
+> `.d.ts` in your own `node_modules/@sakaladev/usai`.
+
+
 ## Modules
 
 | Module | Description |

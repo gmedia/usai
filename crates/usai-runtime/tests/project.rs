@@ -435,3 +435,42 @@ async fn migrations_seeders_and_typed_env_end_to_end() {
     runtime.shutdown().await;
     let _ = Value::Null;
 }
+
+/// Several `usai` processes on one project build into one `.usai/build`, and
+/// the staging directory is a single path inside it — so the first thing
+/// each build does (`remove_dir_all(.staging)`) deleted the files the other
+/// was writing, and a reader mid-rename loaded half a bundle. This is not an
+/// exotic case: `usai test` runs test files **in parallel** and each
+/// `testApp({ migrate: true })` shells out to `usai db migrate`, so a
+/// project's second test file was enough. Measured before the lock: four
+/// concurrent `usai inspect` on a cold project, one succeeded and three
+/// failed with a bare `io: No such file or directory`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_builds_of_one_project_cooperate() {
+    let Some(root) = root() else { return };
+    let out = out_dir("concurrent");
+    let options = BuildOptions {
+        out_dir: out.clone(),
+        ..BuildOptions::for_project(&root)
+    };
+    let mut set = tokio::task::JoinSet::new();
+    for _ in 0..4 {
+        let options = options.clone();
+        set.spawn(async move {
+            let engine = usai_runtime::engine::from_env(8).unwrap();
+            usai_runtime::build::load_or_build(engine.as_ref(), &options)
+                .await
+                .map(|d| d.name().to_owned())
+        });
+    }
+    let mut names = Vec::new();
+    while let Some(joined) = set.join_next().await {
+        names.push(joined.expect("task").expect("every build succeeds"));
+    }
+    assert_eq!(names.len(), 4);
+    assert!(
+        names.windows(2).all(|w| w[0] == w[1]),
+        "the four builds did not agree on the application: {names:?}"
+    );
+    let _ = std::fs::remove_dir_all(&out);
+}

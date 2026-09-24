@@ -61,6 +61,24 @@ test("the harness keeps the runtime's log and joins a request with the tasks it 
     assert.equal(line.level, "INFO");
     assert.equal(line.target, "app");
     assert.deepEqual(line.fields, { requestId: "support-ticket-42" });
+    // The half that matters: a dispatched task that *fails* leaves nothing
+    // of the application's behind, so the runtime's own line is the only
+    // record — and it carried neither the request id nor the workload, so
+    // the documented idiom (`logs({ requestId })`, "including the tasks it
+    // dispatched") found nothing at all for the failure case. `task=` is the
+    // dispatch's own id (`task:always-throws#d1`), which `workload` does not
+    // match.
+    const failing = await app.http.get("/request-id/hand-off-failing", {
+      headers: { "x-request-id": "ticket-43" },
+    });
+    assert.equal(failing.status, 200, failing.text);
+    const failure = await app.waitForLog({
+      requestId: "ticket-43",
+      workload: "task:always-throws",
+      message: "task failed",
+    });
+    assert.equal(failure.level, "WARN");
+    assert.match(failure.message, /task failed/);
     // Both hand-offs — the invoked child and the dispatched one — carry the id
     // (two worlds; the second line may land after the first was seen).
     await app.waitForLog({

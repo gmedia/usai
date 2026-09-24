@@ -108,6 +108,72 @@ new artifact on the old runtime, which is not a supported combination.
 
 Everything else is additive or a fix to behaviour that was wrong.
 
+### Testing
+
+- **Several `usai` processes on one project no longer destroy each other's
+  build.** The staging directory is one path under `.usai/build`, so the first
+  thing each build does — `remove_dir_all(.staging)` — deleted the files the
+  other was writing, and a reader mid-rename loaded half a bundle (`the
+  application bundle did not register __usai_sdk.describe`). That is not an
+  exotic case: `usai test` runs test files **in parallel** and each
+  `testApp({ migrate: true })` shells out to `usai db migrate`, so a project's
+  *second* test file was enough — the CI recipe in GUIDE §15 did not work as
+  written. Measured before the fix: four concurrent `usai inspect` on a cold
+  project, one succeeded and three failed. Deciding "is the artifact current"
+  and building now happen under one lock.
+- **`testApp` does not run the background schedulers.** Cron, queue consumers
+  and services are off by default, because a test run is supposed to be
+  deterministic and they are not: a `* * * * *` schedule fires from the wall
+  clock in the middle of a test, and — since test files run in parallel
+  against one database — two files' consumers take each other's messages (one
+  file saw four attempts of its own poison message, its neighbour saw two).
+  `app.cron().run()`, `app.queue().deliver()` and `app.task().invoke()` drive
+  that work explicitly. For the tests that need the real scheduler — retry,
+  backoff and dead-lettering end to end — `testApp({ schedulers: true })`
+  turns it back on; give those files a database of their own.
+- **A killed test runner no longer leaves a runtime serving.** `close()`
+  covers the happy path; a CI cancel or a `kill -9` does not call it, and the
+  runtime went on holding its database pool until the machine was rebooted.
+  The harness now starts it with `USAI_EXIT_WITH_PARENT=1`, and
+  `--exit-with-parent` / `USAI_EXIT_WITH_PARENT` is available to any
+  supervisor that cannot clean up after itself.
+- **The runtime's `task failed` line carries the request id and the
+  workload.** It had neither — only `task="task:send-welcome#d7"`, the
+  dispatch's own id, which no `LogFilter` matches — so the documented way to
+  observe fire-and-forget work (`app.logs({ requestId })`, "including the
+  tasks it dispatched") covered only the case that went right. The failure is
+  the one worth asserting on.
+- **A `RUST_LOG` that names no level for `app` keeps the application's lines
+  at INFO.** `RUST_LOG=warn` is the most ordinary thing a CI job sets, and it
+  silently deleted every `ctx.log`/`console.*` line — which also blinded
+  `app.logs()` and `app.waitForLog()`, whose failure then reads "0 lines
+  seen" and points at the application. An explicit `app=` directive wins.
+- **The harness prints the application's log, not the runtime's narration.**
+  A 17-test suite had a wall of JSON between every two results. What reaches
+  the terminal is the `app` target plus WARN and above; everything is still
+  kept for `app.logs()`. `USAI_TEST_LOGS=all` or `=none` to change it.
+- **`usai test` typechecks first** (`--no-typecheck` skips it), like `usai
+  build` already did. A suite could be green over code that does not compile,
+  and the mistakes TypeScript catches here are the ones the runtime cannot:
+  an option key that is not in the shape is dropped by the SDK, so `retry: {
+  delay: "100ms" }` for `baseMs` ran the default and said nothing.
+- **A failed `usai db migrate` in `testApp` shows what the command printed**,
+  both streams, instead of `exited with code 1` alone.
+- **`usai inspect` says where each contract is actually checked.** It printed
+  "validated before world creation" for every declared contract, including a
+  task's `input` and a socket's `message` — which are parsed **in the world**,
+  because no host-side validator exists for those kinds — and then explained
+  the in-world parse as "the schema transforms or refines" about schemas that
+  do neither. `inspect` is the one source of truth about what the runtime
+  understood (C8); it must not describe a boundary the runtime does not have.
+- **The scaffold's `tsconfig.json` excludes `**/*.test.ts`**, so a test
+  colocated under `src/` — which `usai test` discovers — is not a file the
+  build refuses.
+- **The SDK reference says which sources it describes.** `docs/sdk/` carried
+  the package's version number and nothing else, so on `main` it documents a
+  surface the published package does not have yet, and told readers the bug
+  they were hitting was already fixed.
+
 ### CLI
 
 - **`usai queue prune --dry-run` applies `--older-than`.** It counted by
