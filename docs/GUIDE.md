@@ -618,7 +618,7 @@ test("users", async () => {
 
 A `WARN connection quarantined: original query has no terminal outcome` in a test run is not a failure: the harness ends worlds while statements are still in flight, and a connection whose outcome the runtime cannot prove is replaced rather than reused (C5, `docs/runbooks/postgres-down.md`). It is the contract working.
 
-In CI, the tests need the binary and a PostgreSQL. On the pure-npm path the wrapper (`@sakaladev/usai`'s `bin/usai.mjs`; `USAI_RELEASE_BASE` for a mirror) downloads the release binary **on first use**, not during `pnpm install` — so the download happens inside the first `usai` command of the job and belongs in the cache, and a service container is the database:
+Tests that touch PostgreSQL need one running: the scaffold's `compose.yaml` has a `postgres:18` service, and without Docker any supported PostgreSQL does (15–18; `SUPPORTED.md`) — a system package, a managed development instance — because the runtime needs nothing but a `DATABASE_URL` it can reach and creates its own tables. Point it at a database that may be wiped. In CI, the tests need the binary and a PostgreSQL. On the pure-npm path the wrapper (`@sakaladev/usai`'s `bin/usai.mjs`; `USAI_RELEASE_BASE` for a mirror) downloads the release binary **on first use**, not during `pnpm install` — so the download happens inside the first `usai` command of the job and belongs in the cache, and a service container is the database:
 
 ```yaml
 # .github/workflows/test.yml

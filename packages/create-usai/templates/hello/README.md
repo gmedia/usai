@@ -32,7 +32,7 @@ docker build -t my-app . && docker run --rm -p 3000:3000 my-app
   are built into the artifact, so production runs the same command against
   the artifact (`usai db migrate --artifact /app/.usai/build`) — nothing
   copies SQL files to a server.
-- `compose.yaml` / `Dockerfile` — the Docker paths above; delete them if you do not use Docker.
+- `compose.yaml` / `Dockerfile` — the Docker paths above; delete them if you do not use Docker. **Without Docker**, any supported PostgreSQL will do (15–18; see the project's `SUPPORTED.md`) — a system package, a container you already run, a managed development instance: the runtime needs nothing but a `DATABASE_URL` it can reach, and `pnpm usai db migrate` creates its own tables.
 - `pnpm-workspace.yaml` — allows esbuild's build script (pnpm blocks dependency scripts by default); npm/yarn users can delete it.
 - The `usai` binary: `pnpm usai …` runs it through the SDK (cache `~/.cache/usai/<version>`); or install it from https://github.com/gmedia/usai/releases (or `cargo build --release -p usai-cli` from the repository) and call `usai` directly.
 - `pnpm usai keygen` → `pnpm usai build --sign usai-signing.key` → run with `--require-signature <public key>`; `*.key` is git-ignored.
