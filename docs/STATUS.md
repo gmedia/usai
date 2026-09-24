@@ -658,9 +658,13 @@ capabilities (design), latency histogram in metrics, an API reference page — a
   ready at the end, zero ceiling hits, and a charged peak inside the headroom
   claim — so the envelope is a test and not a dated measurement. It needs
   Docker, a throwaway database and a release build, and says which is missing
-  rather than failing, because a check that cannot run is not a failure. Its
-  skip path is verified; its assertions run on the qualification host once the
-  24 h soak frees it.
+  rather than failing, because a check that cannot run is not a failure. Its skip path
+  was verified when it was written; **its assertions ran for the first time
+  on 2026-09-24**, on VM 47 with the shipping binary, once the 24 h soak
+  freed the host — `template/192m` peaked at **93 MiB charged with zero
+  ceiling hits**, `hello/64m` stayed alive and ready, and the published
+  envelope holds. Until that run the numbers were still only a dated
+  measurement, which is exactly the criticism that produced the script.
 
 - **Round 20 (2026-09-24): an operator upgrading a live 0.0.9 deployment**
   to the current build, with the real 0.0.9 release binary and SDK on one
