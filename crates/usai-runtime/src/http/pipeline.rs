@@ -1420,7 +1420,7 @@ impl HttpHost {
                                         tracing::warn!(
                                             world = %result.world,
                                             workload,
-                                            duration_ms = result.duration.as_secs_f64() * 1000.0,
+                                            duration_ms = crate::observability::duration_ms(result.duration),
                                             "stream reached its declared timeout; the client received a 200 and a body that ended early"
                                         );
                                         deadline_ended = true;
@@ -1639,7 +1639,7 @@ impl HttpHost {
                         tracing::warn!(
                             world = %result.world,
                             workload,
-                            duration_ms = result.duration.as_secs_f64() * 1000.0,
+                            duration_ms = crate::observability::duration_ms(result.duration),
                             "socket reached its declared timeout; its connection was closed and `close` ran"
                         );
                     }
@@ -1711,7 +1711,7 @@ impl HttpHost {
                     world = %result.world,
                     workload,
                     request_id = result.request_id.as_deref().unwrap_or(""),
-                    duration_ms = result.duration.as_secs_f64() * 1000.0,
+                    duration_ms = crate::observability::duration_ms(result.duration),
                     cpu_us = result.cpu.as_micros() as u64,
                     "deadline exceeded; the world was cancelled and the client got 504"
                 );

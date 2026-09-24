@@ -557,7 +557,7 @@ pub fn trace_world(result: &WorkResult, revision: &str) {
         // `0`, and the runbook's own "is it waiting or computing" ratio —
         // `cpu_us` over `duration_ms` — came out at 123 % and 259 % for the
         // fast routes, which is the one place the page teaches a division.
-        duration_ms = result.duration.as_secs_f64() * 1000.0,
+        duration_ms = duration_ms(result.duration),
         cpu_us = result.cpu.as_micros() as u64,
         completions_delivered = result.completions_delivered,
         completions_dropped = result.completions_dropped,
@@ -565,6 +565,18 @@ pub fn trace_world(result: &WorkResult, revision: &str) {
         violations = %violations,
         "world trace"
     );
+}
+
+/// Milliseconds for a log field, to microsecond resolution.
+///
+/// `as_secs_f64() * 1000.0` puts the whole f64 in the line —
+/// `duration_ms=606.1265380000001` — which is noise in a field people read
+/// and grep. Rounding to three decimals keeps a sub-millisecond world from
+/// reading `0` (which is what an integer did, and it made the runbook's own
+/// CPU-share ratio come out above 100 %) without pretending to more
+/// precision than a wall clock has.
+pub(crate) fn duration_ms(d: std::time::Duration) -> f64 {
+    (d.as_secs_f64() * 1e6).round() / 1e3
 }
 
 fn metric(out: &mut String, name: &str, help: &str, kind: &str, samples: &[(String, f64)]) {
