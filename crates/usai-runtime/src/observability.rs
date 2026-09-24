@@ -875,6 +875,7 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
     let mut resources = Vec::new();
     let mut quarantines = Vec::new();
     let (mut operations, mut transactions) = (Vec::new(), Vec::new());
+    let mut operation_seconds: Vec<(String, f64)> = Vec::new();
     let (mut outbound, mut outbound_failures, mut outbound_refused) =
         (Vec::new(), Vec::new(), Vec::new());
     for r in &status.resources {
@@ -914,6 +915,18 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
                 into.push((base.clone(), value as f64));
             }
         }
+        // How long, not only how many. `rate(seconds)/rate(operations)` is
+        // the mean time in this resource, and `rate(seconds)` against the
+        // route's own `rate(request_seconds_sum)` is the share of a request
+        // spent inside it — which is the difference between "the database is
+        // slow" and "my pool is too small", and could only be guessed.
+        if let Some(seconds) = r
+            .detail
+            .get("operationSecondsTotal")
+            .and_then(serde_json::Value::as_f64)
+        {
+            operation_seconds.push((base.clone(), seconds));
+        }
         quarantines.push((base, r.quarantined as f64));
     }
     if !resources.is_empty() {
@@ -929,6 +942,11 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
                 "usai_resource_operations_total",
                 "Operations leased from this resource (cumulative)",
                 &operations,
+            ),
+            (
+                "usai_resource_operation_seconds_total",
+                "Time spent inside this resource's operations (cumulative). Divide by the count above for the mean; compare its rate with a route's `usai_http_workload_request_seconds_sum` for the share of a request spent waiting on this resource",
+                &operation_seconds,
             ),
             (
                 "usai_resource_transactions_total",

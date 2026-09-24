@@ -42,6 +42,7 @@ refusals and *falls* while a bad-traffic flood rises. Volume is
 | `usai_http_workload_request_seconds_count` | counter | workload | Responses timed per workload (the denominator). **Refusals decided before a world existed are not here** — they have no world time, and counting them as zero made a route's mean *fall* as it was flooded with 400s |
 | `usai_http_workload_rejections_total` | counter | workload, reason | Requests this route matched and the runtime refused before a world existed. They are in `usai_http_workload_responses_total` (the client got that status) and not in the latency, so **subtract this from the workload's 5xx to get the route's own failures** — a capacity refusal is the instance's admission bound, and waking the route's owner for it is the wrong response |
 | `usai_resource_operations_total` | counter | kind, name | Operations leased from the resource |
+| `usai_resource_operation_seconds_total` | counter | kind, name | **Time spent inside them.** `rate(seconds)/rate(operations)` is the mean time in this resource; `rate(seconds)` against a route's `rate(usai_http_workload_request_seconds_sum)` is the share of that route's time spent waiting on it — which is the difference between "the database is slow" and "my pool is too small", and used to be a hand-off to `pg_stat_statements` |
 | `usai_resource_transactions_total` | counter | kind, name | Transactions opened on it |
 | `usai_resource_requests_total` / `_failures_total` / `_refused_total` | counter | kind, name | Outbound requests through an `httpClient` resource: made, failed, refused by its own in-flight bound |
 | `usai_resource` | gauge | kind, metric, name | Resource manager state (current levels): `in_use`, `max`, `waiting` (worlds queued **for a connection**, not for the database — the one number that tells a small pool from a slow dependency), `ready` (1 while the last contact with the resource succeeded, 0 after a connection-level failure until the next success) |
@@ -162,6 +163,34 @@ admission refusals subtracted, and connection-bound work in flight. Plus the
 two things nothing else shows you: what the cgroup is charged against its
 limit, and the ceiling hits that mean the container is reclaiming the pages
 it executes from.
+
+## What these metrics cannot tell you, and what to do instead
+
+**Which caller.** No series carries a tenant, customer or API key, and there
+is no application counter API — deliberately: every label value a request
+could choose is a series somebody's Prometheus has to keep, and an
+application that labels by tenant has unbounded cardinality the day it signs
+its thousandth customer. So "this route is erroring **for one caller** and
+not the others" is not a metrics question here. The supported pattern:
+
+1. Log it. `ctx.log.error("charge failed", { tenant, plan })` puts the
+   dimension in `fields`, where it costs nothing until you query it
+   (`logs.md` — keep it a field, never a Loki label).
+2. Alert on the log, not on a metric: a Loki ruler expression over
+   `{app="…"} | json | tenant!=""` gives you per-tenant rates with the
+   cardinality bill paid at query time instead of at ingest.
+3. If you need it on a dashboard permanently, aggregate it yourself —
+   a row per tenant per hour in PostgreSQL, written by the handler, is
+   cheaper and more accurate than a time series, and you can join it to
+   your billing data.
+
+**Which error code.** A 5xx is a 5xx in the metrics; `code="deadline_exceeded"`
+versus `code="sql_42p01"` exists only in the log line. "504s are up while
+500s are flat" is a `logs.md` query, not a panel.
+
+**How deep the queue is.** Deliberately not a metric — it would cost a query
+per scrape. `usai queue status --json` on a timer through a textfile
+collector is the supported way to put it on a dashboard.
 
 ## Alerts worth setting from this page alone
 

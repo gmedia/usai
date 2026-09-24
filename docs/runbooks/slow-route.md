@@ -107,6 +107,7 @@ computing — there is nothing else it can be.
 | what you see | what it is | what to do |
 |---|---|---|
 | `usai_resource{kind="postgres",metric="in_use"}` at `max`, `waiting` **0** | the pool is fully used and nothing is queued — the database is answering slowly | find the query (`pg_stat_statements`), add the index, or raise `pool.max` if the queries are as fast as they get |
+| `rate(usai_resource_operation_seconds_total)` divided by `rate(usai_http_workload_request_seconds_sum)` for the route | **how much of this route's time is spent inside that resource** — 0.9 says the request is the database, 0.1 says it is somewhere else | this is the number that decides whether to go to `pg_stat_statements` at all. Divide the same counter by `usai_resource_operations_total` for the mean time per operation |
 | `usai_resource{metric="waiting"}` **> 0** | requests are queueing **for a connection**, not for the database | raise `pool.max`, lower the per-request work, or add replicas. At 10 s of waiting the operation is refused (`503 resource_exhausted`, `pool.acquireTimeoutSeconds`) |
 | `usai_resource{kind="http.client",metric="in_use"}` at `max` | the outbound dependency is slow or down | `usai_resource_failures_total` says whether it is failing as well as slow |
 | `usai_workload_cpu_seconds_total` climbing with latency | the application's own code | it is in the handler; bracket the phases with `console.time("label")` / `console.timeEnd("label")`, which log at INFO with the workload and the request id |
@@ -150,8 +151,9 @@ allocates per request; it is for a measurement session, not for production.
 ## What this page cannot tell you
 
 - **Which SQL statement is slow.** That is PostgreSQL's own instrumentation
-  (`pg_stat_statements`, `auto_explain`); the runtime knows a query took
-  200 ms, not what the planner did.
+  (`pg_stat_statements`, `auto_explain`); the runtime knows the resource's
+  operations took 200 ms in total (`usai_resource_operation_seconds_total`),
+  not which statement or what the planner did.
 **Streams.** A stream's latency is its **world's lifetime**, recorded when
 the world ends — so a six-second export is six seconds in
 `usai_http_workload_request_seconds_sum` and in `usai top`'s `avg`, and it

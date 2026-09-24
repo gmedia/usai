@@ -199,6 +199,20 @@ Everything else is additive or a fix to behaviour that was wrong.
   its "Queue by state" panel no longer plots a raw cumulative counter as a
   level (it stepped to zero at every deploy, because the series is labelled
   by revision).
+- **`usai_resource_operation_seconds_total`** is new: how long, not only how
+  many. `slow-route.md` could tell a small pool from a slow dependency and
+  could never say how much of a request was spent *inside* the resource — the
+  hand-off out of the platform was "go and read `pg_stat_statements`". Its
+  rate against a route's own `request_seconds_sum` is the share of that
+  route's time the resource took, which is the number that decides whether
+  to go there at all.
+- **`metrics.md` says what these metrics cannot tell you**, which is as
+  useful as the table: there is no caller or tenant dimension and no
+  application counter API — deliberately, because a label an application
+  chooses is unbounded cardinality the day it signs its thousandth
+  customer — so per-tenant questions belong in the log (a field, never a
+  label) with the alert on the log, or in a table the handler writes. Error
+  codes and queue depth get the same treatment.
 - **`docs/runbooks/logs.md`** is new: the log line's fields, which to label
   and which to leave alone, the three spellings of one concept, the missing
   size cap, and the queries an on-call actually runs. An observability

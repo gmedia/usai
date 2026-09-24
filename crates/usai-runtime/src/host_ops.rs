@@ -207,7 +207,15 @@ async fn resource(ctx: OpContext, payload: String) -> OpOutcome {
         method: request.method,
         args,
     };
-    match manager.call(call, ctx.cancel.clone()).await {
+    // The one place every resource operation passes through: time it here
+    // and no provider has to remember to. "The handler is waiting" is half
+    // an answer; "on the database, for 400 ms of the request's 410" is the
+    // other half, and nothing measured it.
+    let started = std::time::Instant::now();
+    let outcome = manager.call(call, ctx.cancel.clone()).await;
+    let identity = manager.identity();
+    crate::resource::record_operation_time(&identity.kind, &identity.name, started.elapsed());
+    match outcome {
         Ok(value) => OpOutcome::ok(&value),
         Err(error) => OpOutcome::from_resource_error(&error),
     }

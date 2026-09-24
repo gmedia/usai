@@ -2694,3 +2694,88 @@ async fn an_outbound_dependency_that_cannot_be_reached_is_not_ready() {
     token.cancel();
     s.shutdown.cancel();
 }
+
+/// Counting operations answered "how many"; nothing answered "how long". So
+/// `slow-route.md` step 3 could tell a small pool from a slow dependency
+/// (`waiting` against `in_use == max`) and could never say how much of a
+/// request was spent *inside* the resource — the hand-off out of the
+/// platform was "go and read `pg_stat_statements`".
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_resource_reports_how_long_its_operations_took() {
+    let Some(s) = start().await else { return };
+    let host = HttpHost::new(
+        Arc::clone(&s.runtime),
+        HttpConfig {
+            addr: ([127, 0, 0, 1], 0).into(),
+            serve_status: true,
+            ..HttpConfig::default()
+        },
+    );
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let token = CancellationToken::new();
+    let t = token.clone();
+    tokio::spawn(async move {
+        serve(host, t, |addr| {
+            let _ = tx.send(addr);
+        })
+        .await
+        .unwrap()
+    });
+    let addr = rx.await.unwrap();
+    let base = format!("http://{addr}");
+    // A route that leases the audit cache: an operation with real time in it.
+    let r = s
+        .client
+        .get(format!("{base}/counter"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    let status: Value = s
+        .client
+        .get(format!("{base}/_usai/status"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let timed: Vec<&Value> = status["resources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|r| r["detail"]["operationSecondsTotal"].is_number())
+        .collect();
+    assert!(
+        !timed.is_empty(),
+        "no resource reported the time it spent: {}",
+        status["resources"]
+    );
+    assert!(
+        timed
+            .iter()
+            .any(|r| r["detail"]["operationSecondsTotal"].as_f64().unwrap_or(0.0) > 0.0),
+        "{:?}",
+        timed
+    );
+    let metrics = s
+        .client
+        .get(format!("{base}/_usai/metrics"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        metrics.contains("usai_resource_operation_seconds_total{"),
+        "{}",
+        metrics
+            .lines()
+            .filter(|l| l.contains("usai_resource"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    token.cancel();
+    s.shutdown.cancel();
+}
