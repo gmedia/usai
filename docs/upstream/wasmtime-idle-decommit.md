@@ -1,9 +1,18 @@
 # Releasing a pooling slot's kept-resident memory when it goes idle
 
-Status (2026-09-23): **proposal, not yet opened upstream.** This is the second
+Status (2026-09-24): **opened upstream as
+[bytecodealliance/wasmtime#14399](https://github.com/bytecodealliance/wasmtime/issues/14399)**,
+as a follow-up from the same embedder as the merged #14357. This is the second
 of the three levers in `docs/adr/0019-p9-scope-the-runtime-tax-we-keep.md`,
 and the investigation below is why it belongs upstream rather than in this
 repository.
+
+The issue is this document with the parts addressed to *this* repository's
+readers removed, the measurements restated as an embedder's rather than by
+internal filename, and one line saying the numbers come from a process that
+runs one instance per application. What we owe the thread now is the
+before/after measurement named below, on whichever shape the maintainers
+prefer.
 
 ## What an operator sees today
 
@@ -84,10 +93,10 @@ already contributed to — `bytecodealliance/wasmtime#14357` was merged on
 2026-09-23. Opening the second PR is cheap; shipping a private patch for it
 would re-create the vendor we are about to delete.
 
-## How to open it
+## How it was opened
 
-The decision is the maintainer's (it commits this project to an upstream
-conversation and to the measurement that follows). When it is taken, this
+The decision was the maintainer's (it commits this project to an upstream
+conversation and to the measurement that follows); taken 2026-09-24. This
 document **is** the issue — it states the observation, the measurement, why
 the embedder cannot do it, and the shape of the change:
 
