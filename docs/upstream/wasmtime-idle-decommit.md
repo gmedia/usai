@@ -19,11 +19,13 @@ whose value was obvious against the time it cost to review. The difference
 is the policy's golden rule, not the subject matter.
 
 **What a compliant second attempt needs** (a maintainer decision, not an
-assistant's): someone here reads this, cuts it to the shortest form that
-still carries the measurement, writes the issue in their own words, and is
-ready to answer questions. If that is not worth the time right now, the
-honest answer is to leave it closed — this is P9 scope and nothing depends
-on it.
+assistant's): someone here reads it, is satisfied it is worth a maintainer's
+time, posts it in their own words, and is ready to answer questions.
+`wasmtime-idle-decommit-issue-draft.md` beside this file is a starting
+point — about a fifth the length of the first attempt, because what got it
+closed was the cost of reading it, not the subject. Edit it until it is
+yours; if that is not worth the time right now, the honest answer is to
+leave it closed, because this is P9 scope and nothing depends on it.
 
 The original framing follows, as a follow-up from the same embedder as the
 merged #14357. This is the second
