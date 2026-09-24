@@ -378,6 +378,36 @@ async fn recv_json(
     }
 }
 
+/// A socket's `query`/`params` must be parsed **in the world**, like every
+/// other kind. The host validates them against the JSON Schema before the
+/// world exists, but a schema's `.transform()` cannot be expressed in JSON
+/// Schema and only runs in the world — and a socket used to hand the handler
+/// the raw request, while `usai inspect` promised "the handler sees the
+/// transformed value".
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_sockets_query_reaches_the_handler_transformed() {
+    let Some(s) = start().await else { return };
+    let (ws, response) = tokio_tungstenite::connect_async(format!("{}/push?who=dash", s.ws))
+        .await
+        .expect("upgrade");
+    assert_eq!(response.status(), 101);
+    let mut shouted = Value::Null;
+    for _ in 0..40 {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        shouted = audit(&s.runtime, "push-shouted:dash").await;
+        if shouted != Value::Null {
+            break;
+        }
+    }
+    assert_eq!(
+        shouted,
+        json!("DASH"),
+        "the schema's transform did not run for the socket's query"
+    );
+    drop(ws);
+    s.shutdown.cancel();
+}
+
 /// One stream reaching its declared deadline must not touch any other
 /// connection. It did: a stream was handed the **revision's** drain token
 /// rather than a child of it, so its deadline cancelled the drain signal for

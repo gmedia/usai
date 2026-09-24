@@ -11,6 +11,7 @@ import type {
   ResourcesOf,
   ResponseHeaderDocs,
   Workload,
+  BodylessPolicies,
   WorkloadPolicies,
 } from "./declarations.ts";
 import { withAuthResources } from "./declarations.ts";
@@ -72,7 +73,7 @@ type OutputOf<S, Fallback> = S extends AnySchema ? Output<S> : Fallback;
  * @category Streams and WebSockets
  */
 export interface StreamOptions<R extends ResourceDeclaration[] = ResourceDeclaration[]>
-  extends WorkloadPolicies {
+  extends BodylessPolicies {
   /** Default `GET`. */
   method?: Method;
   summary?: string;
@@ -133,7 +134,6 @@ function stream<O extends StreamOptions>(
   const policies: WorkloadPolicies = {};
   if (options.timeout !== undefined) policies.timeout = options.timeout;
   if (options.concurrency !== undefined) policies.concurrency = options.concurrency;
-  if (options.maxBodyBytes !== undefined) policies.maxBodyBytes = options.maxBodyBytes;
   return {
     __usai: "workload",
     kind: "stream",
@@ -211,7 +211,7 @@ export interface SocketOptions<
   A extends AuthDeclaration | undefined = AuthDeclaration | undefined,
   PS extends AnySchema | undefined = undefined,
   QS extends AnySchema | undefined = undefined,
-> extends WorkloadPolicies {
+> extends BodylessPolicies {
   summary?: string;
   description?: string;
   /** Path parameters, validated **before the world exists** — a bad
@@ -313,7 +313,6 @@ export function socket<
   // socket that declared one to declare one.
   if (options.timeout !== undefined) policies.timeout = options.timeout;
   if (options.concurrency !== undefined) policies.concurrency = options.concurrency;
-  if (options.maxBodyBytes !== undefined) policies.maxBodyBytes = options.maxBodyBytes;
   return {
     __usai: "workload",
     kind: "socket",

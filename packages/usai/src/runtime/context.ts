@@ -114,8 +114,11 @@ export interface BaseContext {
   /** Structured logging; lines carry the workload, world and request ids
    * and reach the runtime's log (`target: "app"`). A trailing plain object
    * is structured `fields` (`ctx.log.info("paid", { invoiceId })`), the rest
-   * is the message. `console.*` is the same. */
-  readonly log: Pick<ConsoleLike, "debug" | "info" | "warn" | "error">;
+   * is the message. `console.*` is the same — including `log`, which the
+   * guest emits at `info` and the type used to omit, so the one call
+   * everyone reaches for first was a compile error against a context whose
+   * `log` *is* `console`. */
+  readonly log: Pick<ConsoleLike, "log" | "debug" | "info" | "warn" | "error">;
   /** A timer owned by this world (`"500ms"`, `"2s"`, or milliseconds). It
    * resolves early when the world is asked to stop, so a service loop can
    * `await ctx.sleep("1s")` and then check `ctx.signal.aborted`. */

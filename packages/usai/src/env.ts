@@ -41,12 +41,23 @@ export interface EnvDeclaration<S extends Record<string, EnvField<unknown>>> {
   readonly fields: S;
 }
 
-/** The typed values of a declaration: `EnvValues<typeof spec>`.
+/** The fields of either an `env({...})` declaration or a bare field map,
+ * so {@link EnvValues} takes whichever the caller has. Everything written
+ * about the environment — the guide, the context's own doc comment —
+ * said `EnvValues<typeof spec>`, and `spec` is the declaration, whose
+ * fields sit one level down; only `EnvValues<(typeof spec)["fields"]>`
+ * compiled, and nothing said so. */
+type EnvFieldsOf<S> = S extends EnvDeclaration<infer F> ? F : S;
+
+/** The typed values of a declaration: `EnvValues<typeof spec>`, where
+ * `spec` is what `env({...})` returned (a bare field map works too).
  *
  * @category Environment
  */
-export type EnvValues<S extends Record<string, EnvField<unknown>>> = {
-  readonly [K in keyof S]: S[K] extends EnvField<infer T> ? T : never;
+export type EnvValues<
+  S extends EnvDeclaration<Record<string, EnvField<unknown>>> | Record<string, EnvField<unknown>>,
+> = {
+  readonly [K in keyof EnvFieldsOf<S>]: EnvFieldsOf<S>[K] extends EnvField<infer T> ? T : never;
 };
 
 /**

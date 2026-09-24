@@ -13,7 +13,7 @@ const http: {
   head: Declare;
   options: Declare;
   raw: {
-   <R>  (path: string, options: RawOptions<R>, handler: RawHandler<R>): Workload;
+   <R, A>  (path: string, options: RawOptions<R, A>, handler: RawHandler<R, A>): Workload;
      (path: string, handler: RawHandler): Workload;
   };
   response: HttpResponse<T>;
@@ -63,7 +63,7 @@ path twice is a build error; a path nobody declares is 404
 | <a id="property-delete"></a> `delete` | [`Declare`](../type-aliases/Declare.md) | - | `DELETE` endpoint. |
 | <a id="property-head"></a> `head` | [`Declare`](../type-aliases/Declare.md) | - | `HEAD` endpoint. |
 | <a id="property-options"></a> `options` | [`Declare`](../type-aliases/Declare.md) | - | `OPTIONS` endpoint. |
-| <a id="property-raw"></a> `raw()` | \{ \<`R`\> (`path`: `string`, `options`: [`RawOptions`](../interfaces/RawOptions.md)\<`R`\>, `handler`: [`RawHandler`](../type-aliases/RawHandler.md)\<`R`\>): [`Workload`](../interfaces/Workload.md); (`path`: `string`, `handler`: [`RawHandler`](../type-aliases/RawHandler.md)): [`Workload`](../interfaces/Workload.md); \} | - | Low-level escape hatch: exact bytes in ([RawContext](../interfaces/RawContext.md)), a [RawResponse](../interfaces/RawResponse.md) or [HttpResponse](../interfaces/HttpResponse.md) out. No schema validation; the reference shows the statuses from `responses`. |
+| <a id="property-raw"></a> `raw()` | \{ \<`R`, `A`\> (`path`: `string`, `options`: [`RawOptions`](../interfaces/RawOptions.md)\<`R`, `A`\>, `handler`: [`RawHandler`](../type-aliases/RawHandler.md)\<`R`, `A`\>): [`Workload`](../interfaces/Workload.md); (`path`: `string`, `handler`: [`RawHandler`](../type-aliases/RawHandler.md)): [`Workload`](../interfaces/Workload.md); \} | - | Low-level escape hatch: exact bytes in ([RawContext](../interfaces/RawContext.md)), a [RawResponse](../interfaces/RawResponse.md) or [HttpResponse](../interfaces/HttpResponse.md) out. No schema validation; the reference shows the statuses from `responses`. |
 | `response()` | ( `status`: `number`, `body`: `T`, `headers?`: `ResponseHeaders` ) => [`HttpResponse`](../interfaces/HttpResponse.md)\<`T`\> | - | An explicit status and headers around a contract-encoded body. |
 | `created()` | (`body`: `T`, `headers?`: `ResponseHeaders`) => [`HttpResponse`](../interfaces/HttpResponse.md)\<`T`\> | - | `201 Created` with a body. |
 | `accepted()` | (`body`: `T`, `headers?`: `ResponseHeaders`) => [`HttpResponse`](../interfaces/HttpResponse.md)\<`T`\> | - | `202 Accepted` with a body: the work continues elsewhere (a dispatched task). |

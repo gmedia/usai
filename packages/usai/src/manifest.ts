@@ -151,17 +151,17 @@ function trigger(workload: Workload): ManifestWorkload["trigger"] {
         raw: workload.trigger["raw"] === true,
         ...(workload.trigger["responses"] ? { responses: workload.trigger["responses"] } : {}),
       };
-    case "cron": {
-      const timeoutMs = parseDuration(workload.policies.timeout);
+    // A cron's deadline is the workload's `timeoutMs`, written once for
+    // every kind below. The trigger used to carry a second copy that the
+    // runtime never read.
+    case "cron":
       return {
         kind: "cron",
         schedule: workload.trigger["schedule"],
         overlap: workload.trigger["overlap"] ?? "skip",
-        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
         ...(workload.trigger["exclusive"] ? { exclusive: true } : {}),
         ...(workload.trigger["database"] ? { database: workload.trigger["database"] } : {}),
       };
-    }
     case "queue":
       return {
         kind: "queue",
@@ -230,6 +230,7 @@ export function describe(app: AppDeclaration): Manifest {
     if (workload.responseHeaders) {
       const docs: Record<string, Record<string, string>> = {};
       for (const [status, headers] of Object.entries(workload.responseHeaders)) {
+        if (!headers) continue;
         const lower: Record<string, string> = {};
         for (const [name, text] of Object.entries(headers)) lower[name.toLowerCase()] = text;
         docs[String(status)] = lower;

@@ -26,7 +26,7 @@ inside it.
 | <a id="summary"></a> `summary?` | `string` | One line for the reference and the OpenAPI `summary`. Without it the operation is shown by method and path. | - |
 | <a id="description"></a> `description?` | `string` | A paragraph for the reference and the OpenAPI `description`. | - |
 | <a id="errors"></a> `errors?` | [`DeclaredError`](DeclaredError.md)[] | Errors the handler throws, for the reference and the OpenAPI document. | - |
-| <a id="responseheaders"></a> `responseHeaders?` | [`ResponseHeaderDocs`](../type-aliases/ResponseHeaderDocs.md) | Response headers the handler sets (`set-cookie`, `location`, `etag`), documented per status. See [ResponseHeaderDocs](../type-aliases/ResponseHeaderDocs.md). | - |
+| <a id="responseheaders"></a> `responseHeaders?` | `Partial`\<`Record`\<`number` \| `"*"`, `Record`\<`string`, `string`\>\>\> | Response headers the handler sets (`set-cookie`, `location`, `etag`), documented per status. See [ResponseHeaderDocs](../type-aliases/ResponseHeaderDocs.md). | - |
 | <a id="operationid"></a> `operationId?` | `string` | The OpenAPI `operationId` — what a generated client names the method (`listProducts`). Derived from method and path when absent (`getProducts`). Unique per application. | - |
 | <a id="auth"></a> `auth?` | [`AuthDeclaration`](AuthDeclaration.md)\<`unknown`, readonly [`ResourceDeclaration`](ResourceDeclaration.md)\<`string`, `unknown`\>[]\> | The authentication boundary; its principal is `ctx.auth`. | - |
 | <a id="resources"></a> `resources?` | [`ResourceDeclaration`](ResourceDeclaration.md)\<`string`, `unknown`\>[] | Resources this endpoint leases; only these are on `ctx.resources`. | - |

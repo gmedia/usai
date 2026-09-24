@@ -9,6 +9,8 @@ import type {
   ResourcesOf,
   TypedWorkload,
   Workload,
+  BodylessPolicies,
+  CommandPolicies,
   WorkloadPolicies,
 } from "./declarations.ts";
 import type { BaseContext } from "./runtime/context.ts";
@@ -21,7 +23,7 @@ import type { PostgresDeclaration } from "./resources.ts";
 export interface TaskOptions<
   I extends AnySchema | undefined,
   R extends ResourceDeclaration[] = ResourceDeclaration[],
-> extends WorkloadPolicies {
+> extends BodylessPolicies {
   /** Schema for the input; validated before the task's world exists. */
   input?: I;
   /** A paragraph for the reference. */
@@ -102,7 +104,6 @@ export function task<
   const policies: WorkloadPolicies = {};
   if (options.timeout !== undefined) policies.timeout = options.timeout;
   if (options.concurrency !== undefined) policies.concurrency = options.concurrency;
-  if (options.maxBodyBytes !== undefined) policies.maxBodyBytes = options.maxBodyBytes;
   return {
     __usai: "workload",
     kind: "task",
@@ -124,7 +125,7 @@ export function task<
  * @category Tasks, cron, commands, services
  */
 export interface CronOptions<R extends ResourceDeclaration[] = ResourceDeclaration[]>
-  extends WorkloadPolicies {
+  extends BodylessPolicies {
   /** A paragraph for the reference. */
   description?: string;
   /** Cron expression, UTC: five fields (`minute hour day-of-month month
@@ -187,7 +188,6 @@ export function cron<R extends ResourceDeclaration[] = ResourceDeclaration[]>(
   const policies: WorkloadPolicies = {};
   if (options.timeout !== undefined) policies.timeout = options.timeout;
   if (options.concurrency !== undefined) policies.concurrency = options.concurrency;
-  if (options.maxBodyBytes !== undefined) policies.maxBodyBytes = options.maxBodyBytes;
   return {
     __usai: "workload",
     kind: "cron",
@@ -225,7 +225,7 @@ export interface CommandContext<R = ResourceDeclaration[]> extends BaseContext {
  *
  * @category Tasks, cron, commands, services */
 export interface CommandOptions<R extends ResourceDeclaration[] = ResourceDeclaration[]>
-  extends WorkloadPolicies {
+  extends CommandPolicies {
   /** A paragraph for the reference. */
   description?: string;
   /** Resources the command leases; `ctx.resources` is typed from this list. */
@@ -259,6 +259,10 @@ export function command(name: string, a: unknown, b?: unknown): Workload {
   const handler = (typeof a === "function" ? a : b) as Workload["handler"];
   const policies: WorkloadPolicies = {};
   if (options.timeout !== undefined) policies.timeout = options.timeout;
+  // It was declarable and dropped: the type accepted it, the manifest
+  // never carried it, and `usai inspect` printed nothing where every
+  // other kind prints its admission budget.
+  if (options.concurrency !== undefined) policies.concurrency = options.concurrency;
   return {
     __usai: "workload",
     kind: "command",
@@ -366,13 +370,15 @@ export function service(name: string, a: unknown, b?: unknown): Workload {
  * graph`, `inspect` and the reference page show the edge. The annotation
  * is for the graph only: a dispatch to a task that is not listed here
  * still runs, and a dispatch to a task that does not exist is refused at
- * runtime (`unknown_task`) whether or not it is listed. Returns `from`, so
- * it wraps a declaration in place. See {@link QueueHandle.publish} and
+ * runtime (`unknown_task`) whether or not it is listed. Returns `from`
+ * with its own type — a task wrapped here is still a {@link TypedWorkload},
+ * so `ctx.tasks.invoke` still resolves its handler's output — so it wraps a
+ * declaration in place. See {@link QueueHandle.publish} and
  * {@link publishes} for the durable, cross-process equivalent.
  *
  * @category Tasks, cron, commands, services
  */
-export function dispatches(from: Workload, ...to: Workload[]): Workload {
+export function dispatches<W extends Workload>(from: W, ...to: Workload[]): W {
   (from.dispatches as Workload[]).push(...to);
   return from;
 }
@@ -381,11 +387,12 @@ export function dispatches(from: Workload, ...to: Workload[]): Workload {
  * `queue.consume` workloads) with {@link QueueHandle.publish}, for `usai
  * graph` and the reference page (the consumer's page lists its
  * publishers). Annotation only; the publish itself is `ctx.queue.publish`.
- * Returns `from`, so it wraps a declaration in place.
+ * Returns `from` with its own type, so it wraps a declaration in place
+ * without erasing what a task's handler returns.
  *
  * @category Tasks, cron, commands, services
  */
-export function publishes(from: Workload, ...topics: Array<string | Workload>): Workload {
+export function publishes<W extends Workload>(from: W, ...topics: Array<string | Workload>): W {
   (from.publishes as string[]).push(...topics.map((t) => (typeof t === "string" ? t : t.name)));
   return from;
 }

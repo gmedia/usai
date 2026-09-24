@@ -22,6 +22,7 @@ const {
   httpClient,
   cron,
   queue,
+  command,
 } = await import("./index.ts");
 
 const stringSchema = {
@@ -207,4 +208,34 @@ test("ctx.resources is typed from the declaration list", () => {
     return anything;
   });
   assert.equal(bare.kind, "task");
+});
+
+test("a declared admission budget reaches the manifest for every kind that takes one", () => {
+  // `command()` accepted `concurrency:` and never forwarded it: the type
+  // said the budget existed, the manifest carried nothing, and `usai
+  // inspect` printed no budget where every other kind printed one. Two
+  // `usai app import` runs at once were bounded only by the application's
+  // budget.
+  const m = describe(
+    defineApp({
+      name: "budgets",
+      workloads: [
+        command("import", { concurrency: 1, timeout: "5m" }, async () => {}),
+        task("resize", { concurrency: 3 }, async () => {}),
+        cron("sweep", { schedule: "*/5 * * * *", timeout: "90s" }, async () => {}),
+      ],
+    }),
+  );
+  const byId = Object.fromEntries(m.workloads.map((w) => [w.id, w]));
+  assert.equal(byId["command:import"]!.maxConcurrency, 1);
+  assert.equal(byId["command:import"]!.timeoutMs, 300_000);
+  assert.equal(byId["task:resize"]!.maxConcurrency, 3);
+  // A cron's deadline is the workload's, written once. The trigger used to
+  // carry a second copy that the runtime never read.
+  assert.equal(byId["cron:sweep"]!.timeoutMs, 90_000);
+  assert.equal(
+    "timeoutMs" in (byId["cron:sweep"]!.trigger as Record<string, unknown>),
+    false,
+    "the schedule states no second deadline",
+  );
 });

@@ -7,6 +7,7 @@ import type {
   ResourceDeclaration,
   ResourcesOf,
   Workload,
+  ConsumerPolicies,
   WorkloadPolicies,
 } from "./declarations.ts";
 import type { PostgresDeclaration } from "./resources.ts";
@@ -32,7 +33,7 @@ export interface RetryOptions {
 export interface ConsumeOptions<
   M extends AnySchema | undefined,
   R extends ResourceDeclaration[] = ResourceDeclaration[],
-> extends WorkloadPolicies {
+> extends ConsumerPolicies {
   /** A paragraph for the reference. */
   description?: string;
   /** Schema for the message; validated before the message's world exists.

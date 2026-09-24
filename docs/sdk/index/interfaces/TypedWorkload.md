@@ -36,7 +36,7 @@ is a phantom: nothing carries it at runtime, and a `TypedWorkload` is a
 | `contracts.response?` | `public` | `Record`\<`number`, [`AnySchema`](../type-aliases/AnySchema.md)\> | - | - |
 | `contracts.events?` | `public` | `Record`\<`string`, [`AnySchema`](../type-aliases/AnySchema.md)\> | A stream's events by name (`http.stream({ events })`). | - |
 | <a id="errors"></a> `errors` | `readonly` | [`DeclaredError`](DeclaredError.md)[] | - | [`Workload`](Workload.md).[`errors`](Workload.md#errors) |
-| <a id="responseheaders"></a> `responseHeaders?` | `readonly` | [`ResponseHeaderDocs`](../type-aliases/ResponseHeaderDocs.md) | Documented response headers per status (HTTP, raw and stream workloads). | [`Workload`](Workload.md).[`responseHeaders`](Workload.md#responseheaders) |
+| <a id="responseheaders"></a> `responseHeaders?` | `readonly` | `Partial`\<`Record`\<`number` \| `"*"`, `Record`\<`string`, `string`\>\>\> | Documented response headers per status (HTTP, raw and stream workloads). | [`Workload`](Workload.md).[`responseHeaders`](Workload.md#responseheaders) |
 | <a id="operationid"></a> `operationId?` | `readonly` | `string` | The chosen OpenAPI `operationId`, when the declaration set one. | [`Workload`](Workload.md).[`operationId`](Workload.md#operationid) |
 | <a id="auth"></a> `auth?` | `readonly` | [`AuthDeclaration`](AuthDeclaration.md)\<`unknown`, readonly [`ResourceDeclaration`](ResourceDeclaration.md)\<`string`, `unknown`\>[]\> | - | [`Workload`](Workload.md).[`auth`](Workload.md#auth) |
 | <a id="resources"></a> `resources` | `readonly` | [`ResourceDeclaration`](ResourceDeclaration.md)\<`string`, `unknown`\>[] | - | [`Workload`](Workload.md).[`resources`](Workload.md#resources) |

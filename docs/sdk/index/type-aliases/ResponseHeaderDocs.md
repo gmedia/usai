@@ -3,7 +3,7 @@
 # Type Alias: ResponseHeaderDocs
 
 ```ts
-type ResponseHeaderDocs = Record<number | "*", Record<string, string>>;
+type ResponseHeaderDocs = Partial<Record<number | "*", Record<string, string>>>;
 ```
 
 Response headers an endpoint sets, documented per status for the

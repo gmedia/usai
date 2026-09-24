@@ -242,6 +242,34 @@ capabilities (design), latency histogram in metrics, an API reference page — a
   side, rejections, pool `in use` and `waiting`, what the process costs —
   because totals since boot answer the wrong question during an incident.
 
+- **Round 22 (2026-09-24): a TypeScript type-surface audit.** A developer
+  who reads the `.d.ts` before the guide, asking one question of every
+  public type: *does the compiler say what the runtime says?* Thirteen
+  findings, nine of them real, all fixed the same day with a compile-time
+  test each (`packages/usai/src/types.test.ts`, which type-checks a snippet
+  against the SDK's own sources and asserts on tsc's output). The pattern was
+  one shape repeated: **a type that promises more than the runtime honours.**
+  Every kind extended one shared policy set, so six kinds could declare
+  `maxBodyBytes:` — which the runtime refuses at install, by name, for
+  anything with no request body; a consumer inherited a `concurrency:` with
+  the same name and a different meaning as the topic's own; `command()`
+  accepted `concurrency:` and dropped it before the manifest, so the one kind
+  whose budget an operator would reach for had none. The inverse shape was
+  there too: **a runtime that offers more than the type admits.** A raw
+  endpoint's `auth:` resolver ran, refused with 401, and left the principal
+  unreachable without a cast; `ctx.log` *is* `console` and omitted `log`;
+  `dispatches()`/`publishes()` — the idiom the guide prints around a task —
+  returned a bare `Workload` and took `ctx.tasks.invoke` back to `unknown`
+  one release after that was fixed. And two documented lines did not compile
+  as written: `EnvValues<typeof spec>`, printed in GUIDE §Environment and in
+  `ctx.env`'s own doc comment, and a `responseHeaders:` documenting a single
+  status, which `Record<number | "*", …>` made impossible without an
+  unrelated catch-all entry. Also removed: a cron's deadline was serialised
+  **twice** into the manifest, and the copy inside the schedule trigger was
+  the one nothing read. None of the nine could be caught by a runtime test —
+  they are all statements the compiler makes to a developer before any code
+  runs, which is why nothing had caught them in twenty-one rounds.
+
 - **Round 21 (2026-09-24): a claims audit.** Not a developer building an
   app — a staff engineer doing due diligence, who harvested **~310
   falsifiable statements** from `SUPPORTED.md`, the GUIDE, the runbooks and

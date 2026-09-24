@@ -1,6 +1,6 @@
 [@sakaladev/usai](../../README.md) / [index](../README.md) / RawOptions
 
-# Interface: RawOptions\<R *extends* [`ResourceDeclaration`](ResourceDeclaration.md)[] = [`ResourceDeclaration`](ResourceDeclaration.md)[]\>
+# Interface: RawOptions\<R *extends* [`ResourceDeclaration`](ResourceDeclaration.md)[] = [`ResourceDeclaration`](ResourceDeclaration.md)[], A *extends* [`AuthDeclaration`](AuthDeclaration.md) \| `undefined` = [`AuthDeclaration`](AuthDeclaration.md) \| `undefined`\>
 
 Options for `http.raw`.
 
@@ -13,6 +13,7 @@ Options for `http.raw`.
 | Type Parameter | Default type |
 | ------ | ------ |
 | `R` *extends* [`ResourceDeclaration`](ResourceDeclaration.md)[] | [`ResourceDeclaration`](ResourceDeclaration.md)[] |
+| `A` *extends* [`AuthDeclaration`](AuthDeclaration.md) \| `undefined` | [`AuthDeclaration`](AuthDeclaration.md) \| `undefined` |
 
 ## Properties
 
@@ -24,9 +25,9 @@ Options for `http.raw`.
 | <a id="method"></a> `method?` | [`Method`](../type-aliases/Method.md) | HTTP method. Default `POST`. | - |
 | <a id="summary"></a> `summary?` | `string` | - | - |
 | <a id="description"></a> `description?` | `string` | - | - |
-| <a id="auth"></a> `auth?` | [`AuthDeclaration`](AuthDeclaration.md)\<`unknown`, readonly [`ResourceDeclaration`](ResourceDeclaration.md)\<`string`, `unknown`\>[]\> | - | - |
+| <a id="auth"></a> `auth?` | `A` | - | - |
 | <a id="resources"></a> `resources?` | `R` | - | - |
 | <a id="errors"></a> `errors?` | [`DeclaredError`](DeclaredError.md)[] | Errors the handler answers with (documented in the reference). | - |
 | <a id="responses"></a> `responses?` | `Record`\<`number`, `string`\> | Statuses the handler writes, with a description each — the reference lists them instead of "opaque response". | - |
-| <a id="responseheaders"></a> `responseHeaders?` | [`ResponseHeaderDocs`](../type-aliases/ResponseHeaderDocs.md) | Response headers the handler sets, documented per status (`content-disposition`, `etag`). | - |
+| <a id="responseheaders"></a> `responseHeaders?` | `Partial`\<`Record`\<`number` \| `"*"`, `Record`\<`string`, `string`\>\>\> | Response headers the handler sets, documented per status (`content-disposition`, `etag`). | - |
 | <a id="operationid"></a> `operationId?` | `string` | The OpenAPI `operationId` (a generated client's method name). | - |

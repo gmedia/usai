@@ -140,6 +140,33 @@ export interface WorkloadPolicies {
   maxBodyBytes?: number;
 }
 
+/** The policies a workload with **no request body** may declare. Sharing the
+ * full {@link WorkloadPolicies} let `maxBodyBytes` typecheck on a task, a
+ * cron tick, a stream and a socket — four kinds the runtime then refuses at
+ * build with a paragraph explaining why. An option that is accepted and
+ * ignored is worse than one that is refused; one the compiler refuses is
+ * better than both.
+ *
+ * @category Application
+ */
+export type BodylessPolicies = Omit<WorkloadPolicies, "maxBodyBytes">;
+
+/** What a `command()` may declare. It has no request body, and its
+ * concurrency is the runtime's world budget like any other kind.
+ *
+ * @category Application
+ */
+export type CommandPolicies = Omit<WorkloadPolicies, "maxBodyBytes">;
+
+/** What a `queue.consume()` may declare through the shared policies. Its
+ * `concurrency` is re-declared on {@link ConsumeOptions} with the queue's own
+ * meaning (how many messages of this topic at once), so it is not inherited
+ * here, and a message has no request body.
+ *
+ * @category Application
+ */
+export type ConsumerPolicies = Pick<WorkloadPolicies, "timeout">;
+
 /** The schema slots of an HTTP endpoint. Any Standard Schema
  * (`zod`, `valibot`, `arktype`, …) works; slots whose schema can describe
  * itself as JSON Schema are validated before a world exists, the others
@@ -176,7 +203,12 @@ export interface HttpContracts {
  *
  * @category Application
  */
-export type ResponseHeaderDocs = Record<number | "*", Record<string, string>>;
+// `Record<number | "*", …>` reads as "a status or `*`" and compiles to an
+// index signature plus a **required** `"*"` key, so documenting one status
+// ("201: location") did not compile until an unrelated `"*"` entry was
+// added. Every entry is optional; the point is to document what a handler
+// sets, not to enumerate statuses.
+export type ResponseHeaderDocs = Partial<Record<number | "*", Record<string, string>>>;
 
 /** Options of `http.get`/`post`/…: contracts, policies, errors, auth, resources.
  *

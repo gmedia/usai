@@ -205,6 +205,45 @@ Everything else is additive or a fix to behaviour that was wrong.
   a phantom parameter — nothing changes at runtime, and it is still a
   `Workload` everywhere one is expected).
 
+- **The declaration types say what each kind actually takes.** Every kind
+  extended one shared policy set, so a task, a cron, a command, a stream, a
+  socket or a consumer could declare `maxBodyBytes:` — which the runtime
+  refuses at install, naming the workload, for everything that has no request
+  body. The type now refuses it at the line that wrote it. A consumer's
+  policy set is its deadline alone: `concurrency:` on a consumer is the
+  topic's (how many messages it takes at once) and the shared set had been
+  offering a second field with the same name and a different meaning.
+- **`command()` forwards `concurrency:`.** It accepted the option and
+  dropped it: the type said the budget existed, the manifest carried nothing,
+  and `usai inspect` printed no budget where every other kind printed one.
+  Two `usai app <name>` runs at once were bounded only by the application's
+  budget.
+- **`responseHeaders` no longer requires a `"*"` entry.** `Record<number |
+  "*", …>` compiles to an index signature plus a *required* `"*"` key, so a
+  route documenting only its `201: location` header did not compile until an
+  unrelated catch-all was added.
+- **`EnvValues<typeof spec>` — the cast the guide and `ctx.env`'s own doc
+  comment both print — compiles.** `spec` is what `env({…})` returned and
+  `EnvValues` took the field map one level inside it, so the documented line
+  was a compile error for everyone who copied it. Both forms work now.
+- **A raw endpoint's principal is on its context.** `http.raw` accepted
+  `auth:`, ran the resolver and refused with 401, and `RawContext` had no
+  `auth` — so the principal a signed-webhook endpoint had just proved was
+  unreachable without a cast. Resources the auth scheme leases are on
+  `ctx.resources` there too, as they are for every other kind.
+- **`dispatches()` and `publishes()` keep the workload's own type.** They are
+  annotations that return `from`, and they returned it as a bare `Workload`,
+  so wrapping a task in either one — the idiom the guide prints — took
+  `ctx.tasks.invoke` straight back to `unknown`.
+- **`ctx.log.log` compiles.** `ctx.log` *is* `console` inside a world and the
+  guest emits `console.log` at `info`; the type listed four levels and left
+  out the one most people write first.
+- **A cron's deadline is stated once.** The manifest carried `timeoutMs`
+  twice for a cron — on the workload, where the runtime reads it, and inside
+  the schedule trigger, where nothing did. The second copy is gone; a
+  manifest built by an older SDK still installs, and its workload-level value
+  is the one that was always honoured.
+
 ### Runtime
 
 - **`maxBodyBytes` on a route.** `USAI_MAX_BODY_BYTES` is one number for the

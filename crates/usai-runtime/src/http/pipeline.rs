@@ -975,6 +975,7 @@ impl HttpHost {
                 // did not reach, and it was the path segment that decides
                 // what the client is subscribing to.
                 let mut params = params;
+                let mut validated: Vec<&'static str> = Vec::new();
                 if let Some(SlotValidators {
                     params: p,
                     query: q,
@@ -983,6 +984,12 @@ impl HttpHost {
                     ..
                 }) = compiled.validators.get(&route.index)
                 {
+                    validated.extend(
+                        [("params", p), ("query", q), ("headers", h)]
+                            .into_iter()
+                            .filter(|(_, v)| v.is_some())
+                            .map(|(name, _)| name),
+                    );
                     if let Some(v) = p {
                         if let Some(schema) = &schemas.params {
                             coerce_scalars(schema, &mut params);
@@ -1011,6 +1018,7 @@ impl HttpHost {
                         params,
                         query,
                         headers,
+                        validated,
                     )
                     .await;
             }
@@ -1449,6 +1457,7 @@ impl HttpHost {
         params: Value,
         query: Value,
         headers: Value,
+        validated: Vec<&'static str>,
     ) -> Result<HttpResponse, Reply> {
         let is_upgrade = parts
             .headers
@@ -1523,6 +1532,10 @@ impl HttpHost {
             "params": params,
             "query": query,
             "headers": headers,
+            // Which slots the host already checked, so the world's parse can
+            // take the exact finalizer instead of the full one (C13) — the
+            // same contract an HTTP request carries.
+            "validated": validated,
         });
         let input = json!({ "kind": "socket", "request": request });
         let workload = workload.to_owned();

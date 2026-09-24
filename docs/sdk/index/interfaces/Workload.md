@@ -25,7 +25,7 @@
 | `contracts.response?` | `public` | `Record`\<`number`, [`AnySchema`](../type-aliases/AnySchema.md)\> | - |
 | `contracts.events?` | `public` | `Record`\<`string`, [`AnySchema`](../type-aliases/AnySchema.md)\> | A stream's events by name (`http.stream({ events })`). |
 | <a id="errors"></a> `errors` | `readonly` | [`DeclaredError`](DeclaredError.md)[] | - |
-| <a id="responseheaders"></a> `responseHeaders?` | `readonly` | [`ResponseHeaderDocs`](../type-aliases/ResponseHeaderDocs.md) | Documented response headers per status (HTTP, raw and stream workloads). |
+| <a id="responseheaders"></a> `responseHeaders?` | `readonly` | `Partial`\<`Record`\<`number` \| `"*"`, `Record`\<`string`, `string`\>\>\> | Documented response headers per status (HTTP, raw and stream workloads). |
 | <a id="operationid"></a> `operationId?` | `readonly` | `string` | The chosen OpenAPI `operationId`, when the declaration set one. |
 | <a id="auth"></a> `auth?` | `readonly` | [`AuthDeclaration`](AuthDeclaration.md)\<`unknown`, readonly [`ResourceDeclaration`](ResourceDeclaration.md)\<`string`, `unknown`\>[]\> | - |
 | <a id="resources"></a> `resources` | `readonly` | [`ResourceDeclaration`](ResourceDeclaration.md)\<`string`, `unknown`\>[] | - |

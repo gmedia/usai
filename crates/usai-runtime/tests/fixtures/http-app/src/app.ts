@@ -590,7 +590,12 @@ export const pushLoop = socket(
   {
     outgoing: z.object({ i: z.number() }),
     resources: [audit],
-    query: z.object({ who: z.string().min(1).max(32) }),
+    // A transform: JSON Schema cannot express it, so the host cannot run
+    // it — only the world can. A socket used to skip that parse and hand
+    // the handler the raw request.
+    query: z
+      .object({ who: z.string().min(1).max(32) })
+      .transform((q) => ({ who: q.who, shouted: q.who.toUpperCase() })),
     // A socket gets no default deadline; this one declares 600 ms, which
     // must reach the manifest and end the world — it used to be dropped by
     // the SDK before the runtime ever saw it.
@@ -598,7 +603,12 @@ export const pushLoop = socket(
   },
   {
     async open(ctx) {
-      const who = ctx.query["who"] ?? "anon";
+      const who = (ctx.query as { who: string; shouted?: string }).who ?? "anon";
+      // The transform ran only if the world parsed; the host cannot.
+      await (ctx.resources["audit"] as Audit).set(
+        `push-shouted:${who}`,
+        (ctx.query as { shouted?: string }).shouted ?? null,
+      );
       await (ctx.resources["audit"] as Audit).set(`push:${who}`, "open");
       let i = 0;
       while (!ctx.signal.aborted) {
@@ -610,7 +620,7 @@ export const pushLoop = socket(
     },
     async close(ctx) {
       await (ctx.resources["audit"] as Audit).set(
-        `push-closed:${ctx.query["who"] ?? "anon"}`,
+        `push-closed:${(ctx.query as { who?: string }).who ?? "anon"}`,
         true,
       );
     },

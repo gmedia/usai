@@ -108,7 +108,7 @@ export interface HttpContext<O extends HttpOptions = HttpOptions> extends BaseCo
  *
  * @category HTTP
  */
-export interface RawContext<R = ResourceDeclaration[]> extends BaseContext {
+export interface RawContext<R = ResourceDeclaration[], A = undefined> extends BaseContext {
   /** See {@link HttpContext.requestId}. */
   readonly requestId: string;
   readonly method: Method;
@@ -117,8 +117,16 @@ export interface RawContext<R = ResourceDeclaration[]> extends BaseContext {
   readonly params: Record<string, string>;
   readonly query: Record<string, string | string[]>;
   readonly headers: Record<string, string>;
-  /** The declared resources, typed by name from `resources: [...]`. */
-  readonly resources: ResourcesOf<R>;
+  /** The principal the `auth` declaration resolved; `undefined` without one.
+   *
+   * A raw endpoint could always declare `auth:`, the world always ran the
+   * resolver, and a 401 always stopped the request — but the context type
+   * said nothing, so the principal a signed-webhook endpoint had just
+   * proved was unreachable without a cast. */
+  readonly auth: A extends AuthDeclaration<infer P> ? P : undefined;
+  /** The declared resources, typed by name from `resources: [...]`, plus
+   * the ones the auth scheme leases. */
+  readonly resources: ResourcesOf<R> & AuthResourcesOf<A>;
   /** The request body, read once in one of three forms. */
   readonly request: RawRequestBody;
 }
@@ -195,13 +203,15 @@ function method(m: Method): Declare {
  *
  * @category HTTP
  */
-export interface RawOptions<R extends ResourceDeclaration[] = ResourceDeclaration[]>
-  extends WorkloadPolicies {
+export interface RawOptions<
+  R extends ResourceDeclaration[] = ResourceDeclaration[],
+  A extends AuthDeclaration | undefined = AuthDeclaration | undefined,
+> extends WorkloadPolicies {
   /** HTTP method. Default `POST`. */
   method?: Method;
   summary?: string;
   description?: string;
-  auth?: AuthDeclaration;
+  auth?: A;
   resources?: R;
   /** Errors the handler answers with (documented in the reference). */
   errors?: DeclaredError[];
@@ -215,14 +225,15 @@ export interface RawOptions<R extends ResourceDeclaration[] = ResourceDeclaratio
 }
 
 /** The handler of `http.raw`. */
-export type RawHandler<R extends ResourceDeclaration[] = ResourceDeclaration[]> = (
-  ctx: RawContext<R>,
-) => RawResponse | HttpResponse | Promise<RawResponse | HttpResponse>;
+export type RawHandler<
+  R extends ResourceDeclaration[] = ResourceDeclaration[],
+  A extends AuthDeclaration | undefined = undefined,
+> = (ctx: RawContext<R, A>) => RawResponse | HttpResponse | Promise<RawResponse | HttpResponse>;
 
-function raw<R extends ResourceDeclaration[]>(
+function raw<R extends ResourceDeclaration[], A extends AuthDeclaration | undefined = undefined>(
   path: string,
-  options: RawOptions<R>,
-  handler: RawHandler<R>,
+  options: RawOptions<R, A>,
+  handler: RawHandler<R, A>,
 ): Workload;
 function raw(path: string, handler: RawHandler): Workload;
 function raw(path: string, a: RawOptions | RawHandler, b?: RawHandler): Workload {

@@ -1,9 +1,9 @@
 [@sakaladev/usai](../../README.md) / [index](../README.md) / RawHandler
 
-# Type Alias: RawHandler\<R *extends* [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)[] = [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)[]\>
+# Type Alias: RawHandler\<R *extends* [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)[] = [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)[], A *extends* [`AuthDeclaration`](../interfaces/AuthDeclaration.md) \| `undefined` = `undefined`\>
 
 ```ts
-type RawHandler<R extends ResourceDeclaration[] = ResourceDeclaration[]> = (ctx: RawContext<R>) => 
+type RawHandler<R extends ResourceDeclaration[] = ResourceDeclaration[], A extends AuthDeclaration | undefined = undefined> = (ctx: RawContext<R, A>) => 
   | RawResponse
   | HttpResponse
   | Promise<
@@ -18,12 +18,13 @@ The handler of `http.raw`.
 | Type Parameter | Default type |
 | ------ | ------ |
 | `R` *extends* [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)[] | [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)[] |
+| `A` *extends* [`AuthDeclaration`](../interfaces/AuthDeclaration.md) \| `undefined` | `undefined` |
 
 ## Parameters
 
 | Parameter | Type |
 | ------ | ------ |
-| `ctx` | [`RawContext`](../interfaces/RawContext.md)\<`R`\> |
+| `ctx` | [`RawContext`](../interfaces/RawContext.md)\<`R`, `A`\> |
 
 ## Returns
 

@@ -8,12 +8,6 @@ Bounds every workload can declare.
 
 - [`HttpOptions`](HttpOptions.md)
 - [`RawOptions`](RawOptions.md)
-- [`TaskOptions`](TaskOptions.md)
-- [`CronOptions`](CronOptions.md)
-- [`CommandOptions`](CommandOptions.md)
-- [`StreamOptions`](StreamOptions.md)
-- [`SocketOptions`](SocketOptions.md)
-- [`ConsumeOptions`](ConsumeOptions.md)
 
 ## Properties
 

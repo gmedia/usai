@@ -68,8 +68,12 @@ pub enum Trigger {
     Task,
     Cron {
         schedule: String,
-        #[serde(default)]
-        timeout_ms: Option<u64>,
+        // No `timeout_ms` here: a cron's deadline is the workload's
+        // `timeout_ms`, the one every kind carries and the one the world
+        // arms. The trigger used to carry a second copy that nothing read,
+        // so a manifest could state two deadlines and the schedule's was
+        // silently the wrong one to read. Older manifests still carry it;
+        // serde ignores it, and the workload-level field has the same value.
         #[serde(default = "default_overlap")]
         overlap: OverlapPolicy,
         /// Exactly one instance runs each tick: the schedulers of every

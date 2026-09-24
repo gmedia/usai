@@ -480,8 +480,15 @@ async function runSocket(workload: Workload, input: SocketInput): Promise<unknow
     path: request.path,
     url: request.url,
     requestId: request.headers["x-request-id"] ?? "",
-    params: request.params,
-    query: request.query,
+    // The same parse an HTTP route does. The host validates these against
+    // the JSON Schema before the world exists, but a schema's `.transform()`,
+    // `.pipe()` or computed `.default()` cannot be expressed in JSON Schema
+    // and only runs here — so passing the raw request through meant a socket
+    // handler got `{ room: "lobby" }` where the identical schema on an HTTP
+    // route gave `{ room: "LOBBY", seen: true }`, while `usai inspect`
+    // promised "the handler sees the transformed value".
+    params: parseValidated("params", workload.contracts.params, request.params, request.validated),
+    query: parseValidated("query", workload.contracts.query, request.query, request.validated),
     headers: request.headers,
     state,
     message: undefined as unknown,

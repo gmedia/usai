@@ -122,3 +122,148 @@ test("a workload list still accepts every kind of workload", () => {
   `);
   assert.equal(out, "", out);
 });
+
+test("a body bound on a kind that has no body is a compile error", () => {
+  // `maxBodyBytes` sat on the policies every kind extended, so a task, a
+  // cron, a command, a stream or a socket could declare one, ship it in the
+  // manifest, and have the runtime refuse the whole application at install
+  // ("a body bound on a workload that has no body"). The compiler now says
+  // what the runtime says, at the line that wrote it.
+  for (const source of [
+    `import { task } from "@sakaladev/usai";
+     export const t = task("t", { maxBodyBytes: 1024 }, async () => 1);`,
+    `import { cron } from "@sakaladev/usai";
+     export const c = cron("c", { schedule: "* * * * *", maxBodyBytes: 1024 }, async () => {});`,
+    `import { command } from "@sakaladev/usai";
+     export const c = command("c", { maxBodyBytes: 1024 }, async () => {});`,
+    `import { http } from "@sakaladev/usai";
+     export const s = http.stream("/s", { maxBodyBytes: 1024 }, async () => {});`,
+    `import { http } from "@sakaladev/usai";
+     export const s = http.socket("/s", { maxBodyBytes: 1024 }, { open: async () => {} });`,
+  ]) {
+    assert.notEqual(check(source), "", `maxBodyBytes should not compile here:\n${source}`);
+  }
+  // The kind that does have a body still takes it.
+  assert.equal(
+    check(
+      `${preamble}export const r = http.post("/a", { response: Out, maxBodyBytes: 1024 }, async () => ({ n: 1 }));`,
+    ),
+    "",
+  );
+});
+
+test("a consumer's only admission policy is its deadline", () => {
+  // `concurrency:` on a consumer is the topic's — how many messages that
+  // consumer takes at once — and it used to arrive twice: once from the
+  // consumer's own option, once from the policy set every kind extended,
+  // with the same name and a different meaning. A consumer keeps the topic's
+  // one and takes no body bound.
+  assert.notEqual(
+    check(`import { queue } from "@sakaladev/usai";
+     export const c = queue.consume("t", { maxBodyBytes: 1024 }, async () => {});`),
+    "",
+  );
+  assert.equal(
+    check(`import { queue } from "@sakaladev/usai";
+     export const c = queue.consume("t", { timeout: "30s", concurrency: 4 }, async () => {});`),
+    "",
+  );
+});
+
+test("documenting one status's response headers needs no other entry", () => {
+  // `Record<number | "*", …>` made `"*"` a required key, so a route that
+  // documented only its `201: location` header did not compile.
+  assert.equal(
+    check(
+      `${preamble}export const r = http.post(
+         "/a",
+         { response: { 201: Out }, responseHeaders: { 201: { location: "URL of the new one" } } },
+         async () => ({ n: 1 }) as never,
+       );`,
+    ),
+    "",
+  );
+});
+
+test("the env cast the guide prints is the one that compiles", () => {
+  // GUIDE §Environment and `ctx.env`'s own doc comment both told readers to
+  // write `ctx.env as EnvValues<typeof spec>`. `spec` is the declaration,
+  // and `EnvValues` took the field map inside it, so the documented line
+  // was a compile error for everyone who copied it.
+  const out = check(`
+    import { env, http, type EnvValues } from "@sakaladev/usai";
+    import { z } from "zod";
+    const spec = env({ WORKERS: env.int(), MODE: env.enum(["a", "b"]), NOTE: env.optional(env.string()) });
+    export const r = http.get("/e", { response: z.object({ n: z.number() }) }, async (ctx) => {
+      const e = ctx.env as EnvValues<typeof spec>;
+      const workers: number = e.WORKERS;
+      const mode: "a" | "b" = e.MODE;
+      const note: string | undefined = e.NOTE;
+      return { n: workers + mode.length + (note?.length ?? 0) };
+    });
+  `);
+  assert.equal(out, "", out);
+});
+
+test("a raw endpoint's principal is on its context", () => {
+  // `http.raw` accepted `auth:`, ran the resolver, refused with 401 — and
+  // `RawContext` had no `auth`, so the principal a signed-webhook endpoint
+  // had just proved could only be reached through a cast.
+  const out = check(`
+    import { http, auth, postgres } from "@sakaladev/usai";
+    const db = postgres("main", {});
+    const tenant = auth.header({
+      name: "tenant",
+      header: "x-signature",
+      resources: [db],
+      resolve: async (ctx) => {
+        await ctx.resources.main.query("select 1");
+        return { tenantId: "t" };
+      },
+    });
+    export const hook = http.raw("/hook", { auth: tenant, resources: [db] }, async (ctx) => {
+      const id: string = ctx.auth.tenantId;
+      await ctx.resources.main.query("select 1", [id]);
+      return { status: 204, headers: {}, body: new Uint8Array(0) } as never;
+    });
+  `);
+  assert.equal(out, "", out);
+});
+
+test("the graph annotations do not erase a task's return type", () => {
+  // `dispatches` and `publishes` are annotations that return `from` — and
+  // they returned it as a bare `Workload`, so wrapping a task in either one
+  // (the idiom the guide prints) took `ctx.tasks.invoke` back to `unknown`.
+  const out = check(`
+    import { defineApp, http, task, dispatches, publishes } from "@sakaladev/usai";
+    import { z } from "zod";
+    const inner = task("inner", {}, async () => ({ ok: true }));
+    const count = publishes(
+      dispatches(task("count", { input: z.object({ n: z.number() }) }, async (ctx) => ({
+        doubled: ctx.input.n * 2,
+      })), inner),
+      "audit",
+    );
+    export const run = http.get("/run", { response: z.object({ doubled: z.number() }) }, async (ctx) => {
+      const result = await ctx.tasks.invoke(count, { n: 21 });
+      return { doubled: result.doubled };
+    });
+    export default defineApp({ name: "annotated", workloads: [inner, count, run] });
+  `);
+  assert.equal(out, "", out);
+});
+
+test("ctx.log offers every level the guest emits", () => {
+  // `ctx.log` *is* `console` inside a world, and the guest's `console.log`
+  // emits at `info` — but the type omitted `log`, so the first line most
+  // people write did not compile against the object that implements it.
+  const out = check(`${preamble}export const r = http.get("/l", { response: Out }, async (ctx) => {
+    ctx.log.log("starting", { step: 1 });
+    ctx.log.debug("d");
+    ctx.log.info("i");
+    ctx.log.warn("w");
+    ctx.log.error("e");
+    return { n: 1 };
+  });`);
+  assert.equal(out, "", out);
+});
