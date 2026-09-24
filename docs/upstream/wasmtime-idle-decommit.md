@@ -1,8 +1,32 @@
 # Releasing a pooling slot's kept-resident memory when it goes idle
 
-Status (2026-09-24): **opened upstream as
-[bytecodealliance/wasmtime#14399](https://github.com/bytecodealliance/wasmtime/issues/14399)**,
-as a follow-up from the same embedder as the merged #14357. This is the second
+Status (2026-09-25): **opened as
+[bytecodealliance/wasmtime#14399](https://github.com/bytecodealliance/wasmtime/issues/14399)
+and closed the same day by a maintainer** under the Bytecode Alliance
+[AI tool policy](https://github.com/bytecodealliance/governance/blob/main/AI_TOOL_POLICY.md):
+*"This issue doesn't appear to comply with our policy on tool-generated
+content, and requires additional justification for why it is valuable enough
+to the project for us to read it… please re-open as a new issue."*
+
+**That call was right, and the fault is on our side of the fence.** The
+policy's requirement is a human in the loop who has read the text, is its
+author, and can answer questions about it during review; it explicitly names
+agents acting in the project's spaces without human approval. The text below
+was drafted by an assistant and filed without the maintainer of this
+repository reading it, which is the pattern the policy exists to stop. The
+same week's #14357 was merged within a day — a small change, with tests,
+whose value was obvious against the time it cost to review. The difference
+is the policy's golden rule, not the subject matter.
+
+**What a compliant second attempt needs** (a maintainer decision, not an
+assistant's): someone here reads this, cuts it to the shortest form that
+still carries the measurement, writes the issue in their own words, and is
+ready to answer questions. If that is not worth the time right now, the
+honest answer is to leave it closed — this is P9 scope and nothing depends
+on it.
+
+The original framing follows, as a follow-up from the same embedder as the
+merged #14357. This is the second
 of the three levers in `docs/adr/0019-p9-scope-the-runtime-tax-we-keep.md`,
 and the investigation below is why it belongs upstream rather than in this
 repository.
@@ -93,11 +117,12 @@ already contributed to — `bytecodealliance/wasmtime#14357` was merged on
 2026-09-23. Opening the second PR is cheap; shipping a private patch for it
 would re-create the vendor we are about to delete.
 
-## How it was opened
+## How it was opened, and what that cost
 
-The decision was the maintainer's (it commits this project to an upstream
-conversation and to the measurement that follows); taken 2026-09-24. This
-document **is** the issue — it states the observation, the measurement, why
+The decision to open it was the maintainer's, taken 2026-09-24; the *drafting
+and filing* were not, and that is what the closure was about. A second
+attempt has to be written and posted by a person. This document **is** the
+issue — it states the observation, the measurement, why
 the embedder cannot do it, and the shape of the change:
 
 ```bash

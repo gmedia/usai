@@ -19,9 +19,15 @@ The path from here is mechanical:
    `engine::wasm::tests::a_reused_slot_is_fresh_*` plus the lifecycle and
    HTTP suites on both engines. Those tests are the check that the released
    crate really carries both behaviours.
-3. Until then the vendored file stays — and it is byte-identical to upstream
-   `main` (checked 2026-09-23), so the eventual swap changes nothing about
-   how the runtime behaves.
+3. Until then the vendored file stays. Its **production code** is identical
+   to upstream `main` (re-checked 2026-09-25; `main` also carries the PR's
+   unit tests, which the vendored 48.0.2 copy does not), so the eventual
+   swap changes nothing about how the runtime behaves.
+
+   **Which release carries it is a question about the file, not the date.**
+   v49.0.1 was released after the merge and does **not** contain the change —
+   its `pagemap.rs` is byte-identical to v49.0.0's. `vendor/README.md` has
+   the command to check a candidate release before deleting the vendor.
 
 ### The review (2026-09-21 → 09-22)
 

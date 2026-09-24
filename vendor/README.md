@@ -11,11 +11,34 @@ Upstream: <https://github.com/bytecodealliance/wasmtime/pull/14357>
 `docs/upstream/wasmtime-pagemap-reset.md`). `src/runtime/vm/sys/unix/pagemap.rs`
 here is byte-identical to upstream `main` (checked 2026-09-23; upstream also
 carries the three unit tests, which this vendored 48.0.2 copy does not).
-v49.0.0 was released two days before the merge, so no release carries it
-yet: **this directory goes away with the first wasmtime release after
-2026-09-23** — re-vendor nothing, delete `vendor/`, drop the
+v49.0.0 was released two days before the merge, so no release carried it
+yet.
+
+> **Do not go by the release date.** This file used to say the directory
+> goes away with "the first wasmtime release after 2026-09-23", and that is
+> wrong: **v49.0.1 (checked 2026-09-25) does not carry the patch** — its
+> `pagemap.rs` is byte-identical to v49.0.0's, because a patch release did
+> not touch this file. Following the date rule would have deleted the vendor
+> and silently returned the runtime to 95–315 minor faults per request.
+>
+> Go by the **file**. Before dropping this directory, check that the release
+> you are moving to actually contains the change:
+>
+> ```bash
+> ref=v49.1.0   # whichever release you are considering
+> gh api "repos/bytecodealliance/wasmtime/contents/crates/wasmtime/src/runtime/vm/sys/unix/pagemap.rs?ref=$ref" \
+>   -q .content | base64 -d > /tmp/upstream-pagemap.rs
+> # the production half must match what is vendored here
+> t=$(grep -n 'mod tests' vendor/wasmtime/src/runtime/vm/sys/unix/pagemap.rs | head -1 | cut -d: -f1)
+> u=$(grep -n 'mod tests' /tmp/upstream-pagemap.rs | head -1 | cut -d: -f1)
+> diff <(head -n $((t-1)) vendor/wasmtime/src/runtime/vm/sys/unix/pagemap.rs) \
+>      <(head -n $((u-1)) /tmp/upstream-pagemap.rs) && echo "the release carries it"
+> ```
+
+When a release does carry it: re-vendor nothing, delete `vendor/`, drop the
 `[patch.crates-io]` entry, bump the `wasmtime` dependency, and run the
-freshness tests.
+freshness tests — they are the check that the released crate really has both
+behaviours.
 
 `src/runtime/vm/sys/unix/pagemap.rs`, one function, two behaviours
 (`wasmtime-pagemap-reset.patch`):
