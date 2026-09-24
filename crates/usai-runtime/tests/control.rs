@@ -482,3 +482,67 @@ async fn draining_the_only_revision_is_refused() {
     shutdown.cancel();
     runtime.shutdown().await;
 }
+
+/// `activate` answers 200 for a revision that cannot serve a single
+/// request: an unapplied migration, a schema drift, a resource the
+/// developer forgot to list are all outside the manifest the runtime
+/// checks — and by then the previous revision is already draining away.
+/// `POST /revisions/{id}/verify` runs one workload on the revision while it
+/// is still `installed`, against the resources it will actually use, so a
+/// deployer learns before production does.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_revision_can_be_exercised_before_it_takes_traffic() {
+    let Some((runtime, _hello, fixture_dir, base, shutdown, client)) = setup().await else {
+        return;
+    };
+    let auth = |r: reqwest::RequestBuilder| r.bearer_auth("s3cret");
+    let serving_before = runtime.active().unwrap().id;
+    let installed: Value = auth(client.post(format!("{base}/revisions")))
+        .json(&json!({ "artifact": fixture_dir.to_string_lossy() }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = installed["id"].as_u64().unwrap();
+    assert_eq!(installed["state"], "installed");
+
+    // A task that exists runs, on a revision that is serving nothing.
+    let r = auth(client.post(format!("{base}/revisions/rev{id}/verify")))
+        .json(&json!({ "kind": "task", "name": "record", "input": { "what": "verify" } }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200, "{}", r.text().await.unwrap());
+    let body: Value = r.json().await.unwrap();
+    assert_eq!(body["ok"], true, "{body}");
+    assert_eq!(body["termination"], "completed", "{body}");
+
+    // Nothing was promoted: the revision that was serving still is.
+    assert_eq!(runtime.active().unwrap().id, serving_before);
+    let revisions: Value = auth(client.get(format!("{base}/revisions")))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let row = revisions["revisions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == id)
+        .expect("the revision is still listed");
+    assert_eq!(row["state"], "installed", "{row}");
+
+    // A workload that does not exist is named, not a 500.
+    let r = auth(client.post(format!("{base}/revisions/rev{id}/verify")))
+        .json(&json!({ "kind": "task", "name": "does-not-exist" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 404, "{}", r.text().await.unwrap());
+    shutdown.cancel();
+    runtime.shutdown().await;
+}

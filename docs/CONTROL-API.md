@@ -129,6 +129,36 @@ mean it.
 Activating a `draining` revision again is the **rollback**: it becomes
 `active` and the one that replaced it starts draining.
 
+### `POST /revisions/{id}/verify`
+
+Runs **one workload on a revision that is not serving**, against the
+resources it will actually use. Same body as `/invoke`:
+`{"kind": "task"|"command"|"cron"|"queue", "name": "…", "input": …}` (a
+command takes `"args": [...]`).
+
+This is the step that turns a deploy into a check. `activate` validates what
+the *manifest* records — a missing `DATABASE_URL`, an unreachable database —
+and answers `200` for everything outside it: an unapplied migration, a
+schema drift, a resource the developer forgot to list under a workload. By
+then the revision you were replacing is already draining away. Verify
+first, and nobody's request meets the broken revision.
+
+It prepares the revision as a side effect (resolves its environment, opens
+its resources), which is idempotent and is the same work `activate` does —
+so a verified revision activates no slower. The revision stays `installed`:
+no scheduler runs, no service starts, the listener routes nothing to it.
+
+- `200` — the same body as `/invoke`: `ok`, `value`, `error`, `termination`,
+  `durationMs`, `children`, `logs`, `violations`. **`ok: false` is a failed
+  verification, not a failed request** — read it and decide.
+- `404 unknown_revision` / `404 unknown_workload` — the id, or the name.
+- `422` — the revision could not be prepared (a missing variable, a resource
+  that will not open); the same failures `activate` reports, found earlier.
+
+Pick a workload that proves the thing you are afraid of: a `task` that
+reads the table the release added, a `command` that counts rows. It runs
+for real, against the real database — a verification that writes, writes.
+
 ### `POST /revisions/{id}/drain`
 
 Marks the revision draining (if it was active, nothing is active
@@ -227,6 +257,10 @@ usai db migrate --artifact /srv/app/releases/$sha                  # once per re
 was=$(curl -sf -H "$H" $C/health | jq -r '.active.id // "null"')     # what you are replacing
 id=$(curl -sf -H "$H" -H 'content-type: application/json' -X POST $C/revisions \
        -d "{\"artifact\":\"/srv/app/releases/$sha\",\"ifAbsent\":true}" | jq .id)
+# Exercise it before it takes traffic: the failures `activate` cannot see are
+# the ones outside the manifest (an unapplied migration, a schema drift).
+curl -sf -H "$H" -H 'content-type: application/json' -X POST $C/revisions/$id/verify \
+       -d '{"kind":"task","name":"smoke"}' | jq -e '.ok' || exit 1
 curl -sf -H "$H" -H 'content-type: application/json' -X POST $C/revisions/$id/activate \
        -d "{\"expectedPrevious\":$was}"                                # old revision drains itself
 # The gate is yours: readiness is 200 before, during and after both a healthy

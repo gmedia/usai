@@ -279,7 +279,11 @@ capabilities (design), latency histogram in metrics, an API reference page — a
   control token — is an unannounced rollback. Recorded, not built: there is
   no way to exercise a revision **before** it takes traffic (`/invoke` runs
   against the active one), which the round called the difference between a
-  deploy and a gamble and would block on; no per-revision HTTP error
+  deploy and a gamble and would block on — **built**: `POST
+  /revisions/{id}/verify` runs a task, a command, a cron tick or one queue
+  delivery on a revision while it is still `installed`, against the
+  resources it will actually use, so the failures outside the manifest are
+  found before anyone's request meets them; no per-revision HTTP error
   counters; no force-remove for a draining revision holding a slot; and no
   audit of *who* ran a control operation, only of what.
 

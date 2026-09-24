@@ -549,17 +549,28 @@ impl Runtime {
     /// Validates environment, binds resources, and makes the revision the one
     /// that serves work. A failure leaves the previously active revision
     /// untouched (ADR-0006).
-    pub async fn activate(&self, id: RevisionId) -> Result<Arc<Revision>, RuntimeError> {
+    /// The first half of an activation: resolve the revision's environment
+    /// and open its resources, leaving it `installed` and serving nothing.
+    ///
+    /// It exists so a deployer can **exercise a revision before it takes
+    /// traffic**. Activation answers `200` for a revision that cannot serve
+    /// a single request — an unapplied migration, a schema drift, a resource
+    /// the developer forgot to list — because those are outside the manifest
+    /// the runtime checks, and by then the previous revision is already
+    /// draining away. Preparing, running one smoke workload against the
+    /// prepared revision and then activating turns a deploy from a gamble
+    /// into a check.
+    ///
+    /// Idempotent: resources are shared by identity, so preparing twice
+    /// opens nothing twice, and `activate` prepares again rather than
+    /// assuming.
+    pub async fn prepare(&self, id: RevisionId) -> Result<Arc<Revision>, RuntimeError> {
         let revision = self.revision(id)?;
-        // Activating the active revision again would open its resources a
-        // second time and start a second scheduler beside the first.
-        if revision.state() == RevisionState::Active {
-            return Err(RuntimeError::NotActive(
-                id,
-                RevisionState::Active,
-                "already active",
-            ));
-        }
+        self.bind(&revision).await?;
+        Ok(revision)
+    }
+
+    async fn bind(&self, revision: &Arc<Revision>) -> Result<(), RuntimeError> {
         // Every problem at once: an operator with three variables to set
         // should not need three restarts to learn their names.
         let mut env = BTreeMap::new();
@@ -591,6 +602,21 @@ impl Runtime {
             bound.bind(&spec.name, manager);
         }
         *revision.resources.write().expect("resources poisoned") = Arc::new(bound);
+        Ok(())
+    }
+
+    pub async fn activate(&self, id: RevisionId) -> Result<Arc<Revision>, RuntimeError> {
+        let revision = self.revision(id)?;
+        // Activating the active revision again would open its resources a
+        // second time and start a second scheduler beside the first.
+        if revision.state() == RevisionState::Active {
+            return Err(RuntimeError::NotActive(
+                id,
+                RevisionState::Active,
+                "already active",
+            ));
+        }
+        self.bind(&revision).await?;
 
         let previous = {
             let mut active = self.active.write().expect("active poisoned");
@@ -919,6 +945,108 @@ impl Runtime {
         )
         .await
         .map_err(RuntimeError::InvalidDefinition)
+    }
+
+    /// Admits one unit of work on a revision that is **not** the active one,
+    /// for a deployer verifying it before it takes traffic. Everything else
+    /// about it is an ordinary admission — the runtime and application
+    /// budgets apply, the revision counts it in flight, a drain waits for
+    /// it — and the revision still serves nothing: no scheduler runs, no
+    /// listener routes to it.
+    ///
+    /// Separate from `admit` and named for what it is, because "work on a
+    /// revision that does not admit work" is a contradiction everywhere
+    /// else in this runtime.
+    pub fn admit_for_verification(
+        &self,
+        revision: &Arc<Revision>,
+        workload_id: &str,
+    ) -> Result<Admission, RuntimeError> {
+        if matches!(
+            revision.state(),
+            RevisionState::Draining | RevisionState::Retired
+        ) {
+            return Err(RuntimeError::NotActive(
+                revision.id,
+                revision.state(),
+                "a revision on its way out cannot be verified",
+            ));
+        }
+        let (index, _) = revision
+            .definition
+            .workload(workload_id)
+            .ok_or_else(|| RuntimeError::UnknownWorkload(workload_id.to_owned()))?;
+        let runtime_permit = self.world_budget.try_acquire()?;
+        let app_permit = revision.app_budget.try_acquire()?;
+        let workload_permit = match &revision.workload_budgets[index] {
+            Some(budget) => Some(budget.try_acquire()?),
+            None => None,
+        };
+        revision.in_flight.fetch_add(1, Ordering::SeqCst);
+        if let Some(live) = revision.live_by_workload.get(index) {
+            live.fetch_add(1, Ordering::SeqCst);
+        }
+        Ok(Admission {
+            revision: Arc::clone(revision),
+            workload_index: index,
+            in_flight: InFlight {
+                revision: Arc::clone(revision),
+                workload_index: index,
+                _runtime_permit: runtime_permit,
+                _app_permit: app_permit,
+                _workload_permit: workload_permit,
+            },
+        })
+    }
+
+    /// Runs one workload on a named revision, whether or not it is the
+    /// active one: the verification step of a deploy. The revision is
+    /// prepared first (its environment resolved and its resources opened),
+    /// so the world meets the database the application will actually use —
+    /// which is the whole point, because the failures activation cannot see
+    /// are the ones outside the manifest.
+    pub async fn verify_revision(
+        &self,
+        id: RevisionId,
+        kind: &str,
+        name: &str,
+        input: serde_json::Value,
+    ) -> Result<WorkResult, RuntimeError> {
+        let revision = self.prepare(id).await?;
+        let workload_id = format!("{kind}:{name}");
+        let admission = self.admit_for_verification(&revision, &workload_id)?;
+        let input = match kind {
+            "task" => {
+                crate::workloads::input(&revision, "task", serde_json::json!({ "input": input }))
+            }
+            "command" => crate::workloads::input(
+                &revision,
+                "command",
+                serde_json::json!({ "args": input.as_array().cloned().unwrap_or_default() }),
+            ),
+            "cron" => crate::workloads::input(
+                &revision,
+                "cron",
+                serde_json::json!({ "scheduledAt": chrono::Utc::now().to_rfc3339() }),
+            ),
+            "queue" => crate::workloads::input(
+                &revision,
+                "queue",
+                serde_json::json!({ "message": input, "id": "verify", "attempt": 1 }),
+            ),
+            other => {
+                return Err(RuntimeError::InvalidDefinition(format!(
+                    "cannot verify a {other} workload: verify a task, a command, a cron tick or one queue delivery"
+                )));
+            }
+        };
+        self.execute_with_stop(
+            admission,
+            input,
+            CancellationToken::new(),
+            Some(revision.connections_stop().child_token()),
+        )
+        .await
     }
 
     /// Runs a user-defined command in a fresh finite world (`usai app <name>`).

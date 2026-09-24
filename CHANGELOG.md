@@ -160,6 +160,18 @@ Everything else is additive or a fix to behaviour that was wrong.
   cross_origin_refused`), and a mutating one whose media type is in a
   browser's simple set is refused (`415`). A deploy script sends neither, so
   nothing legitimate changes.
+- **`POST /revisions/{id}/verify` runs one workload on a revision before it
+  takes traffic.** `activate` validates what the *manifest* records — a
+  missing `DATABASE_URL`, an unreachable database — and answers `200` for
+  everything outside it: an unapplied migration, a schema drift, a resource
+  the developer forgot to list under a workload. Measured: a revision whose
+  table no migration creates activated with `200`, `/health` said `ok:true`,
+  `/_usai/ready` said 200, and **every request was a 500** — while the
+  revision it replaced was already draining away. Verifying first runs a
+  task, a command, a cron tick or one queue delivery against the resources
+  the revision will actually use, while it is still `installed` and serving
+  nothing. It prepares the revision as a side effect, which is the same work
+  `activate` does, so a verified revision activates no slower.
 - **`activate` can be retried safely: `{"expectedPrevious": <id>}`.** A
   control plane retries on timeout, and a retry that arrived while the
   revision it replaced was still `draining` was **the documented rollback** —

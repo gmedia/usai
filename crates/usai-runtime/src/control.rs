@@ -150,6 +150,7 @@ struct ActivateRequest {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct InvokeRequest {
     kind: String,
     name: String,
@@ -536,6 +537,51 @@ impl ControlHost {
                     }
                 };
                 match result {
+                    Ok(r) => reply(StatusCode::OK, work_result_json(&r)),
+                    Err(e) => runtime_error(e),
+                }
+            }
+            // Verification before promotion: run one workload on a revision
+            // that is **not** serving, against the resources it will
+            // actually use. `activate` answers 200 for a revision that
+            // cannot serve a single request — an unapplied migration, a
+            // schema drift, a resource the developer forgot to list are all
+            // outside the manifest the runtime checks — and by then the
+            // previous revision is already draining away. This is how a
+            // deploy stops being a gamble.
+            (&Method::POST, ["revisions", id, "verify"]) => {
+                let Some(id) = Self::revision_id(id) else {
+                    return error(StatusCode::NOT_FOUND, "unknown_revision", "bad revision id");
+                };
+                let body = match Limited::new(request.into_body(), 1024 * 1024)
+                    .collect()
+                    .await
+                {
+                    Ok(b) => b.to_bytes(),
+                    Err(_) => {
+                        return error(
+                            StatusCode::PAYLOAD_TOO_LARGE,
+                            "payload_too_large",
+                            "request body too large",
+                        );
+                    }
+                };
+                let invoke: InvokeRequest = match serde_json::from_slice(&body) {
+                    Ok(i) => i,
+                    Err(e) => {
+                        return error(StatusCode::BAD_REQUEST, "invalid_request", e.to_string());
+                    }
+                };
+                let input = if invoke.kind == "command" {
+                    Value::Array(invoke.args.iter().map(|a| json!(a)).collect())
+                } else {
+                    invoke.input
+                };
+                match self
+                    .runtime
+                    .verify_revision(id, &invoke.kind, &invoke.name, input)
+                    .await
+                {
                     Ok(r) => reply(StatusCode::OK, work_result_json(&r)),
                     Err(e) => runtime_error(e),
                 }
