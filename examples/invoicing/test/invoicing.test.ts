@@ -64,6 +64,13 @@ test("invoicing: tenants, sessions, transactional invoices, pagination, signed r
       root,
       env: { DATABASE_URL: url!, SESSION_TTL_HOURS: "1" },
       migrate: { seed: true },
+      // This test asserts on the *real* delivery path — a webhook that is
+      // refused with a 503 on its first attempt and delivered on the retry —
+      // so it needs the queue consumer running. The harness leaves the
+      // schedulers off by default because test files run in parallel and
+      // consumers would take each other's messages; a file that turns one on
+      // wants a database of its own, which this one already has.
+      schedulers: { queue: true },
     });
   } catch (e) {
     hooks.close();
