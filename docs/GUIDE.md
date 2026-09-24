@@ -47,8 +47,13 @@ built it and what this runtime understands.
 
 ```bash
 pnpm dlx @sakaladev/create-usai my-app      # or: node packages/create-usai/dist/cli.js my-app (from this repo)
-#   `dlx` caches what it fetched, so if you scaffolded once before and the
-#   template looks old, name the version: pnpm dlx @sakaladev/create-usai@latest
+#   The scaffolder prints the SDK version it pinned — check it is the one
+#   you expect. `pnpm dlx` serves whatever its own cache holds for a spec,
+#   and **naming @latest does not defeat it**: measured on one machine with
+#   0.0.10 published, `pnpm dlx …create-usai` wrote ^0.0.8 and
+#   `…create-usai@latest` wrote ^0.0.4, while `npx -y @sakaladev/create-usai`
+#   wrote ^0.0.10. If the version printed is not the current one, use npx or
+#   clear the cache (`rm -rf "$(pnpm store path)/../dlx"`).
 cd my-app && pnpm install
 usai dev                         # from this repo: cargo run -p usai-cli -- dev --root my-app
 curl localhost:3000/hello/world

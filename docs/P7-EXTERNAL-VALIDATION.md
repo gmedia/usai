@@ -92,7 +92,7 @@ or send the same content by mail:
   Go or Spring. Mix them; five people making the same mistake means the API
   is wrong, one person means the doc is.
 - Give them the current release, not `main`; note the version on the report.
-  Today that is **0.0.9** (`pnpm dlx @sakaladev/create-usai@latest` scaffolds
+  Today that is **0.0.10** (`npx -y @sakaladev/create-usai` scaffolds
   a project pinned to it). Hand them this page and nothing else — no demo, no
   walkthrough, no "one thing to know first". The first five minutes of
   someone alone with the documentation is the most expensive data this

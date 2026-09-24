@@ -152,6 +152,8 @@ As a user (binary from the [releases](https://github.com/gmedia/usai/releases), 
 
 ```bash
 pnpm dlx @sakaladev/create-usai my-app && cd my-app && pnpm install
+# it prints the SDK version it pinned; if that is not the current release,
+# `pnpm dlx` served a cached scaffolder — use `npx -y @sakaladev/create-usai`
 pnpm dev                                                  # http://127.0.0.1:3000/hello/world (fetches the usai binary once)
 docker compose up                                         # the same, with nothing installed (sakaladev/usai:<v>-dev)
 docker build -t my-app . && docker run -p 3000:3000 my-app   # runtime image + artifact, non-root, no toolchain

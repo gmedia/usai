@@ -8,7 +8,11 @@ import { scaffold } from "./cli.ts";
 
 test("scaffolds the hello template with the project name substituted", () => {
   const dir = join(mkdtempSync(join(tmpdir(), "create-usai-")), "My App");
-  const target = scaffold({ target: dir, usaiVersion: "0.0.1" });
+  const { target, version } = scaffold({ target: dir, usaiVersion: "0.0.1" });
+  // What it pinned comes back, so the CLI can print it — a returning user
+  // whose `pnpm dlx` cache handed them an older scaffolder sees the wrong
+  // version on screen instead of finding it weeks later.
+  assert.equal(version, "0.0.1");
   assert.ok(existsSync(join(target, "src/app.ts")));
   assert.ok(existsSync(join(target, "usai.config.ts")));
   const pkg = JSON.parse(readFileSync(join(target, "package.json"), "utf8"));
@@ -34,6 +38,24 @@ test("scaffolds the hello template with the project name substituted", () => {
     /FROM sakaladev\/usai:0\.0\.1\s*$/m,
   );
   assert.throws(() => scaffold({ target: dir }), /not empty/);
+});
+
+test("the scaffolder prints the SDK version it pinned", () => {
+  // Measured on 2026-09-24 with `@sakaladev/usai@0.0.10` published:
+  // `pnpm dlx @sakaladev/create-usai` scaffolded `^0.0.8` and
+  // `pnpm dlx @sakaladev/create-usai@latest` scaffolded `^0.0.4` on a
+  // machine that had run it before, while `npx -y` on the same machine
+  // scaffolded `^0.0.10`. pnpm's dlx cache is keyed by the spec, so even
+  // `@latest` hits it. A scaffolder cannot fix that; being silent about
+  // which SDK it wrote is what turns it into a bug nobody notices.
+  const dir = join(mkdtempSync(join(tmpdir(), "create-usai-print-")), "app");
+  const out = execFileSync(
+    process.execPath,
+    [resolve(import.meta.dirname, "../dist/cli.js"), dir],
+    { encoding: "utf8" },
+  );
+  assert.match(out, /@sakaladev\/usai \^\d+\.\d+\.\d+/, out);
+  assert.match(out, /create-usai \d+\.\d+\.\d+/, out);
 });
 
 test("runs as an executable through a symlink, the way package managers link bins", () => {

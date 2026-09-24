@@ -33,7 +33,7 @@ function walk(dir: string, visit: (file: string) => void): void {
 }
 
 /** Copies the template and substitutes placeholders. Refuses a non-empty target. */
-export function scaffold(options: ScaffoldOptions): string {
+export function scaffold(options: ScaffoldOptions): { target: string; version: string } {
   const template = options.template ?? "hello";
   const source = resolve(here, "..", "templates", template);
   if (!existsSync(source)) throw new Error(`unknown template ${template}`);
@@ -81,7 +81,17 @@ export function scaffold(options: ScaffoldOptions): string {
   ] as const) {
     if (existsSync(join(target, from))) renameSync(join(target, from), join(target, to));
   }
-  return target;
+  return { target, version };
+}
+
+function ownVersion(): string {
+  try {
+    return (
+      JSON.parse(readFileSync(resolve(here, "..", "package.json"), "utf8")) as { version: string }
+    ).version;
+  } catch {
+    return "unknown";
+  }
 }
 
 function main(argv: string[]): void {
@@ -93,10 +103,22 @@ function main(argv: string[]): void {
     process.exit(2);
   }
   try {
-    const target = scaffold(
+    const { target, version } = scaffold(
       templateFlag ? { target: dir, template: templateFlag } : { target: dir },
     );
-    console.log(`created ${target}\n\n  cd ${dir}\n  pnpm install\n  pnpm dev\n`);
+    // **Say which SDK this pinned.** `pnpm dlx` serves whatever its own
+    // cache holds for a package spec — measured: `pnpm dlx
+    // @sakaladev/create-usai` and even `…@latest` scaffolded `^0.0.4` and
+    // `^0.0.8` on a machine that had run it before, while `npx -y` on the
+    // same machine scaffolded `^0.0.10`. That is the worst shape a
+    // first-impression bug can have: right for whoever tests it on a clean
+    // machine, wrong for the returning user who tried the last version.
+    // A scaffolder cannot fix another tool's cache; it can refuse to be
+    // silent about what it wrote.
+    console.log(
+      `created ${target}\n  @sakaladev/usai ^${version}  (create-usai ${ownVersion()})\n` +
+        `\n  cd ${dir}\n  pnpm install\n  pnpm dev\n`,
+    );
   } catch (error) {
     console.error(`error: ${(error as Error).message}`);
     process.exit(1);
