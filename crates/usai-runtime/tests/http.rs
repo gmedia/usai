@@ -1056,7 +1056,10 @@ async fn outbound_http_is_a_declared_owned_resource() {
             .status()
             .resources
             .into_iter()
-            .find(|r| r.identity.kind == "http.client")
+            // By name: the fixture declares more than one http client now
+            // (a generic one, to prove the destination policy), and "the
+            // first of that kind" is not a selector.
+            .find(|r| r.identity.kind == "http.client" && r.identity.name == "upstream")
             .expect("the client is a resource with a status");
         if found.detail["cancelled"] == 1 && found.in_use == 0 {
             resource = Some(found);
