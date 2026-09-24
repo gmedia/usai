@@ -59,8 +59,12 @@ test("the scaffolder prints the SDK version it pinned", () => {
 });
 
 test("runs as an executable through a symlink, the way package managers link bins", () => {
+  // `pretest` builds it, so this no longer skips. It used to say "CI builds
+  // before testing", which `make test` does not — so the one test that
+  // covers how a package manager actually invokes this binary had been
+  // silently passing by not running.
   const dist = resolve(import.meta.dirname, "../dist/cli.js");
-  if (!existsSync(dist)) return; // built by `pnpm run build`; CI builds before testing
+  assert.ok(existsSync(dist), "pretest should have built dist/cli.js");
   const work = mkdtempSync(join(tmpdir(), "create-usai-bin-"));
   const link = join(work, "create-usai");
   symlinkSync(dist, link);
