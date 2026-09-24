@@ -70,6 +70,12 @@ pub struct Gauges {
     pub completions_dropped_late: AtomicU64,
     pub completions_rejected_stale: AtomicU64,
     pub detached_work_detected: AtomicU64,
+    /// Monotonic: worlds stopped by their **declared** deadline that did not
+    /// finish unwinding within the grace and had to be cancelled. A clean
+    /// ending and a cut-off `close` both end as `DeadlineExceeded`, and they
+    /// are not the same incident: the second one may have left a row, a lock
+    /// or a lease for the cancellation path to reclaim.
+    pub deadline_unwind_overruns: AtomicU64,
     /// Monotonic: thread CPU time spent inside guest entries, in
     /// nanoseconds, summed over every world (per-world CPU accounting).
     pub guest_cpu_ns: AtomicU64,
@@ -90,6 +96,7 @@ pub struct GaugeSnapshot {
     pub completions_dropped_late: u64,
     pub completions_rejected_stale: u64,
     pub detached_work_detected: u64,
+    pub deadline_unwind_overruns: u64,
     pub guest_cpu_ns: u64,
     /// Workload id → guest CPU nanoseconds.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -106,6 +113,7 @@ impl Gauges {
             completions_dropped_late: self.completions_dropped_late.load(Ordering::SeqCst),
             completions_rejected_stale: self.completions_rejected_stale.load(Ordering::SeqCst),
             detached_work_detected: self.detached_work_detected.load(Ordering::SeqCst),
+            deadline_unwind_overruns: self.deadline_unwind_overruns.load(Ordering::SeqCst),
             guest_cpu_ns: self.guest_cpu_ns.load(Ordering::SeqCst),
             guest_cpu_ns_by_workload: self
                 .guest_cpu_ns_by_workload

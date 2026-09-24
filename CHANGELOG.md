@@ -246,6 +246,33 @@ Everything else is additive or a fix to behaviour that was wrong.
 
 ### Runtime
 
+- **A socket or service stopped by its declared deadline gets five seconds to
+  unwind, and a cut-off unwind is counted and named.** The grace was one
+  second for every kind, which is not enough for an ending that has to do
+  anything: a `close` acquiring a pooled connection can wait ten seconds for
+  one before its statement starts, so the very handlers the stop-first design
+  exists for — the ones with a row, a lock or a lease to release — were the
+  ones cut off. Worse, the watchdog arms each guest entry with what is left
+  of the deadline, and at the deadline that is zero, so the unwind's first
+  synchronous run was interrupted after a **millisecond**. The grace now
+  bounds the unwind in both senses, wall clock and CPU. A socket is detached
+  at the stop and a service has no client, so its grace is entirely the
+  handler's own ending; a **stream** keeps its response body open while it
+  unwinds, so its grace stays at one second — there it is overrun on a bound
+  the OpenAPI document publishes to consumers. A world that overruns the
+  grace is cancelled — a bound is a bound — and now increments
+  `usai_deadline_unwind_overruns_total` and logs a WARN naming the workload
+  and the grace: a clean ending and a cut-off one both end as
+  `DeadlineExceeded`, and only the second leaves something for the
+  cancellation path to reclaim.
+- **A `413` that abandoned the request body closes the connection.** The
+  refusal happens mid-read, so the rest of the rejected body is still
+  arriving on a socket the client believes it may reuse — and a keep-alive
+  client does reuse it, so the reset lands on its *next* request: a valid one,
+  on another route, failing for no reason visible from the client. The 413
+  now carries `Connection: close`. (Found as an intermittent failure in this
+  repository's own suite, which is the same shape any pooled HTTP client
+  meets.)
 - **`maxBodyBytes` on a route.** `USAI_MAX_BODY_BYTES` is one number for the
   whole process, so an import route that takes 5 MB opened every other route
   in the application to 5 MB as well — where an Express application would put

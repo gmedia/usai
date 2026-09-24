@@ -1053,11 +1053,20 @@ impl HttpHost {
                             "the runtime's request body bound; USAI_MAX_BODY_BYTES raises it, or declare `maxBodyBytes` on this route".to_owned()
                         }
                     };
+                    // The refusal happens mid-read, so bytes of the rejected
+                    // body are still arriving on a connection the client
+                    // believes it can reuse. Without this header it does
+                    // reuse it, and the reset lands on its **next** request —
+                    // a valid one, on a different route, failing for no
+                    // reason the client can see. (Found as a flake in this
+                    // repository's own suite, which is exactly the shape a
+                    // client pool meets in production.)
                     Reply::error(
                         StatusCode::PAYLOAD_TOO_LARGE,
                         "payload_too_large",
                         format!("body exceeds {bound} bytes ({source})"),
                     )
+                    .with_header("connection", "close".to_owned())
                 })?
                 .to_bytes();
             let body_json: Value = if raw_body.is_empty() {

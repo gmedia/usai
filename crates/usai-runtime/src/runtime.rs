@@ -36,6 +36,13 @@ pub struct RuntimeConfig {
     pub cpu_slice: Duration,
     /// How long `drain` waits before giving up on a revision.
     pub drain_timeout: Duration,
+    /// How long a connection-bound or persistent world has to unwind after
+    /// its **declared** deadline stopped it, before it is cancelled. The
+    /// client is already gone at the stop — the deadline is honoured on time
+    /// whatever this is — so it buys the handler's own ending: the write it
+    /// is in, a socket's `close`, the row that `close` deletes. A world that
+    /// overruns it is cancelled and says so at WARN.
+    pub deadline_unwind_grace: Duration,
     /// Dispatched tasks that may run at once (ADR-0012).
     pub task_concurrency: u32,
     /// Dispatched tasks that may wait in the queue.
@@ -69,6 +76,7 @@ impl Default for RuntimeConfig {
             default_timeout: Duration::from_secs(30),
             cpu_slice: Duration::from_secs(5),
             drain_timeout: Duration::from_secs(30),
+            deadline_unwind_grace: Duration::from_secs(5),
             task_concurrency: 64,
             task_queue_capacity: 10_000,
             cron_scheduler: true,
@@ -1047,6 +1055,7 @@ impl Runtime {
                 extensions: self.extensions(),
                 deadline,
                 cpu_slice: self.config.cpu_slice,
+                unwind_grace: self.config.deadline_unwind_grace,
                 cancel,
                 stop,
                 revision: Some(Arc::clone(&revision)),

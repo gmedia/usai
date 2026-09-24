@@ -784,6 +784,7 @@ async fn a_route_can_accept_less_than_the_process_allows() {
         .await
         .unwrap();
     assert_eq!(refused.status(), 413);
+    let refused_headers = refused.headers().clone();
     let body: Value = refused.json().await.unwrap();
     assert_eq!(body["error"]["code"], "payload_too_large", "{body}");
     let message = body["error"]["message"].as_str().unwrap_or("").to_owned();
@@ -791,6 +792,17 @@ async fn a_route_can_accept_less_than_the_process_allows() {
     // The message has to say *which* bound refused it, or the operator
     // raises USAI_MAX_BODY_BYTES and nothing changes.
     assert!(message.contains("maxBodyBytes"), "{message}");
+    // The body was refused mid-read, so the rest of it is still arriving on
+    // a connection the client thinks it may reuse. Saying so is the
+    // difference between one failed upload and a reset landing on the next,
+    // valid request the client sends over the same socket.
+    assert_eq!(
+        refused_headers
+            .get(reqwest::header::CONNECTION)
+            .and_then(|v| v.to_str().ok()),
+        Some("close"),
+        "a 413 that abandoned the body must not leave the connection reusable"
+    );
 
     // And it still accepts what fits.
     let fits = s
@@ -905,12 +917,20 @@ async fn a_declared_timeout_bounds_a_stream() {
     let took = started.elapsed();
     // The fixture's loop never checks `ctx.signal`, which is the point: a
     // declared deadline stops the world first so it can finish cleanly, and
-    // cancels it a second later whether or not the handler cooperated.
-    // Without that second half a handler that ignores the signal runs to its
-    // own end — sixty seconds here — and the bound its author declared means
-    // nothing.
+    // cancels it after the unwind grace whether or not the handler
+    // cooperated. Without that second half a handler that ignores the signal
+    // runs to its own end — sixty seconds here — and the bound its author
+    // declared means nothing.
+    //
+    // The bound here is **two seconds**, not five, and that is the point of
+    // the number: a stream's client is still reading while the world
+    // unwinds, so a handler that ignores the signal writes to it for the
+    // whole grace. A socket's is closed at the stop and a service has no
+    // client, so those get the full `deadline_unwind_grace` for their
+    // `close`; a stream's grace is the overrun on a bound the OpenAPI
+    // document publishes to consumers, and it stays at a second.
     assert!(
-        took < Duration::from_secs(5),
+        took < Duration::from_secs(2),
         "the declared timeout did not end the stream: {took:?}"
     );
     assert!(

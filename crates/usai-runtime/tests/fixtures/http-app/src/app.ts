@@ -619,10 +619,19 @@ export const pushLoop = socket(
       await (ctx.resources["audit"] as Audit).set(`push:${who}`, `aborted after ${i}`);
     },
     async close(ctx) {
-      await (ctx.resources["audit"] as Audit).set(
-        `push-closed:${(ctx.query as { who?: string }).who ?? "anon"}`,
-        true,
-      );
+      const who = (ctx.query as { who?: string }).who ?? "anon";
+      // A `close` that takes real time before it can release anything — the
+      // shape that matters, because the world is already stopped and the
+      // grace is all it has. `ctx.sleep` resolves immediately in a stopped
+      // world (that is what lets the push loop leave), so the wait here is
+      // wall clock the way a slow query is.
+      if (who.startsWith("slow")) {
+        const until = Date.now() + 1_500;
+        while (Date.now() < until) {
+          /* the handler's own ending, taking longer than a second */
+        }
+      }
+      await (ctx.resources["audit"] as Audit).set(`push-closed:${who}`, true);
     },
   },
 );

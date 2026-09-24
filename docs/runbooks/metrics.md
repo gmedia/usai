@@ -30,6 +30,7 @@ refusals and *falls* while a bad-traffic flood rises. Volume is
 | `usai_ops_live` | gauge | — | External operations with a live owner |
 | `usai_completions_total` | counter | outcome | Operation completions by routing outcome |
 | `usai_detached_work_total` | counter | — | Finite worlds that ended with live asynchronous work |
+| `usai_deadline_unwind_overruns_total` | counter | — | Worlds stopped by a declared deadline that did not finish unwinding within the grace and were cancelled |
 | `usai_world_budget` | gauge | kind | Runtime world budget |
 | `usai_revision_in_flight` | gauge | application, revision, state | Work in flight per revision |
 | `usai_service` | gauge | revision, service, state | 1 per declared `service()`, at its current state (absent when the application declares none) |
@@ -163,6 +164,7 @@ it executes from.
 | Pool saturated | `usai_resource{metric="waiting"} > 0` for 1 m | requests are queueing **for a connection**: size `pool.max` against `--max-worlds`, or make the queries faster. `in_use == max` on its own is healthy saturation and is not worth waking anyone for — read `waiting` beside it (`slow-route.md`) |
 | A route got slow | `topk(5, rate(usai_http_workload_request_seconds_sum[5m]) / rate(usai_http_workload_request_seconds_count[5m])) > 0.5` | per-workload mean latency. The global histogram's p99 cannot see a slow route that is a minority of traffic — measured at 2.5 ms while a route took 204 ms |
 | Detached work | `increase(usai_detached_work_total[1h]) > 0` | an application bug: a handler returned with work in flight (`500 detached_work`) |
+| Cut-off unwind | `increase(usai_deadline_unwind_overruns_total[1h]) > 0` | a stream, socket or service hit its declared `timeout:` and its own ending did not finish in the unwind grace (5 s; 1 s for a stream) — whatever `close` was releasing was reclaimed by the cancellation path instead. Either the deadline is too tight for that handler's ending, or the ending is doing too much |
 | Service gave up | `usai_service{state="failed"} == 1` | the restart policy is exhausted (or there was none); the instance stays ready, the service is down. **Not** `restarting`, which is an ordinary backoff between attempts and clears itself |
 | Cron on two replicas | `sum(usai_scheduler{kind="cron"}) > 1` and the schedule is not `exclusive` | the schedule fires on each — declare it `exclusive: true` or start the others with `--no-cron` |
 | **At the memory ceiling** | `increase(usai_process_memory_ceiling_hits_total[5m]) > 100` | the container is pinned at its limit and reclaiming the pages it is executing from — *not* an OOM kill, nothing is logged, and throughput collapses (measured: 1 req/s at p50 4.7 s in a box 16 MiB too small). Raise the limit or lower `--max-worlds` (`memory-pressure.md`) |

@@ -21,6 +21,15 @@ struct Server {
 }
 
 async fn start() -> Option<Server> {
+    start_with(RuntimeConfig {
+        cron_scheduler: false,
+        drain_timeout: Duration::from_secs(5),
+        ..RuntimeConfig::default()
+    })
+    .await
+}
+
+async fn start_with(config: RuntimeConfig) -> Option<Server> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_test_writer()
@@ -53,15 +62,9 @@ async fn start() -> Option<Server> {
     )
     .await
     .expect("fixture builds");
-    let runtime = Runtime::with_env(
-        engine,
-        RuntimeConfig {
-            cron_scheduler: false,
-            drain_timeout: Duration::from_secs(5),
-            ..RuntimeConfig::default()
-        },
-        |name| (name == "UPSTREAM_URL").then(|| "http://127.0.0.1:9/".to_owned()),
-    );
+    let runtime = Runtime::with_env(engine, config, |name| {
+        (name == "UPSTREAM_URL").then(|| "http://127.0.0.1:9/".to_owned())
+    });
     let rev = runtime.install(out.definition).await.unwrap();
     runtime.activate(rev.id).await.unwrap();
     let host = HttpHost::new(
@@ -501,6 +504,98 @@ async fn a_declared_timeout_bounds_a_socket() {
         }
     }
     assert_eq!(closed, json!(true), "close did not run at the deadline");
+    s.shutdown.cancel();
+}
+
+/// The deadline **stops** a connection-bound world and gives it a grace to
+/// unwind before cancelling it, so a socket's `close` runs. The grace was one
+/// second, and one second is not enough for a `close` that has to do anything
+/// — a single pooled query can wait that long for a connection — so the leak
+/// the stop-first design exists to prevent came back for exactly the handlers
+/// that had something to release. The grace is `RuntimeConfig::
+/// deadline_unwind_grace` (5 s) and a world that overruns it says so at WARN.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_slow_close_still_runs_after_a_declared_deadline() {
+    let Some(s) = start().await else { return };
+    let (mut ws, response) =
+        tokio_tungstenite::connect_async(format!("{}/push?who=slowclose", s.ws))
+            .await
+            .expect("upgrade");
+    assert_eq!(response.status(), 101);
+    // Drain until the deadline (600 ms) closes the connection.
+    while let Ok(Some(Ok(message))) = tokio::time::timeout(Duration::from_secs(5), ws.next()).await
+    {
+        if message.is_close() {
+            break;
+        }
+    }
+    // `close` busy-waits 1.5 s before it writes; it has the grace to finish.
+    let mut closed = Value::Null;
+    for _ in 0..80 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        closed = audit(&s.runtime, "push-closed:slowclose").await;
+        if closed != Value::Null {
+            break;
+        }
+    }
+    assert_eq!(
+        closed,
+        json!(true),
+        "a close that takes longer than a second was cut off at the deadline"
+    );
+    assert_eq!(
+        s.runtime.status().gauges.deadline_unwind_overruns,
+        0,
+        "it unwound inside the grace, so nothing was cut off"
+    );
+    s.shutdown.cancel();
+}
+
+/// A world that does *not* finish unwinding within the grace is cancelled —
+/// which is right, a declared bound is a bound — but it ends as
+/// `DeadlineExceeded` exactly like one that closed cleanly, so from the
+/// outside the two incidents look the same. They are not: this one may have
+/// left the row, the lock or the lease that `close` was about to release.
+/// It is counted (`usai_deadline_unwind_overruns_total`) and said at WARN.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_close_that_overruns_the_grace_is_counted() {
+    let Some(s) = start_with(RuntimeConfig {
+        cron_scheduler: false,
+        drain_timeout: Duration::from_secs(5),
+        // Shorter than the fixture's 1.5 s `close`, so the grace runs out.
+        deadline_unwind_grace: Duration::from_millis(200),
+        ..RuntimeConfig::default()
+    })
+    .await
+    else {
+        return;
+    };
+    assert_eq!(s.runtime.status().gauges.deadline_unwind_overruns, 0);
+    let (mut ws, response) =
+        tokio_tungstenite::connect_async(format!("{}/push?who=slowover", s.ws))
+            .await
+            .expect("upgrade");
+    assert_eq!(response.status(), 101);
+    while let Ok(Some(Ok(message))) = tokio::time::timeout(Duration::from_secs(5), ws.next()).await
+    {
+        if message.is_close() {
+            break;
+        }
+    }
+    let mut overruns = 0;
+    for _ in 0..40 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        overruns = s.runtime.status().gauges.deadline_unwind_overruns;
+        if overruns > 0 {
+            break;
+        }
+    }
+    assert_eq!(overruns, 1, "the cut-off unwind was not counted");
+    assert_eq!(
+        audit(&s.runtime, "push-closed:slowover").await,
+        Value::Null,
+        "the close is supposed to have been cut off; this proves nothing otherwise"
+    );
     s.shutdown.cancel();
 }
 

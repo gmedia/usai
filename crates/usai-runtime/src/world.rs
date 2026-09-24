@@ -132,13 +132,6 @@ pub struct WorkResult {
     pub request_id: Option<String>,
 }
 
-/// How long a connection-bound or persistent world has to unwind after its
-/// **declared** deadline: long enough to finish the write it is in and run
-/// a socket's `close`, short enough that a handler ignoring `ctx.signal`
-/// still stops near the bound its author asked for. Past it the world is
-/// cancelled, exactly as a finite one is at its deadline.
-const DEADLINE_UNWIND_GRACE: Duration = Duration::from_secs(1);
-
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct LogLine {
     pub level: String,
@@ -271,6 +264,9 @@ pub struct WorldSpec {
     pub deadline: Option<Duration>,
     /// Hard bound on one uninterrupted synchronous guest run.
     pub cpu_slice: Duration,
+    /// How long this world has to unwind after its declared deadline
+    /// stopped it (`RuntimeConfig::deadline_unwind_grace`).
+    pub unwind_grace: Duration,
     pub cancel: CancellationToken,
     /// Graceful stop request for persistent workloads (`None` for finite work).
     pub stop: Option<CancellationToken>,
@@ -293,6 +289,7 @@ pub struct WorldDriver {
     gauges: Arc<Gauges>,
     deadline: Option<Duration>,
     cpu_slice: Duration,
+    unwind_grace: Duration,
     cancel: CancellationToken,
     stop: Option<CancellationToken>,
     delivered: u32,
@@ -364,6 +361,7 @@ impl WorldDriver {
             gauges,
             deadline: spec.deadline,
             cpu_slice: spec.cpu_slice,
+            unwind_grace: spec.unwind_grace,
             cancel: spec.cancel,
             stop: spec.stop,
             delivered: 0,
@@ -590,7 +588,13 @@ impl WorldDriver {
                 // a timed-out request with 500 instead of 504 (seen once
                 // under a loaded `make check`, where the interrupt landed
                 // between two iterations of this loop).
-                Err(_) if self.deadline_elapsed() => return self.deadline_interrupted().await,
+                Err(e) if self.deadline_elapsed() => {
+                    return if stopped_at_deadline {
+                        self.unwind_overran(e.to_string()).await
+                    } else {
+                        self.deadline_interrupted().await
+                    };
+                }
                 Err(e) => {
                     return Termination::Faulted {
                         detail: e.to_string(),
@@ -612,6 +616,17 @@ impl WorldDriver {
                     tracing::debug!(world = %self.id, "stop requested: pending timers resolve now");
                     let watchdog = self.watchdog();
                     if let Err(e) = watchdog.finish(self.instance.stop("stop requested").await) {
+                        // The unwind itself ran out of time. When the stop
+                        // came from the world's own declared deadline that
+                        // is not a fault — the bound did what it said — but
+                        // it is not the clean ending either: whatever
+                        // `close` had not released is the cancellation
+                        // path's problem now, and an operator reading
+                        // `DeadlineExceeded` alone cannot tell the two
+                        // apart.
+                        if stopped_at_deadline {
+                            return self.unwind_overran(e.to_string()).await;
+                        }
                         return Termination::Faulted { detail: e.to_string() };
                     }
                 }
@@ -630,10 +645,21 @@ impl WorldDriver {
                         // Re-armed, not disarmed: the stop only ends work
                         // that checks `ctx.signal`, and a declared deadline
                         // is a bound the developer asked for — a loop that
-                        // ignores the signal must still stop. One second to
-                        // unwind (finish the write, run `close`), then the
-                        // cancel below.
-                        deadline.set(Some(tokio::time::sleep(DEADLINE_UNWIND_GRACE)));
+                        // ignores the signal must still stop. The grace is
+                        // for the handler's own ending (the write it is in,
+                        // a socket's `close`, the row that `close` deletes);
+                        // the client already went at the stop, so the bound
+                        // itself is honoured on time either way.
+                        let grace = self.unwind_grace();
+                        deadline.set(Some(tokio::time::sleep(grace)));
+                        // The watchdog arms every guest entry with what is
+                        // left of the deadline, and at the deadline that is
+                        // zero — so without this the unwind's first
+                        // synchronous run was interrupted after a
+                        // millisecond and `close` never reached the release
+                        // it exists for. The grace is the unwind's bound in
+                        // both senses: wall clock here, CPU there.
+                        self.deadline_at = Some(Instant::now() + grace);
                         tracing::debug!(world = %self.id, "declared deadline reached: stopping the world");
                         // Cancelling the world's own stop token, rather than
                         // asking the guest directly, is what makes this a
@@ -646,6 +672,9 @@ impl WorldDriver {
                         // does the guest half on the next turn.
                         token.cancel();
                         continue;
+                    }
+                    if stopped_at_deadline {
+                        return self.unwind_overran("the grace elapsed".to_owned()).await;
                     }
                     return match self.cancel_world("deadline exceeded").await {
                         Ok(_) => Termination::DeadlineExceeded,
@@ -663,7 +692,11 @@ impl WorldDriver {
                         Some(c) => {
                             if let Err(e) = self.route(c).await {
                                 if self.deadline_elapsed() {
-                                    return self.deadline_interrupted().await;
+                                    return if stopped_at_deadline {
+                                        self.unwind_overran(e.to_string()).await
+                                    } else {
+                                        self.deadline_interrupted().await
+                                    };
                                 }
                                 return Termination::Faulted { detail: e.to_string() };
                             }
@@ -673,6 +706,51 @@ impl WorldDriver {
                 }
             }
         }
+    }
+
+    /// How long this world has to unwind after its declared deadline stopped
+    /// it. It depends on whether the client is still attached.
+    ///
+    /// A **socket** is detached at the stop — the token that stops the world
+    /// is the one the connection's pump watches, so the client already has
+    /// its close frame — and a **service** has no client at all. For those
+    /// the grace is entirely the handler's own ending: the write it is in,
+    /// `close`, the row that `close` deletes. It is worth several seconds,
+    /// because an ending that has to acquire a pooled connection and run one
+    /// statement cannot do it in one.
+    ///
+    /// A **stream** is different: the response body is still open, so a
+    /// handler that never looks at `ctx.signal` keeps writing to the client
+    /// for the whole grace — and the declared deadline is a bound published
+    /// to consumers in the OpenAPI document. There the grace is the overrun,
+    /// so it stays at a second.
+    fn unwind_grace(&self) -> Duration {
+        if matches!(
+            self.workload().trigger,
+            crate::definition::Trigger::Stream { .. }
+        ) {
+            self.unwind_grace.min(Duration::from_secs(1))
+        } else {
+            self.unwind_grace
+        }
+    }
+
+    /// A world stopped by its own declared deadline did not finish unwinding
+    /// within the grace. It still ends as `DeadlineExceeded` — the bound did
+    /// exactly what it said — but it is counted and named, because whatever
+    /// `close` had not released is the cancellation path's problem now and
+    /// an operator reading the termination alone cannot tell this from a
+    /// world that closed cleanly at its bound.
+    async fn unwind_overran(&mut self, detail: String) -> Termination {
+        inc(&self.gauges.deadline_unwind_overruns);
+        tracing::warn!(
+            world = %self.id,
+            workload = %self.workload().id,
+            grace_ms = self.unwind_grace().as_millis() as u64,
+            detail = %detail,
+            "the world did not finish unwinding within the deadline grace; cancelling it"
+        );
+        self.deadline_interrupted().await
     }
 
     /// The watchdog interrupted synchronous guest work at the deadline: the

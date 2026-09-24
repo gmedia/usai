@@ -635,6 +635,13 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
     );
     metric(
         &mut out,
+        "usai_deadline_unwind_overruns_total",
+        "Worlds cancelled because they did not unwind within the deadline grace",
+        "counter",
+        &[(String::new(), g.deadline_unwind_overruns as f64)],
+    );
+    metric(
+        &mut out,
         "usai_world_budget",
         "Runtime world budget",
         "gauge",
