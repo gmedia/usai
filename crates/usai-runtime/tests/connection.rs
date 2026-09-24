@@ -378,6 +378,40 @@ async fn recv_json(
     }
 }
 
+/// A socket's upgrade used to skip boundary validation entirely — the one
+/// place on an HTTP surface where C6 ("fail before the world exists") did
+/// not reach, and it was the path segment or query that decides what the
+/// client is subscribing to. A bad one is a `400` now, and no connection is
+/// made.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_socket_upgrade_is_validated_before_the_world() {
+    let Some(s) = start().await else { return };
+    // `who` is declared `min(1).max(32)`; 40 characters is not.
+    let long = "w".repeat(40);
+    let refused = tokio_tungstenite::connect_async(format!("{}/push?who={long}", s.ws)).await;
+    match refused {
+        Ok((_, response)) => panic!("the upgrade succeeded: {}", response.status()),
+        Err(tokio_tungstenite::tungstenite::Error::Http(response)) => {
+            assert_eq!(response.status(), 400);
+            let body =
+                String::from_utf8_lossy(response.body().as_deref().unwrap_or(&[])).to_string();
+            assert!(body.contains("\"slot\":\"query\""), "{body}");
+        }
+        Err(e) => panic!("unexpected error: {e}"),
+    }
+    // And no world ran: the handler's first act is to write its own
+    // presence row, and there is none. (A process-wide world counter would
+    // not do — the fixture's services and cron create worlds of their own
+    // while this test runs.)
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(
+        audit(&s.runtime, &format!("push:{long}")).await,
+        Value::Null,
+        "the handler ran for a request that should not have reached a world"
+    );
+    s.shutdown.cancel();
+}
+
 /// The shape every realtime application needs — a server-push loop in
 /// `open` — and the three things that used to be wrong with it, measured by
 /// a realtime round on 0.0.10:

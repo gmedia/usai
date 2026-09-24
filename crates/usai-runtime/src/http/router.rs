@@ -149,7 +149,12 @@ impl CompiledRevision {
                 index,
                 kind,
             });
-            if kind != RouteKind::Raw && kind != RouteKind::Socket {
+            // A raw route has no declared slots to validate. A socket has:
+            // its upgrade carries path parameters and a query string, and
+            // they decide what the client is subscribing to — the one place
+            // on an HTTP surface where C6 did not reach, until a realtime
+            // round pointed at it.
+            if kind != RouteKind::Raw {
                 let c = &workload.contracts;
                 validators.insert(
                     index,

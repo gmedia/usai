@@ -169,6 +169,8 @@ export interface SocketContext<
   R = ResourceDeclaration[],
   A = unknown,
   D = undefined,
+  P = Record<string, string>,
+  Q = Record<string, string | string[]>,
 > extends BaseContext {
   /** The upgrade request's id (`x-request-id`, the client's or minted). */
   readonly requestId: string;
@@ -176,8 +178,13 @@ export interface SocketContext<
   readonly resources: ResourcesOf<R> & AuthResourcesOf<D>;
   readonly path: string;
   readonly url: string;
-  readonly params: Record<string, string>;
-  readonly query: Record<string, string | string[]>;
+  /** The path parameters, typed and **validated before the world exists**
+   * when `params` is declared (C6, the same as an HTTP route); a plain
+   * `Record<string, string>` the handler must check itself otherwise. */
+  readonly params: P;
+  /** The upgrade's query string, typed and validated when `query` is
+   * declared. */
+  readonly query: Q;
   readonly headers: Record<string, string>;
   /** The principal the `auth` declaration resolved; `undefined` without one. */
   readonly auth: A;
@@ -202,9 +209,18 @@ export interface SocketOptions<
   O extends AnySchema | undefined,
   R extends ResourceDeclaration[] = ResourceDeclaration[],
   A extends AuthDeclaration | undefined = AuthDeclaration | undefined,
+  PS extends AnySchema | undefined = undefined,
+  QS extends AnySchema | undefined = undefined,
 > extends WorkloadPolicies {
   summary?: string;
   description?: string;
+  /** Path parameters, validated **before the world exists** — a bad
+   * `/live/:board` is `400` and no connection is upgraded. Without it
+   * `ctx.params` is an unchecked `Record<string, string>`, which used to be
+   * the one place on a socket where C6 did not reach. */
+  params?: PS;
+  /** The upgrade's query string, validated before the world exists. */
+  query?: QS;
   /** Schema for messages from the client. An invalid message is answered
    * with a `validation_failed` error envelope and dropped; the connection
    * stays open. */
@@ -224,13 +240,25 @@ type Out<S> = S extends AnySchema ? Output<S> : unknown;
  *
  * @category Streams and WebSockets
  */
-export interface SocketHandlers<I, O, R = ResourceDeclaration[], A = unknown, D = undefined> {
-  /** After the upgrade. */
-  open?(ctx: SocketContext<I, O, R, A, D>): unknown;
+export interface SocketHandlers<
+  I,
+  O,
+  R = ResourceDeclaration[],
+  A = unknown,
+  D = undefined,
+  P = Record<string, string>,
+  Q = Record<string, string | string[]>,
+> {
+  /** After the upgrade. Note that **a message is not delivered until `open`
+   * returns**: a socket either pushes or converses, not both (GUIDE §9). */
+  open?(ctx: SocketContext<I, O, R, A, D, P, Q>): unknown;
   /** Once per incoming message, in order. */
-  message?(ctx: SocketContext<I, O, R, A, D>): unknown;
-  /** After the connection closed, whoever closed it. */
-  close?(ctx: SocketContext<I, O, R, A, D>): unknown;
+  message?(ctx: SocketContext<I, O, R, A, D, P, Q>): unknown;
+  /** After the connection closed, however it closed — including when `open`
+   * itself failed, which is how a push loop normally ends (`ctx.send`
+   * rejects with `client_gone` once the client is gone). This is the only
+   * place to release what the connection held. */
+  close?(ctx: SocketContext<I, O, R, A, D, P, Q>): unknown;
 }
 
 /**
@@ -257,18 +285,24 @@ export function socket<
   O extends AnySchema | undefined = undefined,
   R extends ResourceDeclaration[] = ResourceDeclaration[],
   A extends AuthDeclaration | undefined = undefined,
+  PS extends AnySchema | undefined = undefined,
+  QS extends AnySchema | undefined = undefined,
 >(
   path: string,
-  options: SocketOptions<I, O, R, A>,
+  options: SocketOptions<I, O, R, A, PS, QS>,
   handlers: SocketHandlers<
     Out<I>,
     Out<O>,
     R,
     A extends AuthDeclaration<infer P> ? P : undefined,
-    A
+    A,
+    PS extends AnySchema ? Output<PS> : Record<string, string>,
+    QS extends AnySchema ? Output<QS> : Record<string, string | string[]>
   >,
 ): Workload {
   const contracts: Workload["contracts"] = {};
+  if (options.params) contracts.params = options.params;
+  if (options.query) contracts.query = options.query;
   if (options.incoming) contracts.message = options.incoming;
   if (options.outgoing) contracts.response = { 200: options.outgoing };
   const policies: WorkloadPolicies = {};

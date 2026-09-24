@@ -316,6 +316,7 @@ fn render(before: &Sample, now: &Sample) -> String {
         .get(&["http", "by_workload"])
         .and_then(Value::as_object)
         .unwrap_or(&empty);
+    // (workload, req/s, live, 4xx, 5xx, ms/request, share of one core)
     let mut rows: Vec<(String, f64, u64, u64, u64, f64, f64)> = Vec::new();
     for (workload, stats) in by_workload {
         let count = stats.get("count").and_then(Value::as_u64).unwrap_or(0);
@@ -353,20 +354,21 @@ fn render(before: &Sample, now: &Sample) -> String {
             if served > 0 {
                 latency / served as f64 * 1000.0
             } else {
-                0.0
+                f64::NAN
             },
-            if served > 0 {
-                cpu_ns / served as f64 / 1_000_000.0
-            } else {
-                0.0
-            },
+            // Share of one core over the window, not milliseconds per
+            // request: a stream or a socket completes nothing while it runs,
+            // so a per-request figure divides to zero and reads as free —
+            // a realtime round watched the workload eating the box show
+            // `0.00ms` beside 36 ms of guest CPU in the status document.
+            cpu_ns / seconds / 1e9 * 100.0,
         ));
     }
     // A workload that has live worlds and has completed nothing yet — the
     // first long export, a socket that just connected — has no row in the
     // response table at all. It is exactly the one to show.
     for (workload, n) in live {
-        rows.push((workload, 0.0, n, 0, 0, 0.0, 0.0));
+        rows.push((workload, 0.0, n, 0, 0, f64::NAN, 0.0));
     }
     rows.sort_by(|a, b| {
         b.1.total_cmp(&a.1)
@@ -383,8 +385,8 @@ fn render(before: &Sample, now: &Sample) -> String {
         .unwrap_or(8)
         .clamp(8, 44);
     out.push_str(&format!(
-        "\n  {:<width$}  {:>8}  {:>5}  {:>5}  {:>5}  {:>9}  {:>9}\n",
-        "workload", "req/s", "live", "4xx", "5xx", "avg", "cpu"
+        "\n  {:<width$}  {:>8}  {:>5}  {:>5}  {:>5}  {:>9}  {:>7}\n",
+        "workload", "req/s", "live", "4xx", "5xx", "avg", "cpu%"
     ));
     if rows.is_empty() {
         out.push_str("  (no HTTP workload has been called yet)\n");
@@ -400,9 +402,15 @@ fn render(before: &Sample, now: &Sample) -> String {
             workload.clone()
         };
         out.push_str(&format!(
-            "  {short:<width$}  {per_second:>8.1}  {alive:>5}  {s4xx:>5}  {s5xx:>5}  {:>9}  {:>9}\n",
-            ms(*avg),
-            ms(*cpu)
+            "  {short:<width$}  {per_second:>8.1}  {alive:>5}  {s4xx:>5}  {s5xx:>5}  {:>9}  {:>7}\n",
+            if avg.is_nan() {
+                // Nothing completed in the window: there is no average, and
+                // printing 0.00ms would be a claim about latency.
+                "—".to_owned()
+            } else {
+                ms(*avg)
+            },
+            format!("{cpu:.0}%")
         ));
     }
 
@@ -552,13 +560,21 @@ mod tests {
     fn every_number_is_a_difference_over_the_window() {
         let before = sample(2, status(1_000, 10.0, 1_000_000_000, 5.0));
         // 200 requests in 2 s, 0.5 s of latency and 0.2 s of guest CPU
-        // between them: 100 req/s, a 2.5 ms average, 1 ms of CPU each.
+        // between them: 100 req/s, a 2.5 ms average, and 0.2 CPU-seconds
+        // over 2 s — 10 % of one core, which is what the column reports.
         let now = sample(0, status(1_200, 10.5, 1_200_000_000, 5.2));
         let screen = render(&before, &now);
         assert!(screen.contains("hello  revision 1 active"), "{screen}");
         assert!(screen.contains("100.0"), "req/s: {screen}");
         assert!(screen.contains("2.50ms"), "average: {screen}");
-        assert!(screen.contains("1.00ms"), "cpu: {screen}");
+        // Per workload, the same 10 %: a per-request figure would divide to
+        // zero for a stream or a socket, which completes nothing while it
+        // runs — the workload eating the box would read as free.
+        let row = screen
+            .lines()
+            .find(|l| l.contains("http:GET /hello/:name"))
+            .unwrap_or_else(|| panic!("no row:\n{screen}"));
+        assert!(row.trim_end().ends_with("10%"), "{row}");
         // 0.2 CPU-seconds over a 2 s window is 10 % of one core.
         assert!(screen.contains("cpu 10%"), "{screen}");
         // A pool that is queueing says so; the resource row carries it.

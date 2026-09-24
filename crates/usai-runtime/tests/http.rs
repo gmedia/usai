@@ -1014,15 +1014,30 @@ async fn outbound_http_is_a_declared_owned_resource() {
     // operation counted as cancelled, nothing left in flight.
     let (status, _) = s.get("/egress/slow").await;
     assert_eq!(status, 504);
-    let resource = s
-        .runtime
-        .status()
-        .resources
-        .into_iter()
-        .find(|r| r.identity.kind == "http.client")
-        .expect("the client is a resource with a status");
+    // The 504 is the *client's* answer; the lease behind it is released only
+    // on terminal proof (C5), which the deadline does not wait for. Poll for
+    // it rather than reading the status the instant the response lands —
+    // asserting immediately made this test fail on a loaded CI runner with
+    // `cancelled: 0, in_use: 1`, which is the correct intermediate state.
+    let mut resource = None;
+    for _ in 0..100 {
+        let found = s
+            .runtime
+            .status()
+            .resources
+            .into_iter()
+            .find(|r| r.identity.kind == "http.client")
+            .expect("the client is a resource with a status");
+        if found.detail["cancelled"] == 1 && found.in_use == 0 {
+            resource = Some(found);
+            break;
+        }
+        resource = Some(found);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let resource = resource.expect("a status was read");
     assert_eq!(resource.detail["cancelled"], 1, "{resource:?}");
-    assert_eq!(resource.in_use, 0);
+    assert_eq!(resource.in_use, 0, "{resource:?}");
     assert_eq!(resource.detail["baseUrl"], upstream());
     // The global `fetch` exists only to say what to do instead.
     let (_, body) = s.get("/nofetch").await;

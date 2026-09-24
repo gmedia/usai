@@ -1,6 +1,6 @@
 [@sakaladev/usai](../../README.md) / [index](../README.md) / SocketHandlers
 
-# Interface: SocketHandlers\<I, O, R = [`ResourceDeclaration`](ResourceDeclaration.md)[], A = `unknown`, D = `undefined`\>
+# Interface: SocketHandlers\<I, O, R = [`ResourceDeclaration`](ResourceDeclaration.md)[], A = `unknown`, D = `undefined`, P = `Record`\<`string`, `string`\>, Q = `Record`\<`string`, `string` \| `string`[]\>\>
 
 The three moments of a connection.
 
@@ -13,22 +13,25 @@ The three moments of a connection.
 | `R` | [`ResourceDeclaration`](ResourceDeclaration.md)[] |
 | `A` | `unknown` |
 | `D` | `undefined` |
+| `P` | `Record`\<`string`, `string`\> |
+| `Q` | `Record`\<`string`, `string` \| `string`[]\> |
 
 ## Methods
 
 ### open()?
 
 ```ts
-optional open(ctx: SocketContext<I, O, R, A, D>): unknown;
+optional open(ctx: SocketContext<I, O, R, A, D, P, Q>): unknown;
 ```
 
-After the upgrade.
+After the upgrade. Note that **a message is not delivered until `open`
+returns**: a socket either pushes or converses, not both (GUIDE §9).
 
 #### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
-| `ctx` | [`SocketContext`](SocketContext.md)\<`I`, `O`, `R`, `A`, `D`\> |
+| `ctx` | [`SocketContext`](SocketContext.md)\<`I`, `O`, `R`, `A`, `D`, `P`, `Q`\> |
 
 #### Returns
 
@@ -39,7 +42,7 @@ After the upgrade.
 ### message()?
 
 ```ts
-optional message(ctx: SocketContext<I, O, R, A, D>): unknown;
+optional message(ctx: SocketContext<I, O, R, A, D, P, Q>): unknown;
 ```
 
 Once per incoming message, in order.
@@ -48,7 +51,7 @@ Once per incoming message, in order.
 
 | Parameter | Type |
 | ------ | ------ |
-| `ctx` | [`SocketContext`](SocketContext.md)\<`I`, `O`, `R`, `A`, `D`\> |
+| `ctx` | [`SocketContext`](SocketContext.md)\<`I`, `O`, `R`, `A`, `D`, `P`, `Q`\> |
 
 #### Returns
 
@@ -59,16 +62,19 @@ Once per incoming message, in order.
 ### close()?
 
 ```ts
-optional close(ctx: SocketContext<I, O, R, A, D>): unknown;
+optional close(ctx: SocketContext<I, O, R, A, D, P, Q>): unknown;
 ```
 
-After the connection closed, whoever closed it.
+After the connection closed, however it closed — including when `open`
+itself failed, which is how a push loop normally ends (`ctx.send`
+rejects with `client_gone` once the client is gone). This is the only
+place to release what the connection held.
 
 #### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
-| `ctx` | [`SocketContext`](SocketContext.md)\<`I`, `O`, `R`, `A`, `D`\> |
+| `ctx` | [`SocketContext`](SocketContext.md)\<`I`, `O`, `R`, `A`, `D`, `P`, `Q`\> |
 
 #### Returns
 

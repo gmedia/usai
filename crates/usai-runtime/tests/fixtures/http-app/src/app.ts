@@ -587,7 +587,11 @@ export const chat = socket(
 // rejecting once the client is gone.
 export const pushLoop = socket(
   "/push",
-  { outgoing: z.object({ i: z.number() }), resources: [audit] },
+  {
+    outgoing: z.object({ i: z.number() }),
+    resources: [audit],
+    query: z.object({ who: z.string().min(1).max(32) }),
+  },
   {
     async open(ctx) {
       const who = ctx.query["who"] ?? "anon";

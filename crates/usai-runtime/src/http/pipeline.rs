@@ -968,6 +968,40 @@ impl HttpHost {
 
             // Sockets: an HTTP upgrade, then one world for the connection.
             if route.kind == RouteKind::Socket {
+                // The upgrade's own slots are validated first, so a bad
+                // `/live/:board` is a `400` and no connection is made. A
+                // socket used to skip this step entirely — the one place on
+                // an HTTP surface where C6 ("fail before the world exists")
+                // did not reach, and it was the path segment that decides
+                // what the client is subscribing to.
+                let mut params = params;
+                if let Some(SlotValidators {
+                    params: p,
+                    query: q,
+                    headers: h,
+                    schemas,
+                    ..
+                }) = compiled.validators.get(&route.index)
+                {
+                    if let Some(v) = p {
+                        if let Some(schema) = &schemas.params {
+                            coerce_scalars(schema, &mut params);
+                        }
+                        validate("params", v, &params)?;
+                    }
+                    if let Some(v) = q {
+                        if let Some(schema) = &schemas.query {
+                            coerce_scalars(schema, &mut query);
+                        }
+                        validate("query", v, &query)?;
+                    }
+                    if let Some(v) = h {
+                        if let Some(schema) = &schemas.headers {
+                            coerce_scalars(schema, &mut headers);
+                        }
+                        validate("headers", v, &headers)?;
+                    }
+                }
                 return self
                     .upgrade_socket(
                         parts,

@@ -1,6 +1,6 @@
 [@sakaladev/usai](../../README.md) / [index](../README.md) / SocketContext
 
-# Interface: SocketContext\<Incoming, Outgoing, R = [`ResourceDeclaration`](ResourceDeclaration.md)[], A = `unknown`, D = `undefined`\>
+# Interface: SocketContext\<Incoming, Outgoing, R = [`ResourceDeclaration`](ResourceDeclaration.md)[], A = `unknown`, D = `undefined`, P = `Record`\<`string`, `string`\>, Q = `Record`\<`string`, `string` \| `string`[]\>\>
 
 The context of a WebSocket connection, shared by `open`, `message` and
 `close`: request facts, `send`/`close`, connection-local `state`, and
@@ -19,6 +19,8 @@ in `message` the validated incoming `message`.
 | `R` | [`ResourceDeclaration`](ResourceDeclaration.md)[] |
 | `A` | `unknown` |
 | `D` | `undefined` |
+| `P` | `Record`\<`string`, `string`\> |
+| `Q` | `Record`\<`string`, `string` \| `string`[]\> |
 
 ## Properties
 
@@ -28,8 +30,8 @@ in `message` the validated incoming `message`.
 | <a id="resources"></a> `resources` | `readonly` | [`ResourcesOf`](../type-aliases/ResourcesOf.md)\<`R`\> & `AuthResourcesOf`\<`D`\> | The declared resources, plus the ones the auth scheme (`D`) leases. | [`BaseContext`](BaseContext.md).[`resources`](BaseContext.md#resources) | - |
 | <a id="path"></a> `path` | `readonly` | `string` | - | - | - |
 | <a id="url"></a> `url` | `readonly` | `string` | - | - | - |
-| <a id="params"></a> `params` | `readonly` | `Record`\<`string`, `string`\> | - | - | - |
-| <a id="query"></a> `query` | `readonly` | `Record`\<`string`, `string` \| `string`[]\> | - | - | - |
+| <a id="params"></a> `params` | `readonly` | `P` | The path parameters, typed and **validated before the world exists** when `params` is declared (C6, the same as an HTTP route); a plain `Record<string, string>` the handler must check itself otherwise. | - | - |
+| <a id="query"></a> `query` | `readonly` | `Q` | The upgrade's query string, typed and validated when `query` is declared. | - | - |
 | <a id="headers"></a> `headers` | `readonly` | `Record`\<`string`, `string`\> | - | - | - |
 | <a id="auth"></a> `auth` | `readonly` | `A` | The principal the `auth` declaration resolved; `undefined` without one. | - | - |
 | <a id="state"></a> `state` | `readonly` | `Record`\<`string`, `unknown`\> | Connection-local mutable state: survives messages, ends with the connection. | - | - |

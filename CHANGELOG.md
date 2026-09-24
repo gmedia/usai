@@ -52,6 +52,11 @@ the human summary.
   sum and a count, and a mean hides a bimodal route), and **totals since
   boot**, because a rate screen cannot show an event that happened before its
   first sample and `-c 1` run right after an incident is exactly that case.
+  The per-workload `cpu` column is a **share of one core** over the window
+  rather than milliseconds per request: a stream or a socket completes
+  nothing while it runs, so a per-request figure divided to zero and the
+  workload eating the box read as free. `avg` is `—` when nothing completed,
+  instead of a `0.00ms` that claims something about latency.
   The refusal lines name the reason on both clocks (`capacity 42.0/s` for the
   window, `(capacity 6)` since boot), because "6 refused" without one sends
   the reader to the wrong knob.
@@ -88,6 +93,13 @@ the human summary.
   Declaring it on a workload that has no request body — a task, a cron tick,
   a stream, a socket — is **refused at install** with the reason, rather than
   accepted and ignored.
+- **A socket's upgrade is validated before the world exists.** `socket()`
+  now takes `params` and `query` contracts, and the runtime checks them the
+  way it checks an HTTP route's: a bad `/live/:board` is a `400` naming the
+  slot and no connection is made. It was the one place on an HTTP surface
+  where C6 ("fail before the world exists") did not reach — and it was the
+  path segment that decides what the client is subscribing to. `ctx.params`
+  and `ctx.query` are typed from the schemas when they are declared.
 - **A WebSocket world learns that its own client left.** The only stop
   signal a socket had was the revision's drain, so a handler looping in
   `open` — which is how server push is written, and the only place to write

@@ -5,10 +5,10 @@
 ```ts
 function socket<I extends AnySchema | undefined = undefined, O extends AnySchema | undefined = undefined, R extends ResourceDeclaration<string, unknown>[] = ResourceDeclaration<string, unknown>[], A extends 
   | AuthDeclaration<unknown, readonly ResourceDeclaration<string, unknown>[]>
-  | undefined = undefined>(
+  | undefined = undefined, PS extends AnySchema | undefined = undefined, QS extends AnySchema | undefined = undefined>(
    path: string, 
-   options: SocketOptions<I, O, R, A>, 
-   handlers: SocketHandlers<Out<I>, Out<O>, R, A extends AuthDeclaration<P, readonly ResourceDeclaration<string, unknown>[]> ? P : undefined, A>
+   options: SocketOptions<I, O, R, A, PS, QS>, 
+   handlers: SocketHandlers<Out<I>, Out<O>, R, A extends AuthDeclaration<P, readonly ResourceDeclaration<string, unknown>[]> ? P : undefined, A, PS extends AnySchema ? Output<PS> : Record<string, string>, QS extends AnySchema ? Output<QS> : Record<string, string | string[]>>
 ): Workload;
 ```
 
@@ -27,14 +27,16 @@ restart) and `close` runs. `concurrency` bounds open connections.
 | `O` *extends* [`AnySchema`](../type-aliases/AnySchema.md) \| `undefined` | `undefined` |
 | `R` *extends* [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)\<`string`, `unknown`\>[] | [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)\<`string`, `unknown`\>[] |
 | `A` *extends* \| [`AuthDeclaration`](../interfaces/AuthDeclaration.md)\<`unknown`, readonly [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)\<`string`, `unknown`\>[]\> \| `undefined` | `undefined` |
+| `PS` *extends* [`AnySchema`](../type-aliases/AnySchema.md) \| `undefined` | `undefined` |
+| `QS` *extends* [`AnySchema`](../type-aliases/AnySchema.md) \| `undefined` | `undefined` |
 
 ## Parameters
 
 | Parameter | Type |
 | ------ | ------ |
 | `path` | `string` |
-| `options` | [`SocketOptions`](../interfaces/SocketOptions.md)\<`I`, `O`, `R`, `A`\> |
-| `handlers` | [`SocketHandlers`](../interfaces/SocketHandlers.md)\<`Out`\<`I`\>, `Out`\<`O`\>, `R`, `A` *extends* [`AuthDeclaration`](../interfaces/AuthDeclaration.md)\<`P`, readonly [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)\<`string`, `unknown`\>[]\> ? `P` : `undefined`, `A`\> |
+| `options` | [`SocketOptions`](../interfaces/SocketOptions.md)\<`I`, `O`, `R`, `A`, `PS`, `QS`\> |
+| `handlers` | [`SocketHandlers`](../interfaces/SocketHandlers.md)\<`Out`\<`I`\>, `Out`\<`O`\>, `R`, `A` *extends* [`AuthDeclaration`](../interfaces/AuthDeclaration.md)\<`P`, readonly [`ResourceDeclaration`](../interfaces/ResourceDeclaration.md)\<`string`, `unknown`\>[]\> ? `P` : `undefined`, `A`, `PS` *extends* [`AnySchema`](../type-aliases/AnySchema.md) ? [`Output`](../type-aliases/Output.md)\<`PS`\> : `Record`\<`string`, `string`\>, `QS` *extends* [`AnySchema`](../type-aliases/AnySchema.md) ? [`Output`](../type-aliases/Output.md)\<`QS`\> : `Record`\<`string`, `string` \| `string`[]\>\> |
 
 ## Returns
 

@@ -33,10 +33,10 @@ checkout  revision 7 active  engine wasm  every 2.0s
   worlds 12/256 live, 12 in flight   tasks 0 running, 0 queued (max 64)
   mem 121.4/192 MiB charged (rss 155.0, pss 118.2)   cpu 41%   fds 37   threads 20   worlds/s 216
 
-  workload                        req/s   live    4xx    5xx        avg        cpu
-  http:GET /catalog               201.5      3      0      0     2.10ms     1.90ms
-  http:POST /orders                14.2      9      0      0      204ms     7.40ms
-  stream:GET /exports.csv           0.0      2      0      0     0.00ms     0.00ms
+  workload                        req/s   live    4xx    5xx        avg     cpu%
+  http:GET /catalog               201.5      3      0      0     2.10ms      38%
+  http:POST /orders                14.2      9      0      0      204ms      11%
+  stream:GET /exports.csv           0.0      2      0      0          —      24%
 
   resource                 in use  waiting      ops/s      state
   db (postgres)             16/16        9      118.0      ready
@@ -48,9 +48,14 @@ one. The **`live`** column is worlds running right now, and it is the one to
 read for anything connection-bound: a stream or a socket completes no
 requests while it runs, so it moves no rate — the row above shows two
 exports in flight at `0.0` req/s, and a workload that has finished nothing
-at all still gets a row when it has a world alive. A mean hides a bimodal route, but it finds the one to look at, which is
-the step that was missing — and the `avg` and `cpu` columns beside each other
-are step 2 below, already answered.
+at all still gets a row when it has a world alive. **`cpu%` is a share of one
+core over the window**, not milliseconds per request, for the same reason: a
+per-request figure divides to zero for work that has not finished, and the
+workload eating the box would read as free. `avg` is `—` when nothing
+completed in the window, because there is no average to report. A mean hides a bimodal route, but it finds the one to look at, which is
+the step that was missing — and the `avg` and `cpu%` columns beside each other
+are step 2 below, already answered: a route whose `cpu%` accounts for most of
+its `avg` is computing, one whose does not is waiting.
 
 ## 2. Waiting or computing
 

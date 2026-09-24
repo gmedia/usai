@@ -1,6 +1,6 @@
 [@sakaladev/usai](../../README.md) / [index](../README.md) / SocketOptions
 
-# Interface: SocketOptions\<I *extends* [`AnySchema`](../type-aliases/AnySchema.md) \| `undefined`, O *extends* [`AnySchema`](../type-aliases/AnySchema.md) \| `undefined`, R *extends* [`ResourceDeclaration`](ResourceDeclaration.md)[] = [`ResourceDeclaration`](ResourceDeclaration.md)[], A *extends* [`AuthDeclaration`](AuthDeclaration.md) \| `undefined` = [`AuthDeclaration`](AuthDeclaration.md) \| `undefined`\>
+# Interface: SocketOptions\<I *extends* [`AnySchema`](../type-aliases/AnySchema.md) \| `undefined`, O *extends* [`AnySchema`](../type-aliases/AnySchema.md) \| `undefined`, R *extends* [`ResourceDeclaration`](ResourceDeclaration.md)[] = [`ResourceDeclaration`](ResourceDeclaration.md)[], A *extends* [`AuthDeclaration`](AuthDeclaration.md) \| `undefined` = [`AuthDeclaration`](AuthDeclaration.md) \| `undefined`, PS *extends* [`AnySchema`](../type-aliases/AnySchema.md) \| `undefined` = `undefined`, QS *extends* [`AnySchema`](../type-aliases/AnySchema.md) \| `undefined` = `undefined`\>
 
 Options for [socket](../functions/socket.md).
 
@@ -16,6 +16,8 @@ Options for [socket](../functions/socket.md).
 | `O` *extends* [`AnySchema`](../type-aliases/AnySchema.md) \| `undefined` | - |
 | `R` *extends* [`ResourceDeclaration`](ResourceDeclaration.md)[] | [`ResourceDeclaration`](ResourceDeclaration.md)[] |
 | `A` *extends* [`AuthDeclaration`](AuthDeclaration.md) \| `undefined` | [`AuthDeclaration`](AuthDeclaration.md) \| `undefined` |
+| `PS` *extends* [`AnySchema`](../type-aliases/AnySchema.md) \| `undefined` | `undefined` |
+| `QS` *extends* [`AnySchema`](../type-aliases/AnySchema.md) \| `undefined` | `undefined` |
 
 ## Properties
 
@@ -23,6 +25,8 @@ Options for [socket](../functions/socket.md).
 | ------ | ------ | ------ | ------ |
 | <a id="summary"></a> `summary?` | `string` | - | - |
 | <a id="description"></a> `description?` | `string` | - | - |
+| <a id="params"></a> `params?` | `PS` | Path parameters, validated **before the world exists** — a bad `/live/:board` is `400` and no connection is upgraded. Without it `ctx.params` is an unchecked `Record<string, string>`, which used to be the one place on a socket where C6 did not reach. | - |
+| <a id="query"></a> `query?` | `QS` | The upgrade's query string, validated before the world exists. | - |
 | <a id="incoming"></a> `incoming?` | `I` | Schema for messages from the client. An invalid message is answered with a `validation_failed` error envelope and dropped; the connection stays open. | - |
 | <a id="outgoing"></a> `outgoing?` | `O` | Schema for messages to the client. | - |
 | <a id="operationid"></a> `operationId?` | `string` | The OpenAPI `operationId`; the message schemas become `components.schemas.<OperationId>Incoming` / `…Outgoing`. | - |
