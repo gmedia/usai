@@ -44,7 +44,7 @@ refusals and *falls* while a bad-traffic flood rises. Volume is
 | `usai_tasks` | gauge | state | Dispatched task queue |
 | `usai_build_info` | gauge | version | Usai runtime version (label), always 1 |
 | `usai_process_start_time_seconds` | gauge | — | Unix time the runtime started |
-| `usai_process_resident_memory_bytes` | gauge | — | Resident set size |
+| `usai_process_resident_memory_bytes` | gauge | — | Resident set size. **It over-counts this runtime**: the pooled Wasm image is one set of physical pages mapped into every world slot, and the kernel's RSS counters increment per mapping — measured on the 24 h bounded soak, 89 MiB RSS over 66 MiB PSS and 53 MiB charged to the cgroup. Use it for *trend* (rising while `usai_worlds_live` does not is a leak); use PSS or the charged bytes below for a *level* |
 | `usai_process_proportional_memory_bytes` | gauge | — | Proportional set size (shared pages divided among their sharers): the honest per-process footprint |
 | `usai_process_memory_limit_bytes` | gauge | — | The cgroup memory limit the process runs under. Published only when there is one — and when there is, all four cgroup series are published, zeros included, so `ceiling_hits 0` means *measured and zero*. In `/_usai/status` the same fields are omitted when they are zero, so **`memoryLimitBytes` being present is what says the group was measured** |
 | `usai_process_memory_charged_bytes` | gauge | — | What the cgroup is charged (`memory.current`): resident memory **plus the page cache this container faulted in**, which is what the limit actually bounds |

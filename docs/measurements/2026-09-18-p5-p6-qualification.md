@@ -72,6 +72,20 @@ get → create on `examples/invoicing`), a status sample every 60 s.
 | **24 h** | 2026-09-18 22:18 → 2026-09-19 22:19 UTC (86 374 s of load; 8 closed-loop clients ≈ 405 req/s of list → get → create through the proxy) | **34 978 737 ok, 0 × 4xx, 0 × 5xx, 0 × 503**, 9 client errors in **5 bad seconds** (below); p99 median 273.9 ms; RSS 54.8 → max 58.1 → 56.2 MiB at the end (1 416 samples); 35 007 080 worlds created, `liveWorlds` max 8 and 0 at the end, `detachedWorkDetected` 0, completions dropped late / rejected stale 0; PostgreSQL pool: 89.2 M operations, 3.50 M transactions, 9 cancelled, 6 rolled back for a dying world, **0 quarantined**, 8/8 available at the end |
 | **72 h** | 2026-09-19 22:28 → 2026-09-22 22:28 UTC (259 131 s of load, same 8 clients) | **73 627 701 ok, 0 × 5xx, 0 × 503, 2 × 4xx**, 36 client errors in **15 bad seconds** (two episodes, below); RSS 51.5 → max 54.9 → 53.5 MiB over 4 103 samples, fds 29 → 30, threads 19; **73 627 744 worlds created**, `detachedWorkDetected` 0, completions dropped late / rejected stale 0, `liveWorlds` 0 at the end; PostgreSQL pool **0 quarantined**, `waiting` 0 in every sample; the runtime logged no WARN or ERROR line in three days (the five WARNING lines in the container log are PostgreSQL notices, `there is no transaction in progress`, at the two error episodes) |
 
+**What "RSS" means in the rows above** (established 2026-09-24, not when
+they were written): the sampler reads `docker stats`, which reports what the
+**cgroup is charged** — the number that gets the container killed, and the
+right one for a soak's "does it grow". It is *not* the process's `VmRSS`,
+and on this runtime the two differ by tens of MiB for two opposite reasons
+at once: `VmRSS` counts the pooled Wasm image once per slot it is mapped
+into, and the cgroup is not charged for text pages another cgroup faulted in
+first. Measured side by side at 7.1 h of the 2026-09-24 bounded soak: 53 MiB
+charged, 89 MiB `VmRSS`, 66 MiB PSS. The flatness these rows report is
+unaffected — it is the same instrument throughout each run — but a *level*
+from them is the cgroup's, and must not be compared with a `VmRSS` from
+somewhere else. The summary now prints all three
+(`docs/measurements/2026-09-24-bounded-soak.md` has the attribution).
+
 **The 5 bad seconds** (t = 28 741–28 745 s and 40 325–40 326 s, p99 ≈ 10 001 ms
 = the client's own 10 s timeout): both episodes are whole-second gaps in
 which the load client itself completed 0–34 requests instead of ≈400, the

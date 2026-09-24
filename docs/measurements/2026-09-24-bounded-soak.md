@@ -56,27 +56,63 @@ has used, and it is visible in the data exactly once:
 After that the campaigns stopped building images; the cells that followed run
 containers from images already present.
 
-## What has been observed so far (5.3 h)
+## What has been observed so far (7.1 h)
 
 | | |
 |---|---|
-| Requests | 27.6 M ok, 0 × 4xx, 0 × 5xx, 0 × 503 |
+| Requests | 37.2 M ok, 4 × 4xx, 0 × 5xx, 0 × 503 |
 | Errors | 12 client timeouts, all in the three seconds above |
 | p50 | 3.9 ms in the first hour, 4.0 ms now |
-| RSS | 52.0 → 53.2 MiB |
-| Open descriptors | 29 → 30 |
+| RSS (cgroup) | 52.0 → 53.2 MiB |
+| RSS (the process's own) | 87 MiB, PSS 64 |
+| Lifecycle | 0 detached work, 0 quarantined, 0 completions dropped or rejected |
+| Open descriptors | 29 → 31 |
+
+**Two memory numbers that differ by 36 MiB, and neither is "what this
+instance needs".** The sampler's is `docker stats` (what the *cgroup* is
+charged: 53 MiB); `/_usai/status` reports the process's own `VmRSS`
+(89 MiB). Both were attributed at 7.1 h rather than guessed, from
+`/proc/1/smaps` and `/sys/fs/cgroup/memory.stat` inside the container:
+
+| mapping | RSS | PSS | what it is |
+|---|---:|---:|---|
+| `/memfd:wasm-memory-image` | 35 988 kB | 12 871 kB | the Wasm image, mapped into **8 pooled slots** |
+| anonymous | 25 276 | 25 276 | the runtime's heap and stacks |
+| `/usr/local/bin/usai` | 17 680 | 17 680 | the binary's text |
+| `[heap]` | 7 388 | 7 388 | |
+
+Two opposite errors, which is why the totals are so far apart:
+
+- **`VmRSS` over-counts the image.** The kernel's RSS counters increment per
+  page-table entry, so a physical page mapped into eight slot mappings is
+  counted eight times: 36 MiB of RSS over ≈13 MiB of pages. `PSS` (65.9 MiB
+  in the same sample, also in `/_usai/status`) divides the sharing out.
+- **The cgroup under-counts the text.** `file_mapped` is 3.6 MiB against the
+  binary's 17.7 MiB resident: those pages were faulted in from the image
+  layer by something outside this container, and page cache is charged to
+  whoever faults it first (`2026-09-23-floor-accounting.md`).
+
+The two partly cancel — which is exactly why a floor may not be read off
+either one. It is read from a box that has to fault everything in itself,
+which is what the floor cells do (`DROP_CACHES=1`), and is how the technical
+floor turned out to be 64 MiB and not 48. For sizing a *running* instance,
+**`pssKib` is the process-level number to use, and the cgroup's own charge
+is the one that gets you OOM-killed** — `/_usai/status` reports both when
+the process runs under a limit (this deployment's image predates that
+field).
 
 Throughput by hour, which is the question this run exists to answer:
 
-| hour | 1 | 2 | 3 | 4 | 5 |
-|---|---|---|---|---|---|
-| mean req/s | 1 419 | 1 483 | 1 437 | 1 496 | 1 487 |
+| hour | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|
+| mean req/s | 1 419 | 1 483 | 1 437 | 1 496 | 1 487 | 1 484 | 1 479 |
+| median p99 (ms) | 19.2 | 18.8 | 19.0 | 18.7 | 18.7 | 18.8 | 18.8 |
 
 **Flat.** The 72 h run with a growing dataset had lost a third of its
 throughput by this point on its way from 794 to 154 req/s; this one has no
 trend at all, at a *higher* rate, with an unchanged p50.
 
-Five hours is not an answer to a question about seventy-two, and the
+Seven hours is not an answer to a question about seventy-two, and the
 hypothesis is not proven until the run ends — but the shape so far is the
 one the dataset explanation predicts.
 

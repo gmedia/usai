@@ -152,6 +152,23 @@ burst, and because `requests` is what the scheduler packs on.
 memory by design; `usai_process_virtual_memory_bytes` is not a leak and
 `LimitAS`/`ulimit -v` kills the process at the first world.
 
+**Do not size from `kubectl top pod` alone.** It reports the container's
+working set, and the pod's own `usai_process_resident_memory_bytes` is
+higher still: the pooled Wasm image is one set of physical pages mapped into
+every world slot, and RSS counts it once per slot. The number the limit
+actually bounds is `usai_process_memory_charged_bytes` against
+`usai_process_memory_limit_bytes`, both published whenever the process runs
+under a cgroup limit — which in a pod it always does. In one container
+measured side by side: 53 MiB charged, 89 MiB RSS, 66 MiB PSS
+(`../../measurements/2026-09-24-bounded-soak.md`).
+
+**When a pod is slow or fat, `usai top` is one command away**, and it prints
+those three numbers beside the per-workload rates:
+
+```bash
+kubectl exec deploy/usai-app -- usai top --addr 127.0.0.1:9090 -c 1
+```
+
 ## Autoscaling
 
 CPU is the wrong first signal: the limiter in a real deployment is usually

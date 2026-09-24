@@ -31,6 +31,12 @@ the human summary.
   average and the guest CPU per workload side by side (waiting or
   computing, answered in one screen), rejections that never reached a
   workload, pool `in use` and `waiting`, and what the process costs.
+  Memory is shown as the number that actually kills the process — the
+  cgroup's charge against its limit, with RSS and PSS beside it, because RSS
+  counts the pooled Wasm image once per slot it is mapped into and overstates
+  by tens of MiB (measured on the 24 h soak: 89 MiB RSS, 66 PSS, 53 charged).
+  A window in which the box hit its ceiling says so in its own line, since
+  that is how a too-small limit fails *without* an OOM kill.
   `-n <seconds>` is the window, `-c 1` prints one screen and exits,
   `--addr`/`--status-token` read `USAI_STATUS_ADDR`/`USAI_STATUS_TOKEN` like
   `usai probe`. Counters that go backwards (a restarted instance) read zero,

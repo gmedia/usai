@@ -31,6 +31,14 @@ mkdir -p "$here/out"
 status() { curl -s -m 3 "$BASE/_usai/status" || echo '{"unreachable":true}'; }
 health() { curl -s -m 2 -o /dev/null -w "%{http_code}" "$BASE/invoices" || echo 000; }
 wait_healthy() { local d=$((SECONDS + ${1:-120})); while [ $SECONDS -lt $d ]; do [ "$(health)" = "401" ] && return 0; sleep 0.5; done; return 1; }
+# What `docker stats` reports is the **cgroup's charge**, which is the number
+# that gets the container killed. It is not the process's RSS, and on this
+# runtime the two differ by tens of MiB in both directions at once: RSS counts
+# the pooled Wasm image once per slot it is mapped into (over), while the
+# cgroup is not charged for text pages another cgroup faulted in first (under)
+# — see docs/measurements/2026-09-24-bounded-soak.md. The samples carry
+# `/_usai/status`, so the summary reports all three rather than one labelled
+# "RSS" that is not one.
 rss_mb() { docker stats --no-stream --format "{{.MemUsage}}" usai-p5-app-1 | sed 's/MiB.*//; s/ //g'; }
 cpu_pct() { docker stats --no-stream --format "{{.CPUPerc}}" usai-p5-app-1 | tr -d '%'; }
 fds() { docker exec usai-p5-app-1 sh -c 'ls /proc/1/fd | wc -l' 2>/dev/null || echo null; }
@@ -243,7 +251,9 @@ soak() {
     const rss=s.map(x=>parseFloat(x.rssMiB)); const g=s.map(x=>x.status.gauges||{});
     const fds=s.map(x=>x.fds).filter(x=>typeof x==="number"); const cpu=s.map(x=>parseFloat(x.cpuPct)).filter(x=>!isNaN(x));
     const q=(a,p)=>{const b=[...a].sort((x,y)=>x-y); return b.length?b[Math.min(b.length-1,Math.floor(p*b.length))]:null;};
-    console.log(JSON.stringify({samples:s.length, rssFirst:rss[0], rssMax:Math.max(...rss), rssLast:rss[rss.length-1], fdsFirst:fds[0]??null, fdsMax:fds.length?Math.max(...fds):null, fdsLast:fds[fds.length-1]??null, cpuMedian:q(cpu,0.5), cpuP95:q(cpu,0.95), liveWorldsMax:Math.max(...g.map(x=>x.liveWorlds||0)), liveOpsLast:g[g.length-1].liveOps, worldsCreated:g[g.length-1].worldsCreated, detached:g[g.length-1].detachedWorkDetected, imagesLive:s[s.length-1].status.compiledImagesLive, quarantined:(s[s.length-1].status.resources||[]).map(r=>r.quarantined)}));
+    const proc=s.map(x=>x.status.process||{}); const mib=(k)=>proc.map(x=>(x[k]||0)/1024);
+    const procRss=mib("rssKib"); const procPss=mib("pssKib");
+    console.log(JSON.stringify({samples:s.length, chargedFirst:rss[0], chargedMax:Math.max(...rss), chargedLast:rss[rss.length-1], procRssFirst:+procRss[0].toFixed(1), procRssLast:+procRss[procRss.length-1].toFixed(1), procPssFirst:+procPss[0].toFixed(1), procPssLast:+procPss[procPss.length-1].toFixed(1), fdsFirst:fds[0]??null, fdsMax:fds.length?Math.max(...fds):null, fdsLast:fds[fds.length-1]??null, cpuMedian:q(cpu,0.5), cpuP95:q(cpu,0.95), liveWorldsMax:Math.max(...g.map(x=>x.liveWorlds||0)), liveOpsLast:g[g.length-1].liveOps, worldsCreated:g[g.length-1].worldsCreated, detached:g[g.length-1].detachedWorkDetected, imagesLive:s[s.length-1].status.compiledImagesLive, quarantined:(s[s.length-1].status.resources||[]).map(r=>r.quarantined)}));
   ' "$samples"
 }
 

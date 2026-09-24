@@ -162,10 +162,30 @@ fn render(before: &Sample, now: &Sample) -> String {
         now.u64(&["tasks", "queued"]),
         now.u64(&["tasks", "max"]),
     ));
+    // Three memory numbers that disagree, and the one to act on depends on
+    // the question. RSS counts the pooled Wasm image once per slot it is
+    // mapped into, so it overstates; PSS divides that sharing out; and under
+    // a limit the **cgroup's** charge is the number that gets the process
+    // killed, so that is what leads when there is one.
+    let limit = now.f64(&["process", "memoryLimitBytes"]);
+    let memory = if limit > 0.0 {
+        format!(
+            "mem {:.1}/{:.0} MiB charged (rss {:.1}, pss {:.1})",
+            now.f64(&["process", "memoryChargedBytes"]) / 1_048_576.0,
+            limit / 1_048_576.0,
+            now.f64(&["process", "rssKib"]) / 1024.0,
+            now.f64(&["process", "pssKib"]) / 1024.0,
+        )
+    } else {
+        format!(
+            "mem rss {:.1} MiB (peak {:.1}), pss {:.1}",
+            now.f64(&["process", "rssKib"]) / 1024.0,
+            now.f64(&["process", "rssPeakKib"]) / 1024.0,
+            now.f64(&["process", "pssKib"]) / 1024.0,
+        )
+    };
     out.push_str(&format!(
-        "  rss {:.1} MiB (peak {:.1})   cpu {cpu_percent:.0}%   fds {}   threads {}   worlds/s {:.0}\n",
-        now.f64(&["process", "rssKib"]) / 1024.0,
-        now.f64(&["process", "rssPeakKib"]) / 1024.0,
+        "  {memory}   cpu {cpu_percent:.0}%   fds {}   threads {}   worlds/s {:.0}\n",
         now.u64(&["process", "openFds"]),
         now.u64(&["process", "threads"]),
         rate(
@@ -174,6 +194,23 @@ fn render(before: &Sample, now: &Sample) -> String {
             seconds
         ),
     ));
+    // Reclaim is how a box under a limit fails *without* being killed: it is
+    // charged to its ceiling and spends its time faulting its own text back
+    // in. Absence of an OOM kill proves nothing, so both are on the screen.
+    let ceiling = now
+        .u64(&["process", "memoryCeilingHits"])
+        .saturating_sub(before.u64(&["process", "memoryCeilingHits"]));
+    let killed = now.u64(&["process", "memoryOomKills"]);
+    if ceiling > 0 || killed > 0 {
+        out.push_str(&format!(
+            "  AT THE MEMORY CEILING: {ceiling} reclaim events in this window{}\n",
+            if killed > 0 {
+                format!(", {killed} OOM kill(s) since boot")
+            } else {
+                String::new()
+            }
+        ));
+    }
 
     // Per workload: the table the global histogram cannot give you.
     let empty = serde_json::Map::new();
@@ -368,7 +405,7 @@ mod tests {
             "worldsInUse": 3,
             "worldsMax": 256,
             "tasks": { "running": 1, "queued": 2, "max": 64 },
-            "process": { "rssKib": 102400, "rssPeakKib": 112640, "cpuSeconds": cpu_seconds, "openFds": 14, "threads": 20 },
+            "process": { "rssKib": 102400, "rssPeakKib": 112640, "pssKib": 71680, "cpuSeconds": cpu_seconds, "openFds": 14, "threads": 20 },
             "gauges": {
                 "worldsCreated": requests,
                 "guestCpuNsByWorkload": { "http:GET /hello/:name": cpu_ns },
@@ -431,6 +468,43 @@ mod tests {
         let loud = render(&sample(2, before), &sample(0, after));
         assert!(loud.contains("rejected before a world"), "{loud}");
         assert!(loud.contains("validation 10.0/s"), "{loud}");
+    }
+
+    /// RSS counts the pooled Wasm image once per slot it is mapped into, so
+    /// under a limit the number to act on is the **cgroup's** charge — the
+    /// one that gets the process killed. Without a limit there is no such
+    /// number and the screen says RSS and PSS.
+    #[test]
+    fn the_memory_number_that_leads_is_the_one_that_kills_you() {
+        let free = render(
+            &sample(2, status(1_000, 10.0, 1_000_000_000, 5.0)),
+            &sample(0, status(1_200, 10.5, 1_200_000_000, 5.2)),
+        );
+        assert!(
+            free.contains("mem rss 100.0 MiB (peak 110.0), pss 70.0"),
+            "{free}"
+        );
+        assert!(!free.contains("charged"), "{free}");
+        assert!(!free.contains("MEMORY CEILING"), "{free}");
+
+        let mut before = status(1_000, 10.0, 1_000_000_000, 5.0);
+        before["process"]["memoryLimitBytes"] = json!(201_326_592u64);
+        before["process"]["memoryChargedBytes"] = json!(88_080_384u64);
+        before["process"]["memoryCeilingHits"] = json!(4);
+        let mut after = before.clone();
+        after["process"]["memoryChargedBytes"] = json!(94_371_840u64);
+        after["process"]["memoryCeilingHits"] = json!(1_204);
+        after["process"]["memoryOomKills"] = json!(1);
+        let limited = render(&sample(2, before), &sample(0, after));
+        assert!(limited.contains("mem 90.0/192 MiB charged"), "{limited}");
+        assert!(limited.contains("rss 100.0, pss 70.0"), "{limited}");
+        // 1 200 reclaim events in two seconds is a box thrashing on its own
+        // text; it is not being killed, which is the failure that hides.
+        assert!(
+            limited.contains("AT THE MEMORY CEILING: 1200 reclaim events"),
+            "{limited}"
+        );
+        assert!(limited.contains("1 OOM kill(s) since boot"), "{limited}");
     }
 
     /// A restarted instance's counters go backwards. That is a fact about

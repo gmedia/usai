@@ -39,8 +39,11 @@ Where to look, always:
   incident is about the last few seconds. It differences two samples —
   requests per second and the average and guest CPU per workload (waiting or
   computing, in one screen), rejections that never reached a workload, pool
-  `in use` and `waiting`, RSS and CPU. `-c 1` prints one screen to paste into
-  a channel.
+  `in use` and `waiting`, and memory as the number that actually kills the
+  process (the cgroup's charge against its limit, with RSS and PSS beside
+  it, and a loud line when the box is reclaiming at its ceiling — which is
+  how a too-small limit fails *without* an OOM kill). `-c 1` prints one
+  screen to paste into a channel.
 - `GET /_usai/status` (with `--status`): gauges (`liveWorlds`, `liveOps`,
   `detachedWorkDetected`), `revisions[]` (state, in-flight, services, queue
   counters), `resources[]` (`in_use`, `max`, `quarantined`, and per-kind

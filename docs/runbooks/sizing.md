@@ -119,10 +119,24 @@ allocate more than a world does:
 | A held revision (replacement, rollback) | ≈ 30 MiB compiled image | until it is removed |
 | A `cache.local` | its declared `maxEntries × entry size` | for the revision's life |
 
-Go below that and the box is OOM-killed at the first burst, not at idle
-(idle RSS is ≈40 MiB whatever the limit — the hello application fits 48 MiB
-but only for 16 worlds and no pool). Watch `usai_process_resident_memory_bytes`
-against `usai_worlds_live`: RSS climbing while worlds do not is a leak.
+Go below that and the box fails at the first burst, not at idle — and it may
+fail **without being OOM-killed**, which is the failure that wastes a night.
+Re-measured on a box charged for its own page cache
+(`docs/measurements/2026-09-23-floor-accounting.md`): at 48 MiB the hello
+application is not killed, it *thrashes* — charged to its ceiling, reclaiming
+its own executable text 1.4 M times, serving **1 req/s**. The technical floor
+is **64 MiB**, and 48 MiB is not a small box, it is a broken one. Read a floor
+from resident set and reclaim events (`memory.events`), never from the absence
+of an OOM kill.
+
+Watch `usai_process_resident_memory_bytes` against `usai_worlds_live`: RSS
+climbing while worlds do not is a leak. Size from **PSS**, not RSS: the
+pooled Wasm image is one set of physical pages mapped into every slot, and
+RSS counts it once per slot — measured on the 24 h bounded soak, a process
+at 89 MiB RSS was 66 MiB PSS and its cgroup was charged 53
+(`docs/measurements/2026-09-24-bounded-soak.md`). The number that gets you
+OOM-killed is the cgroup's, which `/_usai/status` reports beside the limit
+when the process runs under one.
 
 ## 5. CPU
 

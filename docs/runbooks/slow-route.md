@@ -31,7 +31,7 @@ $ usai top --addr 127.0.0.1:9090
 checkout  revision 7 active  engine wasm  every 2.0s
 
   worlds 12/256 live, 12 in flight   tasks 0 running, 0 queued (max 64)
-  rss 98.4 MiB (peak 121.0)   cpu 41%   fds 37   threads 20   worlds/s 216
+  mem 121.4/192 MiB charged (rss 155.0, pss 118.2)   cpu 41%   fds 37   threads 20   worlds/s 216
 
   workload                        req/s    4xx    5xx        avg        cpu
   http:GET /catalog               201.5      0      0     2.10ms     1.90ms
