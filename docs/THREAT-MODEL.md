@@ -84,12 +84,16 @@ recommended way to run it. `docker stop` (SIGTERM) drains like Ctrl-C. The
 `-dev` image is for building and developing and is not a production base.
 Status/control surfaces stay on trusted networks in a container exactly as
 on a host: prefer `--status-addr` on a private port over `--status` on the
-application listener, and never publish the control port.
+application listener, and never publish the control port. A control request
+carrying an `Origin` header is refused outright, and a mutating one must not
+use a media type a browser may send without a preflight — a page the operator
+visits must not be able to drive a deployment.
 
 ## Operator checklist
 
 1. Terminate TLS in front of Usai; use `sslmode=require` to PostgreSQL (with the provider's root in `tls.caFile`) or keep it on a private network.
 2. Do not pass `--status` on public listeners; scrape metrics from a private interface.
+2b. **Always set `USAI_CONTROL_TOKEN`, loopback included.** The control surface is reachable from the operator's own browser, and `POST /stop` needs no body — a page can send that as a CORS *simple* request, with no preflight and nobody's consent. The runtime now refuses any control request carrying `Origin` and any mutating one whose media type is a browser's simple set, so a token-less loopback surface is no longer a remote kill; the token is still what stops anything else on the host from deploying.
 3. Set `DATABASE_URL` and other declared env in the deployment environment; activation fails loudly if they are missing or malformed.
 4. Size `RuntimeConfig.max_worlds` and pool sizes to the host; watch `usai_world_budget`, `usai_worlds_live` and `usai_resource_quarantines_total`.
 5. Run `usai db migrate` as a deploy step, not from inside the serving

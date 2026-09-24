@@ -46,7 +46,7 @@ Liveness of the runtime plus the active revision.
 
 ```json
 { "ok": true,
-  "active": { "id": 5, "identity": "sha256:…", "application": "invoicing" },
+  "active": { "id": 5, "identity": "106e99430f4f48d5", "application": "invoicing" },
   "gauges": { "live_worlds": 0, "live_ops": 0, … } }
 ```
 
@@ -64,7 +64,7 @@ describes the fields.
 
 ```json
 { "revisions": [
-  { "id": 5, "application": "invoicing", "identity": "sha256:…", "state": "active",
+  { "id": 5, "application": "invoicing", "identity": "106e99430f4f48d5", "state": "active",
     "inFlight": 3, "services": [ … ], "queue": { … }, "cron": { … } } ] }
 ```
 
@@ -76,11 +76,20 @@ when signed). The artifact is verified against `--require-signature` when
 set, loaded and compiled (or its precompiled image is used), and held as
 `installed`. Nothing is served yet, no resource is opened.
 
-- `201 { "id": 6, "identity": "sha256:…", "application": "invoicing", "state": "installed" }`
+- `201 { "id": 6, "identity": "106e99430f4f48d5", "application": "invoicing", "state": "installed", "installed": true }`
 - `422 invalid_artifact` — missing files, a bad signature, a manifest the
   runtime cannot execute (the message names the file and the reason).
 - `409 too_many_revisions` — `max_revisions` held; drain or `DELETE` one.
 - `413 payload_too_large` — the body is bounded at 64 KiB.
+
+**Retrying this call.** By default a second install of the same artifact is
+a second revision, holding a second compiled image and counting against the
+bound — which is what a control plane's retry-on-timeout produces, with no
+way afterwards to tell "my retry landed twice" from "it landed once". Send
+`{"artifact": "…", "ifAbsent": true}` and the call becomes idempotent: an
+`installed` revision with this artifact's identity is returned instead, with
+`"installed": false` so you can tell which happened. Identity is a content
+hash, so "the same artifact" means the same bytes, whatever the path.
 
 ### `POST /revisions/{id}/activate`
 
@@ -94,6 +103,20 @@ and activates never accumulates revisions.
 
 - `200 { "id": 6, "state": "active", "previous": 5 }` — `previous` is
   `null` when nothing was active.
+
+**Retrying this call is not safe without `expectedPrevious`.** Activating a
+`draining` revision again is the rollback (below), and a retry that arrives
+while the revision you replaced is still draining is *that same call*: it
+will revert whatever deployed in between and answer `200`. Send
+`{"expectedPrevious": 5}` — the id you saw active before you started — and
+the call is refused with `409 active_revision_moved` when something else
+landed under you. A control plane that retries should always send it.
+
+**Activating a different application is refused.** A runtime serving
+`invoicing` does not silently become `billing` because a deploy template
+interpolated the wrong release directory: that is `409
+different_application`. Pass `{"allowApplicationChange": true}` when you
+mean it.
 - `409 invalid_state` — `revision rev6 is active, already active`: a
   repeat is refused rather than opening the resources and starting the
   schedulers a second time.
@@ -114,12 +137,25 @@ to stop, waits until in-flight work is zero, then retires and removes it.
 Bounded by `--drain-timeout` (30 s).
 
 - `200 { "id": 5, "state": "retired" }`
-- `409 invalid_state` — `revision rev5 did not drain within 30s`: the
-  revision stays `draining`; call again, or let the process stop finish it.
+- `409 would_stop_serving` — it is the **only** revision. Draining it leaves
+  nothing to serve and nothing to activate, and the way back is a fresh
+  install with an artifact path this process no longer remembers. Install
+  the next revision first if you mean to do it.
+- `409 invalid_state` — `revision rev5 did not drain within 30s`. **Unlike
+  every other `409` on this page, this one is not "nothing happened":** the
+  revision stopped admitting work when the call started and stays
+  `draining`. Call again, or let the process stop finish it. In-flight work
+  is **not** cancelled at the bound here (that is `POST /stop`); it runs to
+  completion and its clients get their answers.
+
+The call blocks for as long as the drain takes, up to `--drain-timeout` —
+with the 30 s default, a control plane with a 10 s HTTP timeout will time
+out on every drain that has work in flight, and there is no handle to poll.
 
 Use this to *stop serving* without stopping the process (a maintenance
-window). To replace, `activate` the new one instead; the old drains on its
-own.
+window). **You do not need it in a deploy**: `activate` drains the revision
+it replaces by itself, and calling `drain` afterwards is how a deployer
+turns a working release into a 503.
 
 ### `DELETE /revisions/{id}`
 
@@ -149,7 +185,8 @@ the handler succeeded or threw — `ok` says which):
 
 ```json
 { "ok": true, "value": { … }, "error": null,
-  "termination": "completed", "world": "w-…", "durationMs": 12 }
+  "termination": "completed", "world": 67122, "durationMs": 12,
+  "children": [], "logs": [], "violations": [] }
 ```
 
 `termination` is `completed`, `deadline-exceeded`, `{ "cancelled": { "reason": "…" } }`
@@ -187,11 +224,27 @@ Every error is `{ "error": { "code": "<code>", "message": "<text>" } }`:
 ```bash
 C=http://127.0.0.1:3900; H="Authorization: Bearer $USAI_CONTROL_TOKEN"
 usai db migrate --artifact /srv/app/releases/$sha                  # once per release
-id=$(curl -sf -H "$H" -X POST $C/revisions -d "{\"artifact\":\"/srv/app/releases/$sha\"}" | jq .id)
-curl -sf -H "$H" -X POST $C/revisions/$id/activate                 # old revision drains itself
-until curl -sf http://127.0.0.1:9090/_usai/ready >/dev/null; do sleep 0.5; done
+was=$(curl -sf -H "$H" $C/health | jq -r '.active.id // "null"')     # what you are replacing
+id=$(curl -sf -H "$H" -H 'content-type: application/json' -X POST $C/revisions \
+       -d "{\"artifact\":\"/srv/app/releases/$sha\",\"ifAbsent\":true}" | jq .id)
+curl -sf -H "$H" -H 'content-type: application/json' -X POST $C/revisions/$id/activate \
+       -d "{\"expectedPrevious\":$was}"                                # old revision drains itself
+# The gate is yours: readiness is 200 before, during and after both a healthy
+# and a broken activation, because it answers "is *a* revision serving". Send
+# real requests, or difference usai_http_responses_total{class="5xx"} over a
+# window, and roll back on what you see.
 # rollback = activate the previous id while it is still draining (or install it again)
 ```
+
+**Revisions live in the process, and `--artifact` is what a restart serves.**
+The instant your first control-plane deploy succeeds, the running revision
+and the `--artifact` the process was started with disagree — and a crash, an
+OOM kill, `systemctl restart`, a host reboot or the documented way to rotate
+`USAI_CONTROL_TOKEN` (restart it) all bring back whatever `--artifact`
+points at. Ids restart at 1 and are reused, so an id your control plane
+still holds may name a different artifact afterwards. **Rewrite the path
+`--artifact` resolves** — the `current` symlink in `systemd.md`'s layout —
+as part of every deploy, or your next restart is an unannounced rollback.
 
 The process never restarts, the listener never closes, no request is
 refused: the replaced revision finishes its in-flight work while the new

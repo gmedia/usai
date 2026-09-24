@@ -777,6 +777,16 @@ impl Runtime {
                 tracing::info!(revision = %id, "revision removed");
                 Ok(())
             }
+            // "Drain it first" is the right advice for an *active* revision
+            // and wrong for a draining one — it is already draining, cannot
+            // be drained again, and holds a slot until its last long-lived
+            // connection ends. Saying so is the difference between waiting
+            // and hunting for a force flag that does not exist.
+            RevisionState::Draining => Err(RuntimeError::NotActive(
+                id,
+                RevisionState::Draining,
+                "it is already draining and holds its slot until the work it still owns finishes (a WebSocket, a stream, a long report). Wait for it, or stop the process",
+            )),
             state => Err(RuntimeError::NotActive(
                 id,
                 state,

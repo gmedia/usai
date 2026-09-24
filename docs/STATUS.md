@@ -242,6 +242,47 @@ capabilities (design), latency histogram in metrics, an API reference page — a
   side, rejections, pool `in use` and `waiting`, what the process costs —
   because totals since boot answer the wrong question during an incident.
 
+- **Round 28 (2026-09-24): a deployer against the control API.** A platform
+  engineer writing their company's own control plane — no Kubernetes, a Go
+  service driving the runtime over HTTP — who put 104 531 requests through
+  three revision transitions including a rollback and measured **0 failures
+  and 0 bad seconds**, with a rollback to a still-draining revision in 3 ms
+  and a reinstall-and-activate rollback in 212 ms under load. Verdict on the
+  data plane: sound. Verdict on the control plane: *"not built for a machine
+  that retries, and one of its verbs is a loaded gun"*. **The worst finding
+  is a remote kill**: the control surface is reachable from the operator's
+  own browser, `POST /stop` needs no body, and a form or `text/plain` POST
+  is a CORS *simple request* — no preflight, no consent — so with the
+  token-less loopback configuration the document explicitly permits, any
+  page the operator visited could stop the runtime or install an artifact
+  already on the host. Then the retry problem, which is structural: a
+  retried `activate` arriving while the old revision is still `draining`
+  **is** the documented rollback, the same call with the same `200`, so a
+  control plane doing the normal thing silently reverts whatever deployed in
+  between (reproduced); a retried `install` became a second revision holding
+  a second compiled image with nothing to distinguish it; and two concurrent
+  activations both answered `200` while one of them had already been drained
+  away. And `drain` on the only revision was a one-call, one-millisecond,
+  irreversible outage whose `409`-on-timeout means "I did the destructive
+  half" — the opposite of every other `409` on the page. All fixed: `Origin`
+  and browser-simple media types refused, `expectedPrevious` as a
+  compare-and-swap, `ifAbsent` for an idempotent install, a refusal when a
+  deploy would swap in a *different application*, and a refusal to drain the
+  last revision. Also corrected: the document's own deploy recipe polled a
+  port its own `usai run` line never opens, and the gate it offered is a
+  no-op (readiness is 200 before, during and after both a healthy and a
+  broken activation — the round measured 66 samples); `identity` on the wire
+  has no `sha256:` prefix and `/invoke`'s `world` is a number; and the page
+  never said that **revisions live in the process**, so the first successful
+  control-plane deploy leaves the running revision and `--artifact`
+  disagreeing and any restart — including the documented way to rotate the
+  control token — is an unannounced rollback. Recorded, not built: there is
+  no way to exercise a revision **before** it takes traffic (`/invoke` runs
+  against the active one), which the round called the difference between a
+  deploy and a gamble and would block on; no per-revision HTTP error
+  counters; no force-remove for a draining revision holding a slot; and no
+  audit of *who* ran a control operation, only of what.
+
 - **Round 27 (2026-09-24): the observability gate.** The engineer who owns
   Prometheus, Grafana, Loki and Tempo, with one question: *when this pages at
   3 a.m., can the on-call answer "what is broken, where, and for whom"

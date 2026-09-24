@@ -514,11 +514,18 @@ async fn revision_replacement_drains_the_old_revision() {
         err.to_string(),
         format!("revision {} is active, already active", b.id)
     );
-    // A live revision cannot be removed; the message names the states that can.
+    // A live revision cannot be removed — and for a *draining* one the old
+    // advice ("drain it first") was wrong twice over: it is already
+    // draining and cannot be drained again, so the message has to say what
+    // the operator can actually do.
     let err = rt.remove(a.id).unwrap_err();
     assert!(
         err.to_string()
-            .contains("is draining, only an installed or retired revision"),
+            .contains("is draining, it is already draining and holds its slot"),
+        "{err}"
+    );
+    assert!(
+        err.to_string().contains("Wait for it, or stop the process"),
         "{err}"
     );
     rt.drain(a.id).await.unwrap();

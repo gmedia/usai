@@ -110,8 +110,43 @@ fn runtime_error(e: RuntimeError) -> ControlResponse {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct InstallRequest {
     artifact: String,
+    /// `true` makes the call **idempotent**: if a revision with this
+    /// artifact's identity is already installed, it is returned instead of a
+    /// second one being made.
+    ///
+    /// A control plane retries on timeout, and an install that landed but
+    /// whose response was lost used to become a second revision holding a
+    /// second compiled image — indistinguishable from the first in every
+    /// field, counting against the bound, and orphaned because the deployer
+    /// only ever learned the second id. Identity is a content hash, so the
+    /// runtime can answer "that is already here" exactly; it does not do so
+    /// unasked, because holding the same artifact twice on purpose is a
+    /// thing a deployer may want.
+    #[serde(default)]
+    if_absent: bool,
+}
+
+/// `POST /revisions/{id}/activate`. `expected_previous` is the
+/// compare-and-swap a machine needs: a control plane retries on timeout, and
+/// without it a retry that arrives while the old revision is still
+/// `draining` is **indistinguishable from a rollback** — so it silently
+/// reverts whatever deployed in between, and answers 200. With it, the call
+/// is refused unless the revision it is replacing is still the one the
+/// caller saw.
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct ActivateRequest {
+    #[serde(default)]
+    expected_previous: Option<u64>,
+    /// Allows this runtime to start serving a **different application**.
+    /// Refused by default: a deploy template that interpolated the wrong
+    /// release directory would otherwise replace one service with another,
+    /// with a plain 200 and `/health` reporting `ok` throughout.
+    #[serde(default)]
+    allow_application_change: bool,
 }
 
 #[derive(Deserialize)]
@@ -201,6 +236,52 @@ impl ControlHost {
     }
 
     pub async fn handle(self: Arc<Self>, request: Request<Incoming>) -> ControlResponse {
+        // A browser can reach a loopback listener. `POST /stop` needs no
+        // body, and a form-encoded or `text/plain` POST is a CORS **simple
+        // request** — no preflight, no consent — so any page the operator
+        // visits could stop the runtime or install an artifact already on
+        // the host, and the token-less loopback configuration this surface
+        // permits made that unauthenticated. The attacker cannot read the
+        // reply and does not need to.
+        //
+        // Two independent closures, both cheap: a mutating verb must carry
+        // `Content-Type: application/json` (which is not a simple request,
+        // so it is preflighted and the preflight is refused), and any
+        // request carrying `Origin` is refused outright — no browser omits
+        // it on a cross-origin request, and no deploy script sends one.
+        if request.method() != Method::GET
+            && let Some(origin) = request.headers().get(header::ORIGIN)
+        {
+            return error(
+                StatusCode::FORBIDDEN,
+                "cross_origin_refused",
+                format!(
+                    "this is a control surface, not a web API: a request carrying Origin ({}) is refused. A page in a browser must not be able to drive a deployment",
+                    origin.to_str().unwrap_or("?")
+                ),
+            );
+        }
+        // The three media types a browser may send without a preflight. A
+        // control request is JSON (or has no body at all); one of these is
+        // a page pretending to be a deployer.
+        if matches!(request.method(), &Method::POST)
+            && request
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|v| {
+                    let v = v.trim_start().to_ascii_lowercase();
+                    v.starts_with("application/x-www-form-urlencoded")
+                        || v.starts_with("multipart/form-data")
+                        || v.starts_with("text/plain")
+                })
+        {
+            return error(
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "unsupported_media_type",
+                "control requests are JSON: send `Content-Type: application/json` or no body at all. A form or text/plain POST is a CORS simple request, which a browser may make without asking anyone",
+            );
+        }
         if !self.authorized(&request) {
             return error(
                 StatusCode::UNAUTHORIZED,
@@ -267,10 +348,39 @@ impl ControlHost {
                         );
                     }
                 };
+                // A control plane retries on timeout, and an install that
+                // landed but whose response was lost used to become a second
+                // revision holding a second compiled image — indistinguishable
+                // from the first in every field, and counting against the
+                // bound of eight. Identity is already a content hash: an
+                // `installed` revision with the same one *is* this request's
+                // outcome, so return it rather than making another.
+                let identity = definition.identity().to_owned();
+                if let Some(existing) =
+                    install
+                        .if_absent
+                        .then(|| {
+                            self.runtime.status().revisions.into_iter().find(|r| {
+                                r.state == RevisionState::Installed && r.identity == identity
+                            })
+                        })
+                        .flatten()
+                {
+                    return reply(
+                        StatusCode::OK,
+                        json!({
+                            "id": existing.id,
+                            "identity": existing.identity,
+                            "application": existing.application,
+                            "state": existing.state,
+                            "installed": false,
+                        }),
+                    );
+                }
                 match self.runtime.install(definition).await {
                     Ok(rev) => reply(
                         StatusCode::CREATED,
-                        json!({ "id": rev.id, "identity": rev.definition.identity(), "application": rev.definition.name(), "state": rev.state() }),
+                        json!({ "id": rev.id, "identity": rev.definition.identity(), "application": rev.definition.name(), "state": rev.state(), "installed": true }),
                     ),
                     Err(e) => runtime_error(e),
                 }
@@ -279,7 +389,64 @@ impl ControlHost {
                 let Some(id) = Self::revision_id(id) else {
                     return error(StatusCode::NOT_FOUND, "unknown_revision", "bad revision id");
                 };
+                let body = match Limited::new(request.into_body(), 64 * 1024).collect().await {
+                    Ok(b) => b.to_bytes(),
+                    Err(_) => {
+                        return error(
+                            StatusCode::PAYLOAD_TOO_LARGE,
+                            "payload_too_large",
+                            "request body too large",
+                        );
+                    }
+                };
+                let wanted: ActivateRequest = if body.is_empty() {
+                    ActivateRequest::default()
+                } else {
+                    match serde_json::from_slice(&body) {
+                        Ok(a) => a,
+                        Err(e) => {
+                            return error(
+                                StatusCode::BAD_REQUEST,
+                                "invalid_request",
+                                e.to_string(),
+                            );
+                        }
+                    }
+                };
                 let previous = self.runtime.active().ok().map(|r| r.id);
+                if let Some(expected) = wanted.expected_previous
+                    && previous.map(|p| p.0) != Some(expected)
+                {
+                    return error(
+                        StatusCode::CONFLICT,
+                        "active_revision_moved",
+                        format!(
+                            "expected rev{expected} to be active, found {}. Another deploy landed since you looked: activating now would revert it",
+                            previous
+                                .map(|p| p.to_string())
+                                .unwrap_or_else(|| "none".into())
+                        ),
+                    );
+                }
+                // A runtime serving one application must not silently become
+                // another because a deploy template interpolated the wrong
+                // release directory. The runtime knows both names.
+                if !wanted.allow_application_change
+                    && let (Ok(active), Ok(target)) =
+                        (self.runtime.active(), self.runtime.revision(id))
+                    && active.definition.name() != target.definition.name()
+                {
+                    return error(
+                        StatusCode::CONFLICT,
+                        "different_application",
+                        format!(
+                            "this runtime is serving {:?}; rev{} is {:?}. Activating it would replace one application with another — start a second runtime, or pass {{\"allowApplicationChange\": true}} if you mean it",
+                            active.definition.name(),
+                            id.0,
+                            target.definition.name()
+                        ),
+                    );
+                }
                 match self.runtime.activate(id).await {
                     Ok(rev) => reply(
                         StatusCode::OK,
@@ -292,6 +459,26 @@ impl ControlHost {
                 let Some(id) = Self::revision_id(id) else {
                     return error(StatusCode::NOT_FOUND, "unknown_revision", "bad revision id");
                 };
+                // Draining the only revision there is takes the runtime out
+                // of service with nothing to put back: every request is 503
+                // `no_active_revision`, and the only way back is a fresh
+                // install with an artifact path this process no longer
+                // remembers. One call, a millisecond, no confirmation. That
+                // is a maintenance window for someone who meant it, and an
+                // outage for a deployer who reached for `drain` after
+                // `activate` (which already drained the old revision itself).
+                if self.runtime.active().is_ok_and(|active| active.id == id)
+                    && self.runtime.status().revisions.len() == 1
+                {
+                    return error(
+                        StatusCode::CONFLICT,
+                        "would_stop_serving",
+                        format!(
+                            "rev{} is the only revision: draining it leaves nothing to serve and nothing to activate. `activate` drains the revision it replaces by itself — you do not need this in a deploy. For a deliberate maintenance window, install the next revision first",
+                            id.0
+                        ),
+                    );
+                }
                 match self.runtime.drain(id).await {
                     Ok(()) => reply(
                         StatusCode::OK,

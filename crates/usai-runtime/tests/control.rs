@@ -191,7 +191,14 @@ async fn orchestrator_lifecycle_install_activate_drain_remove() {
     assert_eq!(r.status(), 422);
 
     // Activate: the previous revision starts draining.
+    //
+    // This fixture is a *different* application from the one the runtime
+    // started with, which a deploy refuses by default — a template that
+    // interpolated the wrong release directory would otherwise replace one
+    // service with another, with a plain 200 throughout. Here the swap is
+    // the point of the test, so it says so.
     let r = auth(client.post(format!("{base}/revisions/rev{id}/activate")))
+        .json(&json!({ "allowApplicationChange": true }))
         .send()
         .await
         .unwrap();
@@ -279,7 +286,9 @@ async fn orchestrator_lifecycle_install_activate_drain_remove() {
     let back: Value = r.json().await.unwrap();
     assert_eq!(back["application"], "hello");
     let back_id = back["id"].as_u64().unwrap();
+    // Back to the other application, again deliberately.
     let r = auth(client.post(format!("{base}/revisions/rev{back_id}/activate")))
+        .json(&json!({ "allowApplicationChange": true }))
         .send()
         .await
         .unwrap();
@@ -339,4 +348,137 @@ fn non_loopback_bind_requires_a_token() {
         .unwrap();
         assert!(err.to_string().contains("USAI_CONTROL_TOKEN"));
     });
+}
+
+/// The control surface is reachable from the operator's own browser, and
+/// `POST /stop` needs no body — which makes it a CORS **simple request**, a
+/// thing any page can send with no preflight and no consent. With the
+/// token-less loopback configuration this surface permits, that was an
+/// unauthenticated remote kill. Two independent closures: any request
+/// carrying `Origin` is refused, and a mutating request whose media type is
+/// one a browser may send without a preflight is refused.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_web_page_cannot_drive_a_deployment() {
+    let Some((runtime, hello, _fixture_dir, base, shutdown, client)) = setup().await else {
+        return;
+    };
+    let auth = |r: reqwest::RequestBuilder| r.bearer_auth("s3cret");
+    for (name, r) in [
+        (
+            "stop",
+            auth(client.post(format!("{base}/stop"))).header("origin", "https://evil.example"),
+        ),
+        (
+            "install",
+            auth(client.post(format!("{base}/revisions")))
+                .header("origin", "https://evil.example")
+                .json(&json!({ "artifact": hello.to_string_lossy() })),
+        ),
+    ] {
+        let r = r.send().await.unwrap();
+        assert_eq!(r.status(), 403, "{name}");
+        let body: Value = r.json().await.unwrap();
+        assert_eq!(body["error"]["code"], "cross_origin_refused", "{name}");
+    }
+    // A form POST is the other half of the same trick.
+    let r = auth(client.post(format!("{base}/stop")))
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body("")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 415);
+    // A deploy script is unaffected: JSON, or no body at all.
+    let r = auth(client.get(format!("{base}/health")))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    shutdown.cancel();
+    runtime.shutdown().await;
+}
+
+/// A control plane retries on timeout. Two of this API's verbs could not
+/// survive that: a retried `activate` arriving while the previous revision
+/// is still `draining` is **the documented rollback**, so it silently
+/// reverted whatever deployed in between and answered 200; and a retried
+/// `install` became a second revision holding a second compiled image, with
+/// nothing to tell it from the first.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_deployer_that_retries_cannot_undo_someone_elses_deploy() {
+    let Some((runtime, hello, _fixture_dir, base, shutdown, client)) = setup().await else {
+        return;
+    };
+    let auth = |r: reqwest::RequestBuilder| r.bearer_auth("s3cret");
+    let active = runtime.active().unwrap().id.0;
+    // `ifAbsent` makes the install the same answer however many times it is
+    // asked: the retry adopts the revision the first call made.
+    let first: Value = auth(client.post(format!("{base}/revisions")))
+        .json(&json!({ "artifact": hello.to_string_lossy(), "ifAbsent": true }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(first["installed"], true, "{first}");
+    let retry: Value = auth(client.post(format!("{base}/revisions")))
+        .json(&json!({ "artifact": hello.to_string_lossy(), "ifAbsent": true }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        retry["id"], first["id"],
+        "a retry must not make a second revision"
+    );
+    assert_eq!(
+        retry["installed"], false,
+        "and it must say which it was: {retry}"
+    );
+
+    // The compare-and-swap: this deployer saw `active` and says so.
+    let id = first["id"].as_u64().unwrap();
+    let r = auth(client.post(format!("{base}/revisions/rev{id}/activate")))
+        .json(&json!({ "expectedPrevious": active + 999, "allowApplicationChange": true }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 409, "the active revision moved under it");
+    let body: Value = r.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "active_revision_moved");
+    let r = auth(client.post(format!("{base}/revisions/rev{id}/activate")))
+        .json(&json!({ "expectedPrevious": active, "allowApplicationChange": true }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200, "{}", r.text().await.unwrap());
+    shutdown.cancel();
+    runtime.shutdown().await;
+}
+
+/// Draining the only revision there is takes the runtime out of service with
+/// nothing to put back: 503 for everything, and the only way back is a fresh
+/// install with an artifact path this process no longer remembers. One call,
+/// a millisecond, no confirmation — and `activate` already drains the
+/// revision it replaces, so a deployer never needs this in a deploy.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn draining_the_only_revision_is_refused() {
+    let Some((runtime, _hello, _fixture_dir, base, shutdown, client)) = setup().await else {
+        return;
+    };
+    let auth = |r: reqwest::RequestBuilder| r.bearer_auth("s3cret");
+    let active = runtime.active().unwrap().id.0;
+    let r = auth(client.post(format!("{base}/revisions/rev{active}/drain")))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 409, "{}", r.text().await.unwrap());
+    let body: Value = r.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "would_stop_serving");
+    assert!(runtime.active().is_ok(), "it must still be serving");
+    shutdown.cancel();
+    runtime.shutdown().await;
 }

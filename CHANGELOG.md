@@ -100,6 +100,12 @@ the old artifact for a while (`SUPPORTED.md` → Versioning).
   build**, with exit 1 and the workload named. That is a CI failure, not a
   deploy failure. Nothing could have declared it before this release.
 
+- **Control requests must not look like a browser's.** A request carrying an
+  `Origin` header is refused, and a `POST` whose `Content-Type` is
+  `application/x-www-form-urlencoded`, `multipart/form-data` or `text/plain`
+  is refused. If your deployer sends one of those, switch it to
+  `application/json` (or no body). Nothing else changes: bodyless POSTs
+  still work.
 - **Two metric families change shape.** `usai_tasks{state="completed|failed|lost"}`
   moves to `usai_tasks_total` (a counter, because they are cumulative
   events), and the dead-letter alert should move from
@@ -141,6 +147,65 @@ one application in both directions. Rolling back only the binary leaves the
 new artifact on the old runtime, which is not a supported combination.
 
 Everything else is additive or a fix to behaviour that was wrong.
+
+### The control surface
+
+- **A web page can no longer drive a deployment.** The control surface is
+  reachable from the operator's own browser, and `POST /stop` needs no body
+  — which makes it a CORS **simple request**, sendable with no preflight and
+  nobody's consent. With the token-less loopback configuration the document
+  permits, that was an unauthenticated remote kill, and with `POST
+  /revisions` it could install any artifact directory already on the host.
+  Any control request carrying `Origin` is now refused (`403
+  cross_origin_refused`), and a mutating one whose media type is in a
+  browser's simple set is refused (`415`). A deploy script sends neither, so
+  nothing legitimate changes.
+- **`activate` can be retried safely: `{"expectedPrevious": <id>}`.** A
+  control plane retries on timeout, and a retry that arrived while the
+  revision it replaced was still `draining` was **the documented rollback** —
+  the same call, the same `200` — so it silently reverted whatever had
+  deployed in between. With the compare-and-swap the call is refused with
+  `409 active_revision_moved` when the active revision is not the one the
+  caller saw. It also closes the two-deployers race, where both concurrent
+  activations answered `200` and one of them was already gone.
+- **`install` can be retried safely: `{"ifAbsent": true}`.** An install that
+  landed but whose response was lost became a second revision holding a
+  second compiled image, indistinguishable from the first and counting
+  against the bound of eight. With the flag the call returns the existing
+  revision and says `"installed": false`, so a deployer can tell "already
+  done" from "did nothing". Identity is a content hash, so "the same
+  artifact" means the same bytes.
+- **Activating a different application is refused.** A runtime serving
+  `invoicing` no longer silently becomes `billing` because a deploy template
+  interpolated the wrong release directory — `409 different_application`,
+  with `{"allowApplicationChange": true}` for the case where someone means
+  it.
+- **Draining the only revision is refused.** One call, a millisecond, no
+  confirmation, and the runtime served `503 no_active_revision` with nothing
+  to activate and no artifact path in memory to reinstall from. `activate`
+  drains the revision it replaces by itself, so a deployer never needs
+  `drain` in a deploy; for a deliberate maintenance window, install the next
+  revision first.
+- **`DELETE` on a draining revision says what to do.** It said "drain it
+  first" about a revision that is already draining and cannot be drained
+  again; it now says it holds its slot until the work it owns finishes, and
+  that waiting or stopping the process are the options.
+- **`docs/CONTROL-API.md` matches the wire**: `identity` has no `sha256:`
+  prefix, `/invoke`'s `world` is a number and the response carries
+  `children`, `logs` and `violations`. The deploy recipe no longer polls a
+  port the document never opens — and says plainly that readiness is 200
+  before, during and after both a healthy and a broken activation, so the
+  gate has to be the deployer's own requests.
+- **The page now states that revisions live in the process.** The instant a
+  control-plane deploy succeeds, the running revision and `--artifact`
+  disagree, and a crash, an OOM kill, a `systemctl restart` or the
+  documented way to rotate the control token all bring back whatever
+  `--artifact` points at — with revision ids restarting at 1 and being
+  reused. Rewriting that path is part of a deploy, and nothing said so.
+- **`USAI_DRAIN_TIMEOUT` says which path cancels.** The bound cancels
+  in-flight work on the *stop* path (`499` to its clients); `POST
+  /revisions/{id}/drain` uses the same number to decide when to answer `409`
+  and does not cancel — the work runs to completion.
 
 ### Observability
 
