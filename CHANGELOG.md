@@ -151,7 +151,9 @@ Everything else is additive or a fix to behaviour that was wrong.
   and their IPv4-mapped spellings are now `destination_refused`.
   `allowPrivateNetwork: true` opts out where the internal address really is
   chosen at runtime, and a client with `baseUrl`/`baseUrlEnv` is pinned to
-  one origin already and is unaffected. **If your application calls an
+  one origin already and is unaffected. `examples/invoicing` — whose tenants
+  configure their own webhook URL, the textbook case — declares the opt-out
+  and says in a comment why a real deployment must not. **If your application calls an
   internal service through a client that does not name it, declare the
   opt-out before you deploy this.** The check resolves the name and refuses
   if any address is internal; a hostile URL still wants an egress proxy,
