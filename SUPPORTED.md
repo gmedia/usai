@@ -121,7 +121,16 @@ the answer is a resource — an existing one, or a case for a new kind.
 
 HTTP/2 or TLS termination in the runtime, Redis/Kafka substrates, Node
 compatibility (`require`, `process`, `fs` in a world), a hostile multi-tenant
-sandbox (worlds are semantic isolation, ADR-0008), an ORM, multi-region.
+sandbox (worlds are semantic isolation, ADR-0008), an ORM, multi-region,
+**OpenTelemetry** — there are no spans, no OTLP exporter and no `traceparent`
+propagation, and none is planned before 1.0. Correlation is `x-request-id`:
+the runtime accepts the client's or mints one, returns it, puts it on every
+log line, and **carries it across every hand-off** — an invoked task, a
+dispatched task, a queue message and an outbound HTTP call all run under the
+same id (verified end to end at the far side of the last hop). Treat it as
+your trace id and correlate in your log store; you lose spans and timing
+waterfalls, you keep "everything that happened for request X"
+(`docs/runbooks/logs.md`).
 
 ## Reporting
 

@@ -161,6 +161,29 @@ struct Counters {
     failures: AtomicU64,
     cancelled: AtomicU64,
     refused: AtomicU64,
+    /// What the last contact with the destination was, the way a PostgreSQL
+    /// resource reports it: false from a **connection-level** failure until
+    /// the next success. `ready` was hard-coded `true` here, so a dependency
+    /// that failed eleven of thirteen calls was reported healthy by the
+    /// metric, by `/_usai/status` and by `usai top` at once — worse than no
+    /// signal, because the documented alert reads it and concludes the
+    /// upstream is fine. A non-2xx *status* is data, not a failure, and
+    /// never flips it.
+    unready_since: std::sync::Mutex<Option<(std::time::Instant, String)>>,
+}
+
+impl Counters {
+    fn mark_unready(&self, code: &str, detail: &str) {
+        let mut slot = self.unready_since.lock().expect("readiness poisoned");
+        if slot.is_none() {
+            *slot = Some((std::time::Instant::now(), format!("{code}: {detail}")));
+        }
+    }
+
+    fn mark_ready(&self) {
+        let mut slot = self.unready_since.lock().expect("readiness poisoned");
+        *slot = None;
+    }
 }
 
 pub struct HttpClient {
@@ -393,10 +416,13 @@ impl ResourceManager for HttpClient {
                 } else {
                     "http_error"
                 };
+                self.counters.mark_unready(code, &e.to_string());
                 return Err(terminal(code, e.to_string()));
             }
         };
         let status = response.status().as_u16();
+        // The destination answered: whatever it said, contact succeeded.
+        self.counters.mark_ready();
         let mut headers = serde_json::Map::new();
         for (name, value) in response.headers() {
             if let Ok(text) = value.to_str() {
@@ -413,14 +439,13 @@ impl ResourceManager for HttpClient {
         }
         .map_err(|e| {
             self.counters.failures.fetch_add(1, Ordering::SeqCst);
-            terminal(
-                if e.is_timeout() {
-                    "http_timeout"
-                } else {
-                    "http_error"
-                },
-                e.to_string(),
-            )
+            let code = if e.is_timeout() {
+                "http_timeout"
+            } else {
+                "http_error"
+            };
+            self.counters.mark_unready(code, &e.to_string());
+            terminal(code, e.to_string())
         })?;
         // Text bodies travel as text; anything else as base64 so the guest
         // can still see it without guessing an encoding.
@@ -460,9 +485,19 @@ impl ResourceManager for HttpClient {
         if let Some(base) = &self.base {
             detail.insert("baseUrl".into(), json!(base.as_str()));
         }
+        let unready = self
+            .counters
+            .unready_since
+            .lock()
+            .expect("readiness poisoned")
+            .clone();
+        if let Some((since, last_error)) = &unready {
+            detail.insert("lastError".into(), json!(last_error));
+            detail.insert("unreadyForSeconds".into(), json!(since.elapsed().as_secs()));
+        }
         ResourceStatus {
             identity: self.identity.clone(),
-            ready: true,
+            ready: unready.is_none(),
             in_use: self.max - self.slots.available_permits() as u32,
             max: self.max,
             quarantined: 0,

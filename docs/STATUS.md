@@ -242,6 +242,49 @@ capabilities (design), latency histogram in metrics, an API reference page — a
   side, rejections, pool `in use` and `waiting`, what the process costs —
   because totals since boot answer the wrong question during an incident.
 
+- **Round 27 (2026-09-24): the observability gate.** The engineer who owns
+  Prometheus, Grafana, Loki and Tempo, with one question: *when this pages at
+  3 a.m., can the on-call answer "what is broken, where, and for whom"
+  without reading source?* **What** was mostly yes; **where** was no for
+  connection-bound work, and **for whom** was no for everything. The worst
+  finding is the one the runbook itself describes as the failure it prevents:
+  a world reported its guest CPU once, **at the end**, so two streams driving
+  a process to 192 % of a core were attributed **0 %** by both
+  `usai_workload_cpu_seconds_total` and `usai top` — blind for as long as the
+  work held the box, then an impossible step of core-seconds inside one
+  scrape interval. Second: refusals decided before a world existed were
+  counted as zero-millisecond requests in the **per-workload** latency, the
+  series `slow-route.md` offers as the cure for the global histogram — a
+  route whose one real request took 10.7 ms read 0.277 ms after sixty
+  rejections, a 39× understatement, so the documented alert goes *quieter* as
+  a route is flooded. Third: `usai_resource{kind="http.client",metric="ready"}`
+  was hard-coded to 1, so a dependency failing eleven of thirteen calls was
+  called healthy by the metric, by `/_usai/status` and by `usai top` at once.
+  Fourth: the `RUST_LOG` three documents recommend *for incidents* replaces
+  the default filter rather than adding to it, and so deletes every
+  `application error`, `task failed` and `message dead-lettered` line at the
+  moment you turn it on. All four fixed, with: per-route rejections as their
+  own counter so an error rate can subtract the instance's admission bound;
+  `usai_service_restarts_total`, because a crash loop under an unbounded
+  `on-failure` policy never reaches the `failed` state the runbook says to
+  alert on; `usai_tasks` split into a gauge and `usai_tasks_total`, because
+  three of its five states were cumulative under a `gauge` type; the request
+  id on the 5xx line and on the queue's retry and dead-letter lines (the
+  pivot from a dashboard to "everything else this request did", which the
+  guide had promised and which joined on nothing); four new dashboard panels
+  that answer *which route*; and `docs/runbooks/logs.md`, the page the round
+  reconstructed by parsing 92 lines by hand. `SUPPORTED.md` now states
+  plainly that there is **no OpenTelemetry** and that `x-request-id` is the
+  correlation mechanism — which the round verified across all five hops, HTTP
+  → invoked task → dispatched task → queue message → outbound call, confirmed
+  at the far side. Recorded, not built: **no caller or tenant dimension on
+  any metric and no application counter API**, so "erroring for one caller
+  but not others" is unanswerable from metrics by construction — the round
+  would block adoption on documenting the intended pattern at minimum; no
+  resource-latency histogram, so "waiting on what" resolves to "a connection"
+  and not to "the query"; and no error-code dimension, so 504s rising while
+  500s are flat cannot be graphed.
+
 - **Round 26 (2026-09-24): multi-tenant isolation.** An engineer building
   the shape most products have — one deployment, one database, many customer
   organisations, and a hard rule that no tenant sees another's data — who

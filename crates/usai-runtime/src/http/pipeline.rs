@@ -1257,8 +1257,12 @@ impl HttpHost {
         match outcome {
             Ok(mut response) => {
                 if !stream_records_itself {
-                    self.stats
-                        .record_workload(&workload_id, response.status().as_u16(), cost);
+                    self.stats.record_workload(
+                        &workload_id,
+                        response.status().as_u16(),
+                        cost,
+                        None,
+                    );
                 }
                 if self.config.server_timing
                     && let Some(v) = server_timing(
@@ -1273,8 +1277,21 @@ impl HttpHost {
             }
             Err(mut reply) => {
                 if !stream_records_itself {
-                    self.stats
-                        .record_workload(&workload_id, reply.status.as_u16(), cost);
+                    // A refusal decided before a world existed belongs to
+                    // this route's counts but not to its latency: it has no
+                    // world time, and counting it as a zero made a flood of
+                    // 400s read as the route getting faster.
+                    let rejection = reply.before_world.then(|| {
+                        crate::observability::Rejection::from_code(
+                            reply.body["error"]["code"].as_str().unwrap_or(""),
+                        )
+                    });
+                    self.stats.record_workload(
+                        &workload_id,
+                        reply.status.as_u16(),
+                        cost,
+                        rejection,
+                    );
                 }
                 reply.workload = Some(workload_id);
                 Err(reply)
@@ -1433,16 +1450,19 @@ impl HttpHost {
                     // first, so this is an ordinary response and its cost is
                     // still the world's lifetime.
                     let result = task.await.map_err(|e| {
-                        self.stats.record_workload(workload, 500, std::time::Duration::ZERO);
+                        self.stats
+                            .record_workload(workload, 500, std::time::Duration::ZERO, None);
                         Reply::after_world(StatusCode::INTERNAL_SERVER_ERROR, "stream_failed", e.to_string())
                     })?;
                     let result = result.map_err(|e| {
-                        self.stats.record_workload(workload, 500, std::time::Duration::ZERO);
+                        self.stats
+                            .record_workload(workload, 500, std::time::Duration::ZERO, None);
                         Reply::after_world(StatusCode::INTERNAL_SERVER_ERROR, "world_creation_failed", e.to_string())
                     })?;
                     let duration = result.duration;
                     let response = self.encode(workload, result);
-                    self.stats.record_workload(workload, response.status().as_u16(), duration);
+                    self.stats
+                        .record_workload(workload, response.status().as_u16(), duration, None);
                     Ok(response)
                 }
             },
@@ -1715,7 +1735,9 @@ impl HttpHost {
                     )
                 }
             },
-            Some(Err(error)) => self.application_error(workload, result.world, error),
+            Some(Err(error)) => {
+                self.application_error(workload, result.world, result.request_id.as_deref(), error)
+            }
             None => json_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 &json!({ "error": { "code": "no_outcome", "message": "the request produced no outcome" } }),
@@ -1817,6 +1839,7 @@ impl HttpHost {
         &self,
         workload: &str,
         world: crate::ownership::WorldId,
+        request_id: Option<&str>,
         error: GuestError,
     ) -> HttpResponse {
         if let Some(usai) = &error.usai {
@@ -1857,16 +1880,23 @@ impl HttpHost {
                     // counting what it stands for; `/_usai/ready` and
                     // `resources[].ready` carry the state.
                     if let Some(suppressed) = DEPENDENCY_LOG.allow(raw_code) {
-                        tracing::warn!(world = %world, workload, code = raw_code, error = %error.message, suppressed, "dependency unavailable");
+                        tracing::warn!(world = %world, workload, request_id, code = raw_code, error = %error.message, suppressed, "dependency unavailable");
                     }
                 } else {
                     // `details` and `stack` are absent far more often than
                     // they are present, and a field that is the JSON string
                     // "null" (or "") is a wart in a line a pipeline parses.
                     let details_text = (!details.is_null()).then(|| details.to_string());
+                    // The pivot every on-call makes: the dashboard shows
+                    // 5xx, you click through to the log, you find this line,
+                    // and you want everything else that happened for that
+                    // request. Without the id the only join is `world`, which
+                    // is unique per *process* — and the GUIDE has promised
+                    // this field all along.
                     tracing::error!(
                         world = %world,
                         workload,
+                        request_id,
                         code = raw_code,
                         error = %error.message,
                         details = details_text.as_deref(),
@@ -1884,7 +1914,7 @@ impl HttpHost {
             }
             return json_response(status, &body);
         }
-        tracing::error!(world = %world, workload, name = %error.name, error = %error.message, stack = error.stack.as_deref(), "unexpected handler failure");
+        tracing::error!(world = %world, workload, request_id, name = %error.name, error = %error.message, stack = error.stack.as_deref(), "unexpected handler failure");
         let mut body = json!({ "error": { "code": "internal", "message": "internal error" } });
         if self.config.expose_diagnostics {
             body["error"]["message"] = Value::String(format!("{}: {}", error.name, error.message));

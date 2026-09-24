@@ -1,631 +1,759 @@
 {
-  "title": "Usai runtime",
-  "uid": "usai-runtime",
-  "tags": [
-    "usai"
-  ],
-  "timezone": "browser",
-  "schemaVersion": 39,
-  "version": 1,
-  "refresh": "30s",
-  "time": {
-    "from": "now-6h",
-    "to": "now"
-  },
-  "templating": {
-    "list": [
-      {
-        "name": "datasource",
-        "type": "datasource",
-        "query": "prometheus",
-        "current": {},
-        "hide": 0
-      },
-      {
-        "name": "job",
-        "type": "query",
-        "datasource": {
-          "type": "prometheus",
-          "uid": "${datasource}"
-        },
-        "query": "label_values(usai_build_info, job)",
-        "refresh": 1,
-        "current": {}
-      }
-    ]
-  },
-  "panels": [
-    {
-      "type": "stat",
-      "title": "Version",
-      "description": "usai_build_info is the only thing that says which version answered; graph it per instance during a roll.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "expr": "usai_build_info{job=\"$job\"}",
-          "legendFormat": "{{version}}",
-          "refId": "A"
-        }
-      ],
-      "id": 1,
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 0,
-        "y": 0
-      }
+ "title": "Usai runtime",
+ "uid": "usai-runtime",
+ "tags": [
+  "usai"
+ ],
+ "timezone": "browser",
+ "schemaVersion": 39,
+ "version": 1,
+ "refresh": "30s",
+ "time": {
+  "from": "now-6h",
+  "to": "now"
+ },
+ "templating": {
+  "list": [
+   {
+    "name": "datasource",
+    "type": "datasource",
+    "query": "prometheus",
+    "current": {},
+    "hide": 0
+   },
+   {
+    "name": "job",
+    "type": "query",
+    "datasource": {
+     "type": "prometheus",
+     "uid": "${datasource}"
     },
-    {
-      "type": "stat",
-      "title": "Worlds live",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "expr": "sum(usai_worlds_live{job=\"$job\"})",
-          "legendFormat": "live",
-          "refId": "A"
-        }
-      ],
-      "id": 2,
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 6,
-        "y": 0
-      }
+    "query": "label_values(usai_build_info, job)",
+    "refresh": 1,
+    "current": {}
+   }
+  ]
+ },
+ "panels": [
+  {
+   "type": "stat",
+   "title": "Version",
+   "description": "usai_build_info is the only thing that says which version answered; graph it per instance during a roll.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
     },
+    "overrides": []
+   },
+   "targets": [
     {
-      "type": "stat",
-      "title": "Budget in use",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit"
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "expr": "sum(usai_world_budget{job=\"$job\",kind=\"in_use\"}) / sum(usai_world_budget{job=\"$job\",kind=\"max\"})",
-          "legendFormat": "in use",
-          "refId": "A"
-        }
-      ],
-      "id": 3,
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 12,
-        "y": 0
-      }
-    },
-    {
-      "type": "stat",
-      "title": "Detached work (1 h)",
-      "description": "Always an application bug: a handler returned with work in flight.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "expr": "sum(increase(usai_detached_work_total{job=\"$job\"}[1h]))",
-          "legendFormat": "violations",
-          "refId": "A"
-        }
-      ],
-      "id": 4,
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 18,
-        "y": 0
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "Responses per second by class",
-      "description": "usai_http_request_seconds_count is NOT the request rate \u2014 refusals are counted before a world exists.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "reqps",
-          "custom": {
-            "fillOpacity": 10,
-            "stacking": {
-              "mode": "normal"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "expr": "sum by (class) (rate(usai_http_responses_total{job=\"$job\"}[5m]))",
-          "legendFormat": "{{class}}",
-          "refId": "A"
-        }
-      ],
-      "id": 5,
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 0
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "Latency (admitted requests)",
-      "description": "Admitted only. Read the refusal panel beside it.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "custom": {
-            "fillOpacity": 0,
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(usai_http_request_seconds_bucket{job=\"$job\"}[5m])))",
-          "legendFormat": "p50",
-          "refId": "A"
-        },
-        {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(usai_http_request_seconds_bucket{job=\"$job\"}[5m])))",
-          "legendFormat": "p95",
-          "refId": "B"
-        },
-        {
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(usai_http_request_seconds_bucket{job=\"$job\"}[5m])))",
-          "legendFormat": "p99",
-          "refId": "C"
-        }
-      ],
-      "id": 6,
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 0
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "Refusals by reason",
-      "description": "capacity = the world budget was full; any refusal is worth an alert.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "reqps",
-          "custom": {
-            "fillOpacity": 10,
-            "stacking": {
-              "mode": "normal"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "expr": "sum by (reason) (rate(usai_http_rejections_total{job=\"$job\"}[5m]))",
-          "legendFormat": "{{reason}}",
-          "refId": "A"
-        }
-      ],
-      "id": 7,
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 0
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "World budget",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "fillOpacity": 0,
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "expr": "sum(usai_world_budget{job=\"$job\",kind=\"in_use\"})",
-          "legendFormat": "in use",
-          "refId": "A"
-        },
-        {
-          "expr": "sum(usai_world_budget{job=\"$job\",kind=\"max\"})",
-          "legendFormat": "max",
-          "refId": "B"
-        },
-        {
-          "expr": "sum(usai_worlds_live{job=\"$job\"})",
-          "legendFormat": "live",
-          "refId": "C"
-        }
-      ],
-      "id": 8,
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 0
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "Resource readiness",
-      "description": "0 for 30 s is the database-down alert.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "fillOpacity": 0,
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "expr": "usai_resource{job=\"$job\",metric=\"ready\"}",
-          "legendFormat": "{{kind}}/{{name}} ready",
-          "refId": "A"
-        }
-      ],
-      "id": 9,
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 0
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "Pool level",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "fillOpacity": 0,
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "expr": "usai_resource{job=\"$job\",metric=\"in_use\"}",
-          "legendFormat": "{{name}} in use",
-          "refId": "A"
-        },
-        {
-          "expr": "usai_resource{job=\"$job\",metric=\"max\"}",
-          "legendFormat": "{{name}} max",
-          "refId": "B"
-        }
-      ],
-      "id": 10,
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 0
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "Quarantines and lost consumers",
-      "description": "A burst during a failover is expected; a steady trickle is a bug.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "fillOpacity": 0,
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "expr": "sum by (name) (increase(usai_resource_quarantines_total{job=\"$job\"}[5m]))",
-          "legendFormat": "quarantined {{name}}",
-          "refId": "A"
-        },
-        {
-          "expr": "sum(increase(usai_queue_messages_total{job=\"$job\",state=\"reclaimed\"}[5m]))",
-          "legendFormat": "reclaimed",
-          "refId": "B"
-        }
-      ],
-      "id": 11,
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 0
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "Queue by state",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "fillOpacity": 10,
-            "stacking": {
-              "mode": "normal"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "expr": "sum by (state) (usai_queue_messages_total{job=\"$job\"})",
-          "legendFormat": "{{state}}",
-          "refId": "A"
-        }
-      ],
-      "id": 12,
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 0
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "Memory",
-      "description": "Charged is what the limit bounds: resident memory plus the page cache this container faulted in.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "bytes",
-          "custom": {
-            "fillOpacity": 0,
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "expr": "usai_process_resident_memory_bytes{job=\"$job\"}",
-          "legendFormat": "RSS {{instance}}",
-          "refId": "A"
-        },
-        {
-          "expr": "usai_process_proportional_memory_bytes{job=\"$job\"}",
-          "legendFormat": "PSS {{instance}}",
-          "refId": "B"
-        },
-        {
-          "expr": "usai_process_memory_charged_bytes{job=\"$job\"}",
-          "legendFormat": "cgroup charged {{instance}}",
-          "refId": "C"
-        },
-        {
-          "expr": "usai_process_memory_limit_bytes{job=\"$job\"}",
-          "legendFormat": "cgroup limit {{instance}}",
-          "refId": "D"
-        }
-      ],
-      "id": 13,
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 0
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "Memory ceiling hits",
-      "description": "The state between fits and OOM-killed: climbing means the container is reclaiming the pages it executes from. Nothing else reports it.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "fillOpacity": 0,
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "expr": "sum by (instance) (increase(usai_process_memory_ceiling_hits_total{job=\"$job\"}[5m]))",
-          "legendFormat": "{{instance}}",
-          "refId": "A"
-        }
-      ],
-      "id": 14,
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 0
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "CPU",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "custom": {
-            "fillOpacity": 0,
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "expr": "sum by (instance) (rate(usai_process_cpu_seconds_total{job=\"$job\"}[5m]))",
-          "legendFormat": "process {{instance}}",
-          "refId": "A"
-        },
-        {
-          "expr": "sum by (workload) (rate(usai_workload_cpu_seconds_total{job=\"$job\"}[5m]))",
-          "legendFormat": "{{workload}}",
-          "refId": "B"
-        }
-      ],
-      "id": 15,
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 0
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "Schedulers and services",
-      "description": "More than one cron scheduler, for a schedule that is not exclusive, means the tick fires twice.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "fillOpacity": 0,
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "expr": "sum(usai_scheduler{job=\"$job\",kind=\"cron\"})",
-          "legendFormat": "cron schedulers",
-          "refId": "A"
-        },
-        {
-          "expr": "sum(usai_service{job=\"$job\",state=\"failed\"})",
-          "legendFormat": "services failed",
-          "refId": "B"
-        }
-      ],
-      "id": 16,
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 0
-      }
+     "expr": "usai_build_info{job=\"$job\"}",
+     "legendFormat": "{{version}}",
+     "refId": "A"
     }
-  ],
-  "description": "Every panel comes from docs/runbooks/metrics.md, which is also where the alerts are. Import, pick the datasource and the job."
+   ],
+   "id": 1,
+   "gridPos": {
+    "h": 4,
+    "w": 6,
+    "x": 0,
+    "y": 0
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Worlds live",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "sum(usai_worlds_live{job=\"$job\"})",
+     "legendFormat": "live",
+     "refId": "A"
+    }
+   ],
+   "id": 2,
+   "gridPos": {
+    "h": 4,
+    "w": 6,
+    "x": 6,
+    "y": 0
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Budget in use",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "sum(usai_world_budget{job=\"$job\",kind=\"in_use\"}) / sum(usai_world_budget{job=\"$job\",kind=\"max\"})",
+     "legendFormat": "in use",
+     "refId": "A"
+    }
+   ],
+   "id": 3,
+   "gridPos": {
+    "h": 4,
+    "w": 6,
+    "x": 12,
+    "y": 0
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Detached work (1 h)",
+   "description": "Always an application bug: a handler returned with work in flight.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "sum(increase(usai_detached_work_total{job=\"$job\"}[1h]))",
+     "legendFormat": "violations",
+     "refId": "A"
+    }
+   ],
+   "id": 4,
+   "gridPos": {
+    "h": 4,
+    "w": 6,
+    "x": 18,
+    "y": 0
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Responses per second by class",
+   "description": "usai_http_request_seconds_count is NOT the request rate \u2014 refusals are counted before a world exists.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps",
+     "custom": {
+      "fillOpacity": 10,
+      "stacking": {
+       "mode": "normal"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "sum by (class) (rate(usai_http_responses_total{job=\"$job\"}[5m]))",
+     "legendFormat": "{{class}}",
+     "refId": "A"
+    }
+   ],
+   "id": 5,
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 0
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Latency (admitted requests)",
+   "description": "Admitted only. Read the refusal panel beside it.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "custom": {
+      "fillOpacity": 0,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "histogram_quantile(0.5, sum by (le) (rate(usai_http_request_seconds_bucket{job=\"$job\"}[5m])))",
+     "legendFormat": "p50",
+     "refId": "A"
+    },
+    {
+     "expr": "histogram_quantile(0.95, sum by (le) (rate(usai_http_request_seconds_bucket{job=\"$job\"}[5m])))",
+     "legendFormat": "p95",
+     "refId": "B"
+    },
+    {
+     "expr": "histogram_quantile(0.99, sum by (le) (rate(usai_http_request_seconds_bucket{job=\"$job\"}[5m])))",
+     "legendFormat": "p99",
+     "refId": "C"
+    }
+   ],
+   "id": 6,
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 0
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Refusals by reason",
+   "description": "capacity = the world budget was full; any refusal is worth an alert.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps",
+     "custom": {
+      "fillOpacity": 10,
+      "stacking": {
+       "mode": "normal"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "sum by (reason) (rate(usai_http_rejections_total{job=\"$job\"}[5m]))",
+     "legendFormat": "{{reason}}",
+     "refId": "A"
+    }
+   ],
+   "id": 7,
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 0
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "World budget",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "fillOpacity": 0,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "sum(usai_world_budget{job=\"$job\",kind=\"in_use\"})",
+     "legendFormat": "in use",
+     "refId": "A"
+    },
+    {
+     "expr": "sum(usai_world_budget{job=\"$job\",kind=\"max\"})",
+     "legendFormat": "max",
+     "refId": "B"
+    },
+    {
+     "expr": "sum(usai_worlds_live{job=\"$job\"})",
+     "legendFormat": "live",
+     "refId": "C"
+    }
+   ],
+   "id": 8,
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 0
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Resource readiness",
+   "description": "0 for 30 s is the database-down alert.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "fillOpacity": 0,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "usai_resource{job=\"$job\",metric=\"ready\"}",
+     "legendFormat": "{{kind}}/{{name}} ready",
+     "refId": "A"
+    }
+   ],
+   "id": 9,
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 0
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Pool level",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "fillOpacity": 0,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "usai_resource{job=\"$job\",metric=\"in_use\"}",
+     "legendFormat": "{{name}} in use",
+     "refId": "A"
+    },
+    {
+     "expr": "usai_resource{job=\"$job\",metric=\"max\"}",
+     "legendFormat": "{{name}} max",
+     "refId": "B"
+    }
+   ],
+   "id": 10,
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 0
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Quarantines and lost consumers",
+   "description": "A burst during a failover is expected; a steady trickle is a bug.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "fillOpacity": 0,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "sum by (name) (increase(usai_resource_quarantines_total{job=\"$job\"}[5m]))",
+     "legendFormat": "quarantined {{name}}",
+     "refId": "A"
+    },
+    {
+     "expr": "sum(increase(usai_queue_messages_total{job=\"$job\",state=\"reclaimed\"}[5m]))",
+     "legendFormat": "reclaimed",
+     "refId": "B"
+    }
+   ],
+   "id": 11,
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 0
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Queue outcomes per minute, by topic",
+   "description": "Rates, not the raw counter: the counter is labelled by revision and restarts at zero on every deploy, so plotting it as a level steps down at each rollout. The per-topic series is the one that can name which consumer is dead-lettering.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "fillOpacity": 10,
+      "stacking": {
+       "mode": "normal"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "sum by (topic, state) (increase(usai_queue_topic_messages_total{job=\"$job\"}[5m]))",
+     "legendFormat": "{{topic}} {{state}}",
+     "refId": "A"
+    }
+   ],
+   "id": 12,
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 0
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Memory",
+   "description": "Charged is what the limit bounds: resident memory plus the page cache this container faulted in.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "bytes",
+     "custom": {
+      "fillOpacity": 0,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "usai_process_resident_memory_bytes{job=\"$job\"}",
+     "legendFormat": "RSS {{instance}}",
+     "refId": "A"
+    },
+    {
+     "expr": "usai_process_proportional_memory_bytes{job=\"$job\"}",
+     "legendFormat": "PSS {{instance}}",
+     "refId": "B"
+    },
+    {
+     "expr": "usai_process_memory_charged_bytes{job=\"$job\"}",
+     "legendFormat": "cgroup charged {{instance}}",
+     "refId": "C"
+    },
+    {
+     "expr": "usai_process_memory_limit_bytes{job=\"$job\"}",
+     "legendFormat": "cgroup limit {{instance}}",
+     "refId": "D"
+    }
+   ],
+   "id": 13,
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 0
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Memory ceiling hits",
+   "description": "The state between fits and OOM-killed: climbing means the container is reclaiming the pages it executes from. Nothing else reports it.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "fillOpacity": 0,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "sum by (instance) (increase(usai_process_memory_ceiling_hits_total{job=\"$job\"}[5m]))",
+     "legendFormat": "{{instance}}",
+     "refId": "A"
+    }
+   ],
+   "id": 14,
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 0
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "CPU",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit",
+     "custom": {
+      "fillOpacity": 0,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "sum by (instance) (rate(usai_process_cpu_seconds_total{job=\"$job\"}[5m]))",
+     "legendFormat": "process {{instance}}",
+     "refId": "A"
+    },
+    {
+     "expr": "sum by (workload) (rate(usai_workload_cpu_seconds_total{job=\"$job\"}[5m]))",
+     "legendFormat": "{{workload}}",
+     "refId": "B"
+    }
+   ],
+   "id": 15,
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 0
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Schedulers and services",
+   "description": "More than one cron scheduler, for a schedule that is not exclusive, means the tick fires twice.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "fillOpacity": 0,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "sum(usai_scheduler{job=\"$job\",kind=\"cron\"})",
+     "legendFormat": "cron schedulers",
+     "refId": "A"
+    },
+    {
+     "expr": "sum(usai_service{job=\"$job\",state=\"failed\"})",
+     "legendFormat": "services failed",
+     "refId": "B"
+    }
+   ],
+   "id": 16,
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 0
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Waiting or computing, per route",
+   "description": "The single most useful panel during an incident: guest CPU divided by wall time. Near 1 the handler is computing; near 0 it is waiting on something (a query, an outbound call). `slow-route.md` step 2.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit",
+     "custom": {
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "rate(usai_workload_cpu_seconds_total{job=\"$job\"}[5m]) / rate(usai_http_workload_request_seconds_sum{job=\"$job\"}[5m])",
+     "legendFormat": "{{workload}}",
+     "refId": "A"
+    }
+   ],
+   "id": 17,
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 8
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Slowest routes (mean)",
+   "description": "The global histogram cannot find a slow route that is a minority of traffic; this can. Refusals decided before a world existed are not in the denominator, so a flood of 400s cannot make a route look fast.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "custom": {
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "topk(10, rate(usai_http_workload_request_seconds_sum{job=\"$job\"}[5m]) / rate(usai_http_workload_request_seconds_count{job=\"$job\"}[5m]))",
+     "legendFormat": "{{workload}}",
+     "refId": "A"
+    }
+   ],
+   "id": 18,
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 8
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Route failures, excluding admission refusals",
+   "description": "A capacity refusal is the instance's admission bound, not the route's failure \u2014 subtract it, or you page the wrong team.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps",
+     "custom": {
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "sum by (workload) (rate(usai_http_workload_responses_total{job=\"$job\",class=\"5xx\"}[5m])) - sum by (workload) (rate(usai_http_workload_rejections_total{job=\"$job\"}[5m]))",
+     "legendFormat": "{{workload}}",
+     "refId": "A"
+    }
+   ],
+   "id": 19,
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 16
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Connection-bound work in flight",
+   "description": "Streams, sockets and services running right now. The only series that shows a long-lived world while it lives; one that never falls is a world that never ends.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "sum by (workload) (usai_workload_worlds_live{job=\"$job\"})",
+     "legendFormat": "{{workload}}",
+     "refId": "A"
+    }
+   ],
+   "id": 20,
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 16
+   }
+  }
+ ],
+ "description": "Every panel comes from docs/runbooks/metrics.md, which is also where the alerts are. Import, pick the datasource and the job."
 }

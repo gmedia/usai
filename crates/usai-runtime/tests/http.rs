@@ -2416,3 +2416,281 @@ async fn a_client_without_a_base_url_does_not_reach_the_hosts_own_network() {
     );
     s.shutdown.cancel();
 }
+
+/// The per-workload mean is what `docs/runbooks/slow-route.md` offers as the
+/// cure for the global histogram's blindness, and it had the same disease:
+/// refusals decided **before a world existed** were counted as
+/// zero-millisecond requests, so a route's reported mean *fell* as it was
+/// flooded with 400s. Measured before this: one real 10.7 ms request read
+/// 0.277 ms after sixty rejections — a 39× understatement, and the alert
+/// built on it goes quiet exactly when the route is in trouble.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_flood_of_refusals_does_not_make_a_route_look_fast() {
+    let Some(s) = start().await else { return };
+    // The counters belong to the host that served the request, so this test
+    // needs one of its own with the status surface on.
+    let host = HttpHost::new(
+        Arc::clone(&s.runtime),
+        HttpConfig {
+            addr: ([127, 0, 0, 1], 0).into(),
+            serve_status: true,
+            ..HttpConfig::default()
+        },
+    );
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let token = CancellationToken::new();
+    let t = token.clone();
+    tokio::spawn(async move {
+        serve(host, t, |addr| {
+            let _ = tx.send(addr);
+        })
+        .await
+        .unwrap()
+    });
+    let addr = rx.await.unwrap();
+    let base = format!("http://{addr}");
+    // One real request through a route with a body contract.
+    let ok = s
+        .client
+        .post(format!("{base}/users"))
+        .json(&json!({ "name": "Ayu", "email": "ayu@example.com" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok.status(), 201);
+    let before: Value = s
+        .client
+        .get(format!("{base}/_usai/status"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let route = &before["http"]["by_workload"]["http:POST /users"];
+    let (sum0, count0) = (
+        route["latencySumSeconds"].as_f64().unwrap_or(0.0),
+        route["count"].as_u64().unwrap_or(0),
+    );
+    assert_eq!(count0, 1, "{}", before["http"]["by_workload"]);
+    assert!(sum0 > 0.0, "{route}");
+
+    // Sixty the schema refuses, all matched to the same route.
+    for _ in 0..60 {
+        let r = s
+            .client
+            .post(format!("{base}/users"))
+            .json(&json!({ "name": 7 }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 400);
+    }
+    let after: Value = s
+        .client
+        .get(format!("{base}/_usai/status"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let route = &after["http"]["by_workload"]["http:POST /users"];
+    assert_eq!(
+        route["count"].as_u64().unwrap_or(0),
+        count0,
+        "a refusal has no world time and must not be timed: {route}"
+    );
+    assert_eq!(
+        route["latencySumSeconds"].as_f64().unwrap_or(0.0),
+        sum0,
+        "{route}"
+    );
+    // The client did get a 400 each time, so the class count moves…
+    assert_eq!(route["4xx"].as_u64().unwrap_or(0), 60, "{route}");
+    // …and the reason is on the route, so an alert can subtract it.
+    assert_eq!(
+        route["rejections"]["validation"].as_u64().unwrap_or(0),
+        60,
+        "{route}"
+    );
+    let metrics = s
+        .client
+        .get(format!("{base}/_usai/metrics"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        metrics.contains(
+            "usai_http_workload_rejections_total{workload=\"http:POST /users\",reason=\"validation\"} 60"
+        ),
+        "{}",
+        metrics
+            .lines()
+            .filter(|l| l.contains("workload_rejections"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    token.cancel();
+    s.shutdown.cancel();
+}
+
+/// Per-workload guest CPU has to be visible **while** the work is running.
+/// A world reported its whole total once, when it ended, so a stream or a
+/// service burning a core for hours was attributed nothing for those hours
+/// and then a step of hours inside one scrape interval — and `usai top`
+/// showed 0 % for the workload on a process at 192 % of a core. The runbook
+/// puts this column in its example output and says the reason for it in so
+/// many words: "the workload eating the box would read as free".
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_workload_spending_cpu_is_visible_before_it_finishes() {
+    let Some(s) = start().await else { return };
+    let host = HttpHost::new(
+        Arc::clone(&s.runtime),
+        HttpConfig {
+            addr: ([127, 0, 0, 1], 0).into(),
+            serve_status: true,
+            ..HttpConfig::default()
+        },
+    );
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let token = CancellationToken::new();
+    let t = token.clone();
+    tokio::spawn(async move {
+        serve(host, t, |addr| {
+            let _ = tx.send(addr);
+        })
+        .await
+        .unwrap()
+    });
+    let addr = rx.await.unwrap();
+    let base = format!("http://{addr}");
+    let reading = |base: String| {
+        let client = s.client.clone();
+        async move {
+            let status: Value = client
+                .get(format!("{base}/_usai/status"))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            status["gauges"]["guestCpuNsByWorkload"]["stream:GET /burn"]
+                .as_u64()
+                .unwrap_or(0)
+        }
+    };
+    assert_eq!(reading(base.clone()).await, 0);
+    // The stream runs for ~16 s. Read the counter twice while it is still
+    // open: the point is that it moves *during* the work, not at the end.
+    let streaming = tokio::spawn({
+        let client = s.client.clone();
+        let url = format!("{base}/burn");
+        async move {
+            let _ = tokio::time::timeout(Duration::from_secs(3), async {
+                client.get(url).send().await.unwrap().text().await
+            })
+            .await;
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(900)).await;
+    let first = reading(base.clone()).await;
+    tokio::time::sleep(Duration::from_millis(900)).await;
+    let second = reading(base.clone()).await;
+    assert!(
+        first > 0,
+        "the workload spent CPU for ~1 s and was credited none while it ran"
+    );
+    assert!(
+        second > first,
+        "the credit must grow while the work runs: {first} then {second}"
+    );
+    let _ = streaming.await;
+    token.cancel();
+    s.shutdown.cancel();
+}
+
+/// `usai_resource{metric="ready"}` is documented across every resource kind
+/// — "1 while the last contact with the resource succeeded, 0 after a
+/// connection-level failure until the next success" — and the outbound HTTP
+/// client reported `true` unconditionally. A dependency failing every call
+/// was called healthy by the metric, by `/_usai/status` and by `usai top` at
+/// once, which is worse than no signal: the documented alert reads it and
+/// concludes the upstream is fine.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_outbound_dependency_that_cannot_be_reached_is_not_ready() {
+    let Some(s) = start().await else { return };
+    let host = HttpHost::new(
+        Arc::clone(&s.runtime),
+        HttpConfig {
+            addr: ([127, 0, 0, 1], 0).into(),
+            serve_status: true,
+            ..HttpConfig::default()
+        },
+    );
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let token = CancellationToken::new();
+    let t = token.clone();
+    tokio::spawn(async move {
+        serve(host, t, |addr| {
+            let _ = tx.send(addr);
+        })
+        .await
+        .unwrap()
+    });
+    let addr = rx.await.unwrap();
+    let base = format!("http://{addr}");
+    let upstream_status = |base: String| {
+        let client = s.client.clone();
+        async move {
+            let status: Value = client
+                .get(format!("{base}/_usai/status"))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            status["resources"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|r| r["identity"]["name"] == "anywhere")
+                .cloned()
+                .expect("the generic client has a status")
+        }
+    };
+    assert_eq!(upstream_status(base.clone()).await["ready"], json!(true));
+    // A public address with nothing behind it: the call cannot complete, so
+    // it is a connection-level failure rather than a status the destination
+    // chose.
+    let r = s
+        .client
+        .get(format!("{base}/fetch-anywhere"))
+        .query(&[("url", "http://198.51.100.7:9/")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    let body: Value = r.json().await.unwrap();
+    assert!(
+        body["code"].as_str().unwrap_or("").starts_with("http_"),
+        "the call must fail to connect: {body}"
+    );
+    let row = upstream_status(base.clone()).await;
+    assert_eq!(
+        row["ready"],
+        json!(false),
+        "a client that cannot reach its destination is not ready: {row}"
+    );
+    assert!(
+        row["detail"]["lastError"].is_string(),
+        "the alert row promises `detail.lastError` says how: {row}"
+    );
+    token.cancel();
+    s.shutdown.cancel();
+}

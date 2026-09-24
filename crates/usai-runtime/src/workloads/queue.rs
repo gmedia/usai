@@ -622,6 +622,7 @@ pub fn start(
                             tracing::error!(
                                 queue = %name,
                                 id = claimed.id,
+                                request_id = claimed.request_id.as_deref().unwrap_or_default(),
                                 error = %detail,
                                 "message dead-lettered: it does not match the topic's contract, so no world ran for it"
                             );
@@ -668,7 +669,13 @@ pub fn start(
                                 stats.retried.fetch_add(1, Ordering::SeqCst);
                                 stats.count(&name, |c| &c.retried);
                                 let delay = retry.delay_ms(attempt);
-                                tracing::warn!(queue = %name, id = claimed.id, attempt, delay_ms = delay, error = %error, "message failed; retrying");
+                                // The publisher's request id travels with the
+                                // message (`usai_queue.request_id`) and the
+                                // guide promises "a webhook fired three
+                                // retries later still joins the request that
+                                // caused it" — which needs it on the line a
+                                // log pipeline sees, not only in the table.
+                                tracing::warn!(queue = %name, id = claimed.id, attempt, delay_ms = delay, request_id = claimed.request_id.as_deref().unwrap_or_default(), error = %error, "message failed; retrying");
                                 mark_outcome(
                                     manager.as_ref(),
                                     &name,
@@ -681,7 +688,7 @@ pub fn start(
                             } else {
                                 stats.dead.fetch_add(1, Ordering::SeqCst);
                                 stats.count(&name, |c| &c.dead);
-                                tracing::error!(queue = %name, id = claimed.id, attempt, error = %error, "message dead-lettered");
+                                tracing::error!(queue = %name, id = claimed.id, attempt, request_id = claimed.request_id.as_deref().unwrap_or_default(), error = %error, "message dead-lettered");
                                 mark_outcome(
                                     manager.as_ref(),
                                     &name,

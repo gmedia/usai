@@ -100,6 +100,11 @@ the old artifact for a while (`SUPPORTED.md` → Versioning).
   build**, with exit 1 and the workload named. That is a CI failure, not a
   deploy failure. Nothing could have declared it before this release.
 
+- **Two metric families change shape.** `usai_tasks{state="completed|failed|lost"}`
+  moves to `usai_tasks_total` (a counter, because they are cumulative
+  events), and the dead-letter alert should move from
+  `usai_queue_messages_total` to `usai_queue_topic_messages_total`. Update
+  those two queries before the binary lands; everything else is additive.
 - **An `httpClient` declared without a `baseUrl` stops reaching private and
   loopback addresses.** If any of yours calls an internal service through a
   client that does not name its destination, it starts failing with
@@ -136,6 +141,75 @@ one application in both directions. Rolling back only the binary leaves the
 new artifact on the old runtime, which is not a supported combination.
 
 Everything else is additive or a fix to behaviour that was wrong.
+
+### Observability
+
+- **A workload spending CPU is visible while it spends it.** A world
+  reported its whole guest-CPU total once, when it ended, so a stream, a
+  socket or a service burning a core for hours was attributed **nothing**
+  for those hours and then an impossible step inside one scrape interval —
+  measured, a process at 192 % of a core with every workload row reading
+  0 %. That is the exact failure `usai_workload_cpu_seconds_total` and
+  `usai top`'s `cpu%` column exist to prevent, and the runbook says so in
+  those words. CPU is now credited as it accrues.
+- **Refusals decided before a world existed are out of the per-workload
+  latency.** `usai_http_workload_request_seconds_{sum,count}` counted them as
+  zero-millisecond requests, so a route's reported mean *fell* as it was
+  flooded with 400s: measured, one real 10.7 ms request read 0.277 ms after
+  sixty rejections — a 39× understatement, in the series the slow-route
+  runbook offers as the **cure** for the global histogram's blindness.
+- **`usai_http_workload_rejections_total{workload,reason}`** is new, and it
+  is what makes a per-route error rate honest: a capacity refusal is the
+  instance's admission bound, not the route's failure, and the two want
+  different people woken up. Subtract it from the workload's 5xx.
+- **An outbound dependency that cannot be reached is not `ready`.**
+  `usai_resource{kind="http.client",metric="ready"}` was hard-coded to 1, so
+  a client failing eleven of thirteen calls was reported healthy by the
+  metric, by `/_usai/status` and by `usai top` at once — and the documented
+  alert reads that series and concludes the upstream is fine. It now follows
+  the last contact, like PostgreSQL's already did, with `lastError` and
+  `unreadyForSeconds` beside it. A non-2xx *status* is data, not a failure,
+  and never flips it.
+- **`usai_service_restarts_total`** is new. A service crash-looping under an
+  unbounded `on-failure` policy never reaches `failed` — the state the
+  runbook tells you to alert on — and sits in `restarting`, which the same
+  page tells you *not* to alert on. "This service has been restarting since
+  the deploy three hours ago" had no metric at all.
+- **`usai_tasks` no longer mixes levels with cumulative events.** `queued`
+  and `running` stay on the gauge; `completed`, `failed` and `lost` move to
+  **`usai_tasks_total`**, a counter. `increase(usai_tasks{state="failed"})`
+  was silently wrong and nothing said which of the five states needed
+  `delta()` instead.
+- **The 5xx log line carries the request id**, as the guide has promised all
+  along — it is the pivot from a dashboard to "everything else that happened
+  for this request", and without it the only join was `world`, which is
+  unique per *process* and named as a join key nowhere. The queue's
+  `message failed; retrying` and `message dead-lettered` lines carry it too,
+  which is what makes "a webhook fired three retries later still joins the
+  request that caused it" true outside the database.
+- **The incident log filter was wrong in three documents.**
+  `RUST_LOG='usai_runtime::observability=debug'` — recommended *for
+  incidents* — **replaces** the default rather than adding to it, so it
+  deleted every `application error`, `task failed` and `message
+  dead-lettered` line at the moment you turned it on to read them. The
+  recipe is `RUST_LOG='warn,usai_runtime::observability=debug'`.
+- **The shipped Grafana dashboard gained the four panels that answer *which
+  route*** — waiting or computing, slowest routes by mean, route failures
+  with admission refusals subtracted, connection-bound work in flight — and
+  its "Queue by state" panel no longer plots a raw cumulative counter as a
+  level (it stepped to zero at every deploy, because the series is labelled
+  by revision).
+- **`docs/runbooks/logs.md`** is new: the log line's fields, which to label
+  and which to leave alone, the three spellings of one concept, the missing
+  size cap, and the queries an on-call actually runs. An observability
+  engineer reconstructed all of it by parsing 92 lines by hand.
+- **`SUPPORTED.md` says there is no OpenTelemetry** and that `x-request-id`
+  is the correlation mechanism — verified across all five hops, HTTP →
+  invoked task → dispatched task → queue message → outbound call. Finding
+  that out mid-incident was the bad outcome.
+- `usai_queue_topic_messages_total` is documented, and the dead-letter alert
+  uses it: it is the only queue series carrying a `topic`, so the documented
+  alert could fire without naming which consumer was dead-lettering.
 
 ### Multi-tenancy and outbound requests
 

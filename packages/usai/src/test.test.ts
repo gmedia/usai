@@ -79,6 +79,17 @@ test("the harness keeps the runtime's log and joins a request with the tasks it 
     });
     assert.equal(failure.level, "WARN");
     assert.match(failure.message, /task failed/);
+    // And the 5xx line an on-call clicks through to from a dashboard: it is
+    // the pivot to "everything else that happened for this request", and it
+    // carried no request id at all, so the only join was `world` — unique
+    // per process, and named in no document as a join key.
+    const boom = await app.http.get("/boom", { headers: { "x-request-id": "ticket-44" } });
+    assert.equal(boom.status, 500, boom.text);
+    const served = await app.waitForLog({
+      requestId: "ticket-44",
+      where: (l) => l.target !== "app" && l.level === "ERROR",
+    });
+    assert.match(served.message, /application error|unexpected handler failure/);
     // Both hand-offs — the invoked child and the dispatched one — carry the id
     // (two worlds; the second line may land after the first was seen).
     await app.waitForLog({

@@ -289,6 +289,13 @@ pub struct WorldDriver {
     gauges: Arc<Gauges>,
     deadline: Option<Duration>,
     cpu_slice: Duration,
+    /// Guest CPU already credited to this world's workload. A world used to
+    /// report its whole total once, when it ended — so a stream or a service
+    /// burning a core for hours was attributed **nothing** while it ran, and
+    /// then a step of hours inside one scrape interval. The workload eating
+    /// the box read as free, which is the exact failure the per-workload CPU
+    /// series exists to prevent.
+    cpu_flushed_ns: u64,
     unwind_grace: Duration,
     cancel: CancellationToken,
     stop: Option<CancellationToken>,
@@ -361,6 +368,7 @@ impl WorldDriver {
             gauges,
             deadline: spec.deadline,
             cpu_slice: spec.cpu_slice,
+            cpu_flushed_ns: 0,
             unwind_grace: spec.unwind_grace,
             cancel: spec.cancel,
             stop: spec.stop,
@@ -382,6 +390,22 @@ impl WorldDriver {
         self.definition
             .workload_by_index(self.workload_index)
             .expect("workload index was validated at admission")
+    }
+
+    /// Credits the guest CPU this world has spent since the last flush to
+    /// its workload's total, so a world that runs for hours is visible while
+    /// it runs rather than as one impossible step when it ends. Called after
+    /// every guest entry; a world that never returns to the driver is
+    /// bounded by the CPU slice, which is the granularity.
+    fn flush_cpu(&mut self) {
+        let total = self.watch.cpu_ns.load(Ordering::Relaxed);
+        let delta = total.saturating_sub(self.cpu_flushed_ns);
+        if delta == 0 {
+            return;
+        }
+        self.cpu_flushed_ns = total;
+        let workload = self.workload().id.clone();
+        self.gauges.record_guest_cpu(&workload, delta);
     }
 
     /// Arms the watchdog for one guest entry: the CPU slice, or what is
@@ -531,9 +555,8 @@ impl WorldDriver {
         } else {
             Vec::new()
         };
+        self.flush_cpu();
         let cpu = Duration::from_nanos(self.watch.cpu_ns.load(Ordering::Relaxed));
-        self.gauges
-            .record_guest_cpu(&workload_id, cpu.as_nanos() as u64);
         let mut result = WorkResult {
             world: self.id,
             workload: workload_id,
@@ -571,6 +594,7 @@ impl WorldDriver {
         // reports is still the deadline's.
         let mut stopped_at_deadline = false;
         loop {
+            self.flush_cpu();
             match self.instance.state().await {
                 Ok(state) if state.outcome.is_some() => {
                     self.last_state = Some(state);

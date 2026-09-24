@@ -34,16 +34,20 @@ refusals and *falls* while a bad-traffic flood rises. Volume is
 | `usai_world_budget` | gauge | kind | Runtime world budget |
 | `usai_revision_in_flight` | gauge | application, revision, state | Work in flight per revision |
 | `usai_service` | gauge | revision, service, state | 1 per declared `service()`, at its current state (absent when the application declares none) |
-| `usai_queue_messages_total` | counter | revision, state | Queue messages by outcome, per revision |
+| `usai_service_restarts_total` | counter | revision, service | Times each service has been restarted by its policy. This is the crash-loop signal: an unbounded `on-failure` policy **never reaches `failed`**, so a service restarting every few seconds since the deploy shows up here and in no other metric |
+| `usai_queue_messages_total` | counter | revision, state | Queue messages by outcome, per revision. **The `revision` label means these series restart at zero on every deploy**: aggregate with `sum without(revision)(...)` and you get a downward step per rollout, which makes `increase()` over it wrong. Use the per-topic series below, or scope the query to one revision |
+| `usai_queue_topic_messages_total` | counter | revision, topic, state | The same, **per topic** — the only queue series that can name which consumer is dead-lettering, which is what the alert below needs when an application has more than one |
 | `usai_cron_ticks_total` | counter | revision, state | Cron ticks per revision: due on this instance, skipped (previous still running), failed, taken by another instance (exclusive schedules) |
 | `usai_http_workload_request_seconds_sum` | counter | workload | Summed response time per workload. **`rate(sum)/rate(count)` is how you find a slow route** — the histogram below has no workload label, so a slow route that is a minority of traffic never moves its p99 (`slow-route.md`). For a **stream** this is the world's whole lifetime, not the time to the head: a six-second export is six seconds here, and it is recorded when the world ends rather than when the response started |
-| `usai_http_workload_request_seconds_count` | counter | workload | Responses timed per workload (the denominator) |
+| `usai_http_workload_request_seconds_count` | counter | workload | Responses timed per workload (the denominator). **Refusals decided before a world existed are not here** — they have no world time, and counting them as zero made a route's mean *fall* as it was flooded with 400s |
+| `usai_http_workload_rejections_total` | counter | workload, reason | Requests this route matched and the runtime refused before a world existed. They are in `usai_http_workload_responses_total` (the client got that status) and not in the latency, so **subtract this from the workload's 5xx to get the route's own failures** — a capacity refusal is the instance's admission bound, and waking the route's owner for it is the wrong response |
 | `usai_resource_operations_total` | counter | kind, name | Operations leased from the resource |
 | `usai_resource_transactions_total` | counter | kind, name | Transactions opened on it |
 | `usai_resource_requests_total` / `_failures_total` / `_refused_total` | counter | kind, name | Outbound requests through an `httpClient` resource: made, failed, refused by its own in-flight bound |
 | `usai_resource` | gauge | kind, metric, name | Resource manager state (current levels): `in_use`, `max`, `waiting` (worlds queued **for a connection**, not for the database — the one number that tells a small pool from a slow dependency), `ready` (1 while the last contact with the resource succeeded, 0 after a connection-level failure until the next success) |
 | `usai_resource_quarantines_total` | counter | kind, name | Connections quarantined because their outcome could not be proven (cumulative) |
-| `usai_tasks` | gauge | state | Dispatched task queue |
+| `usai_tasks` | gauge | state | Dispatched tasks in flight now: `queued` (waiting for a slot), `running` |
+| `usai_tasks_total` | counter | state | Dispatched tasks that have ended: `completed`, `failed`, `lost`. Separate from the gauge above because levels are gauges and events are counters — they used to share one family typed `gauge`, so `increase()` over the cumulative half was silently wrong |
 | `usai_build_info` | gauge | version | Usai runtime version (label), always 1 |
 | `usai_process_start_time_seconds` | gauge | — | Unix time the runtime started |
 | `usai_process_resident_memory_bytes` | gauge | — | Resident set size. **It over-counts this runtime**: the pooled Wasm image is one set of physical pages mapped into every world slot, and the kernel's RSS counters increment per mapping — measured on the 24 h bounded soak, 89 MiB RSS over 66 MiB PSS and 53 MiB charged to the cgroup. Use it for *trend* (rising while `usai_worlds_live` does not is a leak); use PSS or the charged bytes below for a *level* |
@@ -120,9 +124,11 @@ Label values:
   rather scrape it yourself.
 - `usai_cron_ticks_total{state}`: `due` (ticks this instance's scheduler reached), `skipped` (previous invocation still running, `overlap: skip`), `failed`, `taken` (an `exclusive` schedule's tick another instance claimed first). Per revision, cumulative.
 - `usai_resource{kind,name,metric}`: `kind` = `postgres`, `http.client`,
-  `cache.local`; `metric` = `in_use`, `max`.
-- `usai_tasks{state}`: `queued`, `running`, `completed`, `failed`, `lost`
-  (dispatched in memory and gone with a shutdown — ADR-0010).
+  `cache.local`; `metric` = `in_use`, `max`, `waiting` (PostgreSQL only — an
+  `httpClient` refuses rather than queues, so it has no `waiting`), `ready`.
+- `usai_tasks{state}`: `queued`, `running`. `usai_tasks_total{state}`:
+  `completed`, `failed`, `lost` (dispatched in memory and gone with a
+  shutdown — ADR-0010).
 - `usai_http_rejections_total{reason}`: `route`, `validation`, `auth`,
   `capacity`, `draining`, `other`. `draining` is rare by design: a request
   that was routed by a revision which retired between routing and
@@ -149,7 +155,10 @@ Label values:
 
 A **Grafana dashboard built from this page** is
 `docs/deploy/grafana-dashboard.json` — import it, pick the datasource and the
-job. Sixteen panels, every query taken from the table above, including the
+job. Twenty panels, every query taken from the table above — including the
+four that answer *which route*, which the first sixteen did not: waiting or
+computing per route, the slowest routes by mean, route failures with
+admission refusals subtracted, and connection-bound work in flight. Plus the
 two things nothing else shows you: what the cgroup is charged against its
 limit, and the ceiling hits that mean the container is reclaiming the pages
 it executes from.
@@ -166,10 +175,11 @@ it executes from.
 | Detached work | `increase(usai_detached_work_total[1h]) > 0` | an application bug: a handler returned with work in flight (`500 detached_work`) |
 | Cut-off unwind | `increase(usai_deadline_unwind_overruns_total[1h]) > 0` | a stream, socket or service hit its declared `timeout:` and its own ending did not finish in the unwind grace (5 s; 1 s for a stream) — whatever `close` was releasing was reclaimed by the cancellation path instead. Either the deadline is too tight for that handler's ending, or the ending is doing too much |
 | Service gave up | `usai_service{state="failed"} == 1` | the restart policy is exhausted (or there was none); the instance stays ready, the service is down. **Not** `restarting`, which is an ordinary backoff between attempts and clears itself |
+| Service crash-looping | `increase(usai_service_restarts_total[15m]) > 3` | the policy is still trying, so `failed` never fires: an unbounded `on-failure` restarts for ever, doubling its backoff, and this is the only metric that shows it |
 | Cron on two replicas | `sum(usai_scheduler{kind="cron"}) > 1` and the schedule is not `exclusive` | the schedule fires on each — declare it `exclusive: true` or start the others with `--no-cron` |
 | **At the memory ceiling** | `increase(usai_process_memory_ceiling_hits_total[5m]) > 100` | the container is pinned at its limit and reclaiming the pages it is executing from — *not* an OOM kill, nothing is logged, and throughput collapses (measured: 1 req/s at p50 4.7 s in a box 16 MiB too small). Raise the limit or lower `--max-worlds` (`memory-pressure.md`) |
 | Memory drift | `usai_process_proportional_memory_bytes` rising over hours while `usai_worlds_live` is flat and no revision was installed | the plateau is `base + touched slots × 4 MiB` (`memory-pressure.md`); a password-hashing burst or a held revision raises RSS for minutes, not hours — growth beyond that is a leak — report it with the soak samples |
-| Dead letters | `increase(usai_queue_messages_total{state=~"dead|invalid"}[15m]) > 0` | messages out of attempts (`dead`) **or refused by the topic's contract** (`invalid`: no world ran for them, so `retry` never applied). Both land in `usai_queue.state = 'dead'` and both show in `usai queue status`; the metric separates them by *why*. A rolling deploy in which the publisher changes shape before the consumer produces `invalid`, so an alert on `dead` alone is silent for exactly that case (`queue-dead-letter.md`, `schema-change.md`) |
+| Dead letters | `increase(usai_queue_topic_messages_total{state=~"dead|invalid"}[15m]) > 0` | messages out of attempts (`dead`) **or refused by the topic's contract** (`invalid`: no world ran for them, so `retry` never applied). Both land in `usai_queue.state = 'dead'` and both show in `usai queue status`; the metric separates them by *why*. A rolling deploy in which the publisher changes shape before the consumer produces `invalid`, so an alert on `dead` alone is silent for exactly that case (`queue-dead-letter.md`, `schema-change.md`) |
 | Lost consumers | `increase(usai_queue_messages_total{state="reclaimed"}[15m]) > 0` | a consumer died mid-message (a crash, an OOM kill); the message was redelivered — look for the restart |
 | 5xx rate | `rate(usai_http_responses_total{class="5xx"}[5m])` | as for any service; `deadline_exceeded` (504) is in it |
 | Latency | `histogram_quantile(0.99, rate(usai_http_request_seconds_bucket[5m]))` | admitted requests only — read `usai_http_rejections_total` beside it |

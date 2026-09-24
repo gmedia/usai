@@ -558,6 +558,21 @@ export const endless = http.stream("/endless", {}, async (ctx, stream) => {
   return { stopped: true, chunks: i };
 });
 
+// A stream that spends real CPU while it runs, so the per-workload CPU
+// series can be checked *during* the work rather than after it: a world used
+// to report its whole total once, at the end, so the workload eating the box
+// read as free for as long as it held it.
+export const burn = http.stream("/burn", {}, async (ctx, stream) => {
+  await stream.start();
+  for (let n = 0; n < 400 && !ctx.signal.aborted; n++) {
+    const until = Date.now() + 40;
+    while (Date.now() < until) {
+      /* a slice of real work between sends */
+    }
+    await stream.send(`slice ${n}\n`);
+  }
+});
+
 export const plainStream = http.stream("/no-send", {}, async () => ({ nothing: "sent" }));
 
 // A stream gets no deadline by default — one that ended after 30 s would be
@@ -896,6 +911,7 @@ export default defineApp({
     serviceLocalRead,
     events,
     endless,
+    burn,
     csvExport,
     smallBody,
     plainStream,

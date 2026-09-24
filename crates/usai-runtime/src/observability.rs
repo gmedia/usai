@@ -142,6 +142,14 @@ pub struct WorkloadCounters {
     pub classes: [AtomicU64; 4],
     pub latency_sum_us: AtomicU64,
     pub latency_count: AtomicU64,
+    /// Refusals decided **before a world existed** that were nevertheless
+    /// attributable to this route — the request was routed, then refused by
+    /// validation, auth, the body bound or admission. They are in `classes`
+    /// (the client got that status) and **not** in the latency, and they are
+    /// counted here so an alert can subtract them: a capacity refusal is the
+    /// instance's admission bound, not the route's failure, and paging the
+    /// team that owns the route is the wrong response to it.
+    pub rejections: [AtomicU64; REJECTION_REASONS.len()],
 }
 
 /// One workload's counters, flattened for the status document.
@@ -160,6 +168,20 @@ pub struct WorkloadSnapshot {
     /// timed: `latencySumSeconds / count` is this route's mean.
     pub latency_sum_seconds: f64,
     pub count: u64,
+    /// Of the responses above, the ones refused **before a world existed** —
+    /// by reason. They are in the class counts (the client got that status)
+    /// and out of `latencySumSeconds`/`count`, so a per-route error rate can
+    /// subtract them: a capacity refusal is the instance's admission bound,
+    /// not this route's failure, and the two want different people woken up.
+    #[serde(
+        serialize_with = "serialize_rejections",
+        skip_serializing_if = "no_rejections"
+    )]
+    pub rejections: [u64; 6],
+}
+
+fn no_rejections(v: &[u64; 6]) -> bool {
+    v.iter().all(|n| *n == 0)
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -232,6 +254,18 @@ pub fn record_into(
     status: u16,
     latency: std::time::Duration,
 ) {
+    record_into_with(by_workload, workload, status, latency, None)
+}
+
+/// As `record_into`, and `rejection` names the reason when the response was
+/// a refusal decided before a world existed.
+pub fn record_into_with(
+    by_workload: &WorkloadStats,
+    workload: &str,
+    status: u16,
+    latency: std::time::Duration,
+    rejection: Option<Rejection>,
+) {
     // 101 (a WebSocket upgrade) is a success, not a server error.
     let class = match status {
         100..=299 => 0,
@@ -241,6 +275,19 @@ pub fn record_into(
     };
     let add = |counters: &WorkloadCounters| {
         counters.classes[class].fetch_add(1, Ordering::Relaxed);
+        // A refusal decided before a world existed has no world time to
+        // report, and counting it as a zero-millisecond request is how the
+        // per-workload mean — the very series the slow-route runbook offers
+        // as the cure for the global histogram's blindness — got *quieter*
+        // as a route was flooded with 400s. Measured before this: a route
+        // whose one real request took 10.7 ms read 0.277 ms after sixty
+        // rejections, a 39× understatement.
+        if let Some(reason) = rejection {
+            if let Some(slot) = REJECTION_REASONS.iter().position(|r| *r == reason.label()) {
+                counters.rejections[slot].fetch_add(1, Ordering::Relaxed);
+            }
+            return;
+        }
         counters
             .latency_sum_us
             .fetch_add(latency.as_micros() as u64, Ordering::Relaxed);
@@ -261,8 +308,14 @@ impl HttpStats {
 
     /// Counts a response under the workload that produced (or refused) it,
     /// with what it cost.
-    pub fn record_workload(&self, workload: &str, status: u16, latency: std::time::Duration) {
-        record_into(&self.by_workload, workload, status, latency);
+    pub fn record_workload(
+        &self,
+        workload: &str,
+        status: u16,
+        latency: std::time::Duration,
+        rejection: Option<Rejection>,
+    ) {
+        record_into_with(&self.by_workload, workload, status, latency, rejection);
     }
 
     pub fn record_with(
@@ -337,6 +390,9 @@ impl HttpStats {
                             latency_sum_seconds: v.latency_sum_us.load(Ordering::Relaxed) as f64
                                 / 1e6,
                             count: v.latency_count.load(Ordering::Relaxed),
+                            rejections: std::array::from_fn(|i| {
+                                v.rejections[i].load(Ordering::Relaxed)
+                            }),
                         },
                     )
                 })
@@ -699,6 +755,31 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
             "gauge",
             &services,
         );
+        // A service crash-looping under an unbounded `on-failure` policy
+        // never reaches `failed` — the state the runbook tells you to alert
+        // on — and sits in `restarting`, which the same page tells you *not*
+        // to alert on because an ordinary backoff clears itself. So "this
+        // service has been restarting since the deploy three hours ago" had
+        // no metric at all: the count existed only in `/_usai/status`.
+        let restarts: Vec<(String, f64)> = status
+            .revisions
+            .iter()
+            .flat_map(|r| {
+                r.services.iter().map(move |s| {
+                    (
+                        format!("revision=\"{}\",service=\"{}\"", r.id, label(&s.name)),
+                        s.restarts as f64,
+                    )
+                })
+            })
+            .collect();
+        metric(
+            &mut out,
+            "usai_service_restarts_total",
+            "Times each service has been restarted by its policy. A rate above zero for longer than the backoff doubles is a crash loop, which `usai_service{state=\"failed\"}` never shows for an unbounded policy",
+            "counter",
+            &restarts,
+        );
     }
     let queue: Vec<(String, f64)> = status
         .revisions
@@ -882,21 +963,38 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
             &quarantines,
         );
     }
+    // "Levels are gauges, events are counters" is this page's own rule, and
+    // one family broke it: `queued` and `running` are levels, `completed`,
+    // `failed` and `lost` are cumulative, and all five were typed `gauge`.
+    // You cannot write `increase(usai_tasks{state="failed"}[10m])` against
+    // that, and nothing told you which three states needed `delta()`.
     let t = &status.tasks;
-    let tasks: Vec<(String, f64)> = ["queued", "running", "completed", "failed", "lost"]
+    let sample = |k: &str| {
+        t.get(k)
+            .and_then(|v| v.as_u64())
+            .map(|v| (format!("state=\"{k}\""), v as f64))
+    };
+    let levels: Vec<(String, f64)> = ["queued", "running"]
         .iter()
-        .filter_map(|k| {
-            t.get(k)
-                .and_then(|v| v.as_u64())
-                .map(|v| (format!("state=\"{k}\""), v as f64))
-        })
+        .filter_map(|k| sample(k))
         .collect();
     metric(
         &mut out,
         "usai_tasks",
-        "Dispatched task queue",
+        "Dispatched tasks in flight right now: waiting for a slot, or running",
         "gauge",
-        &tasks,
+        &levels,
+    );
+    let totals: Vec<(String, f64)> = ["completed", "failed", "lost"]
+        .iter()
+        .filter_map(|k| sample(k))
+        .collect();
+    metric(
+        &mut out,
+        "usai_tasks_total",
+        "Dispatched tasks that have ended, by outcome (cumulative). `lost` is a task the drain bound cancelled — ADR-0010: a dispatched task is not durable",
+        "counter",
+        &totals,
     );
     for (name, help, kind, samples) in process_metrics() {
         metric(&mut out, name, help, kind, &samples);
@@ -954,10 +1052,40 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
             metric(
                 &mut out,
                 "usai_http_workload_request_seconds_count",
-                "Responses timed per workload (the denominator of _sum)",
+                "Responses timed per workload (the denominator of _sum). Refusals decided before a world existed are **not** here — they have no world time, and counting them as zero made a route's mean fall as it was flooded with 400s",
                 "counter",
                 &counts,
             );
+            // Which route is being refused, and why. Without it a per-route
+            // 5xx rate mixes the application's failures with the instance's
+            // admission bound — two different people to wake up behind one
+            // number — and there was no way to subtract one from the other.
+            let rejections: Vec<(String, f64)> = h
+                .by_workload
+                .iter()
+                .flat_map(|(w, c)| {
+                    REJECTION_REASONS
+                        .iter()
+                        .zip(c.rejections)
+                        .filter(|(_, n)| *n > 0)
+                        .map(move |(reason, n)| {
+                            (
+                                format!("workload=\"{}\",reason=\"{reason}\"", label(w)),
+                                n as f64,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+            if !rejections.is_empty() {
+                metric(
+                    &mut out,
+                    "usai_http_workload_rejections_total",
+                    "Requests this workload's route matched and the runtime refused before a world existed, by reason. Subtract from the workload's 5xx to get the route's own failures",
+                    "counter",
+                    &rejections,
+                );
+            }
         }
         metric(
             &mut out,

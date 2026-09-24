@@ -70,7 +70,9 @@ is **computing**; far apart means it is **waiting**.
 **Per request, from the log**: the runtime's own trace line carries both.
 
 ```bash
-RUST_LOG='usai_runtime::observability=debug' usai run --artifact … --log-format json
+RUST_LOG='warn,usai_runtime::observability=debug' usai run --artifact … --log-format json
+# the leading `warn,` matters: the filter replaces the default, so without it
+# you lose every `application error` and `task failed` line you came for
 ```
 
 That target on its own is **one line per unit of work** — the whole
