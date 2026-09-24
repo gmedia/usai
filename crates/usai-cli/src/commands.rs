@@ -705,10 +705,15 @@ async fn serve_until_signal(
     // listener closed used to see EOF — a 502 its client never asked for.
     if !drain_grace.is_zero() {
         http_for_drain.begin_draining();
+        // The grace is for the balancer and for requests already in flight.
+        // Background work has no balancer watching it, so it stops now
+        // rather than claiming more work this instance then has to finish
+        // while it is leaving.
+        runtime.stop_background_work();
         if !quiet {
             tracing::info!(
                 grace_seconds = drain_grace.as_secs(),
-                "shutting down: readiness now fails and connections close after their response; the listener closes after the grace period"
+                "shutting down: readiness now fails, cron and queue consumers stop claiming, and connections close after their response; the listener closes after the grace period"
             );
         }
         tokio::select! {

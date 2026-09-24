@@ -181,6 +181,18 @@ impl Revision {
         }
     }
 
+    /// Stops this revision's background schedulers and consumers without
+    /// touching its state: HTTP keeps serving, cron stops scheduling and
+    /// queue consumers stop claiming.
+    fn stop_background_work(&self) {
+        if let Some(stop) = self.cron_stop.lock().expect("cron poisoned").take() {
+            stop.cancel();
+        }
+        if let Some(stop) = self.queue_stop.lock().expect("queue poisoned").take() {
+            stop.cancel();
+        }
+    }
+
     /// Counts a queued child (a dispatched task) so draining waits for it.
     pub(crate) fn retain_for_child(&self) {
         self.in_flight.fetch_add(1, Ordering::SeqCst);
@@ -414,6 +426,21 @@ impl Runtime {
 
     pub fn tasks(&self) -> &Arc<tasks::TaskQueue> {
         &self.tasks
+    }
+
+    /// Stops every revision's cron schedulers and queue consumers, leaving
+    /// HTTP serving. This is the first half of a drain: the grace period
+    /// exists so a load balancer notices the instance is unready **while
+    /// requests already in flight finish**, and nothing is watching a queue
+    /// consumer — so claiming new messages through the grace only creates
+    /// work the drain then has to finish inside `--drain-timeout`. A jobs
+    /// round measured a consumer claiming a new message 1.67 s into a 2 s
+    /// grace, which on a rolling deploy is work taken by the instance that
+    /// is leaving.
+    pub fn stop_background_work(&self) {
+        for revision in self.revisions.read().expect("revisions poisoned").values() {
+            revision.stop_background_work();
+        }
     }
 
     pub fn config(&self) -> &RuntimeConfig {

@@ -134,6 +134,13 @@ Everything else is additive or a fix to behaviour that was wrong.
   Declaring it on a workload that has no request body — a task, a cron tick,
   a stream, a socket — is **refused at install** with the reason, rather than
   accepted and ignored.
+- **Cron and queue consumers stop at the start of a drain, not after the
+  grace.** The grace period exists so a load balancer notices the instance
+  is unready while requests already in flight finish — nothing is watching
+  a queue consumer, so claiming through the grace only took work this
+  instance then had to finish while it was leaving. Measured by a jobs
+  round: a new message claimed 1.67 s into a 2 s grace. What was already
+  claimed still finishes.
 - **A message dead-lettered by its contract writes a log line.** It was
   dead *silently*: a row in a table and a counter, with nothing on stderr and
   so nothing in a log pipeline. That is the shape of the commonest queue
