@@ -1,6 +1,6 @@
 {
   "name": "@sakaladev/usai",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "description": "Usai developer SDK: declare workloads and resources; the runtime gives each its natural lifetime.",
   "license": "Apache-2.0",
   "repository": {

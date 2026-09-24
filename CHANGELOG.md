@@ -8,7 +8,7 @@ runtime of that version and the next (`SUPPORTED.md` → Versioning). Within
 GitHub releases carry the auto-generated commit list as well; this file is
 the human summary.
 
-## 0.0.10 — Unreleased
+## 0.0.10 — 2026-09-25
 
 **If you are upgrading**, read this in two halves: what changes when the
 **binary** lands, and what changes when the **rebuilt artifact** lands. They
