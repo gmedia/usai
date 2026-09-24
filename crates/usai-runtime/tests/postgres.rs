@@ -1653,7 +1653,23 @@ async fn a_message_being_handled_is_asked_to_stop_not_cancelled() {
     // What SIGTERM does, in the CLI's order: stop claiming first, then drain.
     rev.stop_background_work();
     let started = std::time::Instant::now();
-    f.runtime.drain(rev.id).await.unwrap();
+    // Activating the replacement already drained this revision, which aborts
+    // `ctx.signal` for the message in flight — so the handler can finish its
+    // 50 ms tick, record its outcome and end the world before this line runs,
+    // and a revision whose last world ends **retires itself**. Then there is
+    // nothing left to drain.
+    //
+    // That is the same outcome reached a moment earlier, not a failure, and
+    // insisting on the `Ok` made this test fail about half the time on a
+    // loaded CI runner while passing locally — a red build nobody could
+    // reproduce, which is how people learn to ignore red. What the test is
+    // actually about is *how* the handler ended, and the counter below is
+    // what says it.
+    match f.runtime.drain(rev.id).await {
+        Ok(()) => {}
+        Err(usai_runtime::RuntimeError::UnknownRevision(_)) => {}
+        Err(e) => panic!("the drain failed for a reason that is not 'already gone': {e}"),
+    }
     assert!(
         started.elapsed() < Duration::from_secs(5),
         "the drain waited for its bound instead of the handler: {:?}",
