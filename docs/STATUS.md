@@ -286,7 +286,13 @@ capabilities (design), latency histogram in metrics, an API reference page — a
   the ledger row is written before the file's SQL, that the lock is per file
   — which are the three facts that decide whether a change is safe or an
   outage. `docs/runbooks/schema-change.md` is that page, written from the
-  round's own procedure.
+  round's own procedure. Recorded rather than built, from the same round:
+  a `command()`'s `ctx.args` are raw strings with no schema (a task gets
+  `input:` validation, a command gets nothing, so a typo becomes `NaN`
+  rather than a boundary rejection), and there is no job-shaped progress
+  surface for a long one-shot — `POST /invoke` is a single blocking call
+  that returns only at the end, so a backfill's progress is whatever it
+  writes to a table itself, which the runbook now says.
 
 - **Round 23 (2026-09-24): a test-suite audit.** A senior engineer who lives
   in the test suite, answering one question for a team lead: *can we gate a

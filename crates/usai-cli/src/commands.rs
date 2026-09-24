@@ -1487,7 +1487,11 @@ pub async fn db_migrate(
 
 fn report_applied(applied: &[String], total: usize) {
     if applied.is_empty() {
-        println!("nothing to apply ({total} migrations already applied)");
+        // `total` is how many migration files *this artifact carries*, not
+        // how many rows the ledger holds. Saying "2 migrations already
+        // applied" with three rows in `usai_migrations` reads like data loss
+        // to anyone rolling back, which is exactly when they see it.
+        println!("nothing to apply ({total} migration(s) in this artifact, all applied)");
     } else {
         for name in applied {
             println!("applied {name}");
