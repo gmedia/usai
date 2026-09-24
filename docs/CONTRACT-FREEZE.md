@@ -73,6 +73,27 @@ Once 1.0 ships, within `1.x`:
    including when a status token is set (it used to be 401 for two of the
    six paths). Anything scripted against the old answer breaks, which is the
    reason to let it sit one release before promising it.
+9. **A declared `timeout:` on a stream, a socket or a service** — accepted
+   and silently dropped until 0.0.10, now honoured (there is still no
+   *default* deadline for those kinds). An application that declared one and
+   relied on it being ignored changes behaviour on upgrade. It is a fix, not
+   a contract change — the OpenAPI document had published the value as
+   authoritative all along — but it moved this week.
+10. **What per-workload latency measures** — 0.0.10 records a stream's as its
+   world's lifetime rather than the time to its head. Every dashboard and
+   alert built on `usai_http_workload_request_seconds_*` for a streaming
+   application reads differently after the upgrade; that is the point, but it
+   is a number people build on.
+11. **`maxBodyBytes` on a route** (0.0.10) — additive, and a cap rather than
+   a raise, so it cannot loosen an operator's ceiling. It is on this list
+   only because declaring it where there is no request body is now an
+   **install-time refusal**: an artifact that did so would have been accepted
+   before.
+
+Items 9–11 landed on 2026-09-24 from the seventeenth fresh-eyes round. They
+are the concrete argument for option 2 below rather than option 1: three
+contract-adjacent shapes moved in a single day, found by one developer in
+twenty-one minutes, and none of them had been exercised by anyone before.
 
 ## What a freeze does **not** require
 
@@ -85,8 +106,8 @@ Once 1.0 ships, within `1.x`:
 
 Three choices, in the order they are usually taken:
 
-1. **Freeze now at 1.0**, with the eight moving items above accepted as they
-   stand. Fastest for adopters; commits us to the 0.0.9 log shape *and* to
+1. **Freeze now at 1.0**, with the eleven moving items above accepted as
+   they stand. Fastest for adopters; commits us to the 0.0.9 log shape *and* to
    0.0.9's answer on what readiness means (item 7), which is the one most
    likely to be regretted: it was written before anyone had lived through a
    database outage behind a proxy with it.
