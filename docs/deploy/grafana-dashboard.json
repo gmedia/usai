@@ -189,7 +189,7 @@
   {
    "type": "timeseries",
    "title": "Latency (admitted requests)",
-   "description": "Admitted only. Read the refusal panel beside it.",
+   "description": "Admitted only. Read the refusal panel beside it. A stream's latency is its world's whole lifetime, so one long export sits in the top bucket; this series carries no label but le, so it cannot be excluded here.",
    "datasource": {
     "type": "prometheus",
     "uid": "${datasource}"

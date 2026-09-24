@@ -507,6 +507,58 @@ async fn a_declared_timeout_bounds_a_socket() {
     s.shutdown.cancel();
 }
 
+/// The close frame a client is sent has to be true. `1012` means "the server
+/// is restarting, back off and reconnect" — the GUIDE tells clients to treat
+/// it that way — and every socket ending at its **own** declared deadline
+/// sent it, on a runtime that was serving normally and whose revision was
+/// `active`. Anyone who saw it went looking at deploys. It is also the exact
+/// symptom of the drain bug this release fixed, so the one is now
+/// indistinguishable from the other in a client's logs.
+///
+/// A connection ending on its own terms is `1001`, the endpoint going away.
+/// A revision that really is draining still says `1012`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_socket_ended_by_its_own_deadline_does_not_claim_the_server_is_draining() {
+    let Some(s) = start().await else { return };
+    let (mut ws, response) = tokio_tungstenite::connect_async(format!("{}/push?who=honest", s.ws))
+        .await
+        .expect("upgrade");
+    assert_eq!(response.status(), 101);
+    let mut close = None;
+    while let Ok(Some(Ok(message))) = tokio::time::timeout(Duration::from_secs(5), ws.next()).await
+    {
+        if let tokio_tungstenite::tungstenite::Message::Close(frame) = message {
+            close = frame;
+            break;
+        }
+    }
+    let frame = close.expect("the deadline closes the connection");
+    let code = u16::from(frame.code);
+    assert_ne!(
+        code, 1012,
+        "the runtime is not draining; `{}` tells every client to back off and reconnect",
+        frame.reason
+    );
+    assert_eq!(
+        code, 1001,
+        "a connection ending on its own terms is `going away`: {frame:?}"
+    );
+    // And the instance really is still serving — which is what makes 1012 a
+    // lie rather than a rounding of the truth.
+    let r = s
+        .client
+        .get(format!("{}/request-id", s.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        r.status(),
+        200,
+        "the instance stopped serving, so this proves nothing"
+    );
+    s.shutdown.cancel();
+}
+
 /// The deadline **stops** a connection-bound world and gives it a grace to
 /// unwind before cancelling it, so a socket's `close` runs. The grace was one
 /// second, and one second is not enough for a `close` that has to do anything

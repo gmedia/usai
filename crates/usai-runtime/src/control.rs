@@ -69,6 +69,27 @@ fn reply(status: StatusCode, body: Value) -> ControlResponse {
         .expect("static response")
 }
 
+/// A refused body has to say what this endpoint wanted. serde's own message
+/// is right for malformed JSON and useless for the commonest mistake — no
+/// body at all — where `POST /revisions/1/verify` answered `EOF while
+/// parsing a value at line 1 column 0`, a raw parser message on a documented
+/// endpoint, on a page that says bodyless POSTs work elsewhere.
+fn bad_body(expected: &str, body: &[u8], e: &serde_json::Error) -> ControlResponse {
+    if body.iter().all(|b| b.is_ascii_whitespace()) {
+        error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            format!("this endpoint needs a JSON body: {expected}"),
+        )
+    } else {
+        error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            format!("{e}; this endpoint needs {expected}"),
+        )
+    }
+}
+
 fn error(status: StatusCode, code: &str, message: impl Into<String>) -> ControlResponse {
     reply(
         status,
@@ -331,7 +352,11 @@ impl ControlHost {
                 let install: InstallRequest = match serde_json::from_slice(&body) {
                     Ok(i) => i,
                     Err(e) => {
-                        return error(StatusCode::BAD_REQUEST, "invalid_request", e.to_string());
+                        return bad_body(
+                            r#"{"artifact": "<directory>"} (optionally "ifAbsent": true)"#,
+                            &body,
+                            &e,
+                        );
                     }
                 };
                 let definition = match load_artifact_trusted(
@@ -514,7 +539,11 @@ impl ControlHost {
                 let invoke: InvokeRequest = match serde_json::from_slice(&body) {
                     Ok(i) => i,
                     Err(e) => {
-                        return error(StatusCode::BAD_REQUEST, "invalid_request", e.to_string());
+                        return bad_body(
+                            r#"{"kind": "task|cron|command|queue", "name": "<declared name>"} (with "input" or "args" when the workload takes them)"#,
+                            &body,
+                            &e,
+                        );
                     }
                 };
                 let result = match invoke.kind.as_str() {
@@ -569,7 +598,11 @@ impl ControlHost {
                 let invoke: InvokeRequest = match serde_json::from_slice(&body) {
                     Ok(i) => i,
                     Err(e) => {
-                        return error(StatusCode::BAD_REQUEST, "invalid_request", e.to_string());
+                        return bad_body(
+                            r#"{"kind": "task|cron|command|queue", "name": "<declared name>"} (with "input" or "args" when the workload takes them)"#,
+                            &body,
+                            &e,
+                        );
                     }
                 };
                 let input = if invoke.kind == "command" {

@@ -138,8 +138,10 @@ test("a body bound on a kind that has no body is a compile error", () => {
      export const c = command("c", { maxBodyBytes: 1024 }, async () => {});`,
     `import { http } from "@sakaladev/usai";
      export const s = http.stream("/s", { maxBodyBytes: 1024 }, async () => {});`,
-    `import { http } from "@sakaladev/usai";
-     export const s = http.socket("/s", { maxBodyBytes: 1024 }, { open: async () => {} });`,
+    // `socket` is its own export: written as `http.socket` this case passed
+    // with `maxBodyBytes` deleted, because the member does not exist at all.
+    `import { socket } from "@sakaladev/usai";
+     export const s = socket("/s", { maxBodyBytes: 1024 }, { open: async () => {} });`,
   ]) {
     assert.notEqual(check(source), "", `maxBodyBytes should not compile here:\n${source}`);
   }

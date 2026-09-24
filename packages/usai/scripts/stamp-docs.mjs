@@ -26,5 +26,10 @@ if (title === -1) {
   console.error("docs/sdk/README.md has no title to stamp");
   process.exit(1);
 }
+// TypeDoc titles the page `@sakaladev/usai v<package version>`, which is the
+// number the banner immediately below it exists to contradict: a checkout of
+// `main` reads `v0.0.9` while documenting the surface *after* 0.0.9. The
+// banner fixed the sentence and the title put the claim straight back.
+lines[title] = lines[title].replace(/\s+v\d+\.\d+\.\d+.*$/, "");
 lines.splice(title + 1, 0, banner);
 await writeFile(readme, lines.join("\n"));

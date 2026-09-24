@@ -151,6 +151,30 @@ export interface WorkloadPolicies {
  */
 export type BodylessPolicies = Omit<WorkloadPolicies, "maxBodyBytes">;
 
+/** Refuses `maxBodyBytes` on a workload that has no request body, naming it.
+ *
+ * The type above is the first line of defence and the better one, but it is
+ * only a type: `usai test --no-typecheck`, a `as never`, a JavaScript
+ * project or an `any` anywhere upstream all get past it, and what happened
+ * next was the failure this option exists to prevent — the declaration was
+ * dropped on the floor by the constructor, never reached the manifest, and
+ * so the definition had nothing to refuse. "Accepted and ignored" is the
+ * shape of bug that costs a day; the build says so instead.
+ */
+export function refuseBodyBound(kind: string, name: string, options: unknown): void {
+  if (
+    typeof options === "object" &&
+    options !== null &&
+    (options as Record<string, unknown>).maxBodyBytes !== undefined
+  ) {
+    throw new Error(
+      `${kind} "${name}" declares maxBodyBytes, and a ${kind} has no request body. ` +
+        `The bound belongs on the HTTP route that accepts the upload; ` +
+        `remove it here, or declare it on the route that dispatches to this workload.`,
+    );
+  }
+}
+
 /** What a `command()` may declare. It has no request body, and its
  * concurrency is the runtime's world budget like any other kind.
  *

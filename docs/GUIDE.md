@@ -369,7 +369,7 @@ export const list = http.get("/books", { query: Filter, resources: [db] }, async
 
 What you keep by compiling rather than connecting: typed, composable query building *and* the runtime's leased connections, terminal-proof reuse and quarantine. What you give up: the library's own migrations, connection pooling and result mapping — migrations are `.sql` files here (`usai db migrate`), and rows come back as plain objects.
 
-### Multi-tenancy
+## Multi-tenancy
 
 One deployment, one database, many customer organisations, and a hard rule
 that no tenant sees another's data. The runtime helps with half of it and

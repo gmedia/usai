@@ -70,5 +70,43 @@ fn a_command_runs_from_an_artifact_with_no_source_tree() {
     );
     assert!(ok, "a command must run from an artifact alone: {text}");
     assert!(text.contains("args"), "{text}");
+
+    // A command's own arguments are variadic and may contain hyphens, so
+    // everything after the first of them is trailing — and `--artifact`
+    // written there is handed to the command instead of to usai. What came
+    // back was "not a Usai project", hinting about `--root` and scaffolding:
+    // the exact error this flag exists to remove, for an invocation an
+    // operator has every reason to write.
+    let (ok, text) = usai(
+        &[
+            "app",
+            "reconcile",
+            "since=2026-01-01",
+            "--artifact",
+            build.to_str().unwrap(),
+        ],
+        &image,
+    );
+    assert!(!ok, "{text}");
+    assert!(
+        !text.contains("not a Usai project"),
+        "the flag was swallowed and the error blames the directory: {text}"
+    );
+    assert!(
+        text.contains("--artifact") && text.contains("put it first"),
+        "the refusal has to say where the flag goes: {text}"
+    );
+    // And the order it suggests works.
+    let (ok, text) = usai(
+        &[
+            "app",
+            "--artifact",
+            build.to_str().unwrap(),
+            "reconcile",
+            "since=2026-01-01",
+        ],
+        &image,
+    );
+    assert!(ok, "the suggested order has to work: {text}");
     let _ = std::fs::remove_dir_all(&image);
 }

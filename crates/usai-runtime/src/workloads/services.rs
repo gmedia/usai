@@ -203,7 +203,20 @@ impl Supervisor {
                             .backoff_ms
                             .saturating_mul(1u64 << (restarts - 1).min(10)),
                     );
-                    tracing::warn!(service = %name, restarts, delay_ms = delay.as_millis() as u64, "service restarting");
+                    // `failed` is what an operator alerts on and `restarting`
+                    // is what they do not — `docs/runbooks/application-failures.md`
+                    // says so, and the state says so. The *line* said the
+                    // opposite: a bounded service under `restart: { mode:
+                    // "always" }` ends normally and restarts every cycle, so
+                    // a healthy loop wrote a WARN every few seconds at the
+                    // level people filter on. A restart after a **failure**
+                    // is still a WARN; a restart after a normal end is the
+                    // policy doing its job.
+                    if state == ServiceState::Failed {
+                        tracing::warn!(service = %name, restarts, delay_ms = delay.as_millis() as u64, "service restarting after a failure");
+                    } else {
+                        tracing::info!(service = %name, restarts, delay_ms = delay.as_millis() as u64, "service restarting");
+                    }
                     tokio::select! {
                         _ = tokio::time::sleep(delay) => {}
                         _ = sup.stop.cancelled() => return,

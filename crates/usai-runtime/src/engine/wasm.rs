@@ -584,10 +584,9 @@ impl WasmEngine {
             )
             .await
             .map_err(|e| {
-                let text = e.to_string();
-                match text.strip_prefix("guest fault: Error: ") {
-                    Some(message) => EngineError::Declaration(message.to_owned()),
-                    None => EngineError::Compile(format!("validator warm-up failed: {text}")),
+                match e.or_declaration() {
+                    declaration @ EngineError::Declaration(_) => declaration,
+                    other => EngineError::Compile(format!("validator warm-up failed: {other}")),
                 }
             })?;
         guest.run_jobs(&mut store).await?;
@@ -1183,7 +1182,8 @@ impl WasmEngine {
         let text = world
             .guest
             .eval(&mut world.store, expression, "usai:eval")
-            .await?;
+            .await
+            .map_err(EngineError::or_declaration)?;
         if text.is_empty() {
             return Err(EngineError::Guest(missing.into()));
         }

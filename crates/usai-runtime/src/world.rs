@@ -556,6 +556,13 @@ impl WorldDriver {
             Vec::new()
         };
         self.flush_cpu();
+        let elapsed = started.elapsed();
+        // Wall time per workload, for every kind. The HTTP pipeline records
+        // its own latency and nothing recorded a queue consumer's, a cron
+        // tick's or a socket's — so `usai top`'s mean was blank for exactly
+        // the workloads whose cost is hardest to guess.
+        self.gauges
+            .record_world_end(&workload_id, elapsed.as_nanos() as u64);
         let cpu = Duration::from_nanos(self.watch.cpu_ns.load(Ordering::Relaxed));
         let mut result = WorkResult {
             world: self.id,
@@ -563,7 +570,7 @@ impl WorldDriver {
             termination,
             outcome,
             violations,
-            duration: started.elapsed(),
+            duration: elapsed,
             completions_delivered: self.delivered,
             completions_dropped: self.dropped,
             logs,

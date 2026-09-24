@@ -634,7 +634,35 @@ async fn async_main() {
             name,
             args,
             artifact,
-        } => commands::app(&root, &name, args, artifact).await,
+        } => {
+            // A command's own arguments are variadic and may contain hyphens,
+            // so everything after the name belongs to the command — including
+            // a `--artifact` meant for us. Once the command has an argument
+            // of its own everything after it is trailing, so
+            // `usai app backfill 2026-01-01 --artifact /app/.usai/build` —
+            // an ordinary invocation in a production image — lost the flag
+            // and came back with "…is not a Usai project", hinting about
+            // `--root` and scaffolding: the exact misleading error
+            // `--artifact` was added to remove. (With no argument of its own
+            // the flag is parsed normally; it is the realistic form that
+            // breaks.)
+            if artifact.is_none()
+                && let Some(i) = args.iter().position(|a| a == "--artifact")
+            {
+                let dir = args.get(i + 1).map(String::as_str).unwrap_or("<dir>");
+                Err(anyhow::anyhow!(
+                    "`--artifact` after the command name is passed to the command, not to usai.\n  \
+                     hint: put it first — `usai app --artifact {dir} {name}{}`",
+                    args.iter()
+                        .enumerate()
+                        .filter(|(j, _)| *j != i && *j != i + 1)
+                        .map(|(_, a)| format!(" {a}"))
+                        .collect::<String>()
+                ))
+            } else {
+                commands::app(&root, &name, args, artifact).await
+            }
+        }
         Command::Cron {
             action: CronAction::Run { name, artifact },
         } => commands::cron_run(&root, &name, artifact).await,

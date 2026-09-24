@@ -51,8 +51,15 @@ exports in flight at `0.0` req/s, and a workload that has finished nothing
 at all still gets a row when it has a world alive. **`cpu%` is a share of one
 core over the window**, not milliseconds per request, for the same reason: a
 per-request figure divides to zero for work that has not finished, and the
-workload eating the box would read as free. `avg` is `—` when nothing
-completed in the window, because there is no average to report. A mean hides a bimodal route, but it finds the one to look at, which is
+workload eating the box would read as free. `avg` is the mean **world lifetime** over the worlds that ended in the
+window — for an HTTP route that is the request, for a queue consumer one
+message, for a stream or a socket the whole connection — and it is `—` only
+when nothing ended, because then there is no average to report. A background
+workload is not exempt: a consumer finishing messages steadily has a mean and
+shows it.
+
+The p50/p99 line above the table is HTTP only and appears only when requests
+completed in the window; on an idle instance it is absent rather than zero. A mean hides a bimodal route, but it finds the one to look at, which is
 the step that was missing — and the `avg` and `cpu%` columns beside each other
 are step 2 below, already answered: a route whose `cpu%` accounts for most of
 its `avg` is computing, one whose does not is waiting.
@@ -137,7 +144,11 @@ client something about the server. `curl -D- -o/dev/null`, a browser's
 network panel and most proxies read it without any setup. A request rejected
 **before** a world exists (an unknown route, a schema failure, a refused
 admission) carries no header at all, which is itself the answer: nothing of
-the application ran.
+the application ran. A `401` from an `auth.bearer` resolver is **not** one of
+those: the resolver is your code and runs in a world, so that request costs a
+world and admission budget and does carry the header — which is the honest
+answer, and the one to remember when a burst of bad tokens shows up as
+admission pressure.
 
 `--diagnostics` adds `x-usai-server-ms` to every response, which is the
 runtime's own view of that request. It also exposes error details and stacks

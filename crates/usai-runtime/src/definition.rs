@@ -68,12 +68,22 @@ pub enum Trigger {
     Task,
     Cron {
         schedule: String,
-        // No `timeout_ms` here: a cron's deadline is the workload's
-        // `timeout_ms`, the one every kind carries and the one the world
-        // arms. The trigger used to carry a second copy that nothing read,
-        // so a manifest could state two deadlines and the schedule's was
-        // silently the wrong one to read. Older manifests still carry it;
-        // serde ignores it, and the workload-level field has the same value.
+        /// **Nothing reads this.** A cron's deadline is the workload's
+        /// `timeout_ms`, the one every kind carries and the one the world
+        /// arms; the trigger used to carry a second copy, so a manifest could
+        /// state two deadlines and the schedule's was silently the wrong one
+        /// to read. The SDK stopped writing it.
+        ///
+        /// It is still parsed and still serialized, always, because the
+        /// manifest is hashed into the application's identity: dropping a key
+        /// the previous SDK wrote changes the identity of the *same artifact*
+        /// across a runtime upgrade, and a rolling deployment comparing
+        /// identities then sees two applications where there is one. That is
+        /// exactly what 0.0.10 did to every application declaring a cron —
+        /// the kind after HTTP that most applications have — and it is why
+        /// `skip_serializing_if` must never be added here.
+        #[serde(default)]
+        timeout_ms: Option<u64>,
         #[serde(default = "default_overlap")]
         overlap: OverlapPolicy,
         /// Exactly one instance runs each tick: the schedulers of every

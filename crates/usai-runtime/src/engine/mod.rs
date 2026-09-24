@@ -78,6 +78,25 @@ pub enum EngineError {
     Capacity,
 }
 
+impl EngineError {
+    /// Re-labels a guest throw that is really a **declaration** mistake.
+    ///
+    /// `defineApp`, `flatten` and `describe` all run inside the guest, so a
+    /// duplicate workload id, two modules disagreeing about a resource or two
+    /// auth schemes sharing a name arrive here as `guest fault: Error: …` —
+    /// which reads as a runtime crash and sends people to look at the engine.
+    /// The warm-up path unwrapped it and the *manifest extraction* path did
+    /// not, so the resource conflict read as itself while the auth conflict,
+    /// thrown a phase later, kept the prefix the release said it had removed.
+    /// One rule, applied everywhere a declaration is evaluated.
+    pub fn or_declaration(self) -> Self {
+        match self.to_string().strip_prefix("guest fault: Error: ") {
+            Some(message) => EngineError::Declaration(message.to_owned()),
+            None => self,
+        }
+    }
+}
+
 /// One read of the guest: the outcome once the handler settled, and what
 /// is still pending (`docs/GUEST-ABI.md`, `__usai.state()`).
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]

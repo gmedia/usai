@@ -586,6 +586,29 @@ export async function testApp(options: TestAppOptions = {}): Promise<TestApp> {
     return { status: res.status, headers: out, body: parsed, text, bytes: raw, violations };
   };
 
+  /** Why a line that should exist never arrived, when the reason is that the
+   * thing that writes it is switched off.
+   *
+   * The schedulers are off by default — a test run has to be deterministic —
+   * and a suite that waits for `message dead-lettered` or a cron tick then
+   * fails with `0 lines seen` and nothing else. The line it wants is written
+   * by a consumer that was never started; without knowing that, the search
+   * goes to the application. Saying so costs one sentence.
+   */
+  const schedulerHint = (
+    filter: LogFilter,
+    on: { cron: boolean; queue: boolean; services: boolean },
+  ): string => {
+    const text = `${filter.message ?? ""} ${filter.workload ?? ""}`.toLowerCase();
+    const off: string[] = [];
+    if (!on.queue && /queue|message|dead-letter|topic|consumer|retry/.test(text)) off.push("queue");
+    if (!on.cron && /cron|tick|schedule/.test(text)) off.push("cron");
+    if (!on.services && /service/.test(text)) off.push("services");
+    if (off.length === 0) return "";
+    const which = off.map((k) => `${k}: true`).join(", ");
+    return `.\n  hint: testApp runs no background schedulers by default, so nothing writes this line. Pass \`testApp({ schedulers: { ${which} } })\` (and give the test a database of its own), or drive the work explicitly with app.queue().deliver() / app.cron().run()`;
+  };
+
   const logs = (filter: LogFilter = {}): LogLine[] => kept.filter((l) => matches(l, filter));
   const waitForLog = (filter: LogFilter, timeoutMs = 5000): Promise<LogLine> => {
     const found = kept.find((l) => matches(l, filter));
@@ -602,7 +625,7 @@ export async function testApp(options: TestAppOptions = {}): Promise<TestApp> {
         waiters.delete(waiter);
         reject(
           new UsaiTestError(
-            `no log line matched ${describeFilter(filter)} within ${timeoutMs} ms; ${kept.length} lines seen${kept.length ? `, the last: ${JSON.stringify(kept[kept.length - 1])}` : ""}`,
+            `no log line matched ${describeFilter(filter)} within ${timeoutMs} ms; ${kept.length} lines seen${kept.length ? `, the last: ${JSON.stringify(kept[kept.length - 1])}` : ""}${schedulerHint(filter, schedulers)}`,
           ),
         );
       }, timeoutMs);

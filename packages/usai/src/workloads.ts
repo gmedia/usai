@@ -13,6 +13,7 @@ import type {
   CommandPolicies,
   WorkloadPolicies,
 } from "./declarations.ts";
+import { refuseBodyBound } from "./declarations.ts";
 import type { BaseContext } from "./runtime/context.ts";
 import type { PostgresDeclaration } from "./resources.ts";
 
@@ -101,6 +102,7 @@ export function task<
   options: TaskOptions<I, R>,
   handler: (ctx: TaskContext<I extends AnySchema ? Output<I> : unknown, R>) => Out,
 ): TypedWorkload<Awaited<Out>, I extends AnySchema ? Output<I> : unknown> {
+  refuseBodyBound("task", name, options);
   const policies: WorkloadPolicies = {};
   if (options.timeout !== undefined) policies.timeout = options.timeout;
   if (options.concurrency !== undefined) policies.concurrency = options.concurrency;
@@ -185,6 +187,7 @@ export function cron<R extends ResourceDeclaration[] = ResourceDeclaration[]>(
   options: CronOptions<R>,
   handler: (ctx: CronContext<R>) => unknown,
 ): Workload {
+  refuseBodyBound("cron", name, options);
   const policies: WorkloadPolicies = {};
   if (options.timeout !== undefined) policies.timeout = options.timeout;
   if (options.concurrency !== undefined) policies.concurrency = options.concurrency;
@@ -257,6 +260,7 @@ export function command<R extends ResourceDeclaration[] = ResourceDeclaration[]>
 export function command(name: string, a: unknown, b?: unknown): Workload {
   const options = (typeof a === "function" ? {} : a) as CommandOptions;
   const handler = (typeof a === "function" ? a : b) as Workload["handler"];
+  refuseBodyBound("command", name, options);
   const policies: WorkloadPolicies = {};
   if (options.timeout !== undefined) policies.timeout = options.timeout;
   // It was declarable and dropped: the type accepted it, the manifest

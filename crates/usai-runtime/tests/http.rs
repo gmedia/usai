@@ -1627,6 +1627,23 @@ async fn status_and_metrics_derive_from_runtime_truth() {
     assert_eq!(status["http"]["rejected_before_world"], 1);
     assert_eq!(status["revisions"][0]["state"], "active");
     assert!(status["gauges"]["worldsCreated"].as_u64().unwrap() >= 1);
+    // Wall time per workload, for every kind: `usai top`'s mean is built
+    // from it, and without it the column was blank for every workload that
+    // answers no HTTP — a queue consumer finishing messages read `—`, which
+    // the runbook explains as "nothing completed in the window".
+    let ended = &status["gauges"]["worldsEndedByWorkload"];
+    let world_ns = &status["gauges"]["worldNsByWorkload"];
+    // The route that was *answered*: `/users/not-a-uuid` was refused before
+    // a world existed (C6), so it correctly has no world to time.
+    let workload = "http:GET /counter";
+    assert!(
+        ended[workload].as_u64().unwrap_or(0) >= 1,
+        "ended worlds are not counted per workload: {ended}"
+    );
+    assert!(
+        world_ns[workload].as_u64().unwrap_or(0) > 0,
+        "a world that ended recorded no wall time: {world_ns}"
+    );
     let metrics = s
         .client
         .get(format!("{base}/_usai/metrics"))
@@ -2693,6 +2710,102 @@ async fn an_outbound_dependency_that_cannot_be_reached_is_not_ready() {
     assert!(
         row["detail"]["lastError"].is_string(),
         "the alert row promises `detail.lastError` says how: {row}"
+    );
+    token.cancel();
+    s.shutdown.cancel();
+}
+
+/// The readiness signal above was added because a client failing every call
+/// still read healthy. This runtime then added a refusal path — a client
+/// without a `baseUrl` may not reach the host's own network — and that path
+/// returned **before any counter was touched**: a service whose every
+/// outbound call was refused reported `requests` 0, `failures` 0, `refused`
+/// 0 and `ready` 1, to the metric, to `/_usai/status` and to `usai top` at
+/// once. The blindness the signal exists to remove, reappearing one release
+/// later on the newer path.
+///
+/// A refusal is an outcome. It is counted, and because it is a *standing*
+/// condition — the same call refused a second ago is refused now — it also
+/// leaves the client unready, with the code in `detail.lastError` so an
+/// operator can tell a misconfigured destination from an upstream outage.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_refused_destination_is_counted_and_leaves_the_client_unready() {
+    let Some(s) = start().await else { return };
+    let host = HttpHost::new(
+        Arc::clone(&s.runtime),
+        HttpConfig {
+            addr: ([127, 0, 0, 1], 0).into(),
+            serve_status: true,
+            ..HttpConfig::default()
+        },
+    );
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let token = CancellationToken::new();
+    let t = token.clone();
+    tokio::spawn(async move {
+        serve(host, t, |addr| {
+            let _ = tx.send(addr);
+        })
+        .await
+        .unwrap()
+    });
+    let addr = rx.await.unwrap();
+    let base = format!("http://{addr}");
+    let row = |base: String| {
+        let client = s.client.clone();
+        async move {
+            let status: Value = client
+                .get(format!("{base}/_usai/status"))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            status["resources"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|r| r["identity"]["name"] == "anywhere")
+                .cloned()
+                .expect("the generic client has a status")
+        }
+    };
+    let before = row(base.clone()).await;
+    assert_eq!(before["ready"], json!(true));
+    assert_eq!(before["detail"]["refused"], json!(0));
+
+    // Exactly the shape an upgraded service hits: an internal destination a
+    // working deployment used to reach, now refused by this runtime.
+    for _ in 0..3 {
+        let r = s
+            .client
+            .get(format!("{base}/fetch-anywhere"))
+            .query(&[("url", "http://127.0.0.1:9/meta")])
+            .send()
+            .await
+            .unwrap();
+        let body: Value = r.json().await.unwrap();
+        assert_eq!(body["code"], "destination_refused", "{body}");
+    }
+
+    let after = row(base.clone()).await;
+    assert_eq!(
+        after["detail"]["refused"],
+        json!(3),
+        "every refusal is counted, or a fully broken client reads as idle: {after}"
+    );
+    assert_eq!(
+        after["ready"],
+        json!(false),
+        "a client refusing every call it is asked to make is not ready: {after}"
+    );
+    assert!(
+        after["detail"]["lastError"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("destination_refused"),
+        "the code has to say it is the destination, not an outage: {after}"
     );
     token.cancel();
     s.shutdown.cancel();

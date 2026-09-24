@@ -1,0 +1,378 @@
+{
+  "manifestVersion": 1,
+  "name": "fixture009",
+  "description": "Every workload kind the 0.0.9 SDK can declare.",
+  "headers": {
+    "x-frame-options": "DENY"
+  },
+  "modules": [
+    {
+      "name": "billing",
+      "migrations": ["./migrations/*.sql"],
+      "seeders": [],
+      "sourceDir": "src/billing"
+    }
+  ],
+  "workloads": [
+    {
+      "id": "task:settle",
+      "name": "settle",
+      "module": "billing",
+      "trigger": {
+        "kind": "task"
+      },
+      "contracts": {
+        "input": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "invoiceId": {
+              "maximum": 9007199254740991,
+              "minimum": -9007199254740991,
+              "type": "integer"
+            }
+          },
+          "required": ["invoiceId"],
+          "type": "object"
+        }
+      },
+      "errors": [],
+      "auth": null,
+      "resources": ["db"],
+      "dispatches": [],
+      "publishes": [],
+      "maxConcurrency": null,
+      "timeoutMs": 20000
+    },
+    {
+      "id": "cron:sweep",
+      "name": "sweep",
+      "module": "billing",
+      "trigger": {
+        "kind": "cron",
+        "schedule": "0 * * * *",
+        "timeout_ms": null,
+        "overlap": "allow"
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": ["db"],
+      "dispatches": [],
+      "publishes": [],
+      "maxConcurrency": null,
+      "timeoutMs": 45000
+    },
+    {
+      "id": "queue:webhooks",
+      "name": "webhooks",
+      "module": "billing",
+      "trigger": {
+        "kind": "queue",
+        "topic": "webhooks",
+        "concurrency": 3,
+        "database": null,
+        "retry": {
+          "maxAttempts": 1,
+          "backoff": "exponential",
+          "baseMs": 1000
+        }
+      },
+      "contracts": {
+        "message": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": ["url"],
+          "type": "object"
+        }
+      },
+      "errors": [],
+      "auth": null,
+      "resources": ["db"],
+      "dispatches": [],
+      "publishes": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:GET /orders/:id",
+      "name": "GET /orders/:id",
+      "summary": "One order",
+      "description": "Reads a single order by its id.",
+      "module": null,
+      "trigger": {
+        "kind": "http",
+        "method": "GET",
+        "path": "/orders/:id",
+        "raw": false
+      },
+      "contracts": {
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "id": {
+              "maximum": 9007199254740991,
+              "minimum": -9007199254740991,
+              "type": "integer"
+            }
+          },
+          "required": ["id"],
+          "type": "object"
+        },
+        "query": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "expand": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "headers": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "x-tenant": {
+              "type": "string"
+            }
+          },
+          "required": ["x-tenant"],
+          "type": "object"
+        },
+        "response": {
+          "200": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "number"
+              }
+            },
+            "required": ["id"],
+            "type": "object"
+          }
+        },
+        "boundaryFinal": ["params", "query", "headers"]
+      },
+      "errors": [
+        {
+          "code": "order_not_found",
+          "status": 404
+        }
+      ],
+      "responseHeaders": {
+        "200": {
+          "etag": "the order's version"
+        }
+      },
+      "operationId": "getOrder",
+      "auth": "session",
+      "resources": ["db", "cache"],
+      "dispatches": [],
+      "publishes": [],
+      "maxConcurrency": 12,
+      "timeoutMs": 9000
+    },
+    {
+      "id": "http:POST /orders",
+      "name": "POST /orders",
+      "module": null,
+      "trigger": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/orders",
+        "raw": false
+      },
+      "contracts": {
+        "body": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "properties": {
+            "total": {
+              "type": "number"
+            }
+          },
+          "required": ["total"],
+          "type": "object"
+        },
+        "response": {
+          "201": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "number"
+              }
+            },
+            "required": ["id"],
+            "type": "object"
+          }
+        },
+        "boundaryFinal": ["body"]
+      },
+      "errors": [],
+      "auth": null,
+      "resources": ["db"],
+      "dispatches": [],
+      "publishes": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "http:POST /hooks/stripe",
+      "name": "POST /hooks/stripe",
+      "module": null,
+      "trigger": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/hooks/stripe",
+        "raw": true,
+        "responses": {
+          "200": "accepted",
+          "400": "bad signature"
+        }
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": ["db"],
+      "dispatches": [],
+      "publishes": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "stream:GET /exports.csv",
+      "name": "GET /exports.csv",
+      "module": null,
+      "trigger": {
+        "kind": "stream",
+        "method": "GET",
+        "path": "/exports.csv",
+        "content_type": "text/csv"
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": ["db"],
+      "dispatches": [],
+      "publishes": [],
+      "maxConcurrency": null,
+      "timeoutMs": 8000
+    },
+    {
+      "id": "socket:/orders/live",
+      "name": "/orders/live",
+      "module": null,
+      "trigger": {
+        "kind": "socket",
+        "path": "/orders/live"
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": ["db"],
+      "dispatches": [],
+      "publishes": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    },
+    {
+      "id": "command:backfill",
+      "name": "backfill",
+      "module": null,
+      "trigger": {
+        "kind": "command"
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": ["db"],
+      "dispatches": [],
+      "publishes": [],
+      "maxConcurrency": null,
+      "timeoutMs": 120000
+    },
+    {
+      "id": "service:ledger-sync",
+      "name": "ledger-sync",
+      "module": null,
+      "trigger": {
+        "kind": "service",
+        "restart": {
+          "mode": "always",
+          "backoffMs": 1000,
+          "maxRestarts": 10
+        }
+      },
+      "contracts": {},
+      "errors": [],
+      "auth": null,
+      "resources": ["db", "upstream"],
+      "dispatches": [],
+      "publishes": [],
+      "maxConcurrency": null,
+      "timeoutMs": null
+    }
+  ],
+  "resources": [
+    {
+      "name": "db",
+      "kind": "postgres",
+      "module": "billing",
+      "config": {
+        "pool": {
+          "max": 8
+        },
+        "urlEnv": "DATABASE_URL"
+      },
+      "env": ["DATABASE_URL"]
+    },
+    {
+      "name": "cache",
+      "kind": "cache.local",
+      "module": null,
+      "config": {
+        "maxEntries": 500
+      },
+      "env": []
+    },
+    {
+      "name": "upstream",
+      "kind": "http.client",
+      "module": null,
+      "config": {
+        "baseUrl": "https://example.test"
+      },
+      "env": []
+    }
+  ],
+  "auth": [
+    {
+      "name": "session",
+      "scheme": "bearer",
+      "header": "authorization"
+    }
+  ],
+  "env": [
+    {
+      "name": "DATABASE_URL",
+      "kind": "url",
+      "required": true,
+      "values": []
+    },
+    {
+      "name": "API_MODE",
+      "kind": "enum",
+      "required": true,
+      "values": ["live", "test"]
+    }
+  ],
+  "codeSha256": "b3ab2d7c1e041af1ca2fc006755a9f92c07ff833e15998720b57474bf913b30c",
+  "builtWith": {
+    "sdk": "0.0.9",
+    "runtime": "0.0.9",
+    "abi": 1
+  }
+}

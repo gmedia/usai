@@ -68,11 +68,18 @@ impl SocketLink {
 
 /// Pumps frames between the upgraded connection and the world's link.
 /// Runs for the connection's lifetime; ends when either side closes.
+/// `stop` is this connection's own token; `draining` is the revision-wide
+/// one it descends from. Both look identical from here once cancelled, which
+/// is how every socket ending at its **own** declared deadline came to close
+/// `1012 server draining` on a runtime that was serving normally — telling
+/// every client the server was restarting, and sending whoever saw it to
+/// look at deploys. The parent is what tells the two apart.
 pub async fn pump(
     upgraded: Upgraded,
     inbound: mpsc::Sender<Inbound>,
     mut outbound: mpsc::Receiver<Message>,
     stop: CancellationToken,
+    draining: CancellationToken,
     idle_timeout: std::time::Duration,
 ) {
     let ws = WebSocketStream::from_raw_socket(TokioIo::new(upgraded), Role::Server, None).await;
@@ -120,11 +127,22 @@ pub async fn pump(
                 None => break,
             },
             _ = stop.cancelled() => {
+                use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+                // 1012 means "the server is restarting, come back" and
+                // clients act on it. It is the truth only when the revision
+                // really is draining; when this one connection ended — its
+                // declared deadline, its world finishing — the honest frame
+                // is 1001, the endpoint going away.
+                let (code, reason) = if draining.is_cancelled() {
+                    (CloseCode::Restart, "server draining")
+                } else {
+                    (CloseCode::Away, "server closed this connection")
+                };
                 let _ = sink.send(Message::Close(Some(tokio_tungstenite::tungstenite::protocol::CloseFrame {
-                    code: tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Restart,
-                    reason: "server draining".into(),
+                    code,
+                    reason: reason.into(),
                 }))).await;
-                let _ = inbound.send(Inbound::Close { code: Some(1012), reason: "server draining".into() }).await;
+                let _ = inbound.send(Inbound::Close { code: Some(u16::from(code)), reason: reason.into() }).await;
                 break;
             }
         }

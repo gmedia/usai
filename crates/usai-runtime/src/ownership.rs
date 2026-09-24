@@ -84,6 +84,16 @@ pub struct Gauges {
     /// *which* workload is spending it. Bounded by the set of workloads the
     /// definitions name, never by request data.
     pub guest_cpu_ns_by_workload: std::sync::RwLock<std::collections::BTreeMap<String, AtomicU64>>,
+    /// Wall time and count of **ended** worlds, per workload. `usai top`'s
+    /// `avg` column was built from the HTTP latency series alone, so a queue
+    /// consumer finishing messages steadily read `—` ("nothing completed")
+    /// while it completed several a second — and a cron tick, a socket and a
+    /// service never had a mean at all. CPU answers "is it computing"; this
+    /// answers "how long does one take", which is the other half and the one
+    /// an operator reaches for first. Same shape and same cost as the CPU
+    /// map beside it, and bounded by the declared workloads either way.
+    pub world_ns_by_workload: std::sync::RwLock<std::collections::BTreeMap<String, AtomicU64>>,
+    pub worlds_ended_by_workload: std::sync::RwLock<std::collections::BTreeMap<String, AtomicU64>>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -101,6 +111,12 @@ pub struct GaugeSnapshot {
     /// Workload id → guest CPU nanoseconds.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub guest_cpu_ns_by_workload: std::collections::BTreeMap<String, u64>,
+    /// Workload id → wall nanoseconds over the worlds that have **ended**.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub world_ns_by_workload: std::collections::BTreeMap<String, u64>,
+    /// Workload id → how many of its worlds have ended.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub worlds_ended_by_workload: std::collections::BTreeMap<String, u64>,
 }
 
 impl Gauges {
@@ -122,28 +138,53 @@ impl Gauges {
                 .iter()
                 .map(|(k, v)| (k.clone(), v.load(Ordering::SeqCst)))
                 .collect(),
+            world_ns_by_workload: self
+                .world_ns_by_workload
+                .read()
+                .expect("world map poisoned")
+                .iter()
+                .map(|(k, v)| (k.clone(), v.load(Ordering::SeqCst)))
+                .collect(),
+            worlds_ended_by_workload: self
+                .worlds_ended_by_workload
+                .read()
+                .expect("world map poisoned")
+                .iter()
+                .map(|(k, v)| (k.clone(), v.load(Ordering::SeqCst)))
+                .collect(),
         }
+    }
+
+    /// Records one ended world's wall time against its workload.
+    pub fn record_world_end(&self, workload: &str, nanos: u64) {
+        add_by_workload(&self.world_ns_by_workload, workload, nanos);
+        add_by_workload(&self.worlds_ended_by_workload, workload, 1);
     }
 
     /// Adds a world's guest CPU time to the totals, global and per workload.
     pub fn record_guest_cpu(&self, workload: &str, nanos: u64) {
         self.guest_cpu_ns.fetch_add(nanos, Ordering::Relaxed);
-        if let Some(counter) = self
-            .guest_cpu_ns_by_workload
-            .read()
-            .expect("cpu map poisoned")
-            .get(workload)
-        {
-            counter.fetch_add(nanos, Ordering::Relaxed);
-            return;
-        }
-        self.guest_cpu_ns_by_workload
-            .write()
-            .expect("cpu map poisoned")
-            .entry(workload.to_owned())
-            .or_default()
-            .fetch_add(nanos, Ordering::Relaxed);
+        add_by_workload(&self.guest_cpu_ns_by_workload, workload, nanos);
     }
+}
+
+/// The read-then-write-once pattern these per-workload maps share: the read
+/// lock is what every call after the first takes, so the hot path is an
+/// atomic add under a shared lock and no allocation (C13).
+fn add_by_workload(
+    map: &std::sync::RwLock<std::collections::BTreeMap<String, AtomicU64>>,
+    workload: &str,
+    by: u64,
+) {
+    if let Some(counter) = map.read().expect("workload map poisoned").get(workload) {
+        counter.fetch_add(by, Ordering::Relaxed);
+        return;
+    }
+    map.write()
+        .expect("workload map poisoned")
+        .entry(workload.to_owned())
+        .or_default()
+        .fetch_add(by, Ordering::Relaxed);
 }
 
 pub(crate) fn inc(counter: &AtomicU64) {

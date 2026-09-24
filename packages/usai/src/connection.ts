@@ -14,6 +14,7 @@ import type {
   BodylessPolicies,
   WorkloadPolicies,
 } from "./declarations.ts";
+import { refuseBodyBound } from "./declarations.ts";
 import { withAuthResources } from "./declarations.ts";
 import type { BaseContext } from "./runtime/context.ts";
 import type { HttpContracts, NoExtraKeys } from "./declarations.ts";
@@ -131,6 +132,7 @@ function stream<O extends StreamOptions>(
   if (options.params) contracts.params = options.params;
   if (options.query) contracts.query = options.query;
   if (options.events) contracts.events = options.events;
+  refuseBodyBound("stream", path, options);
   const policies: WorkloadPolicies = {};
   if (options.timeout !== undefined) policies.timeout = options.timeout;
   if (options.concurrency !== undefined) policies.concurrency = options.concurrency;
@@ -305,6 +307,7 @@ export function socket<
   if (options.query) contracts.query = options.query;
   if (options.incoming) contracts.message = options.incoming;
   if (options.outgoing) contracts.response = { 200: options.outgoing };
+  refuseBodyBound("socket", path, options);
   const policies: WorkloadPolicies = {};
   // A declared deadline reaches the manifest for every other kind. Dropping
   // it here is why "a `timeout:` declared on a stream, a socket or a service

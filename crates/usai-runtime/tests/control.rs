@@ -543,6 +543,27 @@ async fn a_revision_can_be_exercised_before_it_takes_traffic() {
         .await
         .unwrap();
     assert_eq!(r.status(), 404, "{}", r.text().await.unwrap());
+
+    // A refusal on a documented endpoint says what the endpoint wanted. With
+    // no body at all this answered `EOF while parsing a value at line 1
+    // column 0` — a raw serde message, on the same page that tells operators
+    // bodyless POSTs still work, for the commonest mistake there is here.
+    let r = auth(client.post(format!("{base}/revisions/rev{id}/verify")))
+        .header("content-type", "application/json")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 400);
+    let body: Value = r.json().await.unwrap();
+    let message = body["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        !message.contains("EOF while parsing"),
+        "the parser's message is not an answer: {message}"
+    );
+    assert!(
+        message.contains("needs a JSON body") && message.contains("kind"),
+        "the refusal has to name what this endpoint takes: {message}"
+    );
     shutdown.cancel();
     runtime.shutdown().await;
 }

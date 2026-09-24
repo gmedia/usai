@@ -37,17 +37,25 @@ the old artifact for a while (`SUPPORTED.md` → Versioning).
   response over a truncated file. Measured: an export that took 16.1 s and
   wrote 41 rows on the old binary wrote 21 rows in 8.0 s on the new one, and
   `curl` exited 0. **If anything of yours parses a streamed export, make it
-  fail loudly on a short file before you deploy this.** `usai inspect` lists
-  every workload's effective deadline and where it came from; run it first.
+  fail loudly on a short file before you deploy this.** Your deploy gate will
+  probably not catch it for you: a test database holding a handful of rows
+  finishes inside the deadline, so the suite is green and production
+  truncates. Assert on the trailer, or fixture a production-sized export.
+  `usai inspect` lists every workload's effective deadline and where it came
+  from; run it first.
 - **A stream's latency becomes its world's lifetime in the global latency
   histogram** — `usai_http_request_seconds_{bucket,sum,count}`, the series
   the Latency alert in `docs/runbooks/metrics.md` is built on. Measured on
   identical traffic (20 short requests plus one 8-second export): `_sum` went
   from **0.019 to 8.029**, and the p99 moved from the `le="0.005"` bucket to
   `le="10"`. **Your latency alert will fire on the first export after the
-  upgrade.** Exclude streaming routes or widen the alert before you deploy.
-  (The per-workload series named elsewhere in these notes is *new* here, so
-  nothing of yours reads it yet.)
+  upgrade.** Widen it before you deploy — you cannot exclude the streaming
+  routes, because `usai_http_request_seconds_bucket` carries no label but
+  `le`, and the per-workload series that does carry one
+  (`usai_http_workload_request_seconds_{sum,count}`) is a sum and a count
+  with no buckets. The per-workload series is *new* here, so nothing of
+  yours reads it yet; it is where a stream's cost is attributable once you
+  do.
 - **`usai_http_streams_failed_total` now counts a declared stream timeout as
   well as a handler failure**, and no counter separates them; the WARN line
   says which. If you alert on it, it goes from zero to one per export.
@@ -63,8 +71,31 @@ the old artifact for a while (`SUPPORTED.md` → Versioning).
   `memoryCeilingHits`, `memoryOomKills`. They were `0` before and `0` was
   false, but anything reading them by name must tolerate their absence — and
   they will be present on your containers and absent on your bare metal.
+- **An `httpClient` declared without a `baseUrl` stops reaching private and
+  loopback addresses.** A client that does not name its destination takes it
+  from the application's data, so this lands with the **binary**, against
+  your current artifact, and it is not only the internal-service case: a
+  **queue consumer delivering a tenant-configured webhook** whose URL happens
+  to be internal starts failing with `destination_refused`, retries, and
+  **dead-letters the message**. Declare `allowPrivateNetwork: true` on the
+  client, or give it a `baseUrl`, before the binary lands. Clients that name
+  their destination are unaffected, which is most of them. Every refusal is
+  counted in `usai_resource_refused_total` and leaves the client `ready` 0
+  with `destination_refused` in `detail.lastError`, so a service refusing
+  every outbound call does not read as healthy.
+- **Two metric families change shape.** `usai_tasks{state="completed|failed|lost"}`
+  moves to `usai_tasks_total` (a counter, because they are cumulative
+  events), and the dead-letter alert should move from
+  `usai_queue_messages_total` to `usai_queue_topic_messages_total`. Both are
+  the binary's doing and appear against your current artifact, so update
+  those two queries before it lands; everything else is additive.
 - **The JSON log timestamp goes from millisecond to microsecond precision.**
   A shipper with a strict `%3f` format stops parsing.
+- **The new binary cannot use the old artifact's compiled image.** It logs
+  `precompiled image is for another engine or build; compiling` and compiles
+  the bundle at start-up, once per process, until you rebuild. On a large
+  application behind a tight start-up probe that is a rollout stall; give the
+  first start more grace, or deploy the artifact with the binary.
 
 **When the rebuilt artifact lands:**
 
@@ -93,12 +124,17 @@ the old artifact for a while (`SUPPORTED.md` → Versioning).
 - **A `timeout:` declared on a socket or a service is honoured too** — the
   SDK used to drop it before it reached the manifest, so the runtime never
   saw it. A socket ends at its deadline the way it ends when its client
-  leaves: the connection is closed and **`close` runs**. A service ends and,
-  with `restart: { mode: "always" }`, starts again. There is still no
-  *default* deadline for any of the three kinds.
+  leaves: the connection is closed and **`close` runs**. The close frame is
+  `1001 going away` — a connection ending on its own terms — and a WARN names
+  the workload and how long it ran; `1012 server draining` stays what it has
+  always meant, a revision actually draining, so a client that backs off and
+  reconnects on `1012` is not told to do that by an ordinary deadline. A
+  service ends and, with `restart: { mode: "always" }`, starts again. There
+  is still no *default* deadline for any of the three kinds.
 - **Declaring `maxBodyBytes` where there is no request body fails the
-  build**, with exit 1 and the workload named. That is a CI failure, not a
-  deploy failure. Nothing could have declared it before this release.
+  build**, with exit 1 and the workload named — the declaration throws, so
+  the type is the first refusal and not the only one. That is a CI failure,
+  not a deploy failure. Nothing could have declared it before this release.
 
 - **Control requests must not look like a browser's.** A request carrying an
   `Origin` header is refused, and a `POST` whose `Content-Type` is
@@ -106,17 +142,6 @@ the old artifact for a while (`SUPPORTED.md` → Versioning).
   is refused. If your deployer sends one of those, switch it to
   `application/json` (or no body). Nothing else changes: bodyless POSTs
   still work.
-- **Two metric families change shape.** `usai_tasks{state="completed|failed|lost"}`
-  moves to `usai_tasks_total` (a counter, because they are cumulative
-  events), and the dead-letter alert should move from
-  `usai_queue_messages_total` to `usai_queue_topic_messages_total`. Update
-  those two queries before the binary lands; everything else is additive.
-- **An `httpClient` declared without a `baseUrl` stops reaching private and
-  loopback addresses.** If any of yours calls an internal service through a
-  client that does not name its destination, it starts failing with
-  `destination_refused` — declare `allowPrivateNetwork: true` on it, or give
-  it a `baseUrl`, before the binary lands. Clients that name their
-  destination are unaffected, which is most of them.
 
 **Before either of those, when you rebuild against the new SDK**, four
 things can stop a project that builds today. All four are refusals of
@@ -126,25 +151,48 @@ something that never worked, and each names what it found:
   services (a test run has to be deterministic, and parallel test files were
   taking each other's queue messages). A test that asserts on the *real*
   retry or dead-letter path needs `testApp({ schedulers: { queue: true } })`
-  and a database of its own. Everything driven explicitly — `app.cron().run()`,
+  and a database of its own (`schedulers: true` turns all three on). The
+  failure when you forget says so now. Everything driven explicitly — `app.cron().run()`,
   `app.queue().deliver()`, `app.task().invoke()` — is unaffected.
 - **`usai test` typechecks** both the application's project and the test
   files' project before it runs anything. A suite that was green over code
   that does not compile now fails; `--no-typecheck` is the escape hatch.
 - **The SDK refuses declarations the runtime always refused**: `maxBodyBytes`
-  on a workload with no request body, `concurrency` meaning two things on a
-  queue consumer, `ctx.tasks.invoke(task)` without the input the task
-  declares. These were compile-time lies, not behaviour changes.
+  on a workload with no request body (the compiler refuses it, and so does
+  the declaration itself, so `--no-typecheck` and a JavaScript project do not
+  get past it), and `ctx.tasks.invoke(task)` without the input the task
+  declares. These were compile-time lies, not behaviour changes. A queue
+  consumer's own `concurrency` is **not** refused — it is how many messages
+  of that topic this instance takes at once, and it still means that; what
+  went away is the duplicate of the same name that the shared policy set
+  contributed, which meant the world budget.
 - **An application composing modules** is refused when two modules declare
   the same workload id or the same auth-scheme name with different
   configuration, or when two *different* modules share a name. All three used
   to pass — the third silently, the second corrupting the OpenAPI document.
 
 **Rolling back is two axes, not one**: the artifact and the binary. An
-application's identity is stable across a binary swap for the same artifact —
-verified for this release — so a rolling deployment comparing identities sees
-one application in both directions. Rolling back only the binary leaves the
-new artifact on the old runtime, which is not a supported combination.
+application's identity is stable across a binary swap for the same artifact,
+so a rolling deployment comparing identities sees one application in both
+directions. That is held by a test carrying a real artifact from the previous
+SDK that declares **every trigger kind** — HTTP, raw, stream, socket, task,
+cron, command, service and queue consumer — because the version of that test
+that carried two HTTP routes missed a change that moved the identity of every
+application declaring a cron.
+
+Rolling back only the binary leaves the new artifact on the old runtime,
+which is not a supported combination, and the thing it silently loses is a
+**security control**: a route's `maxBodyBytes` is not understood by the
+previous runtime, so the route falls back to the process bound and accepts
+bodies the declaration refuses. The newer-SDK warning cannot save you here,
+because it reads `builtWith.sdk` from the artifact.
+
+**Keep the previous artifact directory mounted.** Re-activating the replaced
+revision is a rollback only while something long-running still holds it
+open; for an HTTP-only service it is `draining` for milliseconds and then
+unlisted, and `activate` on it answers `404`. The rollback that always works
+is to install the previous artifact again and activate that, which needs its
+directory to still be there.
 
 Everything else is additive or a fix to behaviour that was wrong.
 
@@ -156,10 +204,13 @@ Everything else is additive or a fix to behaviour that was wrong.
   nobody's consent. With the token-less loopback configuration the document
   permits, that was an unauthenticated remote kill, and with `POST
   /revisions` it could install any artifact directory already on the host.
-  Any control request carrying `Origin` is now refused (`403
+  Any **mutating** control request carrying `Origin` is now refused (`403
   cross_origin_refused`), and a mutating one whose media type is in a
-  browser's simple set is refused (`415`). A deploy script sends neither, so
-  nothing legitimate changes.
+  browser's simple set is refused (`415`). The read-only endpoints —
+  `GET /health`, `/status`, `/revisions` — still answer with an `Origin`
+  present; they change nothing, and a proxy that adds the header must not
+  break a health check. A deploy script sends neither, so nothing legitimate
+  changes.
 - **`POST /revisions/{id}/verify` runs one workload on a revision before it
   takes traffic.** `activate` validates what the *manifest* records — a
   missing `DATABASE_URL`, an unreachable database — and answers `200` for
@@ -934,7 +985,7 @@ Everything else is additive or a fix to behaviour that was wrong.
 
 ### Documentation
 
-- **`docs/deploy/grafana-dashboard.json`** — sixteen panels built from
+- **`docs/deploy/grafana-dashboard.json`** — twenty panels built from
   `runbooks/metrics.md`, including the two an operator has no other way to
   see: what the cgroup is charged against its limit, and the ceiling hits
   that mean the container is reclaiming the pages it executes from.

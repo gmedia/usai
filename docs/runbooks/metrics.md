@@ -127,6 +127,16 @@ Label values:
 - `usai_resource{kind,name,metric}`: `kind` = `postgres`, `http.client`,
   `cache.local`; `metric` = `in_use`, `max`, `waiting` (PostgreSQL only — an
   `httpClient` refuses rather than queues, so it has no `waiting`), `ready`.
+  On an `httpClient`, `ready` follows the **last outcome**, and a destination
+  this runtime will not contact is an outcome like any other: a client
+  without a `baseUrl` asked for a private or loopback address is
+  `destination_refused`, which counts in `usai_resource_refused_total`,
+  leaves `ready` at 0 and puts the code in `/_usai/status` →
+  `resources[].detail.lastError`. That is how you tell a **misconfigured
+  destination** from an upstream outage — both read `ready 0`, and only the
+  `lastError` says which. `usai_resource_requests_total` and
+  `usai_resource_failures_total` count *contacts*, so a client refusing
+  everything leaves both at zero; read `refused` beside them.
 - `usai_tasks{state}`: `queued`, `running`. `usai_tasks_total{state}`:
   `completed`, `failed`, `lost` (dispatched in memory and gone with a
   shutdown — ADR-0010).
@@ -211,4 +221,4 @@ collector is the supported way to put it on a dashboard.
 | Dead letters | `increase(usai_queue_topic_messages_total{state=~"dead|invalid"}[15m]) > 0` | messages out of attempts (`dead`) **or refused by the topic's contract** (`invalid`: no world ran for them, so `retry` never applied). Both land in `usai_queue.state = 'dead'` and both show in `usai queue status`; the metric separates them by *why*. A rolling deploy in which the publisher changes shape before the consumer produces `invalid`, so an alert on `dead` alone is silent for exactly that case (`queue-dead-letter.md`, `schema-change.md`) |
 | Lost consumers | `increase(usai_queue_messages_total{state="reclaimed"}[15m]) > 0` | a consumer died mid-message (a crash, an OOM kill); the message was redelivered — look for the restart |
 | 5xx rate | `rate(usai_http_responses_total{class="5xx"}[5m])` | as for any service; `deadline_exceeded` (504) is in it |
-| Latency | `histogram_quantile(0.99, rate(usai_http_request_seconds_bucket[5m]))` | admitted requests only — read `usai_http_rejections_total` beside it |
+| Latency | `histogram_quantile(0.99, rate(usai_http_request_seconds_bucket[5m]))` | admitted requests only — read `usai_http_rejections_total` beside it. **A stream's latency is its world's whole lifetime**, so one six-second export moves this p99 to the top bucket, and there is nothing here to exclude it by: this series carries no label but `le`. Set the threshold above your longest declared stream `timeout`, or alert on the per-workload row below instead |

@@ -245,7 +245,7 @@ impl QuickJsEngine {
             .with(move |ctx| {
                 let result = ctx
                     .eval::<Option<String>, _>(expression)
-                    .map_err(|e| EngineError::Guest(describe(&ctx, e)))?;
+                    .map_err(|e| EngineError::Guest(describe(&ctx, e)).or_declaration())?;
                 match result {
                     None => Err(EngineError::Guest(missing.into())),
                     Some(json) => serde_json::from_str(&json)

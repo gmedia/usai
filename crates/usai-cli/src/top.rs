@@ -101,6 +101,12 @@ pub async fn run(
     }
 }
 
+/// A counter's growth over the window, never negative: a restarted instance
+/// resets its gauges, and a negative mean is worse than no mean.
+fn delta(now: f64, before: f64) -> f64 {
+    (now - before).max(0.0)
+}
+
 fn rate(now: u64, before: u64, seconds: f64) -> f64 {
     if seconds <= 0.0 {
         return 0.0;
@@ -425,13 +431,30 @@ fn render(before: &Sample, now: &Sample) -> String {
             finished_before.get(&workload).copied().unwrap_or(0),
             seconds,
         );
+        // The mean is the world's wall time over the worlds that **ended in
+        // this window** — the same question the HTTP rows answer, asked of a
+        // kind that answers no HTTP. It read `—` ("nothing completed") for a
+        // consumer finishing several messages a second, because the only
+        // latency the column knew about was the HTTP pipeline's.
+        let ended = delta(
+            now.f64(&["gauges", "worldsEndedByWorkload", workload.as_str()]),
+            before.f64(&["gauges", "worldsEndedByWorkload", workload.as_str()]),
+        );
+        let world_ns = delta(
+            now.f64(&["gauges", "worldNsByWorkload", workload.as_str()]),
+            before.f64(&["gauges", "worldNsByWorkload", workload.as_str()]),
+        );
         rows.push((
             workload,
             finished,
             alive,
             0,
             0,
-            f64::NAN,
+            if ended > 0.0 {
+                world_ns / ended / 1e6
+            } else {
+                f64::NAN
+            },
             cpu_ns / seconds / 1e9 * 100.0,
         ));
     }
@@ -821,6 +844,41 @@ mod tests {
             .find(|l| l.contains("queue:payment.settle"))
             .unwrap_or_else(|| panic!("no consumer row:\n{screen}"));
         assert!(row.contains("36.0"), "{row}");
+    }
+
+    /// And a throughput without a mean is half an answer. `avg` was built
+    /// from the HTTP latency series alone, so a consumer finishing several
+    /// messages a second read `—`, which the runbook explains as "nothing
+    /// completed in the window" — the one thing it was not. The mean is the
+    /// world's lifetime, which every kind has.
+    #[test]
+    fn a_queue_consumer_has_a_mean_too() {
+        let mut before = status(1_000, 10.0, 1_000_000_000, 5.0);
+        before["revisions"][0]["queueByTopic"] = json!([
+            { "topic": "payment.settle", "done": 500, "dead": 0, "invalid": 0 }
+        ]);
+        before["gauges"]["guestCpuNsByWorkload"]["queue:payment.settle"] = json!(1_000_000_000u64);
+        before["gauges"]["worldsEndedByWorkload"] = json!({ "queue:payment.settle": 500u64 });
+        before["gauges"]["worldNsByWorkload"] = json!({ "queue:payment.settle": 2_000_000_000u64 });
+        let mut after = status(1_200, 10.5, 1_200_000_000, 5.2);
+        after["revisions"][0]["queueByTopic"] = json!([
+            { "topic": "payment.settle", "done": 570, "dead": 2, "invalid": 0 }
+        ]);
+        after["gauges"]["guestCpuNsByWorkload"]["queue:payment.settle"] = json!(1_100_000_000u64);
+        // 72 worlds ended in the window, 0.54 s of wall time between them:
+        // 7.5 ms each.
+        after["gauges"]["worldsEndedByWorkload"] = json!({ "queue:payment.settle": 572u64 });
+        after["gauges"]["worldNsByWorkload"] = json!({ "queue:payment.settle": 2_540_000_000u64 });
+        let screen = render(&sample(2, before), &sample(0, after));
+        let row = screen
+            .lines()
+            .find(|l| l.contains("queue:payment.settle"))
+            .unwrap_or_else(|| panic!("no consumer row:\n{screen}"));
+        assert!(
+            !row.contains('—'),
+            "it finished 36 messages a second; `—` says nothing completed: {row}"
+        );
+        assert!(row.contains("7.50ms"), "{row}");
     }
 
     /// A restarted instance's counters go backwards. That is a fact about

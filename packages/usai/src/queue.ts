@@ -10,6 +10,7 @@ import type {
   ConsumerPolicies,
   WorkloadPolicies,
 } from "./declarations.ts";
+import { refuseBodyBound } from "./declarations.ts";
 import type { PostgresDeclaration } from "./resources.ts";
 import type { BaseContext } from "./runtime/context.ts";
 
@@ -110,6 +111,7 @@ function consume<
   options: ConsumeOptions<M, R>,
   handler: (ctx: QueueContext<M extends AnySchema ? Output<M> : unknown, R>) => unknown,
 ): Workload {
+  refuseBodyBound("queue consumer", topic, options);
   const policies: WorkloadPolicies = {};
   if (options.timeout !== undefined) policies.timeout = options.timeout;
   const resources: ResourceDeclaration[] = [...(options.resources ?? [])];

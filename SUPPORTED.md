@@ -93,6 +93,14 @@ the answer is a resource — an existing one, or a case for a new kind.
 - **The SDK axis**, since 0.0.8: CI also builds an application against the
   *previous published SDK* and serves it on this runtime, or requires the
   refusal to name the guest ABI before anything listens.
+- **On an unreleased checkout, every version stamp is the last release's.**
+  `Cargo.toml` and `packages/usai/package.json` are bumped in the release
+  commit, so a binary built from `main` reports the previous number, and an
+  artifact it builds records that number in `builtWith.sdk`. Two consequences
+  if you run `main`: `usai --version` cannot tell you which of two such
+  binaries a process is running, and the "built by a newer SDK" warning
+  cannot fire for an artifact built from the same checkout. Released builds
+  are unaffected; `CHANGELOG.md` says what is unreleased.
 - Upgrade path: build with the new SDK, deploy the new runtime with the new
   artifact. Rollback: activate the previous artifact on the previous runtime.
   The matrix runtime × artifact (N, N−1) is tested in CI on every push
@@ -101,10 +109,14 @@ the answer is a resource — an existing one, or a case for a new kind.
   application's identity is a hash of its manifest as the runtime serializes
   it, plus the code hash, and a rolling deployment compares identities — so a
   runtime that adds a field when it reads an older manifest would turn one
-  application into two mid-rollout. A unit test holds a real manifest from
-  the previous SDK and asserts it serializes back unchanged; a new optional
-  field has to be omitted when absent, and the test says so by name when it
-  is not.
+  application into two mid-rollout — and so would a runtime that **drops** a
+  field an older SDK wrote, which is the direction that is easier to miss. A
+  test holds real manifests from the previous SDK and asserts each serializes
+  back unchanged, naming the JSON pointer where it did not. One of them is an
+  artifact declaring **every trigger kind** — HTTP, raw, stream, socket,
+  task, cron, command, service and queue consumer — because the version of
+  that test that held two HTTP routes was blind to a change that moved the
+  identity of every application declaring a cron.
 - Migrations are immutable once applied (checksum-verified —
   `usai db status` names a file edited after it was applied and exits
   non-zero, and `--check` also fails on anything pending). Each file is its

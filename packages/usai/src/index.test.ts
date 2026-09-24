@@ -24,6 +24,7 @@ const {
   queue,
   command,
   auth,
+  socket,
 } = await import("./index.ts");
 
 const stringSchema = {
@@ -388,4 +389,47 @@ test("a module declares what it needs from the environment", () => {
     () => describe(defineApp({ name: "shop3", modules: [billing, other] })),
     /BILLING_TAX_RATE is declared differently by module "billing" and module "other"/,
   );
+});
+
+test("a body bound on a kind that has no body fails the build, not the type only", () => {
+  // The compiler refuses this, and the release note promised the *build*
+  // refuses it too — "with exit 1 and the workload named … rather than being
+  // accepted and ignored". It was not true: the only enforcement was the
+  // type, and every way past it (`usai test --no-typecheck`, an `as never`, a
+  // JavaScript project) reached a constructor that copied `timeout` and
+  // `concurrency` into the policies and dropped `maxBodyBytes` on the floor.
+  // It never reached the manifest, so the definition — which does refuse it —
+  // had nothing to refuse, and the declaration was accepted and ignored: the
+  // exact outcome the option was added to prevent.
+  const bodyless: [string, () => unknown][] = [
+    ["task", () => task("t", { maxBodyBytes: 1024 } as never, async () => 1)],
+    [
+      "cron",
+      () => cron("c", { schedule: "* * * * *", maxBodyBytes: 1024 } as never, async () => {}),
+    ],
+    ["command", () => command("c", { maxBodyBytes: 1024 } as never, async () => {})],
+    ["stream", () => http.stream("/s", { maxBodyBytes: 1024 } as never, async () => {})],
+    ["socket", () => socket("/s", { maxBodyBytes: 1024 } as never, { open: async () => {} })],
+    ["queue consumer", () => queue.consume("t", { maxBodyBytes: 1024 } as never, async () => {})],
+  ];
+  for (const [kind, declare] of bodyless) {
+    assert.throws(
+      declare,
+      (e: Error) => {
+        assert.match(e.message, /maxBodyBytes/, `${kind}: ${e.message}`);
+        assert.match(e.message, /no request body/, `${kind}: ${e.message}`);
+        return true;
+      },
+      `${kind} accepted a body bound it has no body for`,
+    );
+  }
+  // The kind that does have a body still takes it, and it still reaches the
+  // manifest — a refusal that also broke the working case would be worse.
+  const route = http.post(
+    "/upload",
+    { body: opaqueSchema, response: { 200: opaqueSchema }, maxBodyBytes: 4096 },
+    async () => ({}),
+  );
+  const manifest = describe(defineApp({ name: "b", workloads: [route] }));
+  assert.equal(manifest.workloads[0]?.maxBodyBytes, 4096);
 });

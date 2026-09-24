@@ -263,6 +263,25 @@ fn terminal(code: &str, message: impl Into<String>) -> ResourceError {
 }
 
 impl HttpClient {
+    /// Records a refusal and decides whether it is the *client's* readiness
+    /// that is in question. `destination_refused` and `origin_refused` are
+    /// standing conditions — the same call refused a second ago is refused
+    /// now — so they leave the client unready with the code in `lastError`,
+    /// which is what distinguishes "the operator pointed it at somewhere it
+    /// may not go" from "the upstream is down". `invalid_url` is one
+    /// caller's mistake and says nothing about the client, so it is counted
+    /// and nothing more.
+    fn refusal<T>(&self, result: Result<T, ResourceError>) -> Result<T, ResourceError> {
+        if let Err(error) = &result {
+            self.counters.refused.fetch_add(1, Ordering::SeqCst);
+            let code = error.code();
+            if matches!(code, "destination_refused" | "origin_refused") {
+                self.counters.mark_unready(code, &error.to_string());
+            }
+        }
+        result
+    }
+
     fn resolve(&self, raw: &str) -> Result<reqwest::Url, ResourceError> {
         match &self.base {
             Some(base) => {
@@ -375,8 +394,15 @@ impl ResourceManager for HttpClient {
         }
         let request: FetchRequest = serde_json::from_value(call.args)
             .map_err(|e| terminal("invalid_args", e.to_string()))?;
-        let url = self.resolve(&request.url)?;
-        self.check_destination(&url).await?;
+        // A refusal is an outcome, and it used to be the one outcome nothing
+        // recorded: `resolve` and `check_destination` returned before any
+        // counter was touched, so a client refusing **every** call it was
+        // asked to make reported `requests` 0, `failures` 0, `refused` 0 and
+        // `ready` 1 — to the metric, to `/_usai/status` and to `usai top` at
+        // once. That is the exact blindness the readiness signal exists to
+        // remove, reappearing on the path this runtime added.
+        let url = self.refusal(self.resolve(&request.url))?;
+        self.refusal(self.check_destination(&url).await)?;
         let method = request
             .method
             .as_deref()

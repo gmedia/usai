@@ -103,6 +103,19 @@ test("the harness keeps the runtime's log and joins a request with the tasks it 
       app.waitForLog({ message: "never written" }, 200),
       /no log line matched message=never written within 200 ms/,
     );
+    // The schedulers are off by default, so a suite waiting for a line that
+    // only a consumer writes fails with "0 lines seen" and no clue that the
+    // thing that writes it was never started. Without the release note in
+    // front of you, that is an hour.
+    await assert.rejects(app.waitForLog({ message: "message dead-lettered" }, 200), (e: Error) => {
+      assert.match(e.message, /schedulers: \{ queue: true \}/, e.message);
+      return true;
+    });
+    // And it stays quiet when the schedulers have nothing to do with it.
+    await assert.rejects(app.waitForLog({ message: "never written" }, 200), (e: Error) => {
+      assert.doesNotMatch(e.message, /schedulers/, e.message);
+      return true;
+    });
   } finally {
     await app.close();
   }

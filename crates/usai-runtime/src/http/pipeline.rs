@@ -1548,8 +1548,10 @@ impl HttpHost {
         // and kept its world for as long as its loop lasted, with the client
         // already gone. Measured by a realtime round: 5.8 s past the close
         // frame, and 717 presence rows left behind over a session.
-        let stop = compiled.revision.connections_stop().child_token();
+        let draining = compiled.revision.connections_stop();
+        let stop = draining.child_token();
         let pump_stop = stop.clone();
+        let pump_draining = draining.clone();
         let cancel = CancellationToken::new();
         let pump_cancel = cancel.clone();
         let idle_timeout = self.config.socket_idle_timeout;
@@ -1621,6 +1623,22 @@ impl HttpHost {
                     for v in &result.violations {
                         tracing::warn!(world = %result.world, workload, code = v.code, "{}", v.message);
                     }
+                    // A stream at its declared deadline gets a named WARN
+                    // with its duration; a socket got silence — no line at
+                    // any level, nothing in the metrics but the close frame
+                    // the client saw. The two kinds end the same way and
+                    // both are a declared ending, so both say so.
+                    if matches!(
+                        result.termination,
+                        crate::world::Termination::DeadlineExceeded
+                    ) {
+                        tracing::warn!(
+                            world = %result.world,
+                            workload,
+                            duration_ms = result.duration.as_secs_f64() * 1000.0,
+                            "socket reached its declared timeout; its connection was closed and `close` ran"
+                        );
+                    }
                     if let Some(Err(e)) = &result.outcome {
                         // A client that goes away is how most connections
                         // end — a closed tab, a reconnect, a wifi blip — and
@@ -1643,8 +1661,15 @@ impl HttpHost {
         tokio::spawn(async move {
             match on_upgrade.await {
                 Ok(upgraded) => {
-                    super::socket::pump(upgraded, inbound_tx, outbound_rx, pump_stop, idle_timeout)
-                        .await;
+                    super::socket::pump(
+                        upgraded,
+                        inbound_tx,
+                        outbound_rx,
+                        pump_stop,
+                        pump_draining,
+                        idle_timeout,
+                    )
+                    .await;
                 }
                 Err(e) => {
                     tracing::debug!(error = %e, "websocket upgrade failed");

@@ -1,4 +1,4 @@
-# @sakaladev/usai v0.0.9
+# @sakaladev/usai
 
 > **These pages describe `main`, not the last release.** They are generated
 > from the SDK sources in this repository, so they can document a surface a

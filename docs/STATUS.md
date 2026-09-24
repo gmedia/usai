@@ -242,6 +242,84 @@ capabilities (design), latency histogram in metrics, an API reference page — a
   side, rejections, pool `in use` and `waiting`, what the process costs —
   because totals since boot answer the wrong question during an incident.
 
+- **Round 29 (2026-09-24): upgrading a production service from the release
+  notes alone.** The engineer who owns a service on 0.0.9 — bearer auth,
+  PostgreSQL, a retrying queue consumer, a cron, two services, two
+  `httpClient`s, a CSV export stream, a WebSocket holding per-connection
+  rows, a deploy-gating test suite, Prometheus alerts — who **wrote the
+  upgrade plan from the notes before running anything**, then executed and
+  compared. The round exists because this project's own release notes have
+  been the bug before (round 20), and a false claim in them is the most
+  expensive defect there is. Verdict: *"not Friday, but Tuesday is reachable
+  and the list is short"*, and the list was mostly ours.
+
+  **The worst finding is the sentence I was proudest of.** "An application's
+  identity is stable across a binary swap for the same artifact — verified
+  for this release" was **false for every application that declares a cron**:
+  the SDK's deduplicated `trigger.timeout_ms` stopped being serialized, so
+  the runtime re-serialized an older manifest without it and the *same
+  artifact* hashed differently on each side — which is precisely the split
+  a rolling deployment comparing identities must never see. Narrowed by the
+  round to three minimal apps built by the published 0.0.9 SDK; reproduced
+  here and fixed, and the test that should have caught it — it held a
+  manifest with two HTTP routes — now reads every fixture in its directory,
+  names the JSON pointer that moved, and the fixture that matters is a real
+  0.0.9 artifact declaring **every trigger kind**. Verified end to end: all
+  three apps' identities now match on both binaries.
+
+  **Two changes were filed in the wrong half of the notes** — the document
+  asks to be read as "binary" then "artifact", and an `httpClient` without a
+  `baseUrl` and the `usai_tasks_total` rename both land with the *binary*.
+  An operator planning from the headings takes the outage at the first
+  deployment; this one avoided it only by noticing the contradiction while
+  planning. Worse, the blast radius was understated: a **tenant-configured
+  webhook** whose URL happens to be internal now dead-letters. Both moved.
+
+  **And the release's own observability fix did not cover the failure the
+  release introduces**: 179 consecutive `destination_refused` on an outbound
+  client left `ready` at 1, `requests`, `failures` and `refused` all at 0,
+  and `usai top` saying "ready" — the exact blindness the note claims to
+  have removed, reappearing on the newer path, because both refusal checks
+  returned before any counter was touched. Refusals are now counted and
+  leave the client unready with the code in `detail.lastError`, which is
+  what separates a misconfigured destination from an upstream outage.
+
+  Also fixed: a socket ending at its **own** declared deadline closed
+  `1012 server draining` on a runtime that was serving normally — telling
+  every client the server was restarting, and indistinguishable from the
+  drain bug this release fixed — and wrote no log line at all where a stream
+  writes a named WARN; `maxBodyBytes` on a bodyless workload was refused by
+  the *type* only, and the constructor dropped it on the floor, so
+  `--no-typecheck` made it "accepted and ignored", the phrase the note uses
+  for what it fixed (and the type test's socket case was checking a member
+  that does not exist, so it passed with the option deleted); two auth
+  schemes sharing a name still read as a `guest fault`, because the
+  unwrapping was applied to the warm-up and not to the manifest extraction a
+  phase later; `--artifact` after a command's own argument was swallowed and
+  answered "not a Usai project", the exact error the flag exists to remove;
+  `service restarting` was a WARN on a healthy restart loop while the
+  runbook says `restarting` is what you do *not* alert on; `usai top` showed
+  `—` for a consumer finishing 36 messages a second, because the mean came
+  from the HTTP pipeline alone — every kind now records its world's wall
+  time; a `testApp` suite waiting for a line no scheduler was started to
+  write failed with "0 lines seen" and no hint; and `POST /verify` with no
+  body answered a raw serde `EOF while parsing`. Documentation corrected:
+  the latency-alert instruction asked operators to exclude streaming routes
+  from a series that carries no label to exclude on; `docs/CONTROL-API.md`
+  documented neither new refusal and claimed a rollback handle that is gone
+  in under 100 ms for an idle revision (the handle is the previous artifact
+  directory); "any request carrying `Origin` is refused" is mutating
+  requests only; GUIDE's Multi-tenancy section was a buried `###`; the SDK
+  reference was titled `v0.0.9` directly above the banner saying it is not
+  0.0.9; and the dashboard has twenty panels, not sixteen.
+
+  **Not reproduced**: `usai app <name> --artifact <dir>` parses correctly on
+  its own; the flag is swallowed only once the command has an argument of
+  its own, which is the form now refused with the right hint. **Still
+  open**: every version stamp reads `0.0.9` until the release bumps it, so
+  `builtWith.sdk` on a 0.0.10-built artifact is wrong and the newer-SDK
+  warning cannot fire — the round could not test a single version claim.
+
 - **Round 28 (2026-09-24): a deployer against the control API.** A platform
   engineer writing their company's own control plane — no Kubernetes, a Go
   service driving the runtime over HTTP — who put 104 531 requests through
@@ -743,7 +821,7 @@ capabilities (design), latency histogram in metrics, an API reference page — a
 - **Recorded rather than built, from the Kubernetes round (2026-09-23)**, in
   the order a user would miss them:
   1. ~~**A Grafana dashboard.**~~ — **shipped the same evening**:
-     `docs/deploy/grafana-dashboard.json`, sixteen panels, every query taken
+     `docs/deploy/grafana-dashboard.json`, twenty panels, every query taken
      from `runbooks/metrics.md` and checked against it. Not yet opened in a
      real Grafana.
   2. ~~**Autoscaling on the honest signal.**~~ — **shipped the same evening**:

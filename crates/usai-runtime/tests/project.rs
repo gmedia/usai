@@ -42,42 +42,77 @@ fn out_dir(tag: &str) -> PathBuf {
 /// serialize back byte-identically here — otherwise the same artifact has a
 /// different identity on each side of an upgrade, and a rolling deploy sees
 /// two applications where there is one. That is the shape of the N−1 promise
-/// in `SUPPORTED.md`, and it is quietly broken by adding a `Option<T>` field
-/// without `skip_serializing_if` (0.0.10 nearly did, with `maxBodyBytes`).
+/// in `SUPPORTED.md`.
 ///
-/// The fixture is a real 0.0.9 artifact's manifest: two routes and a
-/// PostgreSQL pool.
+/// It is broken by adding an `Option<T>` field without `skip_serializing_if`
+/// — and, less obviously, by **removing** a field the previous SDK wrote,
+/// which is how 0.0.10 changed the identity of every application declaring a
+/// cron: the deduplicated `trigger.timeout_ms` stopped being serialized, so
+/// the same artifact hashed differently on each side. The fixture that was
+/// supposed to catch it held two HTTP routes and nothing else, which is why
+/// this reads **every** manifest in the directory and why the one that
+/// matters declares every trigger kind the SDK can produce.
 #[test]
 fn a_manifest_from_the_previous_sdk_round_trips_unchanged() {
-    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/manifests/0.0.9-two-routes-and-a-pool.json");
-    let raw = std::fs::read(&path).expect("the 0.0.9 manifest fixture");
-    let manifest: Manifest = serde_json::from_slice(&raw).expect("it parses here");
-    let before: Value = serde_json::from_slice(&raw).expect("as a value");
-    let after: Value =
-        serde_json::from_slice(&serde_json::to_vec(&manifest).expect("it serializes"))
-            .expect("as a value");
-    if before != after {
-        // Name the keys rather than dumping two documents: the failure is
-        // always "this runtime added or dropped a field".
-        let keys = |v: &Value| -> Vec<String> {
-            v["workloads"]
-                .as_array()
-                .map(|ws| {
-                    ws.first()
-                        .and_then(|w| w.as_object())
-                        .map(|o| o.keys().cloned().collect())
-                        .unwrap_or_default()
-                })
-                .unwrap_or_default()
-        };
-        panic!(
-            "a 0.0.9 manifest does not round-trip: workload keys {:?} became {:?}. \
-             A new Option field needs #[serde(default, skip_serializing_if = \"Option::is_none\")], \
-             or every artifact built by the previous SDK changes identity on upgrade.",
-            keys(&before),
-            keys(&after)
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/manifests");
+    let mut fixtures: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .expect("the manifest fixtures")
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "json"))
+        .collect();
+    fixtures.sort();
+    assert!(
+        fixtures.len() >= 2,
+        "the fixtures directory lost its manifests"
+    );
+
+    for path in fixtures {
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let raw = std::fs::read(&path).expect("the manifest fixture");
+        let manifest: Manifest =
+            serde_json::from_slice(&raw).unwrap_or_else(|e| panic!("{name} parses here: {e}"));
+        let before: Value = serde_json::from_slice(&raw).expect("as a value");
+        let after: Value =
+            serde_json::from_slice(&serde_json::to_vec(&manifest).expect("it serializes"))
+                .expect("as a value");
+        let mut differences = Vec::new();
+        diff_json("", &before, &after, &mut differences);
+        assert!(
+            differences.is_empty(),
+            "{name} does not round-trip through this runtime, so every artifact the \
+             previous SDK built changes identity on upgrade:\n  {}\n\
+             A new Option field needs #[serde(default, skip_serializing_if = \"Option::is_none\")]; \
+             a field the previous SDK wrote has to keep being written even when nothing reads it.",
+            differences.join("\n  ")
         );
+    }
+}
+
+/// Every place the two documents differ, as a JSON pointer and what happened
+/// there. The failure is always "this runtime added, dropped or rewrote a
+/// field", and naming the pointer is the difference between a one-line fix
+/// and an afternoon.
+fn diff_json(at: &str, before: &Value, after: &Value, out: &mut Vec<String>) {
+    match (before, after) {
+        (Value::Object(a), Value::Object(b)) => {
+            for (key, value) in a {
+                let at = format!("{at}/{key}");
+                match b.get(key) {
+                    Some(other) => diff_json(&at, value, other, out),
+                    None => out.push(format!("{at}: dropped (was {value})")),
+                }
+            }
+            for key in b.keys().filter(|k| !a.contains_key(*k)) {
+                out.push(format!("{at}/{key}: added (now {})", b[key]));
+            }
+        }
+        (Value::Array(a), Value::Array(b)) if a.len() == b.len() => {
+            for (i, (x, y)) in a.iter().zip(b).enumerate() {
+                diff_json(&format!("{at}/{i}"), x, y, out);
+            }
+        }
+        _ if before != after => out.push(format!("{at}: {before} became {after}")),
+        _ => {}
     }
 }
 
@@ -141,6 +176,71 @@ async fn a_failed_build_leaves_the_previous_artifact_runnable() {
     assert_eq!(after.identity(), good.identity());
     let _ = tokio::fs::remove_file(&bad_entry).await;
     let _ = tokio::fs::remove_dir_all(&out).await;
+}
+
+/// A mistake in `defineApp` is a **declaration** mistake, and it has to read
+/// like one. Declarations are evaluated inside the guest, so every one of
+/// them arrives as `guest fault: Error: …` unless the build unwraps it —
+/// which sends the reader to the engine, the bundle, or the runtime, for a
+/// line they wrote in their own application.
+///
+/// The unwrapping was applied to the validator warm-up and not to the
+/// manifest extraction that runs a phase later, so a resource declared twice
+/// read as itself while two auth schemes sharing a name — thrown by
+/// `describe()` — still carried the prefix the release said it had removed.
+/// The two mistakes are the same kind of mistake.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_declaration_mistake_never_reads_as_a_guest_fault() {
+    let Some(root) = root() else { return };
+    let engine = usai_runtime::engine::from_env(64).unwrap();
+    let config = load_config(engine.as_ref(), &root).await.unwrap();
+
+    // Two modules, each calling its scheme `session` and meaning something
+    // different by it: the default outcome when two teams share a codebase,
+    // not an exotic one. It is thrown by `describe()`, after the warm-up.
+    let entry = root.join(format!("collide-{}.ts", std::process::id()));
+    tokio::fs::write(
+        &entry,
+        r#"import { auth, defineApp, defineModule, http } from "@sakaladev/usai";
+const a = auth.bearer({ name: "session", resolve: async () => ({ id: "a" }) });
+const b = auth.cookie({ name: "session", cookie: "sid", resolve: async () => ({ id: "b" }) });
+const one = defineModule({ name: "one", workloads: [http.get("/a", { auth: a }, async () => ({}))] });
+const two = defineModule({ name: "two", workloads: [http.get("/b", { auth: b }, async () => ({}))] });
+export default defineApp({ name: "collide", modules: [one, two] });
+"#,
+    )
+    .await
+    .unwrap();
+    let out = out_dir("collide");
+    let failure = build(
+        engine.as_ref(),
+        &BuildOptions {
+            out_dir: out.clone(),
+            entry: entry.canonicalize().unwrap(),
+            ..BuildOptions::from_config(&config)
+        },
+    )
+    .await;
+    // Clean up *before* asserting: the entry lives in the fixture project
+    // because it has to resolve `@sakaladev/usai`, so a failing assertion
+    // that panicked first left a stray file in the repository.
+    let error = failure.err().map(|e| e.to_string());
+    let _ = tokio::fs::remove_file(&entry).await;
+    let _ = tokio::fs::remove_dir_all(&out).await;
+    let error = error.expect("two auth schemes with one name built");
+
+    assert!(
+        error.contains(r#"auth scheme "session" is declared twice"#),
+        "the reason is what the declaration says: {error}"
+    );
+    assert!(
+        error.contains(r#"module "one""#) && error.contains(r#"module "two""#),
+        "a conflict names both declarers: {error}"
+    );
+    assert!(
+        !error.contains("guest fault"),
+        "a declaration mistake still reads as a guest fault: {error}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

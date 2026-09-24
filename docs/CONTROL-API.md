@@ -32,7 +32,7 @@ them (lowercase; log lines say `revision active`):
 |---|---|---|
 | `installed` | loaded, resources not yet opened, serving nothing | `activate`, `DELETE` |
 | `active` | the one revision that admits new work | `drain`, or replaced by another `activate` |
-| `draining` | admits no new work; finishing what it has | retires by itself when in-flight reaches 0 (or at the drain bound); `activate` again = rollback |
+| `draining` | admits no new work; finishing what it has | retires by itself when in-flight reaches 0 (or at the drain bound); `activate` again is a rollback **while it lasts** — for an HTTP-only service that is milliseconds (see below) |
 | `retired` | done; removed from the list right after | — |
 
 Revision ids are `rev<n>` in log lines and `n` (a number) in JSON; the path
@@ -247,6 +247,8 @@ Every error is `{ "error": { "code": "<code>", "message": "<text>" } }`:
 | 409 | `too_many_revisions` | `max_revisions` held |
 | 413 | `payload_too_large` | install body > 64 KiB, invoke body > 1 MiB |
 | 422 | `invalid_artifact`, `activation_failed` | the artifact or its activation was refused; the message is the runtime's own diagnostic |
+| 403 | `cross_origin_refused` | a **mutating** request carried an `Origin` header. The control surface is not a browser API, and a bodyless `POST` is a CORS simple request: reachable from any page the operator has open. `GET /health`, `/status` and `/revisions` still answer with an `Origin` present, so a proxy that adds the header does not break a health check |
+| 415 | `unsupported_media_type` | a mutating request's `Content-Type` was `application/x-www-form-urlencoded`, `multipart/form-data` or `text/plain` — a browser's simple set. Use `application/json`, or send no body |
 | 500 | `runtime_error` | anything else — report it |
 
 ## A deploy, end to end
@@ -267,8 +269,20 @@ curl -sf -H "$H" -H 'content-type: application/json' -X POST $C/revisions/$id/ac
 # and a broken activation, because it answers "is *a* revision serving". Send
 # real requests, or difference usai_http_responses_total{class="5xx"} over a
 # window, and roll back on what you see.
-# rollback = activate the previous id while it is still draining (or install it again)
+# rollback: install the previous artifact again and activate it. Re-activating
+# the revision you just replaced works only while something long-running still
+# holds it draining; keep the previous artifact directory mounted.
 ```
+
+**The rollback handle is the previous artifact directory, not the previous
+revision.** A replaced revision drains and then stops being listed — measured
+at under 100 ms for a revision with nothing in flight, which is every
+HTTP-only service between requests — and `activate` on it then answers `404
+unknown_revision`. With an eight-second export still running it stayed
+`draining` and `activate` returned `200`, so the handle is real; it is just
+not one to plan a rollback around. `POST /revisions` with `ifAbsent: true` on
+the previous directory, then `activate`, always works — which is why the
+directory has to still be there.
 
 **Revisions live in the process, and `--artifact` is what a restart serves.**
 The instant your first control-plane deploy succeeds, the running revision
