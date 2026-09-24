@@ -478,9 +478,14 @@ capabilities (design), latency histogram in metrics, an API reference page — a
   supported floor, the 64 MiB technical floor, `1 100 req/s at c=16` — which
   needs a memory limit it had no permission to set: the most load-bearing
   numbers in the document set are the ones an adopter cannot verify. Its
-  suggestion is on the list: a `make verify-envelope` that re-runs the floor
-  cells under a limit and asserts the published numbers, so the envelope is a
-  test and not a dated measurement.
+  suggestion is **built**: `make verify-envelope` re-runs the two floor cells
+  under a cgroup limit and asserts the published numbers — never OOM-killed,
+  ready at the end, zero ceiling hits, and a charged peak inside the headroom
+  claim — so the envelope is a test and not a dated measurement. It needs
+  Docker, a throwaway database and a release build, and says which is missing
+  rather than failing, because a check that cannot run is not a failure. Its
+  skip path is verified; its assertions run on the qualification host once the
+  24 h soak frees it.
 
 - **Round 20 (2026-09-24): an operator upgrading a live 0.0.9 deployment**
   to the current build, with the real 0.0.9 release binary and SDK on one

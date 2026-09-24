@@ -21,6 +21,7 @@ make lint         # cargo clippy --workspace --all-targets -- -D warnings; pnpm 
 make docs         # regenerate docs/sdk (TypeDoc → markdown) from the SDK's doc comments; docs-check fails CI when stale
 make test         # cargo test --workspace; pnpm -r run test
 make build        # release build + tsc for packages
+make verify-envelope  # re-measure SUPPORTED.md's memory floors and assert them (Docker + DATABASE_URL + a release build; skips with a reason otherwise)
 make fmt          # cargo fmt --all + biome format --write (TypeScript/JSON, 100 columns; biome.json)
 ```
 

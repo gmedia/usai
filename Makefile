@@ -1,7 +1,7 @@
 # Usai — production repository task runner.
 # Every target here is documented in CLAUDE.md; keep them in sync.
 
-.PHONY: setup check test build fmt fmt-check lint docs docs-check clean
+.PHONY: setup check test build fmt fmt-check lint docs docs-check verify-envelope clean
 
 setup:
 	pnpm install --frozen-lockfile
@@ -27,6 +27,15 @@ lint:
 # and committed; `docs-check` fails when it is stale.
 docs:
 	pnpm --filter @sakaladev/usai run docs
+
+# The published memory envelope, re-measured and asserted rather than
+# trusted: `SUPPORTED.md`'s 192 MiB supported floor and 64 MiB technical
+# floor are the numbers a deployment is sized on, and they were the ones an
+# adopter could not check (round 21). Needs Docker, a throwaway
+# DATABASE_URL and a release build; says which is missing and exits 0
+# otherwise. Not part of `check`: it takes minutes and wants an idle host.
+verify-envelope:
+	scripts/verify-envelope.sh
 
 docs-check: docs
 	@if [ -n "$$(git status --porcelain docs/sdk)" ]; then git status --short docs/sdk; echo "docs/sdk is stale: run 'make docs' and commit"; exit 1; fi
