@@ -1804,3 +1804,73 @@ async fn publish_joins_the_callers_transaction() {
         "the publish outlived the transaction that rolled back — that is the bug this fixes"
     );
 }
+
+/// **One reconciler, two replicas.** `cron` has had `exclusive: true` since
+/// it shipped and `service` had nothing equivalent, so a loop that compares
+/// desired and actual state — one writer by nature — had to be faked with a
+/// cron tick or a hand-rolled advisory lease.
+///
+/// The lease is a row with a deadline. This exercises it directly, because
+/// the interesting part is what two instances do to each other, not what one
+/// does on its own.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_exclusive_service_lease_is_held_by_one_instance_at_a_time() {
+    let Some(f) = fixture().await else { return };
+    let db = f.manager();
+    use usai_runtime::workloads::services::{claim_lease, release_lease};
+
+    // A long lease, so nothing here depends on wall-clock timing.
+    let ttl = 60_000;
+    assert!(
+        claim_lease(db.as_ref(), "reconcile", "replica-a", ttl)
+            .await
+            .unwrap(),
+        "the first claim has to win"
+    );
+    assert!(
+        !claim_lease(db.as_ref(), "reconcile", "replica-b", ttl)
+            .await
+            .unwrap(),
+        "a live lease belongs to one instance"
+    );
+    // The holder renews by claiming again: that is the same statement, and
+    // it must not be mistaken for a second instance taking over.
+    assert!(
+        claim_lease(db.as_ref(), "reconcile", "replica-a", ttl)
+            .await
+            .unwrap(),
+        "the holder has to be able to renew"
+    );
+
+    // A drain gives it up, and the waiting replica starts at once rather
+    // than a lease-time later.
+    release_lease(db.as_ref(), "reconcile", "replica-a").await;
+    assert!(
+        claim_lease(db.as_ref(), "reconcile", "replica-b", ttl)
+            .await
+            .unwrap(),
+        "a released lease has to be takeable immediately"
+    );
+
+    // And a holder that dies without draining is replaced when its claim
+    // runs out — the takeover time the option documents.
+    assert!(
+        claim_lease(db.as_ref(), "expiring", "replica-a", 1)
+            .await
+            .unwrap()
+    );
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(
+        claim_lease(db.as_ref(), "expiring", "replica-b", ttl)
+            .await
+            .unwrap(),
+        "an expired lease has to be takeable"
+    );
+    // ... and the instance that lost it cannot simply take it back.
+    assert!(
+        !claim_lease(db.as_ref(), "expiring", "replica-a", ttl)
+            .await
+            .unwrap(),
+        "the old holder must not win against a live lease"
+    );
+}

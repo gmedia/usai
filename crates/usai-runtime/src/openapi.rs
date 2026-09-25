@@ -778,7 +778,12 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
                 Trigger::Task => ("task", json!({})),
                 Trigger::Cron { schedule, overlap, .. } => ("cron", json!({ "schedule": schedule, "overlap": format!("{overlap:?}").to_lowercase() })),
                 Trigger::Command => ("command", json!({})),
-                Trigger::Service { restart } => ("service", json!({ "restart": restart.mode })),
+                Trigger::Service {
+                    restart, exclusive, ..
+                } => (
+                    "service",
+                    json!({ "restart": restart.mode, "exclusive": exclusive }),
+                ),
                 Trigger::Queue { topic, concurrency, .. } => ("queue", json!({ "topic": topic, "concurrency": concurrency })),
                 _ => ("workload", json!({})),
             };

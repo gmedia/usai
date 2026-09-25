@@ -52,5 +52,6 @@ Design choices are closed early where reasoning is sufficient. Empirical questio
 | Q16 | Retry / failure semantics | [ADR-0014](adr/0014-no-implicit-retry.md) |
 | Q19 | Readiness vs a shared dependency | [ADR-0022](adr/0022-readiness-does-not-follow-a-shared-dependency.md) — readiness reports resource health rather than following it; `USAI_READY_REQUIRES_RESOURCES=1` couples them for a replica that owns its database |
 | Q20 | Unreachable dependency at activation | [ADR-0023](adr/0023-activation-retries-a-dependency.md) — retried for 60 s by default, then activation fails as before; a missing variable is never retried; `USAI_ACTIVATION_RETRY=0` restores the immediate exit |
+| Q21 | Outbound protocols beyond HTTP | [ADR-0024](adr/0024-outbound-io-is-http.md) — outbound I/O is HTTP; other protocols are reached through a sidecar that exposes them over HTTP, which the documents now name as the supported shape |
 
 Q1–Q9 originate in `GOAL.md` §56; Q11–Q16 were raised during the 2026-09-17 design review.

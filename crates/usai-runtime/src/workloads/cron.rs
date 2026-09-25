@@ -29,6 +29,13 @@ pub const TICKS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS usai_cron_ticks (
   PRIMARY KEY (name, scheduled_at)
 )";
 
+/// What an instance calls itself in a ledger: the host, or `?` when the
+/// system will not say. Shared with the service leases so two claims from
+/// the same replica look the same in both tables.
+pub fn instance_name() -> String {
+    hostname().unwrap_or_else(|| "?".into())
+}
+
 fn hostname() -> Option<String> {
     let mut buf = [0u8; 256];
     // SAFETY: gethostname writes at most `buf.len()` bytes into a buffer we own.

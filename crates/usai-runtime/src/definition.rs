@@ -100,6 +100,26 @@ pub enum Trigger {
     Service {
         #[serde(default)]
         restart: RestartPolicy,
+        /// Exactly one instance of this service runs across every replica:
+        /// each supervisor claims a lease in the database (`usai_service_leases`)
+        /// and only the holder starts the world. The same idea as a cron
+        /// schedule's `exclusive`, for work that is a loop rather than a tick
+        /// — a reconciler comparing desired and actual state wants one
+        /// writer, and two replicas for availability.
+        ///
+        /// Omitted from the manifest when false, like the cron flag: the
+        /// manifest is hashed into the application's identity.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        exclusive: bool,
+        /// The postgres resource the lease lives in (default: the
+        /// application's first).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        database: Option<String>,
+        /// How long a claim is good for. The holder renews every third of
+        /// it, so a replica that dies is replaced within about this long —
+        /// the takeover time, stated rather than emergent. Default 30 s.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lease_ms: Option<u64>,
     },
     Queue {
         topic: String,
@@ -1004,7 +1024,10 @@ mod tests {
         assert_eq!(Trigger::Task.lifetime(), LifetimeFamily::Finite);
         assert_eq!(
             Trigger::Service {
-                restart: RestartPolicy::default()
+                restart: RestartPolicy::default(),
+                exclusive: false,
+                database: None,
+                lease_ms: None,
             }
             .lifetime(),
             LifetimeFamily::Persistent

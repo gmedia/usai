@@ -308,6 +308,27 @@ export interface ServiceOptions<R extends ResourceDeclaration[] = ResourceDeclar
    * until the next revision. `on-failure` restarts after a throw; `always`
    * restarts whenever it ends. Backoff doubles per restart. */
   restart?: { mode: "never" | "on-failure" | "always"; backoffMs?: number; maxRestarts?: number };
+  /** Run **exactly one** of these across every replica.
+   *
+   * Each instance claims a lease in `usai_service_leases`; only the holder
+   * starts the world, and the others report `waiting` — healthy, ready to
+   * take over, neither stopped nor failed. The holder renews every third of
+   * `leaseMs`, so a replica that dies is replaced within about that long;
+   * one that drains gives the lease up and the next starts at once.
+   *
+   * This is what a reconciler wants — a loop comparing desired and actual
+   * state should have one writer, while two replicas exist for availability.
+   * A cron schedule's `exclusive: true` is the same idea for a tick.
+   *
+   * Losing the lease **stops** the world rather than cancelling it, so the
+   * handler sees `ctx.signal` and can finish what it holds. */
+  exclusive?: boolean;
+  /** Where the lease lives; the application's first `postgres` by default.
+   * Only read when `exclusive` is set. */
+  database?: PostgresDeclaration;
+  /** How long a claim is good for, and so roughly the takeover time after a
+   * replica dies without draining. Default 30 000 ms, minimum 3 000. */
+  leaseMs?: number;
   /** How long this service may run before the world is cancelled
    * (`"30m"`, `"4s"`, or milliseconds). **Undeclared there is none**, which
    * is what a service usually wants — it runs until the revision retires.
@@ -359,7 +380,14 @@ export function service(name: string, a: unknown, b?: unknown): Workload {
     kind: "service",
     name,
     ...(options.description ? { description: options.description } : {}),
-    trigger: restart ? { restart } : {},
+    trigger: {
+      ...(restart ? { restart } : {}),
+      // Omitted when not asked for, so an application that uses none of
+      // this hashes exactly as it did before.
+      ...(options.exclusive ? { exclusive: true } : {}),
+      ...(options.database ? { database: options.database.name } : {}),
+      ...(options.leaseMs !== undefined ? { lease_ms: options.leaseMs } : {}),
+    },
     contracts: {},
     errors: [],
     resources: options.resources ?? [],

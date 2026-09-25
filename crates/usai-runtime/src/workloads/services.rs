@@ -16,8 +16,79 @@ use tokio_util::sync::CancellationToken;
 
 use crate::definition::Trigger;
 use crate::ownership::WorldId;
+use crate::resource::ResourceManager;
 use crate::runtime::{Revision, Runtime};
 use crate::world::Termination;
+
+/// The ledger an `exclusive` service claims itself in: one row per service
+/// name, held by one instance at a time.
+///
+/// A row with a deadline rather than a held connection or an advisory lock:
+/// a world never holds a manager here, every operation leases a connection
+/// and gives it back (`docs/LIFECYCLE-CONTRACTS.md` C5), and a lease that
+/// outlives its holder's crash by a stated amount is easier to reason about
+/// than one that depends on when a TCP connection is noticed to be gone.
+pub const LEASES_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS usai_service_leases (
+  name text PRIMARY KEY,
+  holder text NOT NULL,
+  expires_at timestamptz NOT NULL,
+  claimed_at timestamptz NOT NULL DEFAULT now()
+)";
+
+/// Takes or renews the lease on `name`, returning whether this instance
+/// holds it. Free, expired, or already ours — otherwise somebody else's.
+///
+/// One statement, so two instances racing cannot both win: the `WHERE` on
+/// the conflicting row is what decides, inside the same transaction as the
+/// insert.
+pub async fn claim_lease(
+    manager: &dyn ResourceManager,
+    name: &str,
+    holder: &str,
+    lease_ms: u64,
+) -> Result<bool, String> {
+    const CLAIM: &str = "INSERT INTO usai_service_leases (name, holder, expires_at) \
+         VALUES ($1, $2, now() + ($3::bigint * interval '1 millisecond')) \
+         ON CONFLICT (name) DO UPDATE SET holder = EXCLUDED.holder, \
+           expires_at = EXCLUDED.expires_at, claimed_at = now() \
+         WHERE usai_service_leases.holder = EXCLUDED.holder \
+            OR usai_service_leases.expires_at < now()";
+    let params = || {
+        vec![
+            json!(name),
+            json!(holder),
+            json!(i64::try_from(lease_ms).unwrap_or(30_000)),
+        ]
+    };
+    let taken = super::queue::sql(manager, "execute", CLAIM, params()).await;
+    let taken = match taken {
+        Ok(n) => n.as_u64().unwrap_or(0) == 1,
+        // A fresh database has no table yet: prepare it once and claim
+        // again, the way the cron ledger and the queue do.
+        Err(e) if e.contains("usai_service_leases") || e.contains("42P01") => {
+            let _ = super::queue::sql(manager, "execute", LEASES_SCHEMA, vec![]).await;
+            match super::queue::sql(manager, "execute", CLAIM, params()).await {
+                Ok(n) => n.as_u64().unwrap_or(0) == 1,
+                Err(e) => return Err(e),
+            }
+        }
+        Err(e) => return Err(e),
+    };
+    Ok(taken)
+}
+
+/// Gives the lease up so another instance can start at once instead of
+/// waiting out the deadline. Best effort: a drain that cannot reach the
+/// database still ends, and the lease expires on its own.
+pub async fn release_lease(manager: &dyn ResourceManager, name: &str, holder: &str) {
+    let _ = super::queue::sql(
+        manager,
+        "execute",
+        "DELETE FROM usai_service_leases WHERE name = $1 AND holder = $2",
+        vec![json!(name), json!(holder)],
+    )
+    .await;
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -35,6 +106,11 @@ pub enum ServiceState {
     /// service failed under a policy that does not restart. It stays this
     /// way until the next activation.
     Failed,
+    /// `exclusive: true`, and another instance holds the lease. This one is
+    /// healthy and ready to take over; it is not `stopped` (it did not end)
+    /// and not `failed` (nothing is wrong), and on a two-replica deployment
+    /// it is the ordinary state of one of them.
+    Waiting,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -83,10 +159,19 @@ impl Supervisor {
             restarts: AtomicU64::new(0),
         });
         for workload in revision.definition.workloads() {
-            let Trigger::Service { restart } = &workload.trigger else {
+            let Trigger::Service {
+                restart,
+                exclusive,
+                database,
+                lease_ms,
+            } = &workload.trigger
+            else {
                 continue;
             };
             let restart = restart.clone();
+            let exclusive = *exclusive;
+            let lease_database = database.clone();
+            let lease_ms = lease_ms.unwrap_or(30_000).max(3_000);
             let index = supervisor.entries.lock().expect("services poisoned").len();
             supervisor
                 .entries
@@ -106,9 +191,55 @@ impl Supervisor {
             let name = workload.name.clone();
             let handle = tokio::spawn(async move {
                 let mut restarts: u32 = 0;
+                // Who this instance is in the ledger, the way a cron claim
+                // names itself: enough to tell two replicas apart in a log.
+                let holder = format!("{}:{}", super::cron::instance_name(), std::process::id());
                 loop {
                     let Some(runtime) = runtime.upgrade() else {
                         return;
+                    };
+
+                    // Exactly one instance runs an `exclusive` service. The
+                    // others wait here — cheaply, and visibly: `waiting` is
+                    // a state an operator can see rather than a service that
+                    // looks stopped for no reason.
+                    let lease = if exclusive {
+                        let Some(db) =
+                            super::queue::database_for(&revision, lease_database.as_deref())
+                        else {
+                            sup.set(index, ServiceState::Failed, None, Some(
+                                "exclusive: true needs a postgres resource to hold the lease in".into(),
+                            ));
+                            tracing::error!(service = %name, "exclusive service has no database for its lease");
+                            return;
+                        };
+                        loop {
+                            if sup.stop.is_cancelled() || sup.cancel.is_cancelled() {
+                                return;
+                            }
+                            match claim_lease(db.as_ref(), &name, &holder, lease_ms).await {
+                                Ok(true) => break,
+                                Ok(false) => {
+                                    sup.set(index, ServiceState::Waiting, None, None);
+                                }
+                                // A flaky database must not make every
+                                // replica decide it is the one: not holding
+                                // the lease is the safe answer, so wait.
+                                Err(e) => {
+                                    sup.set(index, ServiceState::Waiting, None, Some(e.clone()));
+                                    tracing::warn!(service = %name, error = %e, "could not claim the service lease");
+                                }
+                            }
+                            tokio::select! {
+                                _ = tokio::time::sleep(Duration::from_millis(lease_ms / 3)) => {}
+                                _ = sup.stop.cancelled() => return,
+                                _ = sup.cancel.cancelled() => return,
+                            }
+                        }
+                        tracing::info!(service = %name, holder, lease_ms, "service lease held");
+                        Some(db)
+                    } else {
+                        None
                     };
                     let admission = match runtime.admit_in_flight(&revision, &id) {
                         Ok(a) => a,
@@ -121,14 +252,59 @@ impl Supervisor {
                     let input = super::input(&revision, "service", json!({}));
                     sup.set(index, ServiceState::Running, None, None);
                     tracing::info!(service = %name, restarts, "service starting");
+                    // While the world runs, the lease is renewed every
+                    // third of its life. If a renew fails — the row was
+                    // taken because this instance stalled past the deadline,
+                    // or the database is gone — the world is **stopped**,
+                    // not cancelled: an exclusive service is exclusive
+                    // because something else must not be writing at the same
+                    // time, so losing the claim has to end the work, and it
+                    // ends it the way a drain does so `close`-shaped cleanup
+                    // still runs.
+                    let world_stop = sup.stop.child_token();
+                    let renewer = lease.clone().map(|db| {
+                        let name = name.clone();
+                        let holder = holder.clone();
+                        let stop = world_stop.clone();
+                        tokio::spawn(async move {
+                            loop {
+                                tokio::select! {
+                                    _ = tokio::time::sleep(Duration::from_millis(lease_ms / 3)) => {}
+                                    _ = stop.cancelled() => return,
+                                }
+                                match claim_lease(db.as_ref(), &name, &holder, lease_ms).await {
+                                    Ok(true) => {}
+                                    Ok(false) => {
+                                        tracing::warn!(service = %name, "service lease lost to another instance; stopping");
+                                        stop.cancel();
+                                        return;
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(service = %name, error = %e, "could not renew the service lease; stopping");
+                                        stop.cancel();
+                                        return;
+                                    }
+                                }
+                            }
+                        })
+                    });
                     let result = runtime
                         .execute_with_stop(
                             admission,
                             input,
                             sup.cancel.child_token(),
-                            Some(sup.stop.child_token()),
+                            Some(world_stop.clone()),
                         )
                         .await;
+                    if let Some(renewer) = renewer {
+                        renewer.abort();
+                    }
+                    if let Some(db) = &lease {
+                        // Give it up rather than let it expire: the replica
+                        // waiting to take over starts now instead of a
+                        // lease-time later.
+                        release_lease(db.as_ref(), &name, &holder).await;
+                    }
                     drop(runtime);
                     let (state, error, world) = match result {
                         Ok(r) => {
