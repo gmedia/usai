@@ -1752,3 +1752,55 @@ async fn a_migration_can_opt_out_of_its_transaction() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// **A transactional outbox.** `publish` commits on its own connection, so
+/// "store the detection and enqueue its evaluation" was two facts: a request
+/// that failed after publishing had enqueued work for something that does not
+/// exist, and every retry enqueued it again. A downstream deployment lives
+/// with that today by committing first and publishing after, with an
+/// idempotent consumer.
+///
+/// `publish(topic, msg, { tx })` puts the row in the caller's transaction, so
+/// it commits or rolls back with the writes beside it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn publish_joins_the_callers_transaction() {
+    let Some(f) = fixture().await else { return };
+    let (_, w) = f
+        .runtime
+        .active()
+        .unwrap()
+        .definition
+        .workload("http:POST /orders/tx")
+        .map(|(i, w)| (i, w.id.clone()))
+        .expect("the outbox route");
+    let post = |order: &str, rollback: bool| {
+        let w = w.clone();
+        let rt = std::sync::Arc::clone(&f.runtime);
+        let input = json!({ "kind": "http", "request": { "method": "POST", "path": "/orders/tx", "url": "/orders/tx", "params": {}, "query": {}, "headers": {},
+            "body": { "json": { "orderId": order, "rollback": rollback } } } });
+        async move { rt.invoke(&w, input).await.unwrap() }
+    };
+    let depth = || async {
+        let (status, body) = f
+            .http("GET", "/queue-depth/:topic", json!({ "topic": "orders" }))
+            .await;
+        assert_eq!(status, 200, "{body}");
+        body["n"].as_u64().unwrap()
+    };
+
+    // Committed: the message is there. (This also prepares the queue schema,
+    // which the runtime creates on the first publish.)
+    let r = post("tx-kept", false).await;
+    assert!(matches!(r.termination, Termination::Completed), "{r:?}");
+    assert_eq!(depth().await, 1, "a committed publish has to leave its row");
+
+    // Rolled back: the message goes with the transaction. Before this, the
+    // row was already committed on another connection and stayed.
+    let r = post("tx-dropped", true).await;
+    assert!(matches!(r.termination, Termination::Completed), "{r:?}");
+    assert_eq!(
+        depth().await,
+        1,
+        "the publish outlived the transaction that rolled back — that is the bug this fixes"
+    );
+}

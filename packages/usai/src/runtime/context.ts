@@ -197,9 +197,22 @@ function cacheLocalHandle(name: string): CacheLocalHandle {
 const sqlParams = (params: readonly unknown[]): unknown[] =>
   params.map((p) => (p instanceof Uint8Array ? bytes.toBase64(p) : p));
 
+/** What `publish({ tx })` reads off the executor: which resource, and which
+ * open transaction on it. Carried as a hidden property rather than asked of
+ * the caller, so there is no way to hand `publish` a lease that belongs to a
+ * different transaction. */
+export interface TxMarker {
+  resource: string;
+  lease: number;
+}
+const TX_MARKER = "__usai_tx";
+export const txMarkerOf = (executor: unknown): TxMarker | undefined =>
+  (executor as Record<string, TxMarker | undefined>)?.[TX_MARKER];
+
 function sqlExecutor(name: string, lease?: number): SqlExecutor {
   const extra = lease === undefined ? {} : { lease };
   return {
+    ...(lease === undefined ? {} : { [TX_MARKER]: { resource: name, lease } }),
     query: (sql, params = []) =>
       resourceCall(name, "query", { sql, params: sqlParams(params), ...extra }) as Promise<never[]>,
     one: (sql, params = []) =>
@@ -356,13 +369,25 @@ export function makeBase(
         op("task.dispatch", { name: task.name, input: input[0] ?? null }),
     },
     queue: {
-      publish: (topic, message, options) =>
-        op("queue.publish", {
+      publish: (topic, message, options) => {
+        const tx = options?.tx === undefined ? undefined : txMarkerOf(options.tx);
+        if (options?.tx !== undefined && tx === undefined)
+          throw new Error(
+            "queue.publish({ tx }) wants the executor `transaction(async (tx) => …)` gave you; " +
+              "the resource handle itself is not a transaction, and publishing through it would " +
+              "commit on its own connection — which is the thing `tx` is for avoiding",
+          );
+        return op("queue.publish", {
           topic,
           message: message ?? null,
           ...(options?.delayMs !== undefined ? { delayMs: options.delayMs } : {}),
           ...(options?.database ? { database: options.database.name } : {}),
-        }),
+          // The transaction decides the database: one transaction is one
+          // connection to one database, so naming another would be a
+          // contradiction rather than a choice.
+          ...(tx === undefined ? {} : { database: tx.resource, lease: tx.lease }),
+        });
+      },
     },
     signal: makeSignal(),
     env,

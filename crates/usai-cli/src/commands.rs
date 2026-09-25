@@ -1581,7 +1581,14 @@ fn print_migration_status(status: Vec<db::MigrationStatus>, json: bool, check: b
     if json {
         println!("{}", serde_json::to_string_pretty(&status)?);
     } else {
-        println!("{:<40} {:<18} applied", "migration", "checksum");
+        // The source column is the answer to "why does this one run first":
+        // migrations are one history for one database, ordered by file name
+        // across every module, so the numbering is a project-wide decision
+        // and the owner of each file has to be visible.
+        println!(
+            "{:<34} {:<24} {:<18} applied",
+            "migration", "from", "checksum"
+        );
         for s in &status {
             let applied = s.applied_at.as_deref().unwrap_or("pending");
             let note = if s.path.is_none() {
@@ -1594,7 +1601,27 @@ fn print_migration_status(status: Vec<db::MigrationStatus>, json: bool, check: b
             } else {
                 String::new()
             };
-            println!("{:<40} {:<18} {applied}{note}", s.name, s.checksum);
+            // Where the file *is*, not which glob found it: the glob is
+            // usually the project's catch-all, and the directory is what
+            // says which module owns this step of the one history.
+            let from = s
+                .path
+                .as_deref()
+                .and_then(|p| p.parent())
+                .map(|d| {
+                    let text = d.to_string_lossy();
+                    // Absolute paths are noise in a table; keep the tail
+                    // from `src/`, which is where a module's name lives.
+                    match text.find("/src/") {
+                        Some(i) => text[i + 1..].to_owned(),
+                        None => text.rsplit('/').next().unwrap_or(&text).to_owned(),
+                    }
+                })
+                .unwrap_or_else(|| s.source.clone());
+            println!(
+                "{:<34} {:<24} {:<18} {applied}{note}",
+                s.name, from, s.checksum
+            );
         }
     }
     let drifted: Vec<&str> = status

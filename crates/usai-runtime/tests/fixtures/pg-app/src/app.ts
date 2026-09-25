@@ -306,6 +306,36 @@ export const publish = http.post(
   },
   async (ctx) => ctx.queue.publish("orders", ctx.body),
 );
+/** Publish inside the caller's transaction — a transactional outbox. With
+ * `rollback` the transaction throws after publishing, so the queue row must
+ * go with it. */
+export const publishInTx = http.post(
+  "/orders/tx",
+  {
+    body: z.object({ orderId: z.string(), rollback: z.boolean().optional() }),
+    resources: [db],
+  },
+  async (ctx) => {
+    try {
+      return await d(ctx).transaction(async (tx) => {
+        await tx.execute("select 1");
+        const published = await ctx.queue.publish("orders", { orderId: ctx.body.orderId }, { tx });
+        if (ctx.body.rollback) throw new Error("rolled back on purpose");
+        return published;
+      });
+    } catch (e) {
+      if (ctx.body.rollback) return { id: "rolled-back" };
+      throw e;
+    }
+  },
+);
+export const queueDepth = http.get("/queue-depth/:topic", { resources: [db] }, async (ctx) => {
+  const row = await d(ctx).one<{ n: string }>(
+    "select count(*)::text as n from usai_queue where topic = $1 and payload->>'orderId' like $2",
+    [ctx.params["topic"]!, "tx-%"],
+  );
+  return { n: Number(row?.n ?? 0) };
+});
 export const seenCount = http.get("/seen/:key", { resources: [seen] }, async (ctx) => ({
   n: await (ctx.resources["seen"] as Seen).get(ctx.params["key"]!),
 }));
@@ -340,6 +370,8 @@ export default defineApp({
     orders,
     publish,
     seenCount,
+    publishInTx,
+    queueDepth,
   ],
   resources: [db, seen],
   env: env({ DATABASE_URL: env.url() }),

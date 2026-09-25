@@ -283,6 +283,17 @@ pub fn database(
 #[serde(rename_all = "camelCase")]
 pub struct MigrationStatus {
     pub name: String,
+    /// Which glob found this file — `usai.config.ts` or `module <name>`.
+    ///
+    /// Migrations are **one history for one database**, ordered by file name
+    /// across every module, because a module is organisation and not
+    /// isolation: a foreign key from one module's table to another's is
+    /// ordinary, and two histories could not express it. That makes the
+    /// numbering a project-wide decision, and this column is what makes the
+    /// resulting order legible — without it, "why does this run before that"
+    /// has no answer on the screen.
+    #[serde(default)]
+    pub source: String,
     /// The file's checksum as it is on disk now.
     pub checksum: String,
     pub applied_at: Option<String>,
@@ -320,6 +331,7 @@ pub async fn status(
         .iter()
         .map(|f| MigrationStatus {
             name: f.name.clone(),
+            source: f.source.clone(),
             checksum: f.checksum.clone(),
             applied_at: applied
                 .iter()
@@ -336,6 +348,8 @@ pub async fn status(
         if !files.iter().any(|f| f.name == a.name) {
             out.push(MigrationStatus {
                 name: a.name,
+                // Applied, and no file on disk claims it any more.
+                source: "(gone from the project)".to_owned(),
                 checksum: a.checksum.clone(),
                 applied_at: Some(a.applied_at),
                 applied_checksum: Some(a.checksum),

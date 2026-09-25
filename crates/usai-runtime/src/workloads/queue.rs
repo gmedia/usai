@@ -751,6 +751,13 @@ struct PublishRequest {
     database: Option<String>,
     #[serde(default)]
     delay_ms: Option<u64>,
+    /// The open transaction to insert through, when the publisher is inside
+    /// one (`publish(topic, msg, { tx })`). The row then commits or rolls
+    /// back with the writes beside it — a transactional outbox — instead of
+    /// committing on its own connection and enqueueing work for something
+    /// the request may still fail to store.
+    #[serde(default)]
+    lease: Option<u64>,
 }
 
 impl OpHandler for PublishHandler {
@@ -773,13 +780,20 @@ impl OpHandler for PublishHandler {
                 return OpOutcome::err("queue_unavailable", 503, e);
             }
             let insert = || {
+                let mut args = json!({
+                    "sql": "INSERT INTO usai_queue (topic, payload, available_at, request_id) VALUES ($1, $2::jsonb, now() + ($3::bigint * interval '1 millisecond'), $4) RETURNING id",
+                    "params": [request.topic, request.message, request.delay_ms.unwrap_or(0), ctx.request_id.as_deref()],
+                });
+                // With a lease the statement goes to the connection that
+                // transaction pinned, so the row is part of it. The resource
+                // routes it; nothing here needs to know how.
+                if let Some(lease) = request.lease {
+                    args["lease"] = json!(lease);
+                }
                 manager.call(
                     ResourceCall {
                         method: "one".into(),
-                        args: json!({
-                            "sql": "INSERT INTO usai_queue (topic, payload, available_at, request_id) VALUES ($1, $2::jsonb, now() + ($3::bigint * interval '1 millisecond'), $4) RETURNING id",
-                            "params": [request.topic, request.message, request.delay_ms.unwrap_or(0), ctx.request_id.as_deref()],
-                        }),
+                        args,
                     },
                     ctx.cancel.clone(),
                 )

@@ -11,7 +11,7 @@ import type {
   WorkloadPolicies,
 } from "./declarations.ts";
 import { refuseBodyBound } from "./declarations.ts";
-import type { PostgresDeclaration } from "./resources.ts";
+import type { SqlExecutor, PostgresDeclaration } from "./resources.ts";
 import type { BaseContext } from "./runtime/context.ts";
 
 /** Retry policy of a queue consumer.
@@ -164,10 +164,32 @@ export interface QueueHandle {
    * must satisfy the consumer's `message` schema or it is dead-lettered on
    * arrival, so adding a new event means extending that schema first.
    * Declare the edge with {@link publishes} so the reference links the two.
-   * `delayMs` holds the message back; `database` targets another queue. */
+   * `delayMs` holds the message back; `database` targets another queue.
+   *
+   * **`tx` makes the message part of your transaction** — a transactional
+   * outbox. Pass the executor `sql.transaction(async (tx) => …)` gave you
+   * and the `usai_queue` row commits or rolls back with the writes beside
+   * it, so "store the detection and enqueue its evaluation" is one fact
+   * rather than two. Without it, `publish` commits on its own connection:
+   * a request that fails after publishing has enqueued work for something
+   * that does not exist, and a retried request enqueues it again — which
+   * is why a consumer has to be idempotent either way, but not why it
+   * should have to clean up after work that never happened.
+   *
+   * The transaction must be on the **same** resource as the queue, since
+   * one transaction is one connection to one database; a mismatch is
+   * refused rather than silently committing on its own.
+   *
+   * ```ts
+   * await ctx.resources.db.transaction(async (tx) => {
+   *   const { id } = await tx.one("insert into detections (...) values (...) returning id");
+   *   await ctx.queue.publish("evaluate", { detectionId: id }, { tx });
+   * });
+   * ```
+   */
   publish(
     topic: string,
     message: unknown,
-    options?: { delayMs?: number; database?: PostgresDeclaration },
+    options?: { delayMs?: number; database?: PostgresDeclaration; tx?: SqlExecutor },
   ): Promise<{ id: string }>;
 }
