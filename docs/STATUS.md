@@ -129,6 +129,28 @@ bookkeeping, 0.02 create.
 
 ## In progress
 
+- **0.0.11 came entirely from a downstream team using Usai in production**
+  (2026-09-25). They kept a list of what the runtime could not do for the
+  service they were building, under a rule worth copying — *a fix has to be
+  generic; project-specific hacks are not allowed* — and seven entries came
+  back. Six were gaps and one was a decision nobody had written down:
+  `httpClient` could not trust a private CA while `postgres` could; `publish`
+  could not join the caller's transaction; `env` could not check a list of
+  CIDRs at activation; `service` had no `exclusive` where `cron` has had one
+  since it shipped; the npm wrapper died with `EXDEV` on a CI runner whose
+  workspace and `/tmp` are different mounts; migration order across modules
+  was undocumented; and outbound I/O being HTTP-only was true and unstated
+  (ADR-0024).
+  
+  **This is not P7 and must not be counted as it** — it is this project's own
+  organisation, not an outside developer, and the people writing the list can
+  ask the people writing the runtime. What it *is*, and what twenty-nine
+  persona rounds were not, is a real service whose deadlines are not ours
+  finding out what the documents do not cover. Every one of the seven was a
+  thing no round had found, which says something about the difference between
+  reading a runtime and depending on one.
+
+
 - ~~**A 24 h soak with a bounded dataset**~~ — **done, and it settles the
   question** (2026-09-23 16:49 → 2026-09-24 16:49 UTC, VM 47):
   **124 471 721 requests, 0 × 5xx, 0 × 503**, mean 4.39 ms, and **1 416
