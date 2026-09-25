@@ -1,0 +1,7 @@
+[package]
+name = "idlemeasure"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+wasmtime = { path = "../wasmtime/crates/wasmtime", default-features = false, features = ["cranelift", "runtime", "std", "pooling-allocator", "wat"] }

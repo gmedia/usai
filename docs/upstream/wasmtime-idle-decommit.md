@@ -108,6 +108,14 @@ smaller, testable, and leaves the policy where the knowledge is. Either way
 the embedder's side here is one call from the idle path plus a
 `usai_pool_memory_released_total` counter.
 
+## Measured
+
+Done 2026-09-25, against the PR, with a standalone program kept beside this
+file (`idle-decommit-measurement/`): 64 slots at `keep_resident` 8 MiB give
+back **256 MiB** of RSS (266.9 → 10.9 MiB), the control holds it, and the
+first instantiation afterwards pays **~2 ms** re-faulting before the slot is
+warm again. The full table is in that directory's README.
+
 ## What to measure before and after
 
 The same cells as P8E, on the qualification VM: a c=32 burst, then 300 s idle,
