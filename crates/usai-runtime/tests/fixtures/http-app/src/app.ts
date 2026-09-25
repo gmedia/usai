@@ -203,6 +203,19 @@ export const slow = http.get("/slow", { timeout: "200ms" }, async (ctx) => {
   return { ok: true };
 });
 export const noContent = http.delete("/users/:id", {}, async () => http.noContent());
+
+// A module's environment contract is the application's, so the world must
+// parse it the way it parses the application's own. It did not: only
+// `app.env` was resolved, so a module's `env.int()` arrived as a string and
+// its `env.list()` never became an array.
+export const moduleEnv = http.get("/module-env", {}, async (ctx) => ({
+  pageSize: ctx.env.USERS_PAGE_SIZE,
+  pageSizeType: typeof ctx.env.USERS_PAGE_SIZE,
+  prefixes: ctx.env.USERS_PREFIXES,
+  prefixesIsArray: Array.isArray(ctx.env.USERS_PREFIXES),
+  // The application's own declaration still wins and still parses.
+  greeting: ctx.env.GREETING,
+}));
 // Using a resource without declaring it is named, not `undefined`.
 export const undeclared = http.get("/undeclared", {}, async (ctx) => ({
   n: await (ctx.resources["hits"] as { get(k: string): Promise<unknown> }).get("x"),
@@ -856,7 +869,16 @@ export default defineApp({
   // Set on every application response; a handler's own header wins.
   headers: { "X-Content-Type-Options": "nosniff", "x-frame-options": "DENY" },
   description: "The HTTP test fixture: one of everything the pipeline can serve.",
-  modules: [defineModule({ name: "users", workloads: [getUser, createUser, noContent] })],
+  modules: [
+    defineModule({
+      name: "users",
+      env: env({
+        USERS_PAGE_SIZE: env.optional(env.int()),
+        USERS_PREFIXES: env.optional(env.list(env.cidr())),
+      }),
+      workloads: [getUser, createUser, noContent, moduleEnv],
+    }),
+  ],
   workloads: [
     counter,
     persistent,

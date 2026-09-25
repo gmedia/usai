@@ -64,6 +64,10 @@ async fn start() -> Option<Server> {
         |name| match name {
             "GREETING" => Some("hi".to_owned()),
             "UPSTREAM_URL" => Some(upstream().to_owned()),
+            // Declared by the fixture's `users` module, not by the
+            // application: the world has to parse those too.
+            "USERS_PAGE_SIZE" => Some("25".to_owned()),
+            "USERS_PREFIXES" => Some("10.0.0.0/8, 192.168.0.0/16".to_owned()),
             _ => None,
         },
     );
@@ -243,6 +247,30 @@ async fn contract_endpoint_end_to_end() {
         body["name"], "user page 1",
         "query default applied in-world"
     );
+    s.baseline().await;
+    s.shutdown.cancel();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_modules_environment_reaches_the_world_parsed() {
+    // `describe()` merges a module's environment contract into the
+    // application's, so the host validates it at activation. The world
+    // resolved only the application's own fields, so a module's `env.int()`
+    // arrived as the raw string and its `env.list()` never became an array:
+    // the host checked the value and then handed the handler the text.
+    let Some(s) = start().await else { return };
+    let (status, body) = s.get("/module-env").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["pageSize"], 25, "env.int() in a module: {body}");
+    assert_eq!(body["pageSizeType"], "number");
+    assert_eq!(
+        body["prefixes"],
+        json!(["10.0.0.0/8", "192.168.0.0/16"]),
+        "env.list(env.cidr()) in a module, items trimmed: {body}"
+    );
+    assert_eq!(body["prefixesIsArray"], true);
+    // The application's own declaration still resolves alongside it.
+    assert_eq!(body["greeting"], "hi");
     s.baseline().await;
     s.shutdown.cancel();
 }
@@ -1162,7 +1190,7 @@ async fn manifest_describes_the_application() {
         usai_runtime::definition::Trigger::Http { raw: true, .. }
     ));
     assert_eq!(m.resources[0].kind, "cache.local");
-    assert_eq!(m.env[0].name, "GREETING");
+    assert!(m.env.iter().any(|e| e.name == "GREETING"));
     assert!(rev.definition.workload("task:send-receipt").is_some());
     s.shutdown.cancel();
 }

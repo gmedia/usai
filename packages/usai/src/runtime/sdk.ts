@@ -11,11 +11,11 @@ import { type ResponseHeaders, isHttpResponse, isRawResponse } from "../http.ts"
 import { type AnySchema, validateWith } from "../schema.ts";
 import { type BaseContext, makeBase, op, setRequestId } from "./context.ts";
 import { describe } from "../manifest.ts";
-import { resolveEnv } from "../env.ts";
+import { type EnvDeclaration, type EnvField, type EnvValue, resolveEnv } from "../env.ts";
 
 interface HttpInput {
   kind: "http";
-  env: Record<string, string | number | boolean | undefined>;
+  env: Record<string, EnvValue>;
   request: {
     method: string;
     path: string;
@@ -32,28 +32,28 @@ interface HttpInput {
 
 interface TaskInput {
   kind: "task";
-  env: Record<string, string | number | boolean | undefined>;
+  env: Record<string, EnvValue>;
   input: unknown;
   /** The id of the request whose world invoked or dispatched this task. */
   requestId?: string | null;
 }
 interface CronInput {
   kind: "cron";
-  env: Record<string, string | number | boolean | undefined>;
+  env: Record<string, EnvValue>;
   scheduledAt: string;
 }
 interface CommandInput {
   kind: "command";
-  env: Record<string, string | number | boolean | undefined>;
+  env: Record<string, EnvValue>;
   args: string[];
 }
 interface ServiceInput {
   kind: "service";
-  env: Record<string, string | number | boolean | undefined>;
+  env: Record<string, EnvValue>;
 }
 interface QueueInput {
   kind: "queue";
-  env: Record<string, string | number | boolean | undefined>;
+  env: Record<string, EnvValue>;
   message: unknown;
   id: string;
   attempt: number;
@@ -62,12 +62,12 @@ interface QueueInput {
 }
 interface StreamInput {
   kind: "stream";
-  env: Record<string, string | number | boolean | undefined>;
+  env: Record<string, EnvValue>;
   request: HttpInput["request"];
 }
 interface SocketInput {
   kind: "socket";
-  env: Record<string, string | number | boolean | undefined>;
+  env: Record<string, EnvValue>;
   request: Omit<HttpInput["request"], "body">;
 }
 type Input =
@@ -594,6 +594,31 @@ function workloadsOf(app: AppDeclaration): ReturnType<typeof flatten> {
   return f;
 }
 
+// A module's environment contract **is** the application's — `describe()`
+// merges the two so a value a module needs fails activation like the
+// application's own — and the world has to read them the same way. Only
+// `app.env` was resolved here, so a module declaring `env.int()` saw its
+// value as a string and `env.list()` saw no array at all: the host had
+// checked the value and then handed the handler the raw text. Merged once
+// per application, in the snapshot, never per world (C13).
+const mergedEnv = new WeakMap<AppDeclaration, EnvDeclaration<Record<string, EnvField<unknown>>>>();
+function envOf(app: AppDeclaration): EnvDeclaration<Record<string, EnvField<unknown>>> | undefined {
+  const cached = mergedEnv.get(app);
+  if (cached) return cached;
+  const fields: Record<string, EnvField<unknown>> = {};
+  // Same precedence as `describe()`: the first module to declare a name owns
+  // it (two modules declaring it differently is a build error), and the
+  // application's own declaration wins over every module's.
+  for (const m of workloadsOf(app).modules)
+    for (const [name, field] of Object.entries(m.env?.fields ?? {}))
+      if (!(name in fields)) fields[name] = field;
+  for (const [name, field] of Object.entries(app.env?.fields ?? {})) fields[name] = field;
+  if (Object.keys(fields).length === 0) return undefined;
+  const declaration: EnvDeclaration<Record<string, EnvField<unknown>>> = { __usai: "env", fields };
+  mergedEnv.set(app, declaration);
+  return declaration;
+}
+
 export async function invoke(
   app: AppDeclaration,
   index: number,
@@ -607,12 +632,13 @@ export async function invoke(
   mark("dispatch", t0);
   // ctx.env carries typed values when the application declared them;
   // the host already validated presence and shape at activation.
-  if (app.env) {
+  const declared = envOf(app);
+  if (declared) {
     const t = ledger !== null ? now() : 0;
     input.env = resolveEnv(
-      app.env,
+      declared,
       input.env as Record<string, string | undefined>,
-    ) as unknown as Record<string, string | number | boolean | undefined>;
+    ) as unknown as Record<string, EnvValue>;
     mark("env", t);
   }
   const { workload } = entry;

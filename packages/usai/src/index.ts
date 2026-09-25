@@ -125,7 +125,7 @@ export { password } from "./password.ts";
 export { errors, UsaiError, isUsaiError } from "./errors.ts";
 export type { UsaiErrorShape } from "./errors.ts";
 export { env, resolveEnv } from "./env.ts";
-export type { EnvValues, EnvField, EnvDeclaration, EnvKind } from "./env.ts";
+export type { EnvValues, EnvValue, EnvField, EnvDeclaration, EnvKind } from "./env.ts";
 export type { StandardSchemaV1 } from "./schema.ts";
 export type { BaseContext, UsaiAbortSignal, TaskHandle, ConsoleLike } from "./runtime/context.ts";
 export { describe, MANIFEST_VERSION, GUEST_ABI } from "./manifest.ts";

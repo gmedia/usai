@@ -8,6 +8,22 @@ runtime of that version and the next (`SUPPORTED.md` → Versioning). Within
 GitHub releases carry the auto-generated commit list as well; this file is
 the human summary.
 
+## 0.0.12 — Unreleased
+
+- **A module's environment reaches the world parsed.** `defineModule({ env })`
+  has always been merged into the application's contract, so the host
+  validates a module's variables at activation and refuses a deployment that
+  is missing one. Inside the world only the application's own fields were
+  resolved, and resolving them *replaced* the whole bag: in an application
+  that declares any `env` of its own, every module-declared variable was
+  `undefined` in `ctx.env` — the host had checked the value and then handed
+  the handler nothing. An application with no `env` block of its own was
+  unaffected, which is why this survived: the module's values arrived as raw
+  text and `env.string()` was right by accident. Worth re-reading any
+  `ctx.env.X ?? fallback` on a module variable, because the fallback is what
+  ran. `ctx.env` now also carries arrays (`env.list`), so its type is
+  `Record<string, EnvValue>`.
+
 ## 0.0.11 — 2026-09-25
 
 Everything here comes from **one downstream deployment** building a real

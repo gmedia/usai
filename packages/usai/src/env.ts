@@ -8,6 +8,18 @@
  */
 export type EnvKind = "string" | "url" | "secret" | "int" | "bool" | "enum" | "cidr" | "list";
 
+/** What a parsed environment value can be: the scalars, an `env.list`'s
+ * array of them, or `undefined` for an absent optional.
+ *
+ * @category Environment
+ */
+export type EnvValue =
+  | string
+  | number
+  | boolean
+  | readonly (string | number | boolean)[]
+  | undefined;
+
 /** One declared variable: kind, whether it is required, and its parser.
  *
  * @category Environment

@@ -167,6 +167,7 @@ Vocabulary used throughout:
 | Name | Description |
 | ------ | ------ |
 | [EnvKind](type-aliases/EnvKind.md) | The kinds an environment field can have; `secret` is never printed by `inspect`. |
+| [EnvValue](type-aliases/EnvValue.md) | What a parsed environment value can be: the scalars, an `env.list`'s array of them, or `undefined` for an absent optional. |
 | [EnvField](interfaces/EnvField.md) | One declared variable: kind, whether it is required, and its parser. |
 | [EnvDeclaration](interfaces/EnvDeclaration.md) | The application's environment contract (`defineApp({ env })`). |
 | [EnvValues](type-aliases/EnvValues.md) | The typed values of a declaration: `EnvValues<typeof spec>`, where `spec` is what `env({...})` returned (a bare field map works too). |
