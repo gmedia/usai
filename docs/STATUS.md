@@ -2,7 +2,7 @@
 
 > Where the project is right now. Update this in the same change that moves it.
 
-**Last updated:** 2026-09-23
+**Last updated:** 2026-09-25
 
 ## Where things stand
 
@@ -149,6 +149,23 @@ bookkeeping, 0.02 create.
   finding out what the documents do not cover. Every one of the seven was a
   thing no round had found, which says something about the difference between
   reading a runtime and depending on one.
+
+  **Adopting the fixes found an eighth, and it was the worst of the set**
+  (2026-09-25, in 0.0.12). Taking `env.list(env.cidr())` into the module that
+  asked for it surfaced that a module's environment was validated at
+  activation and then **dropped on the way into the world**: an application
+  that declares any `env({})` of its own saw every module-declared variable
+  as `undefined` in `ctx.env`, because resolving the application's fields
+  replaced the whole bag. An application with no `env` block of its own was
+  unaffected — nothing was resolved, the raw text came through, and
+  `env.string()` was right by accident — which is how it survived
+  `defineModule({ env })` shipping, its own tests, and thirty persona rounds:
+  every one of them checked the *manifest*. Downstream the value was read as
+  `raw ?? ""`, so a policy's protected scope had been empty in every world
+  since the module was written, and shadow mode meant nothing acted on it.
+  The gap is not that a bug existed; it is that "the manifest says so" was
+  treated as evidence that the world agrees. The test added with the fix
+  reads what the handler actually receives.
 
 
 - ~~**A 24 h soak with a bounded dataset**~~ — **done, and it settles the

@@ -8,7 +8,7 @@ runtime of that version and the next (`SUPPORTED.md` → Versioning). Within
 GitHub releases carry the auto-generated commit list as well; this file is
 the human summary.
 
-## 0.0.12 — Unreleased
+## 0.0.12 — 2026-09-25
 
 - **A module's environment reaches the world parsed.** `defineModule({ env })`
   has always been merged into the application's contract, so the host
