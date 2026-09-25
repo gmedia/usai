@@ -34,6 +34,27 @@ use crate::definition::ResourceSpec;
 
 pub struct HttpClientProvider;
 
+/// `tls: { caFile, clientCertFile, clientKeyFile }`.
+///
+/// A private certificate authority and a client certificate are ordinary
+/// requirements on a management network — talking to a router's REST API, a
+/// mutually-authenticated internal service — and `postgres` has had
+/// `tls.caFile` since it shipped, so an `httpClient` that could not do it
+/// was an asymmetry rather than a decision. There is deliberately no
+/// "skip verification": every option here *adds* trust, and a deployment
+/// that wants none of it changes nothing.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HttpTlsConfig {
+    /// PEM added to the built-in roots (Mozilla's bundle), not replacing
+    /// them — the same rule `postgres` follows.
+    ca_file: Option<String>,
+    /// PEM certificate presented to the server (mTLS). Needs `clientKeyFile`.
+    client_cert_file: Option<String>,
+    /// PEM private key for `clientCertFile`.
+    client_key_file: Option<String>,
+}
+
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct HttpClientConfig {
@@ -53,6 +74,11 @@ struct HttpClientConfig {
     headers: BTreeMap<String, String>,
     /// Environment variable whose value becomes `Authorization: Bearer …`.
     bearer_token_env: Option<String>,
+    /// Trust and identity for TLS, mirroring `postgres`'s `tls`. Verification
+    /// is always on: this adds a root to trust and a certificate to present,
+    /// it never turns checking off.
+    #[serde(default)]
+    tls: HttpTlsConfig,
     /// Let a client **without** a `baseUrl` reach loopback, private,
     /// link-local and unique-local addresses. Off by default: the only
     /// reason such a client exists is that the destination comes from the
@@ -134,11 +160,64 @@ impl ResourceProvider for HttpClientProvider {
             headers.insert(reqwest::header::AUTHORIZATION, value);
         }
         let timeout = Duration::from_millis(config.timeout_ms.unwrap_or(10_000).max(1));
-        let client = reqwest::Client::builder()
+        let mut builder = reqwest::Client::builder()
             .default_headers(headers)
             .timeout(timeout)
             .user_agent(format!("usai/{}", crate::definition::RUNTIME_VERSION))
-            .redirect(reqwest::redirect::Policy::limited(5))
+            .redirect(reqwest::redirect::Policy::limited(5));
+
+        // Certificates are read **here**, at activation, so a path that is
+        // wrong or a file that is not PEM stops the deployment instead of
+        // surfacing as a failed request hours later (`GOAL.md` §32).
+        let read = |what: &str, path: &str| -> Result<Vec<u8>, ResourceError> {
+            std::fs::read(path).map_err(|e| {
+                ResourceError::Startup(spec.name.clone(), format!("tls.{what} {path:?}: {e}"))
+            })
+        };
+        if let Some(path) = &config.tls.ca_file {
+            let pem = read("caFile", path)?;
+            // A bundle is ordinary for a private CA: take every certificate
+            // in the file rather than only the first.
+            let certs = reqwest::Certificate::from_pem_bundle(&pem).map_err(|e| {
+                ResourceError::Startup(spec.name.clone(), format!("tls.caFile {path:?}: {e}"))
+            })?;
+            if certs.is_empty() {
+                return Err(ResourceError::Startup(
+                    spec.name.clone(),
+                    format!("tls.caFile {path:?}: no certificate in this file"),
+                ));
+            }
+            for cert in certs {
+                builder = builder.add_root_certificate(cert);
+            }
+        }
+        match (&config.tls.client_cert_file, &config.tls.client_key_file) {
+            (Some(cert), Some(key)) => {
+                // `Identity::from_pem` wants one PEM holding both.
+                let mut pem = read("clientCertFile", cert)?;
+                pem.push(b'\n');
+                pem.extend_from_slice(&read("clientKeyFile", key)?);
+                let identity = reqwest::Identity::from_pem(&pem).map_err(|e| {
+                    ResourceError::Startup(
+                        spec.name.clone(),
+                        format!("tls.clientCertFile {cert:?} with tls.clientKeyFile {key:?}: {e}"),
+                    )
+                })?;
+                builder = builder.identity(identity);
+            }
+            (None, None) => {}
+            (cert, key) => {
+                return Err(ResourceError::Startup(
+                    spec.name.clone(),
+                    format!(
+                        "tls.clientCertFile and tls.clientKeyFile go together; got {} and {}",
+                        cert.as_deref().unwrap_or("nothing"),
+                        key.as_deref().unwrap_or("nothing")
+                    ),
+                ));
+            }
+        }
+        let client = builder
             .build()
             .map_err(|e| ResourceError::Startup(spec.name.clone(), e.to_string()))?;
         let max = config.max_concurrent.unwrap_or(32).max(1);

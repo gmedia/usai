@@ -58,6 +58,10 @@ wasmtime = { workspace = true }
 libc = "0.2"
 tracing-subscriber = { workspace = true }
 tokio-tungstenite = { workspace = true }
+# A TLS *server* for the outbound-TLS tests: proving a private CA is really
+# used needs something that presents a certificate signed by it.
+rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
 
 [features]
 # Exposes `fuzz_surface` for the coverage-guided targets in `fuzz/`.

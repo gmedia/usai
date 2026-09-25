@@ -231,6 +231,28 @@ export interface HttpClientOptions {
   headers?: Record<string, string>;
   /** Environment variable whose value is sent as `Authorization: Bearer …`. */
   bearerTokenEnv?: string;
+  /** Trust and identity for TLS, the same shape `postgres` takes.
+   *
+   * A private certificate authority and a client certificate are ordinary on
+   * a management network — a router's REST API, a mutually-authenticated
+   * internal service — and `postgres` has had `tls.caFile` since it shipped,
+   * so an `httpClient` that could not do it was an asymmetry rather than a
+   * decision.
+   *
+   * There is deliberately no way to skip verification: every option here
+   * **adds** trust. `caFile` is added to the built-in roots rather than
+   * replacing them, and `clientCertFile`/`clientKeyFile` go together. All of
+   * them are read at **activation**, so a wrong path or a file that is not
+   * PEM stops the deployment instead of surfacing as a failed request later.
+   *
+   * ```ts
+   * const routers = httpClient("routers", {
+   *   baseUrlEnv: "ROUTEROS_URL",
+   *   tls: { caFile: "/etc/usai/router-ca.pem" },
+   * });
+   * ```
+   */
+  tls?: { caFile?: string; clientCertFile?: string; clientKeyFile?: string };
   /** Let a client **without** a `baseUrl` reach loopback, private,
    * link-local and unique-local addresses. Off by default.
    *
@@ -292,6 +314,14 @@ export function httpClient<const N extends string>(
   if (options.maxConcurrent !== undefined) config["maxConcurrent"] = options.maxConcurrent;
   if (options.headers !== undefined) config["headers"] = options.headers;
   if (options.bearerTokenEnv !== undefined) config["bearerTokenEnv"] = options.bearerTokenEnv;
+  if (options.tls !== undefined) {
+    const tls: Record<string, string> = {};
+    if (options.tls.caFile !== undefined) tls["caFile"] = options.tls.caFile;
+    if (options.tls.clientCertFile !== undefined)
+      tls["clientCertFile"] = options.tls.clientCertFile;
+    if (options.tls.clientKeyFile !== undefined) tls["clientKeyFile"] = options.tls.clientKeyFile;
+    if (Object.keys(tls).length > 0) config["tls"] = tls;
+  }
   if (options.allowPrivateNetwork !== undefined)
     config["allowPrivateNetwork"] = options.allowPrivateNetwork;
   return {
