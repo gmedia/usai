@@ -597,7 +597,9 @@ export default defineApp({
 });
 ```
 
-Missing or malformed values fail **activation**, not the first request. Inside a world, `ctx.env.WORKERS` is a number (`ctx.env` is typed `Record<string, string | number | boolean | undefined>`; narrow per key, or `const e = ctx.env as EnvValues<typeof spec>`).
+Constructors: `env.string()`, `env.url()`, `env.secret()` (never printed by `inspect`), `env.int()`, `env.bool()`, `env.enum([...])`, `env.cidr()` (an address **with** a prefix length — `10.0.0.0/8`; a bare address is refused, because the difference is the whole of what a prefix policy does), `env.list(inner, { separator = "," })` (each item checked as `inner`, trimmed, and an empty item — a trailing separator — is an error), and `env.optional(field)`.
+
+Missing or malformed values fail **activation**, not the first request — and that is why the *kind* is what goes in the manifest rather than a parser: the host checks every value before the revision serves, item by item for a list, naming which item is wrong. `env.list(env.cidr())` on a policy's prefix list turns a typo into a refused deployment instead of a queue message that retries and dead-letters. Inside a world, `ctx.env.WORKERS` is a number (`ctx.env` is typed `Record<string, string | number | boolean | undefined>`; narrow per key, or `const e = ctx.env as EnvValues<typeof spec>`).
 
 Where values come from: the process environment. For local work, `usai dev`, `usai test`, `usai db …`, `usai app/cron/task …` also read `<root>/.env` (`KEY=VALUE`, `#` comments, quotes; never overriding what the shell set); `usai dev` re-reads it on every rebuild, so editing `.env` and saving takes effect without a restart. `usai run` does **not** read `.env` — production configuration belongs to the deployment environment (its error says so when a variable is missing).
 

@@ -433,3 +433,44 @@ test("a body bound on a kind that has no body fails the build, not the type only
   const manifest = describe(defineApp({ name: "b", workloads: [route] }));
   assert.equal(manifest.workloads[0]?.maxBodyBytes, 4096);
 });
+
+test("a list of CIDRs is declared so the host can refuse a bad one at activation", () => {
+  // A downstream deployment configures policy prefixes as comma-separated
+  // CIDR lists. As a `string` field, a malformed entry reached the first
+  // queue message that read it and surfaced as retries and a dead letter —
+  // never as a refused deployment. The *kind* is what the host can check,
+  // so the list and its item kind go in the manifest.
+  const app = defineApp({
+    name: "policy",
+    env: env({
+      PROTECTED: env.list(env.cidr()),
+      PORTS: env.list(env.int(), { separator: ";" }),
+    }),
+    workloads: [http.get("/x", {}, async () => ({}))],
+  });
+  const manifest = describe(app);
+  const byName = Object.fromEntries(manifest.env.map((e) => [e.name, e]));
+  assert.equal(byName["PROTECTED"]?.kind, "list");
+  assert.equal(byName["PROTECTED"]?.items, "cidr");
+  assert.equal(byName["PROTECTED"]?.separator, ",");
+  assert.equal(byName["PORTS"]?.separator, ";");
+
+  // And the in-world parse agrees with what the host will have checked.
+  const prefixes = env.list(env.cidr());
+  assert.deepEqual(prefixes.parse("10.0.0.0/8, 192.168.0.0/16"), ["10.0.0.0/8", "192.168.0.0/16"]);
+  assert.throws(() => prefixes.parse("10.0.0.0/8,nope"), /item 2/);
+  assert.throws(() => prefixes.parse("10.0.0.0/8,"), /item 2.*empty/);
+  assert.throws(() => env.cidr().parse("10.0.0.0"), /prefix length/);
+
+  // A field that declares no list carries neither key, so an application
+  // that uses none hashes exactly as it did before.
+  const plain = describe(
+    defineApp({
+      name: "plain",
+      env: env({ A: env.string() }),
+      workloads: [http.get("/y", {}, async () => ({}))],
+    }),
+  );
+  assert.equal("items" in plain.env[0]!, false);
+  assert.equal("separator" in plain.env[0]!, false);
+});

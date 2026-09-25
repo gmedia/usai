@@ -19,7 +19,7 @@ the environment contract. Mirrors the runtime's `Manifest` exactly.
 | <a id="workloads"></a> `workloads` | `ManifestWorkload`[] | - |
 | <a id="resources"></a> `resources` | \{ `name`: `string`; `kind`: `string`; `module?`: `string`; `config`: `Record`\<`string`, `unknown`\>; `env`: `string`[]; \}[] | - |
 | <a id="auth"></a> `auth` | \{ `name`: `string`; `scheme`: `string`; `header?`: `string`; `description?`: `string`; `credential?`: \{ `in`: `"header"` \| `"cookie"` \| `"query"`; `name`: `string`; \}; \}[] | - |
-| <a id="env"></a> `env` | \{ `name`: `string`; `kind`: `string`; `required`: `boolean`; `values`: `string`[]; \}[] | - |
+| <a id="env"></a> `env` | \{ `name`: `string`; `kind`: `string`; `required`: `boolean`; `values`: `string`[]; `items?`: `string`; `separator?`: `string`; \}[] | - |
 | <a id="codesha256"></a> `codeSha256` | `string` | - |
 | <a id="builtwith"></a> `builtWith?` | \{ `sdk?`: `string`; `runtime?`: `string`; `abi?`: `number`; \} | - |
 | `builtWith.sdk?` | `string` | - |

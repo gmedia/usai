@@ -98,7 +98,14 @@ export interface Manifest {
     description?: string;
     credential?: { in: "header" | "cookie" | "query"; name: string };
   }>;
-  env: Array<{ name: string; kind: string; required: boolean; values: string[] }>;
+  env: Array<{
+    name: string;
+    kind: string;
+    required: boolean;
+    values: string[];
+    items?: string;
+    separator?: string;
+  }>;
   codeSha256: string;
   builtWith?: { sdk?: string; runtime?: string; abi?: number };
 }
@@ -209,8 +216,19 @@ function describeField(f: EnvField<unknown>): {
   kind: string;
   required: boolean;
   values: string[];
+  items?: string;
+  separator?: string;
 } {
-  return { kind: f.kind, required: f.required, values: [...(f.values ?? [])] };
+  return {
+    kind: f.kind,
+    required: f.required,
+    values: [...(f.values ?? [])],
+    // Omitted when absent: the manifest is hashed into the application's
+    // identity, so a key that always appeared would change the identity of
+    // every application that declares no list.
+    ...(f.items === undefined ? {} : { items: f.items }),
+    ...(f.separator === undefined ? {} : { separator: f.separator }),
+  };
 }
 
 export function describe(app: AppDeclaration): Manifest {
@@ -309,6 +327,8 @@ export function describe(app: AppDeclaration): Manifest {
         kind: f.kind,
         required: f.required,
         values: [...(f.values ?? [])],
+        ...(f.items === undefined ? {} : { items: f.items }),
+        ...(f.separator === undefined ? {} : { separator: f.separator }),
       }))
     : [];
   return {

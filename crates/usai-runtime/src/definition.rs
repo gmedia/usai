@@ -385,12 +385,22 @@ pub struct ResourceSpec {
 #[serde(rename_all = "camelCase")]
 pub struct EnvRequirement {
     pub name: String,
-    /// `string`, `url`, `secret`, `int`, `bool`, `enum`
+    /// `string`, `url`, `secret`, `int`, `bool`, `enum`, `cidr`, `list`
     pub kind: String,
     #[serde(default)]
     pub required: bool,
     #[serde(default)]
     pub values: Vec<String>,
+    /// `list` only: the kind each item must be.
+    ///
+    /// Omitted when absent, like `maxBodyBytes`: the manifest is hashed into
+    /// the application's identity, so a field that always appeared would
+    /// change the identity of every application that does not use it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub items: Option<String>,
+    /// `list` only: what separates the items (default `,`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub separator: Option<String>,
 }
 
 /// Checks a resolved value against its declared kind. Presence is checked
@@ -398,19 +408,68 @@ pub struct EnvRequirement {
 /// than the first request (`GOAL.md` §32).
 pub fn validate_env(requirement: &EnvRequirement, value: &str) -> Result<(), String> {
     let problem = match requirement.kind.as_str() {
+        "list" => {
+            // Each item by the item kind, and the index of the first bad one:
+            // "expected a CIDR" about a 40-item list is not an answer.
+            let separator = requirement.separator.as_deref().unwrap_or(",");
+            let items = requirement.items.as_deref().unwrap_or("string");
+            let mut problem = None;
+            for (i, item) in value.split(separator).enumerate() {
+                let item = item.trim();
+                if item.is_empty() {
+                    problem = Some(format!("item {} is empty", i + 1));
+                    break;
+                }
+                if let Some(detail) = value_problem(items, item, &requirement.values) {
+                    problem = Some(format!("item {} ({item:?}): {detail}", i + 1));
+                    break;
+                }
+            }
+            problem
+        }
+        kind => value_problem(kind, value, &requirement.values),
+    };
+    match problem {
+        Some(detail) => Err(format!("{}: {detail}", requirement.name)),
+        None => Ok(()),
+    }
+}
+
+/// What is wrong with one value of one kind, or `None`.
+fn value_problem(kind: &str, value: &str, values: &[String]) -> Option<String> {
+    match kind {
         "url" if !value.contains("://") => Some("expected a URL".to_owned()),
         "int" if value.parse::<i64>().is_err() => Some("expected an integer".to_owned()),
         "bool" if !matches!(value, "true" | "false" | "1" | "0") => {
             Some("expected true/false".to_owned())
         }
-        "enum" if !requirement.values.iter().any(|v| v == value) => {
-            Some(format!("expected one of {}", requirement.values.join(", ")))
+        "enum" if !values.iter().any(|v| v == value) => {
+            Some(format!("expected one of {}", values.join(", ")))
         }
+        "cidr" => cidr_problem(value),
         _ => None,
+    }
+}
+
+/// An address with a prefix length, checked with the standard library —
+/// `10.0.0.0/8`, `2001:db8::/32`. A bare address is **not** a CIDR: a policy
+/// that means one host should say `/32`, because the difference between
+/// `10.0.0.0` and `10.0.0.0/8` is the whole of what the policy does.
+fn cidr_problem(value: &str) -> Option<String> {
+    let Some((address, prefix)) = value.split_once('/') else {
+        return Some("expected an address with a prefix length, like 10.0.0.0/8".to_owned());
     };
-    match problem {
-        Some(detail) => Err(format!("{}: {detail}", requirement.name)),
-        None => Ok(()),
+    let address: std::net::IpAddr = match address.parse() {
+        Ok(a) => a,
+        Err(e) => return Some(format!("{address:?} is not an IP address: {e}")),
+    };
+    let bits = if address.is_ipv4() { 32 } else { 128 };
+    match prefix.parse::<u8>() {
+        Ok(p) if u32::from(p) <= bits => None,
+        Ok(p) => Some(format!(
+            "prefix /{p} is longer than the {bits} bits of this address"
+        )),
+        Err(_) => Some(format!("prefix {prefix:?} is not a number")),
     }
 }
 
@@ -954,5 +1013,79 @@ mod tests {
             Trigger::Socket { path: "/c".into() }.lifetime(),
             LifetimeFamily::ConnectionBound
         );
+    }
+}
+
+#[cfg(test)]
+mod env_validation_tests {
+    use super::*;
+
+    fn req(kind: &str, items: Option<&str>) -> EnvRequirement {
+        EnvRequirement {
+            name: "POLICY_PROTECTED_PREFIXES".into(),
+            kind: kind.into(),
+            required: true,
+            values: Vec::new(),
+            items: items.map(str::to_owned),
+            separator: None,
+        }
+    }
+
+    /// A comma-separated list of CIDRs is an ordinary way to configure a
+    /// policy, and it used to be a `string` here: malformed entries reached
+    /// the first message that read them and surfaced as retries and then a
+    /// dead letter, rather than as a refused deployment. The kinds the host
+    /// understands are the ones that can fail **activation** (`GOAL.md` §32).
+    #[test]
+    fn a_list_of_cidrs_is_checked_item_by_item_at_activation() {
+        let field = req("list", Some("cidr"));
+        assert!(validate_env(&field, "10.0.0.0/8,192.168.0.0/16,2001:db8::/32").is_ok());
+        // Whitespace around items is ordinary in a configuration file.
+        assert!(validate_env(&field, "10.0.0.0/8, 192.168.0.0/16").is_ok());
+
+        // The message names which item, because "expected a CIDR" about a
+        // forty-item list is not an answer.
+        let e = validate_env(&field, "10.0.0.0/8,nope,192.168.0.0/16").unwrap_err();
+        assert!(e.contains("item 2") && e.contains("nope"), "{e}");
+        let e = validate_env(&field, "10.0.0.0/8,10.0.0.0/33").unwrap_err();
+        assert!(e.contains("item 2") && e.contains("33"), "{e}");
+        // A trailing separator is a mistake, not an empty item to ignore.
+        let e = validate_env(&field, "10.0.0.0/8,").unwrap_err();
+        assert!(e.contains("item 2") && e.contains("empty"), "{e}");
+    }
+
+    /// A bare address is not a CIDR. The difference between `10.0.0.0` and
+    /// `10.0.0.0/8` is the whole of what a prefix policy does, so a missing
+    /// prefix is refused rather than assumed to be a host route.
+    #[test]
+    fn a_cidr_needs_its_prefix_length() {
+        let field = req("cidr", None);
+        assert!(validate_env(&field, "10.0.0.0/8").is_ok());
+        assert!(validate_env(&field, "2001:db8::/32").is_ok());
+        assert!(validate_env(&field, "10.0.0.1/32").is_ok());
+        for bad in [
+            "10.0.0.0",
+            "10.0.0.0/",
+            "10.0.0.0/8/8",
+            "not-an-ip/8",
+            "10.0.0.0/x",
+        ] {
+            assert!(validate_env(&field, bad).is_err(), "{bad} was accepted");
+        }
+        // An IPv4 prefix may not exceed 32 even though IPv6 allows 128.
+        assert!(validate_env(&field, "10.0.0.0/64").is_err());
+        assert!(validate_env(&field, "2001:db8::/64").is_ok());
+    }
+
+    /// A list of anything else works the same way, so this is not a
+    /// CIDR-shaped feature with a CIDR-shaped hole beside it.
+    #[test]
+    fn a_list_takes_any_item_kind() {
+        assert!(validate_env(&req("list", Some("int")), "1,2,3").is_ok());
+        assert!(validate_env(&req("list", Some("int")), "1,two").is_err());
+        assert!(validate_env(&req("list", Some("url")), "https://a.test,https://b.test").is_ok());
+        assert!(validate_env(&req("list", Some("url")), "https://a.test,b.test").is_err());
+        // No item kind: every item is a string, so anything non-empty passes.
+        assert!(validate_env(&req("list", None), "a,b,c").is_ok());
     }
 }

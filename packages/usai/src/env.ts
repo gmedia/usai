@@ -6,7 +6,7 @@
  *
  * @category Environment
  */
-export type EnvKind = "string" | "url" | "secret" | "int" | "bool" | "enum";
+export type EnvKind = "string" | "url" | "secret" | "int" | "bool" | "enum" | "cidr" | "list";
 
 /** One declared variable: kind, whether it is required, and its parser.
  *
@@ -17,6 +17,12 @@ export interface EnvField<T> {
   readonly kind: EnvKind;
   readonly required: boolean;
   readonly values?: readonly string[];
+  /** `list` only: the kind each item must be, so the **host** can check them
+   * at activation. A parser that only runs in a world cannot fail a
+   * deployment, which is the whole point of declaring the variable. */
+  readonly items?: EnvKind;
+  /** `list` only: what separates the items (default `,`). */
+  readonly separator?: string;
   readonly parse: (raw: string) => T;
   readonly _type?: T;
 }
@@ -26,10 +32,17 @@ function field<T>(
   parse: (raw: string) => T,
   required = true,
   values?: readonly string[],
+  extra?: { items?: EnvKind; separator?: string },
 ): EnvField<T> {
-  return values === undefined
-    ? { __usai: "env-field", kind, required, parse }
-    : { __usai: "env-field", kind, required, parse, values };
+  return {
+    __usai: "env-field",
+    kind,
+    required,
+    parse,
+    ...(values === undefined ? {} : { values }),
+    ...(extra?.items === undefined ? {} : { items: extra.items }),
+    ...(extra?.separator === undefined ? {} : { separator: extra.separator }),
+  };
 }
 
 /** The application's environment contract (`defineApp({ env })`).
@@ -83,6 +96,8 @@ export type EnvValues<
  * | `env.int()` | `number` | an integer |
  * | `env.bool()` | `boolean` | `true`/`1`, `false`/`0` |
  * | `env.enum([...])` | the union | one of the listed values |
+ * | `env.cidr()` | `string` | an address with a prefix length (`10.0.0.0/8`) |
+ * | `env.list(inner)` | `T[]` | a separated list,each item checked as `inner` |
  * | `env.optional(field)` | `T \| undefined` | absent or empty → `undefined` |
  *
  * @example
@@ -136,6 +151,52 @@ env.enum = <const V extends readonly string[]>(values: V): EnvField<V[number]> =
     true,
     values,
   );
+/** An address with a prefix length: `10.0.0.0/8`, `2001:db8::/32`.
+ *
+ * A bare address is **not** accepted. A policy that means one host should
+ * say `/32`, because the difference between `10.0.0.0` and `10.0.0.0/8` is
+ * the whole of what the policy does. */
+env.cidr = (): EnvField<string> =>
+  field("cidr", (raw) => {
+    const [address, prefix, ...rest] = raw.split("/");
+    if (address === undefined || prefix === undefined || rest.length > 0)
+      throw new Error(
+        `expected an address with a prefix length, like 10.0.0.0/8, got ${JSON.stringify(raw)}`,
+      );
+    return raw;
+  });
+/** A separated list, each item checked as `inner`.
+ *
+ * The item kind is in the manifest, so the **host** validates every item at
+ * activation and a malformed entry stops the deployment — a parser that only
+ * runs inside a world would surface it as a failing request instead, which
+ * is what declaring the variable is meant to prevent.
+ *
+ * ```ts
+ * env({ PROTECTED_PREFIXES: env.list(env.cidr()) })   // "10.0.0.0/8,192.168.0.0/16"
+ * ```
+ *
+ * Items are trimmed and an empty item is an error, so a trailing separator
+ * is caught rather than silently dropped. */
+env.list = <T>(inner: EnvField<T>, options?: { separator?: string }): EnvField<T[]> => {
+  const separator = options?.separator ?? ",";
+  return field(
+    "list",
+    (raw) =>
+      raw.split(separator).map((item, i) => {
+        const value = item.trim();
+        if (value === "") throw new Error(`item ${i + 1} is empty`);
+        try {
+          return inner.parse(value);
+        } catch (e) {
+          throw new Error(`item ${i + 1} (${JSON.stringify(value)}): ${(e as Error).message}`);
+        }
+      }),
+    true,
+    inner.values,
+    { items: inner.kind, separator },
+  );
+};
 /** Make a field optional: absent or empty gives `undefined`. */
 env.optional = <T>(inner: EnvField<T>): EnvField<T | undefined> =>
   inner.values === undefined

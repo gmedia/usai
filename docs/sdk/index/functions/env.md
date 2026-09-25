@@ -28,6 +28,8 @@ Field constructors (all required unless wrapped in `env.optional`):
 | `env.int()` | `number` | an integer |
 | `env.bool()` | `boolean` | `true`/`1`, `false`/`0` |
 | `env.enum([...])` | the union | one of the listed values |
+| `env.cidr()` | `string` | an address with a prefix length (`10.0.0.0/8`) |
+| `env.list(inner)` | `T[]` | a separated list,each item checked as `inner` |
 | `env.optional(field)` | `T \| undefined` | absent or empty → `undefined` |
 
 ## Type Parameters
