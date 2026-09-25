@@ -8,6 +8,90 @@ runtime of that version and the next (`SUPPORTED.md` → Versioning). Within
 GitHub releases carry the auto-generated commit list as well; this file is
 the human summary.
 
+## 0.0.11 — 2026-09-25
+
+Everything here comes from **one downstream deployment** building a real
+service on 0.0.10 and keeping a list of what the runtime could not do for it,
+with the rule that a fix has to be generic — no project-shaped holes. Seven
+entries; six were gaps and one was a decision nobody had written down.
+
+**Upgrading**: additive. Nothing changes for an application that uses none of
+it, and the manifest hashes the same — a new optional field is omitted when
+absent, so an artifact built by 0.0.10 keeps its identity.
+
+- **`httpClient` can trust a private CA and present a client certificate.**
+  `tls: { caFile, clientCertFile, clientKeyFile }`, the shape `postgres` has
+  taken since it shipped — the two were asymmetric, so calling a router's
+  REST API or a mutually-authenticated internal service meant plain HTTP,
+  turning verification off, or a TLS-terminating proxy in the path. There is
+  deliberately no way to skip verification: every option **adds** trust, and
+  `caFile` is added to the built-in roots rather than replacing them.
+  Certificates are read at **activation**, so a wrong path stops the
+  deployment instead of surfacing as a failed request later, and
+  `clientCertFile` without `clientKeyFile` is refused rather than quietly
+  ignored.
+
+- **A queue message can join the transaction that produced it.**
+  `ctx.queue.publish(topic, message, { tx })` — a transactional outbox. Pass
+  the executor `transaction(async (tx) => …)` gave you and the `usai_queue`
+  row commits or rolls back with the writes beside it, so "store the thing
+  and enqueue the work" is one fact. Before, a request that failed after
+  publishing had enqueued work for a row that was never written, and every
+  retry enqueued it again. It does **not** make delivery exactly-once — the
+  consumer still has to be idempotent — it removes work enqueued for
+  something that does not exist. The transaction must be on the same resource
+  as the queue, and passing the resource handle instead of the executor is
+  refused.
+
+- **`env.list(inner)` and `env.cidr()`**, checked by the host at activation.
+  A comma-separated list of CIDRs is an ordinary way to configure a policy
+  and it had to be a `string`: a malformed entry reached the first message
+  that read it and surfaced as retries and a dead letter, never as a refused
+  deployment. The *kind* is what the host can check, so the list and its item
+  kind go in the manifest and the failure names **which item** is wrong. A
+  bare address is refused — `10.0.0.0` and `10.0.0.0/8` differ by the whole
+  of what a prefix policy does. `env.list(env.int())` and the rest come free.
+
+- **`service({ exclusive: true })` runs exactly one across every replica.**
+  `cron` has had `exclusive` since it shipped; a reconciliation loop — one
+  writer by nature, on a deployment that wants two replicas for availability
+  — had nothing. Each instance claims a lease in `usai_service_leases`; only
+  the holder starts the world and the others report **`waiting`**, a state an
+  operator can read: healthy, ready to take over, neither stopped nor failed.
+  The holder renews every third of `leaseMs` (30 s by default), so the
+  takeover time is stated rather than emergent, and a drain releases the
+  lease so the next replica starts at once. **Losing the lease stops the
+  world rather than cancelling it**, so the handler sees `ctx.signal` and can
+  finish what it holds — an exclusive service is exclusive because something
+  else must not be writing at the same time.
+
+- **The npm wrapper no longer fails across filesystems.** The first `usai` of
+  a CI job died with `EXDEV: cross-device link not permitted` on a runner
+  whose workspace and `/tmp` are different mounts — it unpacked into the
+  system temp directory and `rename(2)` cannot cross one. It unpacks inside
+  the cache now, which keeps the rename (and so the atomic install) instead
+  of falling back to a copy.
+
+- **Migration order across modules is documented, and visible.** It is
+  global, by file name, and that is a decision: a module is organisation and
+  not isolation, one database has one history, and a foreign key from one
+  module's table to another's is ordinary. Number them project-wide.
+  `usai db status` now prints the directory each file came from, so the order
+  and its owners read at a glance.
+
+- **Outbound I/O is HTTP, and the documents say so** (ADR-0024). There is no
+  gRPC client, no raw TCP and no outbound WebSocket; other protocols are
+  reached through a process of your own that exposes them over HTTP, which is
+  now the named shape rather than an undocumented gap. A protocol needs a
+  lifetime rule before it gets an API (ADR-0013), and a streaming RPC is
+  connection-bound work *leaving* a world — a shape this runtime has no
+  answer for yet. The ADR records what would reopen it.
+
+### Decisions
+
+- [ADR-0024](docs/adr/0024-outbound-io-is-http.md) — outbound I/O is HTTP,
+  and a sidecar is the sanctioned shape for the rest. Closes Q21.
+
 ## 0.0.10 — 2026-09-25
 
 **If you are upgrading**, read this in two halves: what changes when the
