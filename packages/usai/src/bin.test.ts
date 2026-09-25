@@ -9,6 +9,8 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
@@ -129,6 +131,60 @@ test("first use fetches the release tarball, verifies its SHA-256, caches the bi
   } finally {
     server.closeAllConnections();
     server.close();
+  }
+});
+
+test("the fetch works when the temp directory is on another filesystem", async () => {
+  // A GitLab runner whose workspace and `/tmp` are different mounts, or any
+  // machine with `/tmp` on tmpfs and the cache on disk, used to fail on the
+  // very first `usai` of a job: the wrapper unpacked into the system temp
+  // directory and `rename(2)` cannot cross a mount.
+  //
+  //   usai: EXDEV: cross-device link not permitted, rename
+  //         '/tmp/usai-tqKFqp/…/usai' -> '/builds/…/.cache/usai/0.0.10/usai'
+  //
+  // The rename is worth keeping — it is what makes the install atomic — so
+  // the work directory moved next to the target instead.
+  const triple = target(process.platform, process.arch);
+  if (!triple || spawnSync("tar", ["--version"]).status !== 0) return;
+  // tmpfs, and a different filesystem from the repository's own.
+  const otherFs = "/dev/shm";
+  if (!existsSync(otherFs)) return;
+  const dir = mkdtempSync(join(tmpdir(), "usai-exdev-"));
+  const name = `usai-v${version}-${triple}`;
+  mkdirSync(join(dir, name));
+  writeFileSync(join(dir, name, "usai"), `#!/bin/sh\necho "usai ${version} (fetched)"\n`);
+  execFileSync("tar", ["-C", dir, "-czf", join(dir, `${name}.tar.gz`), name]);
+  const tarball = readFileSync(join(dir, `${name}.tar.gz`));
+  const sum = createHash("sha256").update(tarball).digest("hex");
+  const server = createServer((req, res) => {
+    if (req.url?.endsWith(".sha256")) res.end(`${sum}  ${name}.tar.gz\n`);
+    else if (req.url?.endsWith(".tar.gz")) res.end(tarball);
+    else res.writeHead(404).end();
+  });
+  await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+  const port = (server.address() as { port: number }).port;
+  const scratch = mkdtempSync(join(otherFs, "usai-tmp-"));
+  try {
+    const fetched = await run({
+      ...process.env,
+      USAI_BIN: "",
+      PATH: "/usr/bin:/bin",
+      USAI_CACHE_DIR: join(dir, "cache"),
+      USAI_RELEASE_BASE: `http://127.0.0.1:${port}`,
+      // The cache is under the repository's filesystem; this is not.
+      TMPDIR: scratch,
+    });
+    assert.equal(fetched.status, 0, fetched.stderr);
+    assert.doesNotMatch(fetched.stderr, /EXDEV|cross-device/, fetched.stderr);
+    assert.match(fetched.stdout, /\(fetched\)/);
+    assert.ok(existsSync(join(dir, "cache", version, "usai")), "the binary has to be cached");
+    // And nothing is left behind next to it.
+    assert.deepEqual(readdirSync(join(dir, "cache", version)), ["usai"]);
+  } finally {
+    server.closeAllConnections();
+    server.close();
+    rmSync(scratch, { recursive: true, force: true });
   }
 });
 

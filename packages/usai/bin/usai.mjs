@@ -24,7 +24,7 @@ import {
   renameSync,
   rmSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -104,7 +104,15 @@ async function download(triple) {
   if (expected !== actual)
     throw new Error(`${name}.tar.gz: SHA-256 mismatch (expected ${expected}, got ${actual})`);
   mkdirSync(dir, { recursive: true });
-  const work = mkdtempSync(join(tmpdir(), "usai-"));
+  // Unpack **inside the destination**, not in the system temp directory.
+  // `rename(2)` cannot cross a mount, and a cache on disk with `/tmp` on
+  // tmpfs — or a CI runner whose workspace and `/tmp` are different mounts —
+  // is an ordinary setup: `EXDEV: cross-device link not permitted` on the
+  // very first `usai` of a job. Renaming within one directory is also what
+  // makes the install atomic, which is the reason to rename rather than
+  // copy, so keeping both properties means putting the work next to the
+  // target rather than giving up the rename.
+  const work = mkdtempSync(join(dir, ".fetch-"));
   try {
     const tar = spawnSync("tar", ["-xzf", "-", "-C", work], { input: tarball, encoding: "utf8" });
     if (tar.status !== 0) throw new Error(`tar failed: ${tar.error?.message ?? tar.stderr.trim()}`);
