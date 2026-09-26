@@ -58,12 +58,19 @@ commit as `sdkVersion`, every time.
    `SUPPORTED.md` publishes, which is the number an adopter sizes on.
 5. Tag and push: `git tag -a v0.0.x -m "…" && git push origin v0.0.x`.
 6. **Rehearse from the registry, not from the checkout.** The published
-   packages are what a stranger meets:
+   packages are what a stranger meets — and **name the version**, because
+   `pnpm dlx` caches by spec and a bare name (or `@latest`) re-runs whatever
+   it ran last time. Rehearsing 0.0.13 with a bare name served the cached
+   `create-usai` **0.0.14**, which scaffolds `^0.0.10`: a green rehearsal of
+   the wrong release.
    ```bash
-   pnpm dlx @sakaladev/create-usai /tmp/rehearsal
+   pnpm dlx @sakaladev/create-usai@0.0.x /tmp/rehearsal
    cd /tmp/rehearsal && grep '@sakaladev/usai' package.json   # the new version?
-   pnpm install && pnpm test
+   pnpm install && pnpm test    # fetches the published binary of that version
    ```
+   The last line is the whole point: it is the only step that exercises the
+   published *binary* through the npm wrapper, which is how most people will
+   first run this.
 7. Re-sync anything that mirrors these documents (the website's
    `pnpm sync:docs`), or it publishes the previous release's corrections.
 
