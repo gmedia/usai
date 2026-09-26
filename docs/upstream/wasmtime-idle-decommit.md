@@ -1,28 +1,49 @@
 # Releasing a pooling slot's kept-resident memory when it goes idle
 
-Status (2026-09-26): **merged upstream.**
+Status (2026-09-26): **merged upstream, built here, and measured.**
 [bytecodealliance/wasmtime#14419](https://github.com/bytecodealliance/wasmtime/pull/14419)
 was merged into `main` on 2026-09-26 (`65c5190`) by cfallin, closing
 [#14413](https://github.com/bytecodealliance/wasmtime/issues/14413).
 `Engine::release_idle_pool_memory()` exists upstream; review was one approval
 plus four comments, all of them about the comments rather than the code.
 
-**This does not yet change anything here.** The runtime builds against
-wasmtime 48 with a vendored patch, and the rule the vendor directory learned
-the hard way applies again: *go by the file, not the release date.* Before
-calling the new method, check that the release being moved to actually carries
-it:
+**Built here in 0.0.13, and then measured — and the measurement amended the
+lever.** The merged diff applies cleanly to the vendored 48.0.2, so this did
+not wait for a wasmtime release (`vendor/README.md`, second patch); the call
+site is the epoch ticker, which is the one thread that already knows the
+process has gone quiet.
+
+What the before/after found is **not** what this document predicted
+(`docs/measurements/2026-09-26-idle-decommit.md`, VM 47): a c=32
+contract-heavy burst leaves **12 MiB** of accounted warm-unused bytes against
+**66 MiB** of post-burst RSS growth, and releasing those 12 MiB does not move
+RSS at all — measured twice. The per-concurrency cost is real
+(`USAI_WASM_KEEP_RESIDENT=0` takes the same burst from 111 to 50 MiB, at
+≈16 % throughput), but it is not a warm-slot plateau:
+
+- `max_unused_warm_slots(0)`, which this runtime sets because the P6 churn
+  campaign OOM'd without it, re-picks freed slots instead of accumulating
+  them — so it had **already closed** the plateau this lever targets, a week
+  before the lever was written down;
+- what remains is per-slot copy-on-write image pages (RSS 111 against PSS
+  63), which `keep_resident` holds by resetting them in place and which the
+  allocator does not count in the per-slot `bytes_resident` this API reads.
+
+So the implementation ships **off by default** (`USAI_IDLE_DECOMMIT_MS`), with
+the plateau gauge on, because how small the plateau is next to RSS is the
+finding worth surfacing. Nothing about the upstream change is wrong — the
+256 MiB it gives back for a default-tuned embedder is in
+`idle-decommit-measurement/` and stands. What was wrong was assuming we were
+that embedder.
+
+The vendor still goes away when a release carries both patches, by the file
+rather than the date:
 
 ```bash
 ref=v50.0.0   # whichever release you are considering
 gh api "repos/bytecodealliance/wasmtime/contents/crates/wasmtime/src/engine.rs?ref=$ref" \
   -q .content | base64 -d | grep -c release_idle_pool_memory
 ```
-
-The embedder's side is still P9 scope and still unbuilt: one call from
-`crates/usai-runtime/src/idle.rs`, a `usai_pool_memory_released_total`
-counter, and the before/after re-run named below. `docs/adr/0019-p9-scope-the-runtime-tax-we-keep.md`
-is where that decision lives.
 
 ---
 
@@ -155,14 +176,17 @@ back **256 MiB** of RSS (266.9 → 10.9 MiB), the control holds it, and the
 first instantiation afterwards pays **~2 ms** re-faulting before the slot is
 warm again. The full table is in that directory's README.
 
-## What to measure before and after
+## What to measure before and after — done, 2026-09-26
 
-The same cells as P8E, on the qualification VM: a c=32 burst, then 300 s idle,
-sampling RSS/PSS — today the curve is flat after the burst, and the change
-should bring it back toward the pre-burst plateau at the cost of the first
-request after the quiet period. The P8E harness already produces exactly this
-shape (`scripts/qualification/p8e/fleet.sh floor …`), so the before/after is a
-re-run, not new tooling.
+The plan here was: a c=32 burst on the qualification VM, then idle, sampling
+RSS/PSS, expecting the curve to come back toward the pre-burst plateau at the
+cost of the first request afterwards. It was run
+(`docs/measurements/2026-09-26-idle-decommit.md`) and **the curve did not come
+back**: the release fires, gives back the 12 MiB it accounts for, and RSS is
+unchanged. The prediction in this paragraph was wrong, and the reason is in the
+status block at the top — worth leaving here rather than editing away, because
+the shape of the mistake (a lever written from an RSS number without checking
+what that RSS was made of) is the reusable part.
 
 ## Why not now, locally
 
