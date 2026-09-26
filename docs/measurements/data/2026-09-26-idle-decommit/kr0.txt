@@ -1,0 +1,10 @@
+# USAI_IDLE_DECOMMIT_MS=0 floor=64m keep_resident=0 c=32 dur=8s idle=20s
+before-burst	rss=45.6MiB	pss=43.1MiB	plateau=0.0MiB	released=0.0MiB	releases=0	worlds=0
+burst clients=32 ok=17142 bad=0 201=17142
+after-burst	rss=50.5MiB	pss=48.0MiB	plateau=0.0MiB	released=0.0MiB	releases=0	worlds=17142
+idle+10s	rss=50.6MiB	pss=48.0MiB	plateau=0.0MiB	released=0.0MiB	releases=0	worlds=17142
+idle+20s	rss=50.6MiB	pss=48.0MiB	plateau=0.0MiB	released=0.0MiB	releases=0	worlds=17142
+first-request-after-idle	69211us	201
+second-request	6229us	201
+third-request	5741us	201
+after-wake	rss=50.6MiB	pss=48.0MiB	plateau=0.0MiB	released=0.0MiB	releases=0	worlds=17145

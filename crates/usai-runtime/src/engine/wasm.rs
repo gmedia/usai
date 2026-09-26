@@ -77,20 +77,26 @@ pub struct WasmConfig {
     pub pagemap_scan: bool,
     /// How long the process must go with no live world before the pool is
     /// asked to hand back what it keeps resident for slots nobody is using
-    /// (ADR-0019 lever 2). `None` never asks.
+    /// (`Engine::release_idle_pool_memory`). `None`, the default, never asks.
     ///
-    /// `linear_memory_keep_resident` above is a *fixed* trade, set when the
-    /// engine is built: memory for page faults. It is the right trade while a
-    /// slot is reused every few milliseconds and the wrong one for a slot
-    /// nothing has touched since last night's peak, so resident memory
-    /// otherwise follows the highest concurrency the process has ever seen
-    /// rather than its current load.
+    /// **Off by default because it was measured and it reclaims almost
+    /// nothing here** (`docs/measurements/2026-09-26-idle-decommit.md`). The
+    /// lever it was built for — ADR-0019's "64 concurrent worlds cost half a
+    /// gigabyte and keep it" — turns out to have been closed already by
+    /// `max_unused_warm_slots(0)` below: with warm slots re-picked instead of
+    /// accumulated, a c=32 burst leaves 12 MiB of *accounted* warm-unused
+    /// bytes against 66 MiB of post-burst RSS, and releasing those 12 MiB
+    /// does not move RSS at all. What the RSS is made of is per-slot
+    /// copy-on-write image pages, which `keep_resident` holds and this API
+    /// does not reach.
+    ///
+    /// It is kept, and switchable, because the cost when off is zero and
+    /// the shape of a deployment decides: an embedder that raised
+    /// `max_unused_warm_slots` would see the plateau this releases.
     pub idle_decommit_after: Option<Duration>,
     /// Below this many resident bytes the release is skipped. At low
     /// concurrency there is nothing to win — one warm slot is one
-    /// `keep_resident` — and the next request would pay the re-faults for
-    /// it, so the floor is what makes the default safe for a service that
-    /// answers one request a minute.
+    /// `keep_resident` — and the next world would pay the re-faults for it.
     pub idle_decommit_floor_bytes: u64,
 }
 
@@ -102,7 +108,7 @@ impl Default for WasmConfig {
             linear_memory_keep_resident: 8 * 1024 * 1024,
             table_keep_resident: 64 * 1024,
             pagemap_scan: true,
-            idle_decommit_after: Some(Duration::from_secs(30)),
+            idle_decommit_after: None,
             idle_decommit_floor_bytes: 64 * 1024 * 1024,
         }
     }

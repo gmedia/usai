@@ -63,16 +63,23 @@ research or a different product.
    (2026-09-24; a first attempt, #14399, was closed under the Bytecode
    Alliance AI tool policy), and merged 2026-09-26 as
    [#14419](https://github.com/bytecodealliance/wasmtime/pull/14419) —
-   `Engine::release_idle_pool_memory()`. The address of the kept region
-   belongs to Wasmtime's allocator and `keep_resident` is fixed when the
-   engine is built, which is why the lever had to be an upstream API plus one
-   call from the idle path we already have. Releasing it has no correctness
-   consequence, though not for the reason first written here: on a platform
-   whose `decommit_behavior` is `RestoreOriginalMapping` the kept region
-   holds the slot's *original* contents — the module's image where there is
-   one — and the decommit restores exactly those. Our side is still unbuilt
-   and still needs a wasmtime release that carries the method; the upstream
-   document says how to check that by file rather than by date.**
+   `Engine::release_idle_pool_memory()`. Built here the same day and then
+   measured, which amended the lever rather than closing it
+   (`docs/measurements/2026-09-26-idle-decommit.md`): a c=32 burst leaves
+   12 MiB of accounted warm-unused bytes against 66 MiB of post-burst RSS,
+   and releasing those 12 MiB does not move RSS at all, twice. The
+   per-concurrency cost is real — `USAI_WASM_KEEP_RESIDENT=0` takes the same
+   burst from 111 to 50 MiB, at ≈16 % throughput — but it is not a
+   warm-slot plateau, so this API is not the lever for it. Two reasons,
+   both ours: `max_unused_warm_slots(0)`, which the P6 churn campaign made us
+   set, re-picks freed slots instead of accumulating them and so had already
+   closed the plateau; and the rest of the RSS is per-slot copy-on-write
+   image pages (RSS 111 against PSS 63), which `keep_resident` holds and the
+   allocator does not count. The implementation ships off by default with
+   the gauge left on, because the interesting fact is how small the plateau
+   is. What is left of this lever is lever 3 (a smaller image shrinks every
+   slot's COW set at once) or a different upstream proposal that reaches a
+   slot's image pages — which would need its own measurement first.**
 3. **The world's entry cost** (open, small). What remains of the reset after
    the upstream Wasmtime patch landed (2026-09-23, merged) is the memcpy of
    the dirty pages the core itself touches. Shrinking the core's own working

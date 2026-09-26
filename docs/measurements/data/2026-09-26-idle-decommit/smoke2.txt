@@ -1,0 +1,8 @@
+# USAI_IDLE_DECOMMIT_MS=30000 floor=64m c=32 dur=8s idle=0s
+before-burst	rss=45.6MiB	pss=43.0MiB	plateau=0.0MiB	released=0.0MiB	releases=0	worlds=0
+burst clients=32 ok=20245 bad=0 201=20245
+after-burst	rss=111.7MiB	pss=63.3MiB	plateau=12.2MiB	released=0.0MiB	releases=0	worlds=20245
+first-request-after-idle	70233us	201
+second-request	5130us	201
+third-request	4509us	201
+after-wake	rss=111.7MiB	pss=63.3MiB	plateau=12.2MiB	released=0.0MiB	releases=0	worlds=20248

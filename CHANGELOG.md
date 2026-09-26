@@ -8,6 +8,35 @@ runtime of that version and the next (`SUPPORTED.md` → Versioning). Within
 GitHub releases carry the auto-generated commit list as well; this file is
 the human summary.
 
+## 0.0.13 — 2026-09-26
+
+- **The substrate can hand back its idle pool memory, and now we know what
+  that is worth here: not much.** `Engine::release_idle_pool_memory()` was
+  merged into Wasmtime on our proposal
+  ([#14419](https://github.com/bytecodealliance/wasmtime/pull/14419)) and is
+  vendored and wired, behind `USAI_IDLE_DECOMMIT_MS` — **off by default**,
+  because the before/after says the honest thing rather than the hoped-for
+  one. On a c=32 contract-heavy burst it reclaims 12 MiB of accounted
+  warm-unused bytes out of 66 MiB of RSS growth and does not lower RSS at
+  all. The plateau it was built for had already been closed by the pool's
+  `max_unused_warm_slots(0)`, and what remains is per-slot copy-on-write
+  image pages the API does not reach
+  (`docs/measurements/2026-09-26-idle-decommit.md`).
+  `USAI_WASM_KEEP_RESIDENT=0` is still the measured way to get that memory
+  back, at ≈16 % of throughput on 16 cores.
+
+- **`/_usai/status` and the metrics surface show the plateau.**
+  `poolMemory` in the status document, and
+  `usai_pool_memory_resident_unused_bytes`,
+  `usai_pool_memory_released_bytes_total`,
+  `usai_pool_memory_releases_total` in Prometheus. The gauge is the useful
+  one and it is on regardless of the policy: read it *against* RSS rather
+  than as RSS, because the gap between them is image pages shared by every
+  slot and counted once per mapping.
+
+**Upgrading**: nothing changes unless you set `USAI_IDLE_DECOMMIT_MS`. The
+new metrics are additive.
+
 ## 0.0.12 — 2026-09-25
 
 - **A module's environment reaches the world parsed.** `defineModule({ env })`

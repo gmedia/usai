@@ -1,7 +1,7 @@
 {
   "name": "@sakaladev/create-usai",
-  "version": "0.0.16",
-  "sdkVersion": "0.0.12",
+  "version": "0.0.17",
+  "sdkVersion": "0.0.13",
   "description": "Scaffold a new Usai application.",
   "license": "Apache-2.0",
   "repository": {
