@@ -11,7 +11,13 @@
      repository — #14413 went up wrapped at 76 characters and came out with
      21 forced line breaks. Nothing is lost, but the paragraphs read narrow
      on a wide screen and wrap twice on a phone. Put each paragraph on one
-     long line; leave the code fence and the bullets alone. -->
+     long line; leave the code fence and the bullets alone.
+
+     Historical: this draft became #14413, which #14419 answered (merged
+     2026-09-26). One claim in it is wrong and is corrected in
+     wasmtime-idle-decommit.md: the kept-resident pages do not hold zeros on
+     a slot that has an image, they hold the image. The proposal stands for a
+     better reason than the one argued here. -->
 
 **Title:** pooling allocator: a way to release a slot's kept-resident memory when it goes idle
 

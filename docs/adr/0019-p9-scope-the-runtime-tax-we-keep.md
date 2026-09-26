@@ -58,12 +58,21 @@ research or a different product.
    policy (return a slot's pages after N seconds unused, pay the faults only
    on the first world after a quiet period) gives a small box both curves.
    Contained, measurable with the P8E cells, no ABI change. **Investigated
-   2026-09-23 (`docs/upstream/wasmtime-idle-decommit.md`), open upstream as [#14413](https://github.com/bytecodealliance/wasmtime/issues/14413) (2026-09-24; a first attempt, #14399, was closed under the Bytecode Alliance AI tool policy): the kept region is
-   anonymous memory the pool zeroes — not the module's image, which arrives
-   through the COW mapping — so releasing it has no correctness consequence.
-   But its address belongs to Wasmtime's allocator and `keep_resident` is
-   fixed when the engine is built, so this lever is an upstream API plus one
-   call from the idle path we already have, not local work.**
+   2026-09-23 (`docs/upstream/wasmtime-idle-decommit.md`), filed upstream as
+   [#14413](https://github.com/bytecodealliance/wasmtime/issues/14413)
+   (2026-09-24; a first attempt, #14399, was closed under the Bytecode
+   Alliance AI tool policy), and merged 2026-09-26 as
+   [#14419](https://github.com/bytecodealliance/wasmtime/pull/14419) —
+   `Engine::release_idle_pool_memory()`. The address of the kept region
+   belongs to Wasmtime's allocator and `keep_resident` is fixed when the
+   engine is built, which is why the lever had to be an upstream API plus one
+   call from the idle path we already have. Releasing it has no correctness
+   consequence, though not for the reason first written here: on a platform
+   whose `decommit_behavior` is `RestoreOriginalMapping` the kept region
+   holds the slot's *original* contents — the module's image where there is
+   one — and the decommit restores exactly those. Our side is still unbuilt
+   and still needs a wasmtime release that carries the method; the upstream
+   document says how to check that by file rather than by date.**
 3. **The world's entry cost** (open, small). What remains of the reset after
    the upstream Wasmtime patch landed (2026-09-23, merged) is the memcpy of
    the dirty pages the core itself touches. Shrinking the core's own working

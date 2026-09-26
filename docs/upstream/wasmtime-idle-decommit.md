@@ -1,5 +1,34 @@
 # Releasing a pooling slot's kept-resident memory when it goes idle
 
+Status (2026-09-26): **merged upstream.**
+[bytecodealliance/wasmtime#14419](https://github.com/bytecodealliance/wasmtime/pull/14419)
+was merged into `main` on 2026-09-26 (`65c5190`) by cfallin, closing
+[#14413](https://github.com/bytecodealliance/wasmtime/issues/14413).
+`Engine::release_idle_pool_memory()` exists upstream; review was one approval
+plus four comments, all of them about the comments rather than the code.
+
+**This does not yet change anything here.** The runtime builds against
+wasmtime 48 with a vendored patch, and the rule the vendor directory learned
+the hard way applies again: *go by the file, not the release date.* Before
+calling the new method, check that the release being moved to actually carries
+it:
+
+```bash
+ref=v50.0.0   # whichever release you are considering
+gh api "repos/bytecodealliance/wasmtime/contents/crates/wasmtime/src/engine.rs?ref=$ref" \
+  -q .content | base64 -d | grep -c release_idle_pool_memory
+```
+
+The embedder's side is still P9 scope and still unbuilt: one call from
+`crates/usai-runtime/src/idle.rs`, a `usai_pool_memory_released_total`
+counter, and the before/after re-run named below. `docs/adr/0019-p9-scope-the-runtime-tax-we-keep.md`
+is where that decision lives.
+
+---
+
+The history below is kept because the first attempt's closure is the part
+worth remembering.
+
 Status (2026-09-25): **open as
 [bytecodealliance/wasmtime#14413](https://github.com/bytecodealliance/wasmtime/issues/14413)**,
 filed by the maintainer of this repository under wasmtime's *Improvement*
@@ -65,17 +94,27 @@ nothing has touched for an hour.
 
 ## Why the embedder cannot do it
 
-The kept-resident region is **anonymous memory the pool `memset`s to zero** on
-deallocation — `memory_pool.rs`: *"This much memory will be `memset` to zero
-when a linear memory is deallocated. Memory exceeding this amount … will be
-released with `madvise`"*. So the pages hold zeros, not the module's image;
-the image arrives through the copy-on-write mapping when the next instance
-starts.
+> **Correction (2026-09-26).** The issue text and an earlier version of this
+> section said the kept-resident pages hold zeros. That is wrong on Linux for
+> a slot that has an image: the reset writes the image back into the region,
+> so the pages hold the image, not zeros. The conclusion survives anyway, for
+> a different reason than the one given — see below.
 
-That makes the *content* question trivial: `MADV_DONTNEED` over that region
-gives back zero-filled pages on the next touch, which is exactly what is
-there now. Releasing it is a pure memory-for-page-faults trade with no
-correctness consequence.
+The kept-resident region is the part of a freed slot the pool resets **in
+place** rather than releasing — `memory_pool.rs`: *"This much memory will be
+`memset` to zero when a linear memory is deallocated. Memory exceeding this
+amount … will be released with `madvise`"*. On a platform whose
+`decommit_behavior` is `RestoreOriginalMapping`, that in-place reset restores
+the slot's original contents: the module's image where there is one, zeros
+where there is not.
+
+That is what makes the *content* question trivial, and it is a stronger
+guarantee than "the pages are zeros": `MADV_DONTNEED` on a private file
+mapping restores exactly those same original contents on the next touch. So
+the resident region holds precisely what the mapping would give back for
+free, and releasing it is a pure memory-for-page-faults trade with no
+correctness consequence. The merged test checks this directly — it reads the
+module's data back out of a slot whose resident pages were released.
 
 What the embedder does not have is the **address**. Slot memory belongs to the
 pool; `wasmtime` exposes no handle to an idle slot's region, and reaching into
