@@ -4,7 +4,11 @@ The runtime's resident set is dominated by the world pool: each of the
 `--max-worlds` slots keeps up to `USAI_WASM_KEEP_RESIDENT` (8 MiB) of memory
 resident after use, so the plateau is roughly `base + touched slots ×
 min(working set, keep_resident)`, where *touched slots* is the peak
-concurrency the instance has seen, not the request count. Measured
+concurrency the instance has seen, not the request count. Since 0.0.13 that
+plateau is **not permanent**: 30 s with no live world hands it back when there
+is enough of it to be worth the re-faults (`USAI_IDLE_DECOMMIT_MS`, "What to
+do" below). An instance under steady load is never quiet, so for that one the
+formula still describes what to size for. Measured
 (`docs/measurements/2026-09-20-p8e-efficiency.md`): base ≈ 40 MiB RSS with a
 PostgreSQL pool, a task queue and a cron scheduler; ≈ 4 MiB RSS (≈ 1.5 MiB
 PSS — most of the 4 MiB is copy-on-write image pages every slot shares) per
@@ -79,12 +83,24 @@ the sizing section asks for.
 ## What to do
 
 Size the limit for `40 MiB + max_worlds × 4 MiB` (192 MiB is the supported
-floor for 48 worlds, `SUPPORTED.md`), or lower `--max-worlds`. For a box
-whose bursts are rare, `USAI_WASM_KEEP_RESIDENT=0` gives the memory back
-after each burst (RSS 100 → 45 MiB measured) at the price of re-faulting the
-image for every world: ≈2× the CPU per request and half the throughput on
-one vCPU (the C2 table in the P8E report; values between 0 and the default
-8 MiB change nothing). The same formula at the default `--max-worlds` of 256 asks for ≈ 1 GiB, which is the honest number for a box that really admits 256 concurrent worlds — a smaller box lowers `--max-worlds` rather than the limit. A
+floor for 48 worlds, `SUPPORTED.md`), or lower `--max-worlds`.
+
+**For a box whose bursts are rare, the plateau is already given back.** Since
+0.0.13 the runtime hands the pool's kept-resident pages back after 30 s with
+no live world, provided there are at least 64 MiB of them
+(`USAI_IDLE_DECOMMIT_MS`, `USAI_IDLE_DECOMMIT_FLOOR`). The cost is paid once
+per released slot by the first world that uses it again — ≈2 ms of re-faults
+for an 8 MiB slot — instead of on every request. `usai_pool_memory_releases_total`
+says whether it has fired; `0` against a large plateau means the instance is
+never quiet for that long, and then the plateau is what to size for.
+
+The older knob is still there and is now the second choice:
+`USAI_WASM_KEEP_RESIDENT=0` gives the memory back after *every* world (RSS
+100 → 45 MiB measured) at the price of re-faulting the image for every world:
+≈2× the CPU per request and half the throughput on one vCPU (the C2 table in
+the P8E report; values between 0 and the default 8 MiB change nothing). Reach
+for it only when even a 30 s plateau is too much — a box that is memory-bound
+rather than bursty. The same formula at the default `--max-worlds` of 256 asks for ≈ 1 GiB, which is the honest number for a box that really admits 256 concurrent worlds — a smaller box lowers `--max-worlds` rather than the limit. A
 memory-limited instance with fewer worlds refuses with 503
 `capacity_exhausted` instead of dying — the right failure. Watch
 `usai_worlds_live` and the container's RSS together: RSS that keeps rising

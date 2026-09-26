@@ -75,6 +75,23 @@ pub struct WasmConfig {
     pub table_keep_resident: usize,
     /// Use the kernel's PAGEMAP_SCAN to reset only dirtied pages, when available.
     pub pagemap_scan: bool,
+    /// How long the process must go with no live world before the pool is
+    /// asked to hand back what it keeps resident for slots nobody is using
+    /// (ADR-0019 lever 2). `None` never asks.
+    ///
+    /// `linear_memory_keep_resident` above is a *fixed* trade, set when the
+    /// engine is built: memory for page faults. It is the right trade while a
+    /// slot is reused every few milliseconds and the wrong one for a slot
+    /// nothing has touched since last night's peak, so resident memory
+    /// otherwise follows the highest concurrency the process has ever seen
+    /// rather than its current load.
+    pub idle_decommit_after: Option<Duration>,
+    /// Below this many resident bytes the release is skipped. At low
+    /// concurrency there is nothing to win — one warm slot is one
+    /// `keep_resident` — and the next request would pay the re-faults for
+    /// it, so the floor is what makes the default safe for a service that
+    /// answers one request a minute.
+    pub idle_decommit_floor_bytes: u64,
 }
 
 impl Default for WasmConfig {
@@ -85,6 +102,8 @@ impl Default for WasmConfig {
             linear_memory_keep_resident: 8 * 1024 * 1024,
             table_keep_resident: 64 * 1024,
             pagemap_scan: true,
+            idle_decommit_after: Some(Duration::from_secs(30)),
+            idle_decommit_floor_bytes: 64 * 1024 * 1024,
         }
     }
 }
@@ -407,6 +426,47 @@ impl Compiled for Image {
 /// revision-churn campaign watches it.
 pub static IMAGES_LIVE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// Asks the pool to hand back what it keeps resident for slots nobody is
+/// using, once the process has been quiet (`idle_decommit_after`).
+///
+/// The floor is the whole of the policy. Releasing costs the next world in
+/// each slot its re-faults (measured at about 2 ms for an 8 MiB slot,
+/// `docs/upstream/idle-decommit-measurement/`), and at low concurrency there
+/// is one warm slot to win back — so a service answering one request a minute
+/// would pay that on every request and save almost nothing. Above the floor
+/// the numbers invert: a burst that touched 64 slots is holding half a
+/// gigabyte it will not use again until the next burst.
+///
+/// Anything the release gives back is re-faulted on next use and nothing is
+/// lost: on a platform whose decommit restores the original mapping, the
+/// resident region holds exactly what that mapping would put back.
+fn release_idle_pool_memory(engine: &WtEngine, floor_bytes: u64) {
+    let resident = engine
+        .pooling_allocator_metrics()
+        .map(|m| m.unused_memory_bytes_resident() as u64)
+        .unwrap_or(0);
+    if resident < floor_bytes {
+        return;
+    }
+    let released = engine.release_idle_pool_memory() as u64;
+    POOL_MEMORY_RELEASES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    POOL_MEMORY_RELEASED_BYTES.fetch_add(released, std::sync::atomic::Ordering::Relaxed);
+    tracing::debug!(
+        released_bytes = released,
+        resident_bytes = resident,
+        "released idle pool memory"
+    );
+}
+
+/// Bytes the pooling allocator has handed back after a quiet period, and how
+/// many times it was asked (ADR-0019 lever 2). Monotonic, process-wide, and
+/// read by `/_usai/status`: an operator watching an RSS plateau needs to know
+/// whether the runtime released anything or simply never tried.
+pub static POOL_MEMORY_RELEASED_BYTES: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+pub static POOL_MEMORY_RELEASES: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
 impl Drop for Image {
     fn drop(&mut self) {
         IMAGES_LIVE.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
@@ -501,14 +561,27 @@ impl WasmEngine {
         // Epoch ticks let the deadline callback observe the watchdog flag.
         let ticker = {
             let engines = [runtime.clone(), builder.clone()];
+            let idle_after = config.idle_decommit_after;
+            let floor = config.idle_decommit_floor_bytes;
+            let pool = runtime.clone();
             std::thread::Builder::new()
                 .name("usai-epoch".into())
                 .spawn(move || {
                     loop {
                         // A tick only matters to a live world's deadline
                         // callback; with none live the thread parks (an
-                        // idle process wakes for nothing).
-                        crate::idle::wait_until_active();
+                        // idle process wakes for nothing). This thread is
+                        // also the one place that knows the process went
+                        // quiet, so the idle release rides on the same
+                        // wait rather than costing a timer of its own.
+                        match idle_after {
+                            Some(quiet) if !crate::idle::wait_until_active_for(quiet) => {
+                                release_idle_pool_memory(&pool, floor);
+                                crate::idle::wait_until_active();
+                            }
+                            Some(_) => {}
+                            None => crate::idle::wait_until_active(),
+                        }
                         std::thread::sleep(EPOCH_TICK);
                         for engine in &engines {
                             engine.increment_epoch();
@@ -1013,6 +1086,13 @@ impl Engine for WasmEngine {
         "wasm"
     }
 
+    fn resident_unused_bytes(&self) -> u64 {
+        self.runtime
+            .pooling_allocator_metrics()
+            .map(|m| m.unused_memory_bytes_resident() as u64)
+            .unwrap_or(0)
+    }
+
     async fn compile_code(&self, code: &Code) -> Result<Arc<dyn Compiled>, EngineError> {
         let image = self.build_image(code).await?;
         let image_sha256 = {
@@ -1495,5 +1575,70 @@ mod tests {
     async fn a_reused_slot_is_fresh_without_the_pagemap_scan() {
         assert_slot_is_fresh_after(scribble_everything, true, false).await;
         assert_slot_is_fresh_after(scribble_fragmented, false, false).await;
+    }
+
+    /// The idle release: the floor decides, and a world after it still runs.
+    ///
+    /// The floor is the whole of the policy (ADR-0019 lever 2), so it is what
+    /// this asserts. Without it, a service holding one warm slot would pay
+    /// the re-faults on every request to give back a few megabytes it is
+    /// about to want again. The counters are process-wide and other tests in
+    /// this binary create worlds, so this reads the return value and the
+    /// pool's own metric rather than the statics.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_idle_release_respects_its_floor_and_leaves_the_slot_usable() {
+        let engine = WasmEngine::new(WasmConfig {
+            capacity: 4,
+            // The thread does this on its own schedule; here it is called
+            // directly so the test does not wait on a quiet period.
+            idle_decommit_after: None,
+            ..WasmConfig::default()
+        })
+        .unwrap();
+        let code = Code::new("globalThis.__usai_app = { workloads: [] };");
+        let compiled = engine.compile_code(&code).await.unwrap();
+        let bindings: Arc<dyn HostBindings> = Arc::new(RefusingBindings);
+
+        // Warm a slot and give it back: the pool keeps part of it resident.
+        {
+            let mut world = engine
+                .instantiate(&compiled, Arc::clone(&bindings))
+                .await
+                .unwrap();
+            let w = world.as_any_mut().downcast_mut::<WasmWorld>().unwrap();
+            w.guest.memory.grow(&mut w.store, 64).unwrap();
+            scribble_everything(w.guest.memory.data_mut(&mut w.store));
+        }
+
+        let resident = engine.resident_unused_bytes();
+        // A platform whose decommit resets to zero keeps nothing resident, so
+        // there is nothing for the policy to decide about; the usability half
+        // below still applies.
+        if resident > 0 {
+            // Above the plateau: nothing to do, and nothing done.
+            release_idle_pool_memory(&engine.runtime, resident + 1);
+            assert_eq!(
+                engine.resident_unused_bytes(),
+                resident,
+                "the release ran below its floor"
+            );
+            // At the plateau: the pages go back.
+            release_idle_pool_memory(&engine.runtime, resident);
+            assert_eq!(
+                engine.resident_unused_bytes(),
+                0,
+                "a released slot still reports resident bytes"
+            );
+        }
+
+        // And the slot is usable, not lost: a world after the release starts
+        // and reads its image.
+        let mut world = engine
+            .instantiate(&compiled, Arc::clone(&bindings))
+            .await
+            .unwrap();
+        let w = world.as_any_mut().downcast_mut::<WasmWorld>().unwrap();
+        let len = w.guest.memory.data_size(&w.store);
+        assert!(len > 0, "a world after the release has no memory");
     }
 }

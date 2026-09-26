@@ -628,6 +628,34 @@ pub fn render_prometheus(status: &RuntimeStatus, http: Option<&HttpSnapshot>) ->
         "counter",
         &[(String::new(), g.worlds_created as f64)],
     );
+    // The plateau and what has been given back. An operator sizing a box
+    // reads the first; one wondering why RSS stays high after a burst reads
+    // the other two, and `usai_pool_memory_releases_total 0` against a large
+    // plateau says the policy never fired rather than failed.
+    metric(
+        &mut out,
+        "usai_pool_memory_resident_unused_bytes",
+        "Memory the substrate keeps resident for slots that are warm but unused",
+        "gauge",
+        &[(
+            String::new(),
+            status.pool_memory.resident_unused_bytes as f64,
+        )],
+    );
+    metric(
+        &mut out,
+        "usai_pool_memory_released_bytes_total",
+        "Memory handed back from warm unused slots after a quiet period",
+        "counter",
+        &[(String::new(), status.pool_memory.released_bytes as f64)],
+    );
+    metric(
+        &mut out,
+        "usai_pool_memory_releases_total",
+        "How many times the idle release ran",
+        "counter",
+        &[(String::new(), status.pool_memory.releases as f64)],
+    );
     metric(
         &mut out,
         "usai_guest_cpu_seconds_total",
@@ -1315,6 +1343,11 @@ mod tests {
                 services: true,
             },
             compiled_images_live: 1,
+            pool_memory: crate::runtime::PoolMemoryStatus {
+                resident_unused_bytes: 268_435_456,
+                released_bytes: 268_435_456,
+                releases: 1,
+            },
             gauges: crate::ownership::GaugeSnapshot {
                 worlds_created: 3,
                 live_worlds: 1,
@@ -1338,6 +1371,9 @@ mod tests {
         );
         assert!(text.contains("usai_worlds_live 1"));
         assert!(text.contains("usai_worlds_created_total 3"));
+        assert!(text.contains("usai_pool_memory_resident_unused_bytes 268435456"));
+        assert!(text.contains("usai_pool_memory_released_bytes_total 268435456"));
+        assert!(text.contains("usai_pool_memory_releases_total 1"));
         assert!(text.contains("usai_http_responses_total{class=\"2xx\"} 9"));
         assert!(text.contains("usai_tasks{state=\"running\"} 1"));
         assert!(text.lines().all(|l| l.starts_with('#') || l.contains(' ')));

@@ -1,0 +1,300 @@
+diff --git a/src/engine.rs b/src/engine.rs
+index 16d666a4f192..649713fd484b 100644
+--- a/src/engine.rs
++++ b/src/engine.rs
+@@ -808,6 +808,46 @@ impl Engine {
+         crate::runtime::vm::PoolingAllocatorMetrics::new(self)
+     }
+ 
++    /// Releases memory the pooling allocator is keeping resident for slots
++    /// that are not currently in use, returning how many bytes were released.
++    ///
++    /// [`PoolingAllocationConfig::linear_memory_keep_resident`] keeps memory
++    /// resident after an instance slot is freed, in order to enable faster
++    /// instantiation on the next use of the same module. This increases
++    /// resident memory size. If an embedder knows that load has decreased and
++    /// wishes to free up memory, it might wish to purge these "warm slots".
++    ///
++    /// This method releases all resident memory held by warm but unused
++    /// slots. The tradeoff is that the next instantiation of any given module
++    /// may be slower, because no cached memory mappings are present anymore.
++    ///
++    /// Returns 0 if this engine is not using the pooling allocator, or if
++    /// nothing was resident to release.
++    ///
++    /// [`PoolingAllocationConfig::linear_memory_keep_resident`]: crate::PoolingAllocationConfig::linear_memory_keep_resident
++    ///
++    /// # Example
++    ///
++    /// ```
++    /// # use wasmtime::{Config, Engine, InstanceAllocationStrategy};
++    /// # fn main() -> wasmtime::Result<()> {
++    /// let mut config = Config::new();
++    /// config.allocation_strategy(InstanceAllocationStrategy::pooling());
++    /// let engine = Engine::new(&config)?;
++    ///
++    /// // ... once the embedder knows load has decreased ...
++    /// let _bytes = engine.release_idle_pool_memory();
++    /// # Ok(())
++    /// # }
++    /// ```
++    #[cfg(feature = "pooling-allocator")]
++    pub fn release_idle_pool_memory(&self) -> usize {
++        match self.allocator().as_pooling() {
++            Some(pool) => pool.release_resident_unused_memory(),
++            None => 0,
++        }
++    }
++
+     pub(crate) fn allocator(&self) -> &dyn crate::runtime::vm::InstanceAllocator {
+         let r: &(dyn crate::runtime::vm::InstanceAllocator + Send + Sync) =
+             self.inner.allocator.as_ref();
+diff --git a/src/runtime/vm/instance/allocator/pooling.rs b/src/runtime/vm/instance/allocator/pooling.rs
+index 74ca072056df..207146838e72 100644
+--- a/src/runtime/vm/instance/allocator/pooling.rs
++++ b/src/runtime/vm/instance/allocator/pooling.rs
+@@ -268,6 +268,13 @@ impl Drop for PoolingInstanceAllocator {
+ }
+ 
+ impl PoolingInstanceAllocator {
++    /// Releases memory kept resident for unused slots, returning the number
++    /// of bytes released. See
++    /// [`MemoryPool::release_resident_unused_memory`].
++    pub fn release_resident_unused_memory(&self) -> usize {
++        self.memories.release_resident_unused_memory()
++    }
++
+     /// Creates a new pooling instance allocator with the given strategy and limits.
+     pub fn new(config: &PoolingAllocationConfig, tunables: &Tunables) -> Result<Self> {
+         Ok(Self {
+diff --git a/src/runtime/vm/instance/allocator/pooling/index_allocator.rs b/src/runtime/vm/instance/allocator/pooling/index_allocator.rs
+index 80610a2bd7ba..bc3833b6fc3c 100644
+--- a/src/runtime/vm/instance/allocator/pooling/index_allocator.rs
++++ b/src/runtime/vm/instance/allocator/pooling/index_allocator.rs
+@@ -579,6 +579,53 @@ impl ModuleAffinityIndexAllocator {
+             .sum()
+     }
+ 
++    /// Takes every warm slot that still has resident memory out of the free
++    /// lists, returning each slot and the number of bytes it has resident.
++    ///
++    /// The slots are marked used so that nothing can allocate them while
++    /// their memory is being released; the caller frees each one again
++    /// afterwards.
++    ///
++    /// Shards are locked one at a time rather than all at once, since this
++    /// is reclaiming memory rather than taking a snapshot.
++    pub(crate) fn take_resident_warm_slots(&self) -> Vec<(SlotId, usize)> {
++        let mut taken = Vec::new();
++        for (shard_index, shard) in self.shards.iter().enumerate() {
++            let mut inner = shard.0.lock().unwrap();
++
++            // Walk the warm list first and only then remove, because
++            // `remove` unlinks the very entries this walk is following.
++            let mut resident = Vec::new();
++            let mut next = inner.warm.head;
++            while let Some(slot) = next {
++                let unused = match &inner.slot_state[slot.index()] {
++                    SlotState::UnusedWarm(u) => *u,
++                    // The warm list only contains warm slots.
++                    _ => unreachable!(),
++                };
++                next = unused.unused_list_link.next;
++                if unused.bytes_resident > 0 {
++                    resident.push((slot, unused.bytes_resident));
++                }
++            }
++
++            for (slot, bytes_resident) in resident {
++                let affinity = inner.slot_state[slot.index()].unwrap_unused().affinity;
++                inner.remove(slot);
++                inner.unused_bytes_resident -= bytes_resident;
++                // Keep the affinity: `free` reads it back out of this payload
++                // to re-file the slot on its module's affine list, so
++                // `Used(None)` here would un-affine every slot touched.
++                inner.slot_state[slot.index()] = SlotState::Used(affinity);
++                taken.push((
++                    self.global_id(ShardId::from_index(shard_index), slot),
++                    bytes_resident,
++                ));
++            }
++        }
++        taken
++    }
++
+     /// Returns the number of bytes that are resident in previously-used slots
+     /// in this allocator which are not currently in use.
+     ///
+@@ -755,6 +802,32 @@ mod test {
+         }
+     }
+ 
++    /// Taking slots out to release their memory must not cost them their
++    /// affinity: `free` reads the module back out of the `Used` payload to
++    /// re-file the slot on its module's affine list.
++    #[test]
++    fn take_resident_warm_slots_keeps_affinity() {
++        let id = MemoryInModule(CompiledModuleId::new(), DefinedMemoryIndex::new(0));
++        let state = ModuleAffinityIndexAllocator::new(4, 4).unwrap();
++
++        let index = state.alloc(Some(id)).unwrap();
++        state.free(index, 4096);
++        assert_eq!(state.unused_bytes_resident(), 4096);
++
++        let taken = state.take_resident_warm_slots();
++        assert_eq!(taken, vec![(index, 4096)]);
++        // While taken, the slot is neither warm nor counted as resident.
++        assert_eq!(state.unused_bytes_resident(), 0);
++        assert_eq!(state.unused_warm_slots(), 0);
++
++        state.free(index, 0);
++        assert_eq!(state.unused_bytes_resident(), 0);
++        assert_eq!(state.unused_warm_slots(), 1);
++        assert!(state.testing_module_affinity_list().contains(&id));
++        // And the affinity is real: the same module gets the same slot back.
++        assert_eq!(state.alloc(Some(id)).unwrap(), index);
++    }
++
+     #[test]
+     fn test_affinity_allocation_strategy() {
+         let id1 = MemoryInModule(CompiledModuleId::new(), DefinedMemoryIndex::new(0));
+diff --git a/src/runtime/vm/instance/allocator/pooling/memory_pool.rs b/src/runtime/vm/instance/allocator/pooling/memory_pool.rs
+index 5a554d72cd7a..00a4217af863 100644
+--- a/src/runtime/vm/instance/allocator/pooling/memory_pool.rs
++++ b/src/runtime/vm/instance/allocator/pooling/memory_pool.rs
+@@ -61,6 +61,7 @@ use crate::runtime::vm::{
+     CompiledModuleId, InstanceAllocationRequest, Memory, MemoryBase, MemoryImageSlot, Mmap,
+     MmapOffset, mmap::AlignedLength,
+ };
++use crate::vm::sys::vm::{decommit_pages, iovec};
+ use crate::{
+     Enabled,
+     runtime::vm::mpk::{self, ProtectionKey, ProtectionMask},
+@@ -578,6 +579,56 @@ impl MemoryPool {
+         }
+     }
+ 
++    /// Releases the memory this pool is keeping resident for unused-but-warm
++    /// slots.
++    ///
++    /// Useful when the embedder knows that load has decreased and wishes to
++    /// reduce resident memory usage at the cost of some instantiation time at
++    /// the next instantiation.
++    ///
++    /// Returns the number of bytes freed.
++    ///
++    /// Slots are taken out of the free lists before their memory is released
++    /// and returned afterwards, so nothing can allocate a slot while it is
++    /// being decommitted, the same order `DecommitQueue::flush` uses.
++    pub fn release_resident_unused_memory(&self) -> usize {
++        let mut released = 0;
++        for (stripe_index, stripe) in self.stripes.iter().enumerate() {
++            let taken = stripe.allocator.take_resident_warm_slots();
++            if taken.is_empty() {
++                continue;
++            }
++
++            let mut iov = Vec::with_capacity(taken.len());
++            for (id, bytes_resident) in &taken {
++                let index = StripedAllocationIndex(id.0)
++                    .as_unstriped_slot_index(stripe_index, self.stripes.len());
++                iov.push(iovec {
++                    iov_base: self.get_base(index).as_mut_ptr().cast(),
++                    iov_len: *bytes_resident,
++                });
++            }
++
++            // SAFETY: every region here belongs to a slot this loop has taken
++            // out of the free list, so it is not in use and cannot be handed
++            // out until it is freed below.
++            let decommitted = unsafe { decommit_pages(&iov) }.is_ok();
++
++            // A failed decommit leaves the pages resident with the contents
++            // they had, which is a correct state: the slots go back reporting
++            // the same bytes as before and nothing but the reclaim is lost.
++            for (id, bytes_resident) in taken {
++                if decommitted {
++                    released += bytes_resident;
++                    stripe.allocator.free(id, 0);
++                } else {
++                    stripe.allocator.free(id, bytes_resident);
++                }
++            }
++        }
++        released
++    }
++
+     fn get_base(&self, allocation_index: MemoryAllocationIndex) -> MmapOffset {
+         assert!(allocation_index.index() < self.layout.num_slots);
+         let offset = self
+diff --git a/src/runtime/vm/instance/allocator/pooling/metrics.rs b/src/runtime/vm/instance/allocator/pooling/metrics.rs
+index 4cd26be24bce..07e45bf5b94e 100644
+--- a/src/runtime/vm/instance/allocator/pooling/metrics.rs
++++ b/src/runtime/vm/instance/allocator/pooling/metrics.rs
+@@ -152,6 +152,66 @@ mod tests {
+         config
+     }
+ 
++    /// A module whose memory carries data, so an incorrect reset shows up as
++    /// wrong bytes rather than only as a metric.
++    const TEST_MEMORY_MODULE: &str = r#"
++        (module
++            (memory (export "memory") 1)
++            (data (i32.const 0) "init")
++        )
++    "#;
++
++    /// This test verifies both that memory is freed, and that instantiation
++    /// still works correctly afterward.
++    #[test]
++    #[cfg_attr(miri, ignore)]
++    fn release_idle_pool_memory_frees_unused_slots() -> Result<()> {
++        let mut pool = small_pool_config();
++        pool.linear_memory_keep_resident(1 << 16);
++        let engine = Engine::new(&Config::new().allocation_strategy(pool))?;
++        let metrics = engine.pooling_allocator_metrics().unwrap();
++        let module = Module::new(&engine, TEST_MEMORY_MODULE)?;
++
++        // Dirty a slot and give it back: the pool keeps part of it resident.
++        {
++            let mut store = Store::new(&engine, ());
++            let instance = crate::Instance::new(&mut store, &module, &[])?;
++            let memory = instance.get_memory(&mut store, "memory").unwrap();
++            memory.data_mut(&mut store)[4..8].copy_from_slice(b"dirt");
++        }
++
++        // On platforms whose decommit resets to zero (`DecommitBehavior::Zero`)
++        // a freed slot keeps nothing resident, so there is nothing to release
++        // and only the contents check below applies.
++        let resident = metrics.unused_memory_bytes_resident();
++        if resident > 0 {
++            let released = engine.release_idle_pool_memory();
++            assert!(
++                released > 0,
++                "{resident} bytes were resident and none were released"
++            );
++            assert_eq!(
++                metrics.unused_memory_bytes_resident(),
++                0,
++                "a released slot still reports resident bytes"
++            );
++            // The slot is allocatable again, not lost.
++            assert_eq!(metrics.unused_warm_memories(), 1);
++        }
++
++        // The slot still reads as its module defines it: the released region
++        // is restored by the mapping, and the previous instance's write is
++        // gone because the slot was reset when it was freed.
++        let mut store = Store::new(&engine, ());
++        let instance = crate::Instance::new(&mut store, &module, &[])?;
++        let memory = instance.get_memory(&mut store, "memory").unwrap();
++        assert_eq!(&memory.data(&store)[..8], b"init\0\0\0\0");
++
++        // Releasing with nothing unused is a no-op rather than an error.
++        assert_eq!(engine.release_idle_pool_memory(), 0);
++        Ok(())
++    }
++
+     #[test]
+     #[cfg_attr(miri, ignore)]
+     fn smoke_test() {

@@ -36,6 +36,30 @@ pub fn by_name(name: &str, capacity: u32) -> Result<Arc<dyn Engine>, EngineError
             if std::env::var("USAI_WASM_PAGEMAP_SCAN").as_deref() == Ok("0") {
                 config.pagemap_scan = false;
             }
+            // Unlike the two above, this one *is* application configuration:
+            // it trades the first request after a quiet period against what
+            // the process holds while it is quiet, and which side of that an
+            // operator wants depends on their traffic, not on profiling.
+            if let Ok(v) = std::env::var("USAI_IDLE_DECOMMIT_MS") {
+                match v.trim().parse::<u64>() {
+                    Ok(0) => config.idle_decommit_after = None,
+                    Ok(ms) => {
+                        config.idle_decommit_after = Some(std::time::Duration::from_millis(ms));
+                    }
+                    Err(_) => tracing::warn!(
+                        value = v,
+                        "USAI_IDLE_DECOMMIT_MS ignored: not a number of milliseconds"
+                    ),
+                }
+            }
+            if let Ok(v) = std::env::var("USAI_IDLE_DECOMMIT_FLOOR") {
+                match parse_bytes(&v) {
+                    Some(bytes) => config.idle_decommit_floor_bytes = bytes as u64,
+                    None => {
+                        tracing::warn!(value = v, "USAI_IDLE_DECOMMIT_FLOOR ignored: not a size")
+                    }
+                }
+            }
             Ok(wasm::WasmEngine::new(config)? as Arc<dyn Engine>)
         }
         "quickjs" | "native" => {
@@ -242,6 +266,14 @@ pub trait Engine: Send + Sync {
         &self,
         compiled: &Arc<dyn Compiled>,
     ) -> Result<serde_json::Value, EngineError>;
+    /// Bytes this substrate is holding resident for slots that are warm but
+    /// unused — the RSS plateau an operator sees after a burst. `0` for a
+    /// substrate with no such notion, which is the honest answer rather than
+    /// a missing one: the reference engine allocates per world and keeps
+    /// nothing between them.
+    fn resident_unused_bytes(&self) -> u64 {
+        0
+    }
 }
 
 /// Bindings for the build phase: every operation is refused, so a

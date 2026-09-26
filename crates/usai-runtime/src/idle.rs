@@ -41,6 +41,20 @@ pub fn wait_until_active() {
     }
 }
 
+/// The same, giving up after `quiet`. `true` means a world is live; `false`
+/// means the process went that long with none, which is the only signal the
+/// substrate needs to hand back what it is holding for slots nobody is using
+/// (`engine/wasm.rs`). A world arriving during the wait restarts the clock,
+/// because the caller loops back into this call.
+pub fn wait_until_active_for(quiet: std::time::Duration) -> bool {
+    let live = ACTIVITY.live.lock().expect("activity poisoned");
+    let (live, _) = ACTIVITY
+        .changed
+        .wait_timeout_while(live, quiet, |live| *live == 0)
+        .expect("activity poisoned");
+    *live > 0
+}
+
 /// Live worlds as the tickers see them (tests, status).
 pub fn live() -> u64 {
     *ACTIVITY.live.lock().expect("activity poisoned")
@@ -59,6 +73,18 @@ mod tests {
         super::enter();
         waiter.join().unwrap();
         assert!(super::live() >= 1);
+        super::leave();
+    }
+
+    #[test]
+    fn a_quiet_wait_gives_up_and_says_so() {
+        // The idle-decommit policy turns `false` into "hand the pool's
+        // kept-resident pages back", so a spurious wake-up that returned
+        // `false` with a world live would release memory under load.
+        super::enter();
+        assert!(super::wait_until_active_for(
+            std::time::Duration::from_millis(20)
+        ));
         super::leave();
     }
 }

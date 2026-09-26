@@ -279,6 +279,12 @@ pub struct RuntimeStatus {
     /// Compiled application images alive (one per held revision, plus
     /// whatever a build or a world still references). Wasm engine only.
     pub compiled_images_live: u64,
+    /// What the substrate holds for slots nobody is using, and what it has
+    /// handed back after quiet periods (ADR-0019 lever 2). An RSS plateau
+    /// after a burst is expected up to `USAI_WASM_KEEP_RESIDENT` per slot
+    /// ever touched; these three say whether the runtime released any of it
+    /// or never had enough to bother. Wasm engine only.
+    pub pool_memory: PoolMemoryStatus,
     pub gauges: GaugeSnapshot,
     pub tasks: serde_json::Value,
     pub revisions: Vec<RevisionStatus>,
@@ -289,6 +295,20 @@ pub struct RuntimeStatus {
     /// fds), read from `/proc/self` for this answer; absent off Linux.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub process: Option<crate::procfs::ProcessStatus>,
+}
+
+/// The substrate's per-concurrency memory, as an operator sees it.
+#[derive(Clone, Debug, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PoolMemoryStatus {
+    /// Resident right now in slots that are warm but unused: the plateau.
+    pub resident_unused_bytes: u64,
+    /// Monotonic: bytes handed back after quiet periods.
+    pub released_bytes: u64,
+    /// Monotonic: how many times the release ran. Zero with a non-zero
+    /// plateau means the plateau never reached `USAI_IDLE_DECOMMIT_FLOOR`,
+    /// or the process has not been quiet for `USAI_IDLE_DECOMMIT_MS`.
+    pub releases: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1350,6 +1370,13 @@ impl Runtime {
             },
             compiled_images_live: crate::engine::wasm::IMAGES_LIVE
                 .load(std::sync::atomic::Ordering::Relaxed),
+            pool_memory: PoolMemoryStatus {
+                resident_unused_bytes: self.engine.resident_unused_bytes(),
+                released_bytes: crate::engine::wasm::POOL_MEMORY_RELEASED_BYTES
+                    .load(std::sync::atomic::Ordering::Relaxed),
+                releases: crate::engine::wasm::POOL_MEMORY_RELEASES
+                    .load(std::sync::atomic::Ordering::Relaxed),
+            },
             gauges: self.ledger.gauges.snapshot(),
             tasks: self.tasks.status(),
             revisions,

@@ -1,8 +1,9 @@
 # vendor/
 
-Third-party sources carried with a local patch. Each entry says what is
+Third-party sources carried with local patches. Each entry says what is
 patched and why; regenerate with the recipe, do not hand-edit beyond the
-listed patch.
+listed patches. **Both patches are merged upstream**, so this directory is
+waiting on releases, not on review.
 
 ## wasmtime 48.0.2 — pagemap slot reset: complete traversal, and reset paged-out dirty pages
 
@@ -75,15 +76,55 @@ ordinary reset), `a_reused_slot_is_fresh_after_fragmented_writes` (one byte
 every other page: hundreds of regions, more than one scan call returns), and
 the same property on the memcpy path without the scan.
 
+## wasmtime 48.0.2 — `Engine::release_idle_pool_memory`
+
+Upstream: <https://github.com/bytecodealliance/wasmtime/pull/14419>
+**merged into `main` on 2026-09-26** (`65c5190`, approved by a Wasmtime
+maintainer; `docs/upstream/wasmtime-idle-decommit.md`). The patch here is that
+PR's merged diff with the `crates/wasmtime/` prefix stripped, applied
+unchanged — it lands cleanly on 48.0.2, which is why the lever did not have to
+wait for a release.
+
+Adds one public method and the two internal pieces it needs: an index
+allocator that can take warm-but-unused slots out of the free lists with their
+affinity intact, and a memory pool that decommits their resident regions and
+puts the slots back. Nothing is lost by releasing: on a platform whose
+`decommit_behavior` is `RestoreOriginalMapping` the resident region holds
+exactly what the mapping restores on the next touch.
+
+Why this repository needs it: `linear_memory_keep_resident` is fixed when the
+`Engine` is built, so resident memory follows the peak concurrency the process
+has ever seen rather than its current load — 64 concurrent worlds cost half a
+gigabyte and keep it all night. ADR-0019 lever 2; the call site is the epoch
+ticker in `engine/wasm.rs`, which is the one thread that knows the process has
+gone quiet.
+
+Regression test: `engine::wasm::tests::the_idle_release_respects_its_floor_and_leaves_the_slot_usable`.
+Unlike the pagemap patch there is no freshness property to re-check — if the
+method disappears, the build fails.
+
 Recipe:
 
 ```bash
 cp -r ~/.cargo/registry/src/index.crates.io-*/wasmtime-48.0.2 vendor/wasmtime
 rm -f vendor/wasmtime/.cargo_vcs_info.json vendor/wasmtime/.cargo-ok vendor/wasmtime/Cargo.lock vendor/wasmtime/Cargo.toml.orig
 patch -p1 -d vendor/wasmtime < vendor/wasmtime-pagemap-reset.patch
+patch -p1 -d vendor/wasmtime < vendor/wasmtime-idle-decommit.patch
 ```
 
 `Cargo.toml` `[patch.crates-io]` points `wasmtime` here; every other
-`wasmtime-*` crate comes from crates.io at the same version. Upstream: both
-behaviours to be proposed (the second is a correctness issue); drop the
-vendor when released.
+`wasmtime-*` crate comes from crates.io at the same version.
+
+**Dropping the vendor now takes two checks, not one.** Both patches are
+merged, but they will not necessarily be in the same release, and the rule
+above still holds: go by the file. `pagemap.rs` as shown earlier, and for this
+one:
+
+```bash
+ref=v50.0.0   # whichever release you are considering
+gh api "repos/bytecodealliance/wasmtime/contents/crates/wasmtime/src/engine.rs?ref=$ref" \
+  -q .content | base64 -d | grep -c release_idle_pool_memory
+```
+
+A release carrying one and not the other means the vendor stays with the patch
+that is still missing — and the `[patch.crates-io]` entry with it.
