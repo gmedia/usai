@@ -45,3 +45,13 @@ path = "fuzz_targets/postgres_params.rs"
 test = false
 doc = false
 bench = false
+
+# This is its own workspace, so the root's `[patch.crates-io]` does not reach
+# it: without this the fuzz targets build `usai-runtime` against an unpatched
+# wasmtime from crates.io. That was invisible while the vendored patch only
+# changed behaviour inside an existing function (the pagemap reset) — the
+# fuzzers simply ran without the fix. It stopped being invisible when the
+# second patch added an API: the build failed on
+# `Engine::release_idle_pool_memory`. Both patches now apply here too.
+[patch.crates-io]
+wasmtime = { path = "../vendor/wasmtime" }

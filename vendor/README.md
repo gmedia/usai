@@ -113,7 +113,13 @@ patch -p1 -d vendor/wasmtime < vendor/wasmtime-idle-decommit.patch
 ```
 
 `Cargo.toml` `[patch.crates-io]` points `wasmtime` here; every other
-`wasmtime-*` crate comes from crates.io at the same version.
+`wasmtime-*` crate comes from crates.io at the same version. **`fuzz/` is its
+own workspace and needs its own `[patch.crates-io]`**, which it now has: until
+2026-09-26 it did not, so every fuzz target built against an *unpatched*
+wasmtime and fuzzed a runtime without the pagemap fix. Nothing pointed that
+out because the first patch only changes behaviour inside an existing
+function; the second added a method and the build finally failed. A third
+patch would need the same check.
 
 **Dropping the vendor now takes two checks, not one.** Both patches are
 merged, but they will not necessarily be in the same release, and the rule

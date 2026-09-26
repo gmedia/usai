@@ -3289,7 +3289,7 @@ dependencies = [
 
 [[package]]
 name = "usai-runtime"
-version = "0.0.8"
+version = "0.0.13"
 dependencies = [
  "anyhow",
  "argon2",
@@ -3544,8 +3544,6 @@ dependencies = [
 [[package]]
 name = "wasmtime"
 version = "48.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "699c2cb832d70d284b2839ebeb12721ca2ef80aa4a3389d2d2d13acf3e19c821"
 dependencies = [
  "addr2line",
  "async-trait",
