@@ -125,6 +125,12 @@ secure multi-tenant sandbox proven
 all backend workloads supported
 ```
 
+**A number in one of our own documents is not evidence; it is a claim with a date on it.** Before building anything on top of one — especially before spending an outside maintainer's time — re-measure it, and check that it still means what the sentence around it says.
+
+This is not hypothetical. ADR-0019's second P9 lever was written from "64 concurrent requests cost half a gigabyte and keep it", a number read off a sweep's RSS column. Acting on it produced an upstream issue, a closed first attempt, a merged wasmtime PR and a vendored patch — and then the measurement that should have come first showed the plateau had already been closed weeks earlier by a fix from another campaign, and that most of the RSS was shared pages the fix could never have touched (`docs/measurements/2026-09-26-idle-decommit.md`). The check that would have caught it needed no new API and no permission: one burst, read the metric that already existed next to RSS. Fifteen minutes.
+
+Two habits follow. **Read RSS with PSS beside it** — RSS counts one shared page once per mapping, and this runtime maps the same image into every slot, so RSS can be most of a lie. And when a fix in one campaign changes what another campaign's number means, say so in both places; nobody notices otherwise, because the two are written weeks apart.
+
 Production readiness requires production-shaped evidence: soak, overload, crash/restart, rolling upgrade, multi-core, many-app density, threat model. Most of it exists now — 24 h and 72 h soaks, overload and restart campaigns, a two-replica rolling restart, density to N = 50, and a threat model whose claims are verified by `scripts/qualification/threat/run.sh` (`docs/STATUS.md` has the evidence). **Multi-core is the one still missing** (Q8), and P7 is still waiting on people.
 
 ---

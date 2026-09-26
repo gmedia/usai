@@ -97,6 +97,8 @@ Milestone order is `GOAL.md` §53 (D0 → D15); D1 lifecycle core before D2 HTTP
 ## Claude-specific notes
 
 - Explain to the user in **Indonesian**; write code, identifiers, commit messages, and repo docs in **English**.
+- **Explain in plain Indonesian, not in engineer's shorthand.** The user asked for this directly: "bahasamu kurang masuk ke aku ... jangan seperti senior software engineer". Short sentences. Say what happened before naming what it is called. Spell an unavoidable term out once instead of assuming it (`plateau`, `COW`, `PSS`). Do not open with a table — a table answers "how much", and the question is usually "what happened and why". The same habit shows up in code: a Wasmtime reviewer asked for the comments on our PR to be cut down twice, so this is one problem, not two.
+- Keep the same plainness when reporting a bad result. Say the result in the first sentence, then the reason. Do not lead with the consolations — the user will ask for those if they want them, and offering them first reads as softening the number.
 - Stop-and-surface decisions (`AGENTS.md` §3) and the rows in `docs/OPEN-QUESTIONS.md` are the cases to use `AskUserQuestion` or state an explicit assumption — not routine engineering choices.
 - When a change moves the milestone, edit `docs/STATUS.md` in the same change. When it closes an open question, add an ADR and update `docs/OPEN-QUESTIONS.md`.
 - Never edit files under the research repository's `docs/experiments/` or `artifacts/`, even if asked to "fix" something there; add a new document instead and say why.
