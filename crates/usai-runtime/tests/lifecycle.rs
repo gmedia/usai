@@ -537,6 +537,47 @@ async fn revision_replacement_drains_the_old_revision() {
     assert_baseline(&rt);
 }
 
+/// Draining a revision that has already retired on its own is success, not
+/// `unknown_revision`.
+///
+/// Activation puts the old revision into `Draining` and a background task
+/// retires it — which **removes** it — as soon as its work settles. An
+/// orchestrator that activates the new revision and then drains the old one
+/// is racing that task, and when it loses it used to be told the revision
+/// does not exist: an error for a caller whose request had already been
+/// carried out. It is how `draining_waits_for_dispatched_tasks` went red on
+/// CI while passing on every developer machine.
+#[tokio::test]
+async fn draining_an_already_retired_revision_is_success() {
+    let rt = runtime().await;
+    let a = rt.active().unwrap();
+    let b = rt.install(definition("t2")).await.unwrap();
+    rt.activate(b.id).await.unwrap();
+
+    // Nothing was in flight, so the background retire removes A promptly.
+    for _ in 0..200 {
+        if rt.revision(a.id).is_err() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(
+        rt.revision(a.id).is_err(),
+        "the background retire should have removed A by now"
+    );
+
+    rt.drain(a.id).await.expect("draining a retired revision");
+    assert_eq!(a.state(), RevisionState::Retired);
+
+    // An id this runtime never issued is still unknown: the point is to stop
+    // lying to a caller whose work is done, not to accept anything.
+    assert!(matches!(
+        rt.drain(RevisionId(9999)).await,
+        Err(RuntimeError::UnknownRevision(_))
+    ));
+    assert_baseline(&rt);
+}
+
 #[tokio::test]
 async fn failed_activation_leaves_the_active_revision_untouched() {
     let rt = runtime().await;

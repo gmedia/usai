@@ -45,6 +45,16 @@ not different endpoints; regenerate it.
   — the TypeScript idiom for one — needed a copy at every call. The runtime
   only reads it.
 
+- **Draining a revision that already retired is success, not
+  `unknown_revision`.** Activation puts the old revision into `Draining` and
+  retires it in the background as soon as its work settles — which removes
+  it. An orchestrator that activates the new revision and then drains the old
+  one races that, and losing the race used to be an error for a caller whose
+  request had already been carried out. An id this runtime issued and no
+  longer holds has been drained; an id it never issued is still unknown.
+  Found because a test that does exactly this went red on CI while passing on
+  every developer machine.
+
 ## 0.0.13 — 2026-09-26
 
 - **The substrate can hand back its idle pool memory, and now we know what

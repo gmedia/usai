@@ -776,7 +776,19 @@ impl Runtime {
     /// Waits until a draining (or still-active, which it first marks
     /// draining) revision has no in-flight work, then retires it.
     pub async fn drain(&self, id: RevisionId) -> Result<(), RuntimeError> {
-        let revision = self.revision(id)?;
+        // A revision that activation put into `Draining` retires on its own
+        // once its work settles, and retiring removes it. An orchestrator
+        // that activates the new revision and then drains the old one is
+        // racing that: when it loses, the revision is gone and asking for it
+        // used to be `unknown_revision` — an error for a caller whose
+        // request had already been carried out. An id this runtime issued
+        // and no longer holds has been drained, so say so. An id it never
+        // issued is still unknown.
+        let revision = match self.revision(id) {
+            Ok(revision) => revision,
+            Err(_) if id.0 < self.next_revision.load(Ordering::SeqCst) => return Ok(()),
+            Err(e) => return Err(e),
+        };
         {
             let mut active = self.active.write().expect("active poisoned");
             if *active == Some(id) {
