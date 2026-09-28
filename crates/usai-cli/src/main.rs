@@ -357,6 +357,17 @@ enum QueueAction {
         resource: Option<String>,
         #[arg(long)]
         json: bool,
+        /// Run against a built artifact instead of a project (a production
+        /// image carries `.usai/build` and no source tree)
+        #[arg(long)]
+        artifact: Option<PathBuf>,
+        /// The queue's database directly, skipping the project and the
+        /// artifact. Only this one resource is opened — the queue is one
+        /// table in one database, and a URL is all this work needs
+        /// (`DATABASE_URL` is read when neither a project nor an artifact
+        /// resolves)
+        #[arg(long)]
+        database_url: Option<String>,
     },
     /// Delete finished rows. The runtime never prunes by itself: a `dead`
     /// row is a message your application failed, and only you know whether
@@ -381,6 +392,17 @@ enum QueueAction {
         /// `done` rows older than a week with no confirmation
         #[arg(long)]
         yes: bool,
+        /// Run against a built artifact instead of a project (a production
+        /// image carries `.usai/build` and no source tree)
+        #[arg(long)]
+        artifact: Option<PathBuf>,
+        /// The queue's database directly, skipping the project and the
+        /// artifact. Only this one resource is opened — the queue is one
+        /// table in one database, and a URL is all this work needs
+        /// (`DATABASE_URL` is read when neither a project nor an artifact
+        /// resolves)
+        #[arg(long)]
+        database_url: Option<String>,
     },
     /// Create the queue's indexes with CREATE INDEX CONCURRENTLY, before an
     /// upgrade builds them under a write-blocking lock. Safe to run while
@@ -388,6 +410,17 @@ enum QueueAction {
     Prepare {
         #[arg(long)]
         resource: Option<String>,
+        /// Run against a built artifact instead of a project (a production
+        /// image carries `.usai/build` and no source tree)
+        #[arg(long)]
+        artifact: Option<PathBuf>,
+        /// The queue's database directly, skipping the project and the
+        /// artifact. Only this one resource is opened — the queue is one
+        /// table in one database, and a URL is all this work needs
+        /// (`DATABASE_URL` is read when neither a project nor an artifact
+        /// resolves)
+        #[arg(long)]
+        database_url: Option<String>,
     },
 }
 
@@ -695,8 +728,22 @@ async fn async_main() {
                     topic,
                     resource,
                     json,
+                    artifact,
+                    database_url,
                 },
-        } => commands::queue_status(&root, topic.as_deref(), resource.as_deref(), json).await,
+        } => {
+            commands::queue_status(
+                &root,
+                topic.as_deref(),
+                json,
+                &commands::QueueTarget {
+                    resource,
+                    artifact,
+                    database_url,
+                },
+            )
+            .await
+        }
         Command::Queue {
             action:
                 QueueAction::Prune {
@@ -706,6 +753,8 @@ async fn async_main() {
                     resource,
                     dry_run,
                     yes,
+                    artifact,
+                    database_url,
                 },
         } => {
             commands::queue_prune(
@@ -713,16 +762,35 @@ async fn async_main() {
                 &state,
                 &older_than,
                 topic.as_deref(),
-                resource.as_deref(),
                 // Counting is the default; deleting is the thing you ask
                 // for. `--dry-run` stays because scripts already pass it.
                 dry_run || !yes,
+                &commands::QueueTarget {
+                    resource,
+                    artifact,
+                    database_url,
+                },
             )
             .await
         }
         Command::Queue {
-            action: QueueAction::Prepare { resource },
-        } => commands::queue_prepare(&root, resource.as_deref()).await,
+            action:
+                QueueAction::Prepare {
+                    resource,
+                    artifact,
+                    database_url,
+                },
+        } => {
+            commands::queue_prepare(
+                &root,
+                &commands::QueueTarget {
+                    resource,
+                    artifact,
+                    database_url,
+                },
+            )
+            .await
+        }
         Command::Db {
             action: DbAction::Migrate { resource, artifact },
         } => commands::db_migrate(&root, resource.as_deref(), artifact).await,

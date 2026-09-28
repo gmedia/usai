@@ -1328,13 +1328,11 @@ pub async fn queue_run(
 pub async fn queue_status(
     root: &Path,
     topic: Option<&str>,
-    resource: Option<&str>,
     json: bool,
+    target: &QueueTarget,
 ) -> Result<()> {
-    with_active_runtime(root, async |runtime, _config| {
-        let revision = runtime.active()?;
-        let manager = db::database(&revision, resource)?;
-        let rows = match usai_runtime::workloads::queue::ops::stats(manager.as_ref()).await {
+    with_queue_database(root, target, async |manager| {
+        let rows = match usai_runtime::workloads::queue::ops::stats(manager).await {
             Ok(rows) => rows,
             // The table is created by the first publish or the first
             // consumer; before that there is nothing to report, which is an
@@ -1401,8 +1399,8 @@ pub async fn queue_prune(
     state: &str,
     older_than: &str,
     topic: Option<&str>,
-    resource: Option<&str>,
     dry_run: bool,
+    target: &QueueTarget,
 ) -> Result<()> {
     let states: Vec<&str> = match state {
         "done" => vec!["done"],
@@ -1411,12 +1409,10 @@ pub async fn queue_prune(
         other => anyhow::bail!("--state is done, dead or all (got {other})"),
     };
     let seconds = parse_duration_seconds(older_than)?;
-    with_active_runtime(root, async |runtime, _config| {
-        let revision = runtime.active()?;
-        let manager = db::database(&revision, resource)?;
+    with_queue_database(root, target, async |manager| {
         if dry_run {
             let n = usai_runtime::workloads::queue::ops::prune_count(
-                manager.as_ref(),
+                manager,
                 &states,
                 seconds,
                 topic,
@@ -1429,8 +1425,7 @@ pub async fn queue_prune(
             return Ok(());
         }
         let deleted =
-            usai_runtime::workloads::queue::ops::prune(manager.as_ref(), &states, seconds, topic)
-                .await?;
+            usai_runtime::workloads::queue::ops::prune(manager, &states, seconds, topic).await?;
         println!(
             "deleted {deleted} row(s) in state {} older than {older_than}{}",
             states.join("/"),
@@ -1442,11 +1437,9 @@ pub async fn queue_prune(
 }
 
 /// `usai queue prepare`: build the indexes without blocking writers.
-pub async fn queue_prepare(root: &Path, resource: Option<&str>) -> Result<()> {
-    with_active_runtime(root, async |runtime, _config| {
-        let revision = runtime.active()?;
-        let manager = db::database(&revision, resource)?;
-        let ran = usai_runtime::workloads::queue::ops::prepare_indexes(manager.as_ref()).await?;
+pub async fn queue_prepare(root: &Path, target: &QueueTarget) -> Result<()> {
+    with_queue_database(root, target, async |manager| {
+        let ran = usai_runtime::workloads::queue::ops::prepare_indexes(manager).await?;
         if ran.is_empty() {
             println!("nothing to build");
         } else {
@@ -1504,6 +1497,131 @@ async fn with_active_runtime<T>(
     let result = f(&runtime, &config).await;
     runtime.shutdown().await;
     result
+}
+
+/// Where a queue command finds its database. The three commands take the same
+/// three answers, and a queue is one table in one database — so this is the
+/// whole of what they need to know.
+#[derive(Clone, Debug, Default)]
+pub struct QueueTarget {
+    /// The named `postgres` resource, when the application has several.
+    pub resource: Option<String>,
+    /// A built artifact, for an image with no source tree.
+    pub artifact: Option<PathBuf>,
+    /// The database itself, skipping project and artifact alike.
+    pub database_url: Option<String>,
+}
+
+/// The one PostgreSQL resource the queue lives in, opened on its own.
+///
+/// `queue status|prune|prepare` touch exactly one table in one database, and
+/// they used to get there through a revision — which means activating the
+/// whole application and binding **every** resource. At a site that failed on
+/// an unrelated `ROUTEROS_BRIDGE_URL is not set` while clearing a dead
+/// message, and inside a production image there is no project to activate
+/// from at all: `/app` has `.usai/build` and no source tree.
+///
+/// So: no runtime, no revision, no activation. Where the database comes from,
+/// in order —
+///
+/// 1. `--database-url`, or `DATABASE_URL` when there is no project and no
+///    artifact. A URL is all this work needs, which is what makes
+///    `docker exec … usai queue prune` possible.
+/// 2. the artifact's definition (`--artifact`), or the project's, for the
+///    named resource or its first `postgres`.
+async fn with_queue_database<T>(
+    root: &Path,
+    target: &QueueTarget,
+    f: impl AsyncFnOnce(&dyn resource::ResourceManager) -> Result<T>,
+) -> Result<T> {
+    let (artifact, resource, database_url) = (
+        target.artifact.as_deref(),
+        target.resource.as_deref(),
+        target.database_url.as_deref(),
+    );
+    /// A spec that reads the URL from this one name, which the closure below
+    /// answers — rather than `set_var`, which would reach the whole process.
+    const DIRECT: &str = "USAI_QUEUE_DATABASE_URL";
+    let direct = || definition::ResourceSpec {
+        name: "queue".into(),
+        kind: "postgres".into(),
+        module: None,
+        config: serde_json::json!({ "urlEnv": DIRECT }),
+        env: vec![DIRECT.into()],
+    };
+    let mut url = database_url.map(str::to_owned);
+    let spec =
+        match (&url, artifact) {
+            // A bare URL: nothing is read from the project, so this works in an
+            // image that carries only the binary.
+            (Some(_), _) => direct(),
+            (None, Some(dir)) => {
+                let definition = load_artifact(dir)
+                    .await
+                    .with_context(|| format!("artifact {}", dir.display()))?;
+                postgres_spec(&definition, resource)?
+            }
+            (None, None) => match load_config(engine().as_ref(), root).await {
+                Ok(config) => {
+                    let out = usai_runtime::build::build(
+                        engine().as_ref(),
+                        &BuildOptions::from_config(&config),
+                    )
+                    .await?;
+                    postgres_spec(&out.definition, resource)?
+                }
+                // No project here. Inside a production image that is the normal
+                // case, and `DATABASE_URL` is already set for the runtime, so
+                // there is nothing left to ask the operator for.
+                Err(e) => match std::env::var("DATABASE_URL") {
+                    Ok(from_env) if !from_env.trim().is_empty() => {
+                        url = Some(from_env);
+                        direct()
+                    }
+                    _ => return Err(anyhow::Error::new(e).context(
+                        "not a Usai project, and DATABASE_URL is not set. Point --artifact at the \
+                     built artifact, or pass --database-url: the queue is one table in one \
+                     database and that is all this needs",
+                    )),
+                },
+            },
+        };
+    let registry = resource::ResourceRegistry::new();
+    let manager = registry
+        .open(&spec, &|name| match (name, &url) {
+            (DIRECT, Some(url)) => Some(url.clone()),
+            _ => std::env::var(name).ok(),
+        })
+        .await
+        .with_context(|| {
+            format!(
+                "opening the queue's database ({}). Only this resource is opened: \
+                 pass --database-url, or set DATABASE_URL, to skip the project entirely",
+                spec.name
+            )
+        })?;
+    let result = f(manager.as_ref()).await;
+    registry.shutdown().await;
+    result
+}
+
+/// The named `postgres` resource of a definition, or its first.
+fn postgres_spec(
+    definition: &definition::ApplicationDefinition,
+    name: Option<&str>,
+) -> Result<definition::ResourceSpec> {
+    let specs = definition.resources();
+    let found = match name {
+        Some(wanted) => specs
+            .iter()
+            .find(|r| r.name == wanted && r.kind == "postgres")
+            .with_context(|| format!("no postgres resource named {wanted} in this application")),
+        None => specs
+            .iter()
+            .find(|r| r.kind == "postgres")
+            .context("this application declares no postgres resource, so it has no queue"),
+    }?;
+    Ok(found.clone())
 }
 
 /// A runtime over an artifact's definition (no project, no source), for

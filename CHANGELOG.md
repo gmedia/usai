@@ -8,6 +8,25 @@ runtime of that version and the next (`SUPPORTED.md` → Versioning). Within
 GitHub releases carry the auto-generated commit list as well; this file is
 the human summary.
 
+## 0.0.17 — 2026-09-29
+
+- **Queue maintenance runs where the application runs.** `usai queue status`,
+  `prune` and `prepare` took a project directory and then activated the whole
+  application to reach one table — so clearing a given-up message at a site
+  was impossible from the deployed container ("not a Usai project: no
+  package.json or usai.config.ts here"), and from a checkout it stopped on an
+  unrelated resource's variable. The operator's only route left was
+  hand-written SQL against a runtime table, which is the coupling
+  `ctx.queue.stats` had just removed from the application.
+
+  All three now take `--artifact /app/.usai/build` like `usai run`, or
+  `--database-url`, and fall back to `DATABASE_URL` when there is neither a
+  project nor an artifact — which is the normal shape inside an image, where
+  the runtime already has it. **Only the queue's database is opened**: no
+  revision, no activation, so nothing else's configuration can stand in the
+  way. The error when there is nothing to go on names both escapes instead of
+  suggesting you scaffold a project.
+
 ## 0.0.16 — 2026-09-29
 
 Five entries from the same downstream deployment, one of them a bug that made

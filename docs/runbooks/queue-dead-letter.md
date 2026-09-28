@@ -44,6 +44,20 @@ usai --root /srv/app queue status                 # per topic and state, with ag
 usai --root /srv/app queue status --json | jq     # for a script or an alert
 ```
 
+**Inside the deployed container** there is no source tree — that is the point
+of the image — and until 0.0.17 these commands needed one. They no longer do:
+the queue is one table in one database, so a URL is enough, and only that one
+resource is opened. Nothing is activated, so an unrelated resource's variable
+cannot stop you clearing a dead message.
+
+```bash
+docker exec <container> usai queue status                          # DATABASE_URL is already set for the runtime
+docker exec <container> usai queue prune --state dead --older-than 0m        # counts
+docker exec <container> usai queue prune --state dead --older-than 0m --yes  # deletes
+usai queue status --database-url "$URL"           # or name it, from anywhere
+usai queue status --artifact /app/.usai/build     # or read it from the artifact
+```
+
 `ready` is depth. A `processing` row is a lost consumer once it is older
 than the consumer's deadline **plus a margin** — 10 s, so a row claimed by a
 consumer with the default 30 s timeout is reclaimed at 40 s, and the sweep

@@ -149,3 +149,76 @@ fn a_command_runs_from_an_artifact_with_no_source_tree() {
     );
     let _ = std::fs::remove_dir_all(&image);
 }
+
+/// Queue maintenance runs where the application runs: in an image with no
+/// source tree, and without activating anything but the queue's database.
+///
+/// Clearing a given-up message at a site used to be impossible from the
+/// deployed container: `usai queue prune` answered "not a Usai project", and
+/// from a checkout it activated the whole application and stopped on an
+/// unrelated resource's variable — although it only touches one table. The
+/// operator's escape was hand-written SQL against a runtime table, which is
+/// exactly the coupling `ctx.queue.stats` had just removed.
+#[test]
+fn queue_maintenance_runs_from_an_image_with_only_a_database_url() {
+    let Some(url) = std::env::var("USAI_TEST_DATABASE_URL")
+        .ok()
+        .or_else(|| std::env::var("DATABASE_URL").ok())
+        .filter(|u| !u.trim().is_empty())
+    else {
+        eprintln!("SKIPPED: no USAI_TEST_DATABASE_URL/DATABASE_URL");
+        return;
+    };
+    // An empty directory: no project, no artifact. What a container looks
+    // like to a command run with `docker exec`.
+    let empty = std::env::temp_dir().join(format!("usai-queue-cli-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&empty);
+    std::fs::create_dir_all(&empty).unwrap();
+
+    let run = |args: &[&str], with_url: bool| -> (bool, String) {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_usai"));
+        cmd.args(args)
+            .current_dir(&empty)
+            .env_remove("DATABASE_URL");
+        if with_url {
+            cmd.env("DATABASE_URL", &url);
+        }
+        let out = cmd.output().expect("usai runs");
+        let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+        text.push_str(&String::from_utf8_lossy(&out.stderr));
+        (out.status.success(), text)
+    };
+
+    // Nothing to go on: the error names both ways out instead of only
+    // suggesting `--root` and scaffolding a new project.
+    let (ok, text) = run(&["queue", "status"], false);
+    assert!(!ok, "{text}");
+    assert!(
+        text.contains("--artifact") && text.contains("--database-url"),
+        "the refusal has to name both escapes: {text}"
+    );
+
+    // With the URL the runtime already has, it reads the table.
+    let (ok, text) = run(&["queue", "status"], true);
+    assert!(ok, "a URL is all this needs: {text}");
+    assert!(
+        text.contains("usai_queue") || text.contains("topic") || text.contains("state"),
+        "{text}"
+    );
+
+    // And prune counts without deleting, from the same place.
+    let (ok, text) = run(
+        &["queue", "prune", "--state", "dead", "--older-than", "0m"],
+        true,
+    );
+    assert!(ok, "{text}");
+    assert!(
+        text.contains("dry run") || text.contains("nothing was deleted") || text.contains("row(s)"),
+        "{text}"
+    );
+
+    // `--database-url` needs no environment at all.
+    let (ok, text) = run(&["queue", "status", "--database-url", &url], false);
+    assert!(ok, "the flag alone has to work: {text}");
+    let _ = std::fs::remove_dir_all(&empty);
+}
