@@ -8,6 +8,24 @@ runtime of that version and the next (`SUPPORTED.md` → Versioning). Within
 GitHub releases carry the auto-generated commit list as well; this file is
 the human summary.
 
+## 0.0.18 — 2026-09-29
+
+Documentation only, released on its own because a downstream site syncs these
+pages on a schedule and was failing on them every six hours.
+
+- **A broken link in the SDK reference, and a check so the next one cannot
+  ship.** `EnvField.group`'s comment wrote `{@link env.group}`, and TypeDoc
+  turned that into `env.md#group` — a page section it never produced, because
+  `env.group` is a function attached to `env` rather than a documented member.
+  The link has been wrong since 0.0.16. Nothing here noticed: the site that
+  mirrors these pages ran a link checker, and its scheduled sync failed
+  instead of ours.
+
+  So `make docs-check` now validates every relative link in `docs/sdk` —
+  the page has to exist and an anchor has to be one that page defines
+  (`scripts/check-doc-links.mjs`, 158 pages). A guard belongs where the link
+  is written, not only where it is read.
+
 ## 0.0.17 — 2026-09-29
 
 - **Queue maintenance runs where the application runs.** `usai queue status`,

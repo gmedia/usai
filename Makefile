@@ -39,6 +39,7 @@ verify-envelope:
 
 docs-check: docs
 	@if [ -n "$$(git status --porcelain docs/sdk)" ]; then git status --short docs/sdk; echo "docs/sdk is stale: run 'make docs' and commit"; exit 1; fi
+	node scripts/check-doc-links.mjs
 
 test:
 	cargo test --workspace

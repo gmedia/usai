@@ -35,7 +35,7 @@ export interface EnvField<T> {
   readonly items?: EnvKind;
   /** `list` only: what separates the items (default `,`). */
   readonly separator?: string;
-  /** The group this field belongs to ({@link env.group}). Every field of one
+  /** The group this field belongs to (`env.group`). Every field of one
    * group must be set together or not at all, checked by the **host** at
    * activation. It lives on the field rather than on the declaration because
    * a field map is routinely spread into a larger one
