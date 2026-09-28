@@ -8,6 +8,43 @@ runtime of that version and the next (`SUPPORTED.md` → Versioning). Within
 GitHub releases carry the auto-generated commit list as well; this file is
 the human summary.
 
+## 0.0.14 — 2026-09-28
+
+Three things the same downstream deployment reported on 0.0.13, under the
+rule that has been working: a fix has to be generic.
+
+**Upgrading**: additive, except that an OpenAPI document may now contain
+`$ref`s where it had inline shapes. A generated client gets *better* names,
+not different endpoints; regenerate it.
+
+- **A schema you name becomes one named type in the OpenAPI document.**
+  `z.object({ … }).meta({ id: "DetectionEvent" })` now produces
+  `components.schemas.DetectionEvent`, referenced by every operation that
+  uses it, in the public profile too. The name was always there — Zod emits
+  it as a `$defs` block — and the document scattered it: a contract shared by
+  three endpoints was written out three times under a `$ref` into a local
+  `$defs` that `openapi-typescript` does not follow, so a generated client
+  had an anonymous type per operation and `components.schemas` held only
+  `UsaiError`. A schema with no id is untouched and stays inline. Two
+  *different* shapes claiming one id cannot both have it: the first keeps the
+  name, the others stay inline, and a warning names the id.
+
+- **`httpClient` TLS paths can come from the environment.**
+  `tls: { caFileEnv, clientCertFileEnv, clientKeyFileEnv }`, the way
+  `baseUrl` has `baseUrlEnv`. Each site has its own certificate authority
+  while the code does not, and a literal path forced every deployment to
+  mount the file where the source happened to say — including the
+  development box that never calls the client and could not activate at all.
+  **An unset variable means no extra trust, not a failure**; a variable that
+  is set and names a missing file still stops activation, because that is a
+  deployment saying one thing and meaning another. Setting both forms of one
+  path is a build error.
+
+- **A constant list can be a statement parameter.** `SqlParam` accepted
+  `unknown[]` but not `readonly unknown[]`, so a fixed set written `as const`
+  — the TypeScript idiom for one — needed a copy at every call. The runtime
+  only reads it.
+
 ## 0.0.13 — 2026-09-26
 
 - **The substrate can hand back its idle pool memory, and now we know what

@@ -13,6 +13,93 @@ use crate::definition::{ApplicationDefinition, Trigger, WorkloadSpec};
 /// `.int()`: not a contract, noise in the document.
 const SAFE_INT: f64 = 9_007_199_254_740_991.0;
 
+/// Moves named schemas out of the document and into `components.schemas`.
+///
+/// A Standard Schema that carries an id — Zod's `.meta({ id: "DetectionEvent" })`
+/// — describes itself as `{ "$ref": "#/$defs/DetectionEvent", "$defs": { … } }`.
+/// That `$defs` used to travel with the schema to every place it was used, so
+/// a shape shared by three endpoints was written out three times, under no
+/// name a generator could reach: `components.schemas` held only `UsaiError`,
+/// and `openapi-typescript` produced an anonymous type per operation. The
+/// name was always there; the document scattered it.
+///
+/// Two passes, because a `$defs` block and the `$ref` that points into it sit
+/// at different depths. The first collects and removes; the second repoints.
+/// A name claimed twice by **different** shapes is a mistake we cannot
+/// resolve, so the first one wins the component and every other keeps its
+/// local `$defs` — the document stays valid and the WARN names the id.
+fn collect_defs(value: &mut Value, into: &mut Map<String, Value>, conflicts: &mut Vec<String>) {
+    match value {
+        Value::Object(map) => {
+            for (_, v) in map.iter_mut() {
+                collect_defs(v, into, conflicts);
+            }
+            let Some(Value::Object(defs)) = map.get("$defs").cloned() else {
+                return;
+            };
+            let mut kept = Map::new();
+            for (name, schema) in defs {
+                match into.get(&name) {
+                    Some(existing) if *existing != schema => {
+                        if !conflicts.contains(&name) {
+                            conflicts.push(name.clone());
+                        }
+                        kept.insert(name, schema);
+                    }
+                    Some(_) => {}
+                    None => {
+                        into.insert(name, schema);
+                    }
+                }
+            }
+            if kept.is_empty() {
+                map.remove("$defs");
+            } else {
+                map.insert("$defs".into(), Value::Object(kept));
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_defs(item, into, conflicts);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The second pass: `#/$defs/X` becomes `#/components/schemas/X` for every
+/// `X` that was lifted. A name that stayed local keeps its local reference.
+fn repoint_refs(value: &mut Value, lifted: &Map<String, Value>) {
+    match value {
+        Value::Object(map) => {
+            // A schema that kept a conflicting `$defs` keeps its references
+            // to it too, so this subtree is left alone for those names.
+            let local: Vec<String> = match map.get("$defs") {
+                Some(Value::Object(defs)) => defs.keys().cloned().collect(),
+                _ => Vec::new(),
+            };
+            for (key, v) in map.iter_mut() {
+                if key == "$ref" {
+                    if let Some(name) = v.as_str().and_then(|r| r.strip_prefix("#/$defs/"))
+                        && lifted.contains_key(name)
+                        && !local.iter().any(|l| l == name)
+                    {
+                        *v = Value::String(format!("#/components/schemas/{name}"));
+                    }
+                } else {
+                    repoint_refs(v, lifted);
+                }
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                repoint_refs(item, lifted);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn clean(schema: &Value) -> Value {
     match schema {
         Value::Object(map) => Value::Object(
@@ -833,11 +920,34 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
     if let Some(description) = &manifest.description {
         info["description"] = json!(description);
     }
+    // Named schemas are lifted last, over the finished document, so every
+    // place a contract can appear is covered by one pass rather than by
+    // remembering to call something at each of them.
+    let mut paths = Value::Object(paths);
+    let mut workloads = Value::Array(workloads);
+    let mut lifted = Map::new();
+    let mut conflicts = Vec::new();
+    collect_defs(&mut paths, &mut lifted, &mut conflicts);
+    collect_defs(&mut workloads, &mut lifted, &mut conflicts);
+    repoint_refs(&mut paths, &lifted);
+    repoint_refs(&mut workloads, &lifted);
+    for (name, schema) in lifted {
+        components["schemas"][name] = schema;
+    }
+    if !conflicts.is_empty() {
+        tracing::warn!(
+            ids = conflicts.join(", "),
+            "two different schemas claim the same id; the first keeps the name in \
+             components.schemas and the others stay inline. Give them different \
+             ids so a generated client can name them"
+        );
+    }
+
     json!({
         "openapi": "3.1.0",
         "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
         "info": info,
-        "paths": Value::Object(paths),
+        "paths": paths,
         "components": components,
         "x-usai-workloads": workloads,
         "x-usai-resources": resources,
@@ -852,6 +962,78 @@ pub const DOCS_HTML: &str = include_str!("docs.html");
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A schema that carries an id becomes one named component, however many
+    /// operations use it. Before this, the `$defs` Zod emits travelled with
+    /// the schema to every use site and `components.schemas` held only
+    /// `UsaiError`, so a generated client saw an anonymous shape per
+    /// operation.
+    #[test]
+    fn a_named_schema_becomes_one_component() {
+        let named = || {
+            json!({
+                "$ref": "#/$defs/Greeting",
+                "$defs": { "Greeting": { "type": "object", "properties": { "hello": { "type": "string" } } } }
+            })
+        };
+        let mut paths =
+            json!({ "/a": { "get": { "x": named() } }, "/b": { "get": { "x": named() } } });
+        let mut lifted = Map::new();
+        let mut conflicts = Vec::new();
+        collect_defs(&mut paths, &mut lifted, &mut conflicts);
+        repoint_refs(&mut paths, &lifted);
+
+        assert!(conflicts.is_empty(), "one shape, one id: {conflicts:?}");
+        assert_eq!(lifted.len(), 1, "the shape is written once: {lifted:?}");
+        assert!(lifted.contains_key("Greeting"));
+        for path in ["/a", "/b"] {
+            let schema = &paths[path]["get"]["x"];
+            assert_eq!(schema["$ref"], "#/components/schemas/Greeting", "{schema}");
+            assert!(
+                schema.get("$defs").is_none(),
+                "the local copy is gone: {schema}"
+            );
+        }
+    }
+
+    /// Two different shapes cannot share one name. The first keeps the
+    /// component and the other stays inline, so the document is still valid
+    /// and still describes both — the warning is what asks for a rename.
+    #[test]
+    fn one_id_for_two_shapes_keeps_the_document_valid() {
+        let mut paths = json!({
+            "/a": { "get": { "x": { "$ref": "#/$defs/Greeting", "$defs": { "Greeting": { "type": "object" } } } } },
+            "/b": { "get": { "x": { "$ref": "#/$defs/Greeting", "$defs": { "Greeting": { "type": "array" } } } } },
+        });
+        let mut lifted = Map::new();
+        let mut conflicts = Vec::new();
+        collect_defs(&mut paths, &mut lifted, &mut conflicts);
+        repoint_refs(&mut paths, &lifted);
+
+        assert_eq!(conflicts, vec!["Greeting".to_string()]);
+        assert_eq!(
+            paths["/a"]["get"]["x"]["$ref"],
+            "#/components/schemas/Greeting"
+        );
+        // The loser keeps both its definition and its reference to it, so
+        // nothing dangles.
+        let loser = &paths["/b"]["get"]["x"];
+        assert_eq!(loser["$ref"], "#/$defs/Greeting");
+        assert_eq!(loser["$defs"]["Greeting"]["type"], "array");
+    }
+
+    /// A schema with no id is untouched: it stays inline, exactly as before.
+    #[test]
+    fn an_anonymous_schema_is_left_alone() {
+        let mut paths = json!({ "/a": { "get": { "x": { "type": "object" } } } });
+        let before = paths.clone();
+        let mut lifted = Map::new();
+        let mut conflicts = Vec::new();
+        collect_defs(&mut paths, &mut lifted, &mut conflicts);
+        repoint_refs(&mut paths, &lifted);
+        assert_eq!(paths, before);
+        assert!(lifted.is_empty());
+    }
 
     #[test]
     fn paths_and_operation_ids() {

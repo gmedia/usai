@@ -54,6 +54,19 @@ const session = auth.bearer({ name: "session", resolve: async () => ({ userId: "
 const Out = z.object({ n: z.number() });
 `;
 
+test("a constant list written `as const` can be a statement parameter", () => {
+  // `SqlParam` had `unknown[]` but not `readonly unknown[]`, so the
+  // TypeScript idiom for a fixed set — the one a policy's live states are
+  // written in — needed a copy at every call site. The runtime only reads it.
+  const out = check(
+    `${preamble}const LIVE = ["a", "b"] as const;
+export async function q(tx: import("@sakaladev/usai").SqlExecutor) {
+  return tx.query("select 1 where s = any($1::text[])", [LIVE]);
+}`,
+  );
+  assert.equal(out, "", out);
+});
+
 test("a misspelled option key on a route is a compile error", () => {
   const out = check(
     `${preamble}export const r = http.get("/a", { response: Out, Auth: session }, async () => ({ n: 1 }));`,

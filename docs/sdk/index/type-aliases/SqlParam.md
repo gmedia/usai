@@ -10,7 +10,7 @@ type SqlParam =
   | null
   | Uint8Array
   | Record<string, unknown>
-  | unknown[];
+  | readonly unknown[];
 ```
 
 A statement parameter (`$1`, `$2`, …): scalars bind to their SQL type,

@@ -147,8 +147,27 @@ fn serve_https(dir: &std::path::Path) -> u16 {
 }
 
 async fn fetch_through(spec: ResourceSpec, url: &str) -> Result<serde_json::Value, String> {
+    fetch_through_env(spec, url, &[]).await
+}
+
+/// The same, with an environment: `tls.caFileEnv` and its siblings name a
+/// variable instead of a path, so the tests need to set one.
+async fn fetch_through_env(
+    spec: ResourceSpec,
+    url: &str,
+    vars: &[(&str, &str)],
+) -> Result<serde_json::Value, String> {
     let provider = usai_runtime::resource::http_client::HttpClientProvider;
-    let env = |_: &str| None;
+    let owned: Vec<(String, String)> = vars
+        .iter()
+        .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+        .collect();
+    let env = move |name: &str| {
+        owned
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.clone())
+    };
     let identity = ResourceIdentity::compute(&spec, &env, provider.compat());
     let manager = provider
         .open(&spec, identity, &env)
@@ -249,5 +268,64 @@ async fn a_certificate_that_cannot_be_read_fails_activation() {
     assert!(
         half.contains("clientKeyFile"),
         "the failure has to say what is missing: {half}"
+    );
+}
+
+/// The path may come from the environment, and an unset variable means "no
+/// extra trust" rather than a refused deployment.
+///
+/// Each deployment has its own CA, so a literal path in the source forces
+/// every environment to mount the file where the code happened to say — and
+/// a development box that never calls the client could not activate at all.
+/// The three cases below are the whole contract: set and valid trusts,
+/// unset activates but does not trust, set and wrong stops the deployment.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_tls_path_can_come_from_the_environment() {
+    let Some(dir) = certs() else {
+        eprintln!("SKIPPED: openssl is not available to make a private CA");
+        return;
+    };
+    let port = serve_https(&dir);
+    let url = format!("https://localhost:{port}/");
+    let ca = dir.join("ca.crt").to_str().unwrap().to_owned();
+    let config = json!({
+        "baseUrl": url,
+        "tls": { "caFileEnv": "ROUTER_CA_FILE" },
+        "allowPrivateNetwork": true,
+    });
+
+    // Set and valid: the same trust the literal `caFile` gives.
+    let trusted = fetch_through_env(
+        spec("env-ca", config.clone()),
+        &url,
+        &[("ROUTER_CA_FILE", &ca)],
+    )
+    .await
+    .expect("the CA named by the environment must be trusted");
+    assert_eq!(trusted["status"], 200, "{trusted}");
+
+    // Unset: activation succeeds, and the request fails on verification —
+    // which is the point. A silent pass here would mean the option did
+    // nothing and nobody would notice until the certificate mattered.
+    let untrusted = fetch_through_env(spec("env-ca-unset", config.clone()), &url, &[])
+        .await
+        .expect_err("an unset CA variable must not trust the private CA");
+    assert!(
+        !untrusted.contains("activation"),
+        "an unset TLS variable must not fail activation: {untrusted}"
+    );
+
+    // Set to a path that is not there: the deployment says one thing and
+    // means another, so it stops.
+    let wrong = fetch_through_env(
+        spec("env-ca-wrong", config),
+        &url,
+        &[("ROUTER_CA_FILE", "/nonexistent/ca.pem")],
+    )
+    .await
+    .expect_err("a named file that does not exist must fail activation");
+    assert!(
+        wrong.contains("activation") && wrong.contains("caFile"),
+        "the failure has to name the option and the path: {wrong}"
     );
 }

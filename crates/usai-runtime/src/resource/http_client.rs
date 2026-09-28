@@ -49,10 +49,37 @@ struct HttpTlsConfig {
     /// PEM added to the built-in roots (Mozilla's bundle), not replacing
     /// them — the same rule `postgres` follows.
     ca_file: Option<String>,
+    /// Environment variable holding that path instead. Deployments differ (a
+    /// CA per site) while the code does not, and a literal path forces every
+    /// environment to mount the file where the source happened to say.
+    /// **Unset means no extra trust**, not a failed activation, so a box
+    /// that never calls this client still starts.
+    ca_file_env: Option<String>,
     /// PEM certificate presented to the server (mTLS). Needs `clientKeyFile`.
     client_cert_file: Option<String>,
+    client_cert_file_env: Option<String>,
     /// PEM private key for `clientCertFile`.
     client_key_file: Option<String>,
+    client_key_file_env: Option<String>,
+}
+
+impl HttpTlsConfig {
+    /// The path for one field: the literal when it was declared, the
+    /// environment variable's value when it was named and is set, and
+    /// `None` when neither — which is "no extra trust". A variable that is
+    /// set to the empty string counts as unset, so a compose file with
+    /// `ROUTER_CA_FILE=` behaves like one that omits it.
+    fn path(
+        literal: &Option<String>,
+        var: &Option<String>,
+        env: &dyn Fn(&str) -> Option<String>,
+    ) -> Option<String> {
+        if let Some(path) = literal {
+            return Some(path.clone());
+        }
+        let var = var.as_ref()?;
+        env(var).filter(|v| !v.trim().is_empty())
+    }
 }
 
 #[derive(Deserialize, Default)]
@@ -174,7 +201,18 @@ impl ResourceProvider for HttpClientProvider {
                 ResourceError::Startup(spec.name.clone(), format!("tls.{what} {path:?}: {e}"))
             })
         };
-        if let Some(path) = &config.tls.ca_file {
+        let ca_file = HttpTlsConfig::path(&config.tls.ca_file, &config.tls.ca_file_env, &env);
+        let client_cert_file = HttpTlsConfig::path(
+            &config.tls.client_cert_file,
+            &config.tls.client_cert_file_env,
+            &env,
+        );
+        let client_key_file = HttpTlsConfig::path(
+            &config.tls.client_key_file,
+            &config.tls.client_key_file_env,
+            &env,
+        );
+        if let Some(path) = &ca_file {
             let pem = read("caFile", path)?;
             // A bundle is ordinary for a private CA: take every certificate
             // in the file rather than only the first.
@@ -191,7 +229,7 @@ impl ResourceProvider for HttpClientProvider {
                 builder = builder.add_root_certificate(cert);
             }
         }
-        match (&config.tls.client_cert_file, &config.tls.client_key_file) {
+        match (&client_cert_file, &client_key_file) {
             (Some(cert), Some(key)) => {
                 // `Identity::from_pem` wants one PEM holding both.
                 let mut pem = read("clientCertFile", cert)?;

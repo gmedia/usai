@@ -171,7 +171,9 @@ export type SqlParam =
   | null
   | Uint8Array
   | Record<string, unknown>
-  | unknown[];
+  // `readonly` too: a fixed set written `as const` is the TypeScript idiom
+  // for one, and the runtime only reads the array.
+  | readonly unknown[];
 
 /** The statements available on a connection. Rows are plain objects keyed
  * by column name; values arrive as JSON (uuid, timestamptz and numeric
@@ -245,14 +247,32 @@ export interface HttpClientOptions {
    * them are read at **activation**, so a wrong path or a file that is not
    * PEM stops the deployment instead of surfacing as a failed request later.
    *
+   * Each one has an `…Env` form, the way `baseUrl` has `baseUrlEnv`: the
+   * path comes from the environment instead of the declaration. Deployments
+   * differ — a CA per site, a certificate mounted somewhere else in staging
+   * — while the code does not, and a literal path forces every environment
+   * to mount the file where the source happened to say. **An `…Env`
+   * variable that is unset means "no extra trust", not a failure**, so a
+   * development box that never calls the client still activates; a variable
+   * that *is* set and names a missing or unreadable file still stops
+   * activation, because that is a deployment saying one thing and meaning
+   * another. Setting both the literal and the `…Env` form is a build error.
+   *
    * ```ts
    * const routers = httpClient("routers", {
    *   baseUrlEnv: "ROUTEROS_URL",
-   *   tls: { caFile: "/etc/usai/router-ca.pem" },
+   *   tls: { caFileEnv: "ROUTER_CA_FILE" },
    * });
    * ```
    */
-  tls?: { caFile?: string; clientCertFile?: string; clientKeyFile?: string };
+  tls?: {
+    caFile?: string;
+    caFileEnv?: string;
+    clientCertFile?: string;
+    clientCertFileEnv?: string;
+    clientKeyFile?: string;
+    clientKeyFileEnv?: string;
+  };
   /** Let a client **without** a `baseUrl` reach loopback, private,
    * link-local and unique-local addresses. Off by default.
    *
@@ -316,10 +336,17 @@ export function httpClient<const N extends string>(
   if (options.bearerTokenEnv !== undefined) config["bearerTokenEnv"] = options.bearerTokenEnv;
   if (options.tls !== undefined) {
     const tls: Record<string, string> = {};
-    if (options.tls.caFile !== undefined) tls["caFile"] = options.tls.caFile;
-    if (options.tls.clientCertFile !== undefined)
-      tls["clientCertFile"] = options.tls.clientCertFile;
-    if (options.tls.clientKeyFile !== undefined) tls["clientKeyFile"] = options.tls.clientKeyFile;
+    for (const field of ["caFile", "clientCertFile", "clientKeyFile"] as const) {
+      const literal = options.tls[field];
+      const fromEnv = options.tls[`${field}Env` as const];
+      if (literal !== undefined && fromEnv !== undefined) {
+        throw new Error(
+          `httpClient "${name}": tls.${field} and tls.${field}Env are both set; one path, one source`,
+        );
+      }
+      if (literal !== undefined) tls[field] = literal;
+      if (fromEnv !== undefined) tls[`${field}Env`] = fromEnv;
+    }
     if (Object.keys(tls).length > 0) config["tls"] = tls;
   }
   if (options.allowPrivateNetwork !== undefined)
@@ -329,6 +356,10 @@ export function httpClient<const N extends string>(
     name,
     kind: "http.client",
     config,
+    // `env` is what activation *requires*, so the TLS variables are not in
+    // it: an unset one means "no extra trust" rather than a refused
+    // deployment. Their names travel in `config.tls`, which is where the
+    // host reads them from — the same way `postgres` reads `PGSSLROOTCERT`.
     env: [options.baseUrlEnv, options.bearerTokenEnv].filter((v): v is string => v !== undefined),
     methods: ["fetch"],
   };
