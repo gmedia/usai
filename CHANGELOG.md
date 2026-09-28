@@ -8,6 +8,36 @@ runtime of that version and the next (`SUPPORTED.md` → Versioning). Within
 GitHub releases carry the auto-generated commit list as well; this file is
 the human summary.
 
+## 0.0.15 — 2026-09-28
+
+**Two fixes to 0.0.14's named OpenAPI schemas.** Both were reported by the
+downstream deployment that asked for the feature, within hours of it shipping,
+and both broke their type generation — they were running a patch script over
+the document to get around it.
+
+- **A reference inside a lifted schema is repointed too.** A named schema
+  nested in another (`DetectionDetail` holding a `DetectionEvent`) reached
+  `components.schemas` still pointing at `#/$defs/DetectionEvent`, and the
+  `$defs` it pointed at had been removed — so the reference dangled and
+  `openapi-typescript` stopped with *"Can't resolve $ref at
+  #/components/schemas/DetectionDetail/properties/event"*. The lift now takes
+  one emitted schema at a time: every name in it gets a component name first,
+  then the bodies are repointed, then they move. Verified by running
+  `openapi-typescript` over the same document before and after.
+
+- **One id's input and output forms both get names.** A contract used as a
+  request body *and* inside a response is emitted twice — Zod's input form has
+  no `additionalProperties`, its output form does — and 0.0.14 called that
+  "two different schemas claim the same id", kept one and left the other
+  inline. Both are named now: the plain id for the input form, `<Name>Output`
+  for the response's, and **only when they actually differ**. Identical forms
+  stay one component, so nothing gains a needless `…Output`. Two different
+  *input-side* shapes under one id is still a mistake, and the second is
+  described as `<Name>2`.
+
+**Upgrading**: regenerate any client. A document that worked before still
+works; one that could not be resolved now can.
+
 ## 0.0.14 — 2026-09-28
 
 Three things the same downstream deployment reported on 0.0.13, under the
