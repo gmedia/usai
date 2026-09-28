@@ -18,7 +18,18 @@ use usai_runtime::resource::{ResourceCall, ResourceIdentity, ResourceProvider};
 
 /// A private CA and a `localhost` certificate it signs, written to a
 /// temporary directory. `None` when openssl is not available.
+///
+/// Generated **once** per process: the files are shared by every test here
+/// and the tests run in parallel, so an "exists?" check let a second caller
+/// read `server.crt` while `server.key` was still being written — the pair
+/// then failed to load with `InconsistentKeys(KeyMismatch)`. `OnceLock`
+/// makes the others wait instead.
 fn certs() -> Option<PathBuf> {
+    static CERTS: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    CERTS.get_or_init(make_certs).clone()
+}
+
+fn make_certs() -> Option<PathBuf> {
     let dir = std::env::temp_dir().join(format!("usai-httptls-{}", std::process::id()));
     if dir.join("server.crt").exists() {
         return Some(dir);
