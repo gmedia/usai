@@ -51,15 +51,25 @@ type UsaiDigest = "SHA-256" | "SHA-384" | "SHA-512";
  * code written against `lib.dom` (`usage: KeyUsage[]`) typechecks here. */
 type KeyUsage = "sign" | "verify";
 type HmacImportParams = { name: "HMAC"; hash: UsaiDigest | { name: UsaiDigest } };
+/** The public-key algorithms a world can **verify** (never sign: a private
+ * key would be one the runtime holds). */
+type UsaiPublicAlgorithm = "RSASSA-PKCS1-v1_5" | "RSA-PSS" | "ECDSA";
+type PublicKeyImportParams = {
+  name: UsaiPublicAlgorithm;
+  hash: UsaiDigest | { name: UsaiDigest };
+};
+/** A JWK as a JWKS endpoint publishes it: RSA `n`/`e`, or EC `crv`/`x`/`y`. */
+type UsaiJsonWebKey = { kty: string; [field: string]: string | undefined };
 interface UsaiCryptoKey {
-  readonly type: "secret";
-  readonly algorithm: { name: "HMAC"; hash: { name: UsaiDigest } };
+  readonly type: "secret" | "public";
+  readonly algorithm: { name: "HMAC" | UsaiPublicAlgorithm; hash: { name: UsaiDigest } };
   readonly extractable: false;
   readonly usages: ReadonlyArray<KeyUsage>;
 }
 type CryptoKey = UsaiCryptoKey;
-/** The WebCrypto subset a world provides: SHA-2 digests, HMAC, random bytes
- * and UUIDs (host entropy per world). Password hashing is `password` in the SDK. */
+/** The WebCrypto subset a world provides: SHA-2 digests, HMAC, public-key
+ * signature *verification*, random bytes and UUIDs (host entropy per world).
+ * Password hashing is `password` in the SDK. */
 declare const crypto: {
   getRandomValues<T extends ArrayBufferView>(array: T): T;
   randomUUID(): `${string}-${string}-${string}-${string}-${string}`;
@@ -75,13 +85,21 @@ declare const crypto: {
       extractable: boolean,
       usages: ReadonlyArray<KeyUsage>,
     ): Promise<UsaiCryptoKey>;
+    /** A public key, as the JWK a JWKS endpoint publishes. `verify` only. */
+    importKey(
+      format: "jwk",
+      keyData: UsaiJsonWebKey,
+      algorithm: PublicKeyImportParams,
+      extractable: boolean,
+      usages: ReadonlyArray<"verify">,
+    ): Promise<UsaiCryptoKey>;
     sign(
       algorithm: "HMAC" | { name: "HMAC" },
       key: UsaiCryptoKey,
       data: ArrayBuffer | ArrayBufferView,
     ): Promise<ArrayBuffer>;
     verify(
-      algorithm: "HMAC" | { name: "HMAC" },
+      algorithm: "HMAC" | UsaiPublicAlgorithm | { name: "HMAC" | UsaiPublicAlgorithm },
       key: UsaiCryptoKey,
       signature: ArrayBuffer | ArrayBufferView,
       data: ArrayBuffer | ArrayBufferView,

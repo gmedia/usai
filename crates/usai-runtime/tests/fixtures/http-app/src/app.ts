@@ -876,9 +876,9 @@ export const verifyRoute = http.post(
   "/verify-jwk",
   {
     body: z.object({
-      jwk: z.record(z.string(), z.string()),
-      algorithm: z.string(),
-      hash: z.string(),
+      jwk: z.object({ kty: z.string() }).catchall(z.string()),
+      algorithm: z.enum(["RSASSA-PKCS1-v1_5", "RSA-PSS", "ECDSA"]),
+      hash: z.enum(["SHA-256", "SHA-384", "SHA-512"]),
       signature: z.string(),
       data: z.string(),
     }),
