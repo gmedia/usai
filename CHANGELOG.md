@@ -27,6 +27,11 @@ the human summary.
   way. The error when there is nothing to go on names both escapes instead of
   suggesting you scaffold a project.
 
+  While there: a missing queue table is an answer for all three, not a raw
+  SQLSTATE. `status` already said "nothing has been published and no consumer
+  has started"; `prune` and `prepare` answered `sql_42p01`, which on a fresh
+  deployment is the first thing an operator would have seen.
+
 ## 0.0.16 — 2026-09-29
 
 Five entries from the same downstream deployment, one of them a bug that made

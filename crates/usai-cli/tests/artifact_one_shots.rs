@@ -206,15 +206,24 @@ fn queue_maintenance_runs_from_an_image_with_only_a_database_url() {
         "{text}"
     );
 
-    // And prune counts without deleting, from the same place.
+    // And prune counts without deleting, from the same place. On a database
+    // where nothing has published yet there is no table, and that is an
+    // answer rather than the raw SQLSTATE it used to be.
     let (ok, text) = run(
         &["queue", "prune", "--state", "dead", "--older-than", "0m"],
         true,
     );
     assert!(ok, "{text}");
     assert!(
-        text.contains("dry run") || text.contains("nothing was deleted") || text.contains("row(s)"),
+        text.contains("dry run")
+            || text.contains("nothing was deleted")
+            || text.contains("row(s)")
+            || text.contains("does not exist in this database yet"),
         "{text}"
+    );
+    assert!(
+        !text.contains("42p01"),
+        "a SQLSTATE is not an answer: {text}"
     );
 
     // `--database-url` needs no environment at all.

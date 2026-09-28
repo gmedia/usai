@@ -1338,9 +1338,7 @@ pub async fn queue_status(
             // consumer; before that there is nothing to report, which is an
             // answer rather than an error.
             Err(e) if e.to_string().contains("42p01") => {
-                println!(
-                    "usai_queue does not exist in this database yet: nothing has been published and no consumer has started."
-                );
+                println!("{NO_QUEUE_TABLE}");
                 return Ok(());
             }
             Err(e) => return Err(e.into()),
@@ -1411,13 +1409,18 @@ pub async fn queue_prune(
     let seconds = parse_duration_seconds(older_than)?;
     with_queue_database(root, target, async |manager| {
         if dry_run {
-            let n = usai_runtime::workloads::queue::ops::prune_count(
-                manager,
-                &states,
-                seconds,
-                topic,
+            let n = match usai_runtime::workloads::queue::ops::prune_count(
+                manager, &states, seconds, topic,
             )
-            .await?;
+            .await
+            {
+                Ok(n) => n,
+                Err(e) if queue_table_absent(&e) => {
+                    println!("{NO_QUEUE_TABLE}");
+                    return Ok(());
+                }
+                Err(e) => return Err(e.into()),
+            };
             println!(
                 "dry run: {n} row(s) in state {} older than {older_than} would be deleted\n  nothing was deleted — add --yes to delete",
                 states.join("/")
@@ -1425,7 +1428,15 @@ pub async fn queue_prune(
             return Ok(());
         }
         let deleted =
-            usai_runtime::workloads::queue::ops::prune(manager, &states, seconds, topic).await?;
+            match usai_runtime::workloads::queue::ops::prune(manager, &states, seconds, topic).await
+            {
+                Ok(deleted) => deleted,
+                Err(e) if queue_table_absent(&e) => {
+                    println!("{NO_QUEUE_TABLE}");
+                    return Ok(());
+                }
+                Err(e) => return Err(e.into()),
+            };
         println!(
             "deleted {deleted} row(s) in state {} older than {older_than}{}",
             states.join("/"),
@@ -1439,7 +1450,14 @@ pub async fn queue_prune(
 /// `usai queue prepare`: build the indexes without blocking writers.
 pub async fn queue_prepare(root: &Path, target: &QueueTarget) -> Result<()> {
     with_queue_database(root, target, async |manager| {
-        let ran = usai_runtime::workloads::queue::ops::prepare_indexes(manager).await?;
+        let ran = match usai_runtime::workloads::queue::ops::prepare_indexes(manager).await {
+            Ok(ran) => ran,
+            Err(e) if queue_table_absent(&e) => {
+                println!("{NO_QUEUE_TABLE}");
+                return Ok(());
+            }
+            Err(e) => return Err(e.into()),
+        };
         if ran.is_empty() {
             println!("nothing to build");
         } else {
@@ -1497,6 +1515,20 @@ async fn with_active_runtime<T>(
     let result = f(&runtime, &config).await;
     runtime.shutdown().await;
     result
+}
+
+/// What every queue command says when the table is not there yet.
+const NO_QUEUE_TABLE: &str = "usai_queue does not exist in this database yet: nothing has been published and no consumer has started.";
+
+/// `true` when the failure is "the table is not there yet".
+///
+/// The queue table is created by the first publish or the first consumer, so
+/// on a fresh deployment there is nothing to report and nothing to prune —
+/// which is an answer, not an error. `status` said so already; `prune` and
+/// `prepare` answered with a raw SQLSTATE.
+fn queue_table_absent(error: &impl std::fmt::Display) -> bool {
+    let text = error.to_string().to_ascii_lowercase();
+    text.contains("42p01") && text.contains("usai_queue")
 }
 
 /// Where a queue command finds its database. The three commands take the same
