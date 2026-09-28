@@ -201,9 +201,12 @@ async fn an_exclusive_cron_tick_is_claimed_once_across_instances() {
         other => panic!("{other:?}"),
     }
     let manager = rev.resources().get("main").cloned().unwrap();
-    let at = chrono::DateTime::parse_from_rfc3339("2026-09-21T03:00:00Z")
-        .unwrap()
-        .with_timezone(&chrono::Utc);
+    // Relative to now, not a fixed date. `claim_tick` prunes claims older
+    // than a week whenever one succeeds, so a literal timestamp works until
+    // the calendar passes it and then fails for ever: the row this test had
+    // just inserted was deleted by its own prune, and the second claim found
+    // the tick free. Written 2026-09-21, first red 2026-09-28.
+    let at = chrono::Utc::now() - chrono::Duration::hours(1);
     // Two replicas' schedulers reach the same tick: the first inserts the
     // row (the table is created on first use), the second finds it taken;
     // the next tick is a new row.
