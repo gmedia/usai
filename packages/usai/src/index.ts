@@ -104,7 +104,13 @@ export type {
   SocketOptions,
 } from "./connection.ts";
 export { queue } from "./queue.ts";
-export type { QueueContext, QueueHandle, RetryOptions, ConsumeOptions } from "./queue.ts";
+export type {
+  QueueContext,
+  QueueHandle,
+  QueueStats,
+  RetryOptions,
+  ConsumeOptions,
+} from "./queue.ts";
 export { cache, postgres, httpClient } from "./resources.ts";
 export type {
   CacheLocalHandle,

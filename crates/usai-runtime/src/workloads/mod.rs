@@ -20,6 +20,12 @@ use crate::runtime::Revision;
 pub fn input(revision: &Revision, kind: &str, fields: Value) -> Value {
     let env: BTreeMap<String, String> = (*revision.env()).clone();
     let mut envelope = json!({ "kind": kind, "env": env });
+    // Only when there is one, so the envelope of every application that has
+    // no optional resource is byte for byte what it was.
+    let unconfigured = revision.unconfigured();
+    if !unconfigured.is_empty() {
+        envelope["unconfigured"] = json!(*unconfigured);
+    }
     if let (Value::Object(target), Value::Object(extra)) = (&mut envelope, fields) {
         target.extend(extra);
     }

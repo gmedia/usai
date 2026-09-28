@@ -401,6 +401,19 @@ pub struct ResourceSpec {
     pub env: Vec<String>,
 }
 
+impl ResourceSpec {
+    /// Whether this resource may be left unconfigured
+    /// (`httpClient(…, { optional: true })`). A deployment can lack a part;
+    /// the application then says "not configured" instead of refusing to
+    /// start over something nothing calls.
+    pub fn optional(&self) -> bool {
+        self.config
+            .get("optional")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvRequirement {
@@ -421,6 +434,12 @@ pub struct EnvRequirement {
     /// `list` only: what separates the items (default `,`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub separator: Option<String>,
+    /// The group this variable belongs to (`env.group`). Every variable of a
+    /// group is set together or not at all, checked at activation: an
+    /// integration that needs four values and was given three is a mistake,
+    /// and finding it at the first sign-in is finding it too late.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
 }
 
 /// Checks a resolved value against its declared kind. Presence is checked
@@ -1051,6 +1070,7 @@ mod env_validation_tests {
             values: Vec::new(),
             items: items.map(str::to_owned),
             separator: None,
+            group: None,
         }
     }
 

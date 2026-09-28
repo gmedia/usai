@@ -823,6 +823,82 @@ impl OpHandler for PublishHandler {
     }
 }
 
+/// `queue.stats`: what the queue holds, for an application's own operator
+/// page.
+///
+/// The numbers existed already — in `usai_queue` and on the status listener —
+/// but neither is the application's to read: the status port is the
+/// operator's surface and not something a handler should proxy, so the only
+/// way to put a backlog on a page was to query the runtime's own table and
+/// couple the application to its columns. This is the same data through an
+/// owned operation.
+pub struct StatsHandler;
+
+#[derive(Deserialize)]
+struct StatsRequest {
+    #[serde(default)]
+    topic: Option<String>,
+    #[serde(default)]
+    database: Option<String>,
+}
+
+impl OpHandler for StatsHandler {
+    fn start(&self, ctx: OpContext, payload: String) -> Result<OpFuture, OpOutcome> {
+        let request: StatsRequest = serde_json::from_str(&payload)
+            .map_err(|e| OpOutcome::err("invalid_stats_request", 500, e.to_string()))?;
+        let revision = ctx
+            .revision
+            .clone()
+            .ok_or_else(|| OpOutcome::err("no_revision", 500, "world has no revision"))?;
+        let manager = database_for(&revision, request.database.as_deref()).ok_or_else(|| {
+            OpOutcome::err(
+                "no_queue_database",
+                500,
+                "no postgres resource backs the queue",
+            )
+        })?;
+        Ok(Box::pin(async move {
+            // A queue with no table yet has nothing in it, which is an answer
+            // and not an error: `testApp` runs consumers without one, and a
+            // page that asked for the backlog should read zero rather than
+            // fail.
+            if let Err(e) = ensure_schema_once(manager.as_ref()).await {
+                return OpOutcome::err("queue_unavailable", 503, e);
+            }
+            let (sql_text, params) = match &request.topic {
+                Some(topic) => (
+                    "SELECT topic,
+                            count(*) FILTER (WHERE state = 'ready')::bigint AS ready,
+                            count(*) FILTER (WHERE state = 'processing')::bigint AS processing,
+                            count(*) FILTER (WHERE state = 'done')::bigint AS done,
+                            count(*) FILTER (WHERE state = 'dead')::bigint AS dead,
+                            max(extract(epoch FROM now() - available_at)) FILTER (WHERE state = 'ready')::bigint AS \"oldestReadySeconds\",
+                            max(extract(epoch FROM now() - locked_at)) FILTER (WHERE state = 'processing')::bigint AS \"oldestClaimSeconds\",
+                            (array_agg(last_error ORDER BY id DESC) FILTER (WHERE state = 'dead'))[1] AS \"lastDeadError\"
+                     FROM usai_queue WHERE topic = $1 GROUP BY topic ORDER BY topic",
+                    vec![json!(topic)],
+                ),
+                None => (
+                    "SELECT topic,
+                            count(*) FILTER (WHERE state = 'ready')::bigint AS ready,
+                            count(*) FILTER (WHERE state = 'processing')::bigint AS processing,
+                            count(*) FILTER (WHERE state = 'done')::bigint AS done,
+                            count(*) FILTER (WHERE state = 'dead')::bigint AS dead,
+                            max(extract(epoch FROM now() - available_at)) FILTER (WHERE state = 'ready')::bigint AS \"oldestReadySeconds\",
+                            max(extract(epoch FROM now() - locked_at)) FILTER (WHERE state = 'processing')::bigint AS \"oldestClaimSeconds\",
+                            (array_agg(last_error ORDER BY id DESC) FILTER (WHERE state = 'dead'))[1] AS \"lastDeadError\"
+                     FROM usai_queue GROUP BY topic ORDER BY topic",
+                    vec![],
+                ),
+            };
+            match sql(manager.as_ref(), "query", sql_text, params).await {
+                Ok(rows) => OpOutcome::ok(&rows),
+                Err(e) => OpOutcome::err("queue_unavailable", 503, e),
+            }
+        }))
+    }
+}
+
 /// Counts of messages by state for `inspect`/status.
 pub async fn depth(manager: &dyn ResourceManager, topic: &str) -> Result<Value, String> {
     sql(manager, "one", "SELECT count(*) FILTER (WHERE state = 'ready')::int AS ready, count(*) FILTER (WHERE state = 'processing')::int AS processing, count(*) FILTER (WHERE state = 'dead')::int AS dead, count(*) FILTER (WHERE state = 'done')::int AS done FROM usai_queue WHERE topic = $1", vec![json!(topic)]).await

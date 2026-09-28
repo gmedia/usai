@@ -3,7 +3,9 @@
 # Function: httpClient()
 
 ```ts
-function httpClient<N extends string>(name: N, options?: HttpClientOptions): HttpClientDeclaration<N>;
+function httpClient<N extends string, O extends HttpClientOptions>(name: N, options?: O): HttpClientDeclaration<N, O extends {
+  optional: true;
+} ? HttpClientHandle | undefined : HttpClientHandle>;
 ```
 
 Declare an outbound HTTP client. There is no global `fetch` in a world;
@@ -21,17 +23,20 @@ connection failures and timeouts throw and map to 503 for HTTP callers.
 | Type Parameter |
 | ------ |
 | `N` *extends* `string` |
+| `O` *extends* [`HttpClientOptions`](../interfaces/HttpClientOptions.md) |
 
 ## Parameters
 
 | Parameter | Type |
 | ------ | ------ |
 | `name` | `N` |
-| `options` | [`HttpClientOptions`](../interfaces/HttpClientOptions.md) |
+| `options?` | `O` |
 
 ## Returns
 
-[`HttpClientDeclaration`](../interfaces/HttpClientDeclaration.md)\<`N`\>
+[`HttpClientDeclaration`](../interfaces/HttpClientDeclaration.md)\<`N`, `O` *extends* \{
+  `optional`: `true`;
+\} ? [`HttpClientHandle`](../interfaces/HttpClientHandle.md) \| `undefined` : [`HttpClientHandle`](../interfaces/HttpClientHandle.md)\>
 
 ## Example
 

@@ -107,6 +107,7 @@ Vocabulary used throughout:
 | [QueueContext](interfaces/QueueContext.md) | The context of one message delivery: the validated `message`, the `attempt` number and the message `id`, plus [BaseContext](interfaces/BaseContext.md). |
 | [queue](variables/queue.md) | Queue workloads: `queue.consume(topic, options, handler)`. |
 | [QueueHandle](interfaces/QueueHandle.md) | `ctx.queue` in every world. |
+| [QueueStats](interfaces/QueueStats.md) | One topic's queue, as [QueueHandle.stats](interfaces/QueueHandle.md#stats) reports it. |
 
 ## Resources
 

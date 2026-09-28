@@ -35,6 +35,13 @@ export interface EnvField<T> {
   readonly items?: EnvKind;
   /** `list` only: what separates the items (default `,`). */
   readonly separator?: string;
+  /** The group this field belongs to ({@link env.group}). Every field of one
+   * group must be set together or not at all, checked by the **host** at
+   * activation. It lives on the field rather than on the declaration because
+   * a field map is routinely spread into a larger one
+   * (`env({ ...authEnv.fields })`), and a rule attached to the declaration
+   * would vanish there without a word. */
+  readonly group?: string;
   readonly parse: (raw: string) => T;
   readonly _type?: T;
 }
@@ -44,7 +51,7 @@ function field<T>(
   parse: (raw: string) => T,
   required = true,
   values?: readonly string[],
-  extra?: { items?: EnvKind; separator?: string },
+  extra?: { items?: EnvKind; separator?: string; group?: string },
 ): EnvField<T> {
   return {
     __usai: "env-field",
@@ -54,6 +61,7 @@ function field<T>(
     ...(values === undefined ? {} : { values }),
     ...(extra?.items === undefined ? {} : { items: extra.items }),
     ...(extra?.separator === undefined ? {} : { separator: extra.separator }),
+    ...(extra?.group === undefined ? {} : { group: extra.group }),
   };
 }
 
@@ -111,6 +119,7 @@ export type EnvValues<
  * | `env.cidr()` | `string` | an address with a prefix length (`10.0.0.0/8`) |
  * | `env.list(inner)` | `T[]` | a separated list,each item checked as `inner` |
  * | `env.optional(field)` | `T \| undefined` | absent or empty → `undefined` |
+ * | `env.group(name, {…})` | each `T \| undefined` | all of them or none, checked at activation |
  *
  * @example
  * ```ts
@@ -209,6 +218,53 @@ env.list = <T>(inner: EnvField<T>, options?: { separator?: string }): EnvField<T
     { items: inner.kind, separator },
   );
 };
+/** Variables that go together: **all of them or none**.
+ *
+ * An integration usually needs several values at once — a tenant, a client
+ * id, a secret, a redirect — and three out of four is a mistake, not a
+ * configuration. Each field on its own cannot say that, so the rule is
+ * declared over the group and the **host** checks it at activation: a partly
+ * configured integration refuses the revision and names what is missing,
+ * instead of being discovered by the first person who tries to sign in.
+ *
+ * Every field in the group becomes optional on its own, because "none" is a
+ * valid answer: `ctx.env.X` is `T | undefined`, and if one of them is defined
+ * they all are.
+ *
+ * ```ts
+ * export const spec = env({
+ *   DATABASE_URL: env.url(),
+ *   ...env.group("entra", {
+ *     ENTRA_TENANT_ID: env.string(),
+ *     ENTRA_CLIENT_ID: env.string(),
+ *     ENTRA_CLIENT_SECRET: env.secret(),
+ *   }),
+ * });
+ * ```
+ *
+ * The group travels on the fields, so spreading the map into a larger one
+ * keeps the rule.
+ *
+ * @category Environment
+ */
+env.group = <S extends Record<string, EnvField<unknown>>>(
+  name: string,
+  fields: S,
+): { [K in keyof S]: S[K] extends EnvField<infer T> ? EnvField<T | undefined> : never } => {
+  if (!name.trim()) throw new Error("env.group needs a name");
+  const out: Record<string, EnvField<unknown>> = {};
+  for (const [key, inner] of Object.entries(fields)) {
+    out[key] = field(inner.kind, inner.parse, false, inner.values, {
+      ...(inner.items === undefined ? {} : { items: inner.items }),
+      ...(inner.separator === undefined ? {} : { separator: inner.separator }),
+      group: name,
+    });
+  }
+  return out as {
+    [K in keyof S]: S[K] extends EnvField<infer T> ? EnvField<T | undefined> : never;
+  };
+};
+
 /** Make a field optional: absent or empty gives `undefined`. */
 env.optional = <T>(inner: EnvField<T>): EnvField<T | undefined> =>
   inner.values === undefined

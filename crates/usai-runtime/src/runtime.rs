@@ -123,6 +123,11 @@ pub struct Revision {
     state: RwLock<RevisionState>,
     resources: RwLock<Arc<BoundResources>>,
     env: RwLock<Arc<BTreeMap<String, String>>>,
+    /// Optional resources this deployment did not configure, computed once
+    /// at bind rather than per world (C13). The world sees `undefined` for
+    /// them, which is how a handler says "not configured" instead of the
+    /// deployment refusing to start over a part it does not have.
+    unconfigured: RwLock<Arc<Vec<String>>>,
     app_budget: Arc<Budget>,
     workload_budgets: Vec<Option<Arc<Budget>>>,
     in_flight: AtomicU64,
@@ -174,6 +179,11 @@ impl Revision {
     /// the application declared are present; the world sees nothing else.
     pub fn env(&self) -> Arc<BTreeMap<String, String>> {
         Arc::clone(&self.env.read().expect("env poisoned"))
+    }
+
+    /// Optional resources this deployment did not configure.
+    pub fn unconfigured(&self) -> Arc<Vec<String>> {
+        Arc::clone(&self.unconfigured.read().expect("unconfigured poisoned"))
     }
 
     fn set_state(&self, state: RevisionState) {
@@ -424,6 +434,7 @@ impl Runtime {
             }
             let builtin: Vec<(&str, Arc<dyn OpHandler>)> = vec![
                 ("queue.publish", Arc::new(queue::PublishHandler)),
+                ("queue.stats", Arc::new(queue::StatsHandler)),
                 ("stream.start", Arc::new(crate::http::stream::StartHandler)),
                 ("stream.send", Arc::new(crate::http::stream::SendHandler)),
                 (
@@ -545,6 +556,7 @@ impl Runtime {
             state: RwLock::new(RevisionState::Installed),
             resources: RwLock::new(Arc::new(BoundResources::default())),
             env: RwLock::new(Arc::new(BTreeMap::new())),
+            unconfigured: RwLock::new(Arc::new(Vec::new())),
             app_budget,
             workload_budgets,
             live_by_workload,
@@ -608,6 +620,32 @@ impl Runtime {
                 None => {}
             }
         }
+        // A rule *between* variables: every member of a group is set or none
+        // is. A single field cannot express "these four go together", so a
+        // half-configured integration used to start and be discovered by the
+        // first person who tried to use it.
+        let mut groups: BTreeMap<&str, (Vec<&str>, Vec<&str>)> = BTreeMap::new();
+        for requirement in &revision.definition.manifest().env {
+            let Some(group) = requirement.group.as_deref() else {
+                continue;
+            };
+            let entry = groups.entry(group).or_default();
+            if env.contains_key(&requirement.name) {
+                entry.0.push(&requirement.name);
+            } else {
+                entry.1.push(&requirement.name);
+            }
+        }
+        for (group, (set, unset)) in &groups {
+            if !set.is_empty() && !unset.is_empty() {
+                invalid.push(format!(
+                    "{group}: these variables go together — {} {} set, so {} must be too",
+                    set.join(", "),
+                    if set.len() == 1 { "is" } else { "are" },
+                    unset.join(", ")
+                ));
+            }
+        }
         if !missing.is_empty() {
             return Err(RuntimeError::MissingEnv(missing.join(", ")));
         }
@@ -616,12 +654,36 @@ impl Runtime {
         }
         *revision.env.write().expect("env poisoned") = Arc::new(env);
         let mut bound = BoundResources::default();
+        let mut unconfigured = Vec::new();
         for spec in revision.definition.resources() {
             let env = &self.env;
+            // An **optional** resource whose environment says nothing is a
+            // deployment that does not have that part — a lab without a
+            // collector, a site whose bridge is not up yet. Opening it would
+            // fail activation over something nothing calls, so it is left
+            // unbound and the world sees `undefined` for it.
+            if spec.optional()
+                && spec
+                    .env
+                    .iter()
+                    .all(|name| env(name).is_none_or(|v| v.trim().is_empty()))
+            {
+                tracing::info!(
+                    resource = %spec.name,
+                    variables = spec.env.join(", "),
+                    "optional resource not configured; handlers see it as undefined"
+                );
+                unconfigured.push(spec.name.clone());
+                continue;
+            }
             let manager = self.resources.open(spec, &|name| env(name)).await?;
             bound.bind(&spec.name, manager);
         }
         *revision.resources.write().expect("resources poisoned") = Arc::new(bound);
+        *revision
+            .unconfigured
+            .write()
+            .expect("unconfigured poisoned") = Arc::new(unconfigured);
         Ok(())
     }
 

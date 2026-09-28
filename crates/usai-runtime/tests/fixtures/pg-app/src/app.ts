@@ -92,6 +92,13 @@ export const getBlob = http.get(
   },
 );
 
+// An application's own operator page: the backlog and the dead letters,
+// through an owned operation rather than a query against the runtime's table.
+export const queueStats = http.get("/queue-stats", { resources: [db] }, async (ctx) => ({
+  all: await ctx.queue.stats(),
+  orders: await ctx.queue.stats("orders"),
+}));
+
 export const listUsers = http.get("/users", { resources: [db] }, async (ctx) =>
   d(ctx).query(`select id, name from users order by id`),
 );
@@ -351,6 +358,7 @@ export default defineApp({
     setup,
     getUser,
     listUsers,
+    queueStats,
     nightly,
     putBlob,
     getBlob,

@@ -19,6 +19,15 @@ activation (`missing required environment` refuses the revision, never a
 request). `usai run` reads them from the process environment only; `.env`
 files are for `usai dev` (`GUIDE.md` §13).
 
+Two rules on those are worth knowing as an operator, because both refuse a
+revision rather than a request. Variables an application declares with
+`env.group` go **together**: setting some of a group and not the rest is
+refused, with the message naming both sides — an integration configured
+halfway is a mistake, not a configuration. And a resource declared
+`optional` is the opposite: leaving *all* of its variables unset is a valid
+deployment that does not have that part, and the application sees it as
+absent.
+
 Every operating variable has a flag of the same meaning (`--max-worlds` ↔
 `USAI_MAX_WORLDS`); the flag wins when both are set. Prefer the variable
 for secrets — a flag shows in `ps`. Boolean variables are on for `1`,

@@ -316,9 +316,18 @@ function genericHandle(
 
 export function makeResources(
   declarations: readonly ResourceDeclaration[],
+  unconfigured?: readonly string[],
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const declaration of declarations) {
+    // An optional resource this deployment did not configure is `undefined`,
+    // not a handle that fails on use: the type said `| undefined`, and a
+    // handler that checked it has already decided what to do. The host
+    // decides — it is the one that knows whether the variables were set.
+    if (unconfigured?.includes(declaration.name)) {
+      out[declaration.name] = undefined;
+      continue;
+    }
     out[declaration.name] =
       declaration.kind === "cache.local"
         ? cacheLocalHandle(declaration.name)
@@ -331,6 +340,9 @@ export function makeResources(
   // A resource the workload did not declare is a lifecycle mistake, not
   // `undefined`: say so, with the fix, instead of failing later on
   // "cannot read property 'query' of undefined".
+  // `in` rather than a truthiness check: a declared name whose value is
+  // `undefined` is present and answers `undefined`; only an *undeclared*
+  // name is the mistake this proxy is for.
   const declared = Object.keys(out);
   return new Proxy(out, {
     get(target, key, receiver) {
@@ -362,9 +374,10 @@ export function parseDurationMs(value: string | number): number {
 export function makeBase(
   resources: readonly ResourceDeclaration[],
   env: Record<string, EnvValue>,
+  unconfigured?: readonly string[],
 ): BaseContext {
   return {
-    resources: makeResources(resources),
+    resources: makeResources(resources, unconfigured),
     tasks: {
       invoke: (task, ...input) => op("task.invoke", { name: task.name, input: input[0] ?? null }),
       dispatch: (task, ...input) =>
@@ -390,6 +403,11 @@ export function makeBase(
           ...(tx === undefined ? {} : { database: tx.resource, lease: tx.lease }),
         });
       },
+      stats: (topic, options) =>
+        op("queue.stats", {
+          ...(topic === undefined ? {} : { topic }),
+          ...(options?.database ? { database: options.database.name } : {}),
+        }) as Promise<import("../queue.ts").QueueStats[]>,
     },
     signal: makeSignal(),
     env,

@@ -192,4 +192,48 @@ export interface QueueHandle {
     message: unknown,
     options?: { delayMs?: number; database?: PostgresDeclaration; tx?: SqlExecutor },
   ): Promise<{ id: string }>;
+  /** What the queue holds right now, one entry per topic: the backlog, what
+   * is being worked on, what finished, and what gave up.
+   *
+   * For an operator page that belongs to the application. The same numbers
+   * are on the status listener, but that surface is the operator's and not
+   * something a handler should proxy — so the alternative was querying
+   * `usai_queue` directly and coupling the application to a runtime table's
+   * columns.
+   *
+   * Without `topic`, every topic with at least one message. A topic whose
+   * table is empty (or does not exist yet, as under `usai test`) simply has
+   * no entry, which is the honest answer rather than an error.
+   *
+   * ```ts
+   * const [deliver] = await ctx.queue.stats("webhook.deliver");
+   * return { backlog: deliver?.ready ?? 0, dead: deliver?.dead ?? 0 };
+   * ```
+   */
+  stats(topic?: string, options?: { database?: PostgresDeclaration }): Promise<QueueStats[]>;
+}
+
+/** One topic's queue, as {@link QueueHandle.stats} reports it.
+ *
+ * @category Queues
+ */
+export interface QueueStats {
+  readonly topic: string;
+  /** Waiting to be claimed — the backlog. */
+  readonly ready: number;
+  /** Claimed by a consumer and running now. */
+  readonly processing: number;
+  /** Finished, and not pruned yet (`usai queue prune`). */
+  readonly done: number;
+  /** Out of attempts: a message an application failed to process. The
+   * runtime never deletes these on its own. */
+  readonly dead: number;
+  /** How long the oldest waiting message has waited, in seconds; `null` when
+   * nothing is waiting. The number an alert on "keeping up?" watches. */
+  readonly oldestReadySeconds: number | null;
+  /** How long the oldest claimed message has been claimed, in seconds. A
+   * number that keeps growing is a consumer that died mid-message. */
+  readonly oldestClaimSeconds: number | null;
+  /** The error of the most recent dead message, or `null`. */
+  readonly lastDeadError: string | null;
 }

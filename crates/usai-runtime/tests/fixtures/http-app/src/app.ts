@@ -198,6 +198,14 @@ export const detachWrite = http.post("/detach-write", { resources: [hits] }, asy
   void (ctx.resources["hits"] as { increment(k: string): Promise<number> }).increment("detached");
   return { ok: true };
 });
+// A handler that **throws** while an operation it started is still in
+// flight. The runtime used to answer 500 `detached_work` and drop the
+// handler's own error, so with a dependency down every request reported the
+// wrong cause: the 503 the outage deserved was invisible.
+export const detachThrow = http.post("/detach-throw", { resources: [hits] }, async (ctx) => {
+  void (ctx.resources["hits"] as { increment(k: string): Promise<number> }).increment("thrown");
+  throw errors.unavailable("the dependency is down");
+});
 export const slow = http.get("/slow", { timeout: "200ms" }, async (ctx) => {
   await ctx.sleep("10s");
   return { ok: true };
@@ -745,7 +753,17 @@ const upstream = httpClient("upstream", {
 // consumer needs, and the shape whose destination is attacker-influenced by
 // construction. The runtime refuses this one's requests into the host's own
 // network unless the declaration opts in.
+// A deployment may not have this part at all. With its variable unset the
+// resource is never opened and the handler sees `undefined`, so the
+// application reports "not configured" instead of refusing to start.
+const collector = httpClient("collector", { baseUrlEnv: "COLLECTOR_URL", optional: true });
 const anywhere = httpClient("anywhere", { timeoutMs: 2000, maxConcurrent: 2 });
+export const optionalResource = http.get(
+  "/optional-resource",
+  { resources: [collector] },
+  async (ctx) => ({ configured: ctx.resources.collector !== undefined }),
+);
+
 const anywherePrivate = httpClient("anywhere-private", {
   timeoutMs: 2000,
   maxConcurrent: 2,
@@ -851,6 +869,39 @@ export const cryptoRoute = http.get("/crypto", {}, async () => {
     random: Array.from(crypto.getRandomValues(new Uint8Array(4))),
   };
 });
+// A JWT from an identity provider is verified against the provider's
+// published key: the signature check is the whole point of the exercise, and
+// `crypto.subtle` had digests and HMAC only.
+export const verifyRoute = http.post(
+  "/verify-jwk",
+  {
+    body: z.object({
+      jwk: z.record(z.string(), z.string()),
+      algorithm: z.string(),
+      hash: z.string(),
+      signature: z.string(),
+      data: z.string(),
+    }),
+  },
+  async (ctx) => {
+    const bytes = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const key = await crypto.subtle.importKey(
+      "jwk",
+      ctx.body.jwk,
+      { name: ctx.body.algorithm, hash: ctx.body.hash },
+      false,
+      ["verify"],
+    );
+    return {
+      verified: await crypto.subtle.verify(
+        ctx.body.algorithm,
+        key,
+        bytes(ctx.body.signature),
+        bytes(ctx.body.data),
+      ),
+    };
+  },
+);
 export const passwordRoute = http.post(
   "/password",
   { body: z.object({ password: z.string() }) },
@@ -897,6 +948,8 @@ export default defineApp({
     badShape,
     detach,
     detachWrite,
+    detachThrow,
+    optionalResource,
     slow,
     echoQuery,
     formats,
@@ -955,6 +1008,7 @@ export default defineApp({
     egressBytes,
     noFetch,
     cryptoRoute,
+    verifyRoute,
     passwordRoute,
     shape,
     shapeStrict,

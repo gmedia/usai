@@ -3547,7 +3547,7 @@ dependencies = [
 
 [[package]]
 name = "usai-cli"
-version = "0.0.15"
+version = "0.0.16"
 dependencies = [
  "anyhow",
  "clap",
@@ -3567,7 +3567,7 @@ dependencies = [
 
 [[package]]
 name = "usai-runtime"
-version = "0.0.15"
+version = "0.0.16"
 dependencies = [
  "anyhow",
  "argon2",
@@ -3591,6 +3591,7 @@ dependencies = [
  "libc",
  "matchit",
  "reqwest",
+ "ring",
  "rquickjs",
  "rust_decimal",
  "rustls",

@@ -16,6 +16,9 @@ import { type EnvDeclaration, type EnvField, type EnvValue, resolveEnv } from ".
 interface HttpInput {
   kind: "http";
   env: Record<string, EnvValue>;
+  /** Optional resources this deployment did not configure; the world
+   * sees `undefined` for them. Absent when there are none. */
+  unconfigured?: readonly string[];
   request: {
     method: string;
     path: string;
@@ -33,6 +36,9 @@ interface HttpInput {
 interface TaskInput {
   kind: "task";
   env: Record<string, EnvValue>;
+  /** Optional resources this deployment did not configure; the world
+   * sees `undefined` for them. Absent when there are none. */
+  unconfigured?: readonly string[];
   input: unknown;
   /** The id of the request whose world invoked or dispatched this task. */
   requestId?: string | null;
@@ -40,20 +46,32 @@ interface TaskInput {
 interface CronInput {
   kind: "cron";
   env: Record<string, EnvValue>;
+  /** Optional resources this deployment did not configure; the world
+   * sees `undefined` for them. Absent when there are none. */
+  unconfigured?: readonly string[];
   scheduledAt: string;
 }
 interface CommandInput {
   kind: "command";
   env: Record<string, EnvValue>;
+  /** Optional resources this deployment did not configure; the world
+   * sees `undefined` for them. Absent when there are none. */
+  unconfigured?: readonly string[];
   args: string[];
 }
 interface ServiceInput {
   kind: "service";
   env: Record<string, EnvValue>;
+  /** Optional resources this deployment did not configure; the world
+   * sees `undefined` for them. Absent when there are none. */
+  unconfigured?: readonly string[];
 }
 interface QueueInput {
   kind: "queue";
   env: Record<string, EnvValue>;
+  /** Optional resources this deployment did not configure; the world
+   * sees `undefined` for them. Absent when there are none. */
+  unconfigured?: readonly string[];
   message: unknown;
   id: string;
   attempt: number;
@@ -63,11 +81,17 @@ interface QueueInput {
 interface StreamInput {
   kind: "stream";
   env: Record<string, EnvValue>;
+  /** Optional resources this deployment did not configure; the world
+   * sees `undefined` for them. Absent when there are none. */
+  unconfigured?: readonly string[];
   request: HttpInput["request"];
 }
 interface SocketInput {
   kind: "socket";
   env: Record<string, EnvValue>;
+  /** Optional resources this deployment did not configure; the world
+   * sees `undefined` for them. Absent when there are none. */
+  unconfigured?: readonly string[];
   request: Omit<HttpInput["request"], "body">;
 }
 type Input =
@@ -267,7 +291,7 @@ function encodeHttp(workload: Workload, result: unknown): HttpOutput {
 
 async function runHttp(workload: Workload, input: HttpInput): Promise<HttpOutput> {
   let t = ledger !== null ? now() : 0;
-  const base = makeBase(workload.resources, input.env);
+  const base = makeBase(workload.resources, input.env, input.unconfigured);
   mark("context", t);
   const { request } = input;
   const raw = workload.trigger["raw"] === true;
@@ -331,7 +355,7 @@ async function runHttp(workload: Workload, input: HttpInput): Promise<HttpOutput
 }
 
 async function runTask(workload: Workload, input: TaskInput): Promise<unknown> {
-  const base = makeBase(workload.resources, input.env);
+  const base = makeBase(workload.resources, input.env, input.unconfigured);
   setRequestId(input.requestId ?? undefined);
   const parsed = parse("input", workload.contracts.input, input.input);
   return (workload.handler as (ctx: unknown) => unknown)({
@@ -342,7 +366,7 @@ async function runTask(workload: Workload, input: TaskInput): Promise<unknown> {
 }
 
 async function runCron(workload: Workload, input: CronInput): Promise<unknown> {
-  const base = makeBase(workload.resources, input.env);
+  const base = makeBase(workload.resources, input.env, input.unconfigured);
   return (workload.handler as (ctx: unknown) => unknown)({
     ...base,
     scheduledAt: input.scheduledAt,
@@ -350,12 +374,12 @@ async function runCron(workload: Workload, input: CronInput): Promise<unknown> {
 }
 
 async function runCommand(workload: Workload, input: CommandInput): Promise<unknown> {
-  const base = makeBase(workload.resources, input.env);
+  const base = makeBase(workload.resources, input.env, input.unconfigured);
   return (workload.handler as (ctx: unknown) => unknown)({ ...base, args: input.args });
 }
 
 async function runQueue(workload: Workload, input: QueueInput): Promise<unknown> {
-  const base = makeBase(workload.resources, input.env);
+  const base = makeBase(workload.resources, input.env, input.unconfigured);
   setRequestId(input.requestId ?? undefined);
   const message = parse("message", workload.contracts.message, input.message);
   return (workload.handler as (ctx: unknown) => unknown)({
@@ -368,7 +392,7 @@ async function runQueue(workload: Workload, input: QueueInput): Promise<unknown>
 }
 
 async function runStream(workload: Workload, input: StreamInput): Promise<unknown> {
-  const base = makeBase(workload.resources, input.env);
+  const base = makeBase(workload.resources, input.env, input.unconfigured);
   const { request } = input;
   setRequestId(request.headers["x-request-id"]);
   const auth = await authenticate(workload, base, request);
@@ -439,7 +463,7 @@ interface SocketEvent {
 }
 
 async function runSocket(workload: Workload, input: SocketInput): Promise<unknown> {
-  const base = makeBase(workload.resources, input.env);
+  const base = makeBase(workload.resources, input.env, input.unconfigured);
   const { request } = input;
   const handlers = workload.handler as unknown as {
     open?: (ctx: unknown) => unknown;
@@ -577,7 +601,7 @@ async function runSocket(workload: Workload, input: SocketInput): Promise<unknow
 }
 
 async function runService(workload: Workload, input: ServiceInput): Promise<unknown> {
-  const base = makeBase(workload.resources, input.env);
+  const base = makeBase(workload.resources, input.env, input.unconfigured);
   return (workload.handler as (ctx: unknown) => unknown)(base);
 }
 

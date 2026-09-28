@@ -8,6 +8,65 @@ runtime of that version and the next (`SUPPORTED.md` → Versioning). Within
 GitHub releases carry the auto-generated commit list as well; this file is
 the human summary.
 
+## 0.0.16 — 2026-09-29
+
+Five entries from the same downstream deployment, one of them a bug that made
+an outage report the wrong cause.
+
+**Upgrading**: additive, with one behaviour change worth reading — a handler
+that throws while its own work is in flight now answers with its own error
+instead of `detached_work`. If anything watches for 500 `detached_work` as a
+signal, it will see the handler's real status instead, which is the point.
+
+- **A handler that throws no longer hides its error behind
+  `detached_work`.** With PostgreSQL down, a handler using `Promise.all`
+  fails as soon as the first query is refused while its siblings are still in
+  flight — and every request answered 500 `detached_work`, so the
+  `pool_error` that explained the outage appeared nowhere and the status code
+  said "this application is broken" where it should have said "a dependency
+  is down, retry". A handler that **returned** early still answers
+  `detached_work`, because there a 200 would report success over cancelled
+  work; a handler that **threw** has an error, and that error is the answer.
+  The violation is unchanged and still reported: the log, the
+  `usai_detached_work_total` gauge, and `x-usai-lifecycle` — which error
+  answers now carry too.
+
+- **`env.group(name, { … })`: variables that go together.** An integration
+  that needs four values is misconfigured with three, and no single field can
+  say that, so activation accepted it and the first person to use the
+  integration found out. A group is all of its variables or none, checked at
+  activation, with a message naming both sides. Each field is optional on its
+  own, and the rule travels on the fields — spreading the map into a larger
+  `env({ … })` keeps it, which a rule attached to the declaration would not.
+
+- **`httpClient(…, { optional: true })`: a deployment may not have the thing
+  on the other end.** A lab without a collector, a site whose bridge is not
+  deployed yet. With none of the client's variables set the resource is not
+  opened and `ctx.resources.<name>` is `undefined` — the type says so, so a
+  handler has to decide rather than find out — and the revision still
+  activates. Set *some* of them and activation still fails: that is a
+  half-configured integration, not an absent one.
+
+- **`ctx.queue.stats(topic?)`: an application can read its own queue.**
+  Ready, processing, done, dead, the age of the oldest waiting and oldest
+  claimed message, and the last dead message's error, one entry per topic.
+  The numbers were on the status listener and in `usai_queue`, and neither is
+  the application's: the status port is the operator's surface and not
+  something a handler should proxy, so a backlog on an operator page meant
+  querying the runtime's own table and coupling to its columns.
+
+- **`crypto.subtle` verifies a public key's signature.**
+  `importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5" | "RSA-PSS" | "ECDSA",
+  hash }, false, ["verify"])` takes the components a JWKS endpoint publishes,
+  and `verify` checks a signature against it (RSA with SHA-256/384/512,
+  ECDSA P-256 and P-384). Verifying an identity provider's ID token was
+  impossible before — the surface was digests and HMAC — so the alternative
+  was trusting the transport and reading the claims. Digests and HMAC are
+  pure and stay in the world; a public-key check is arithmetic the core does
+  not have, so it is an owned host operation and no key material is kept
+  between calls. There is deliberately no **signing**: a private key is one
+  the runtime would hold, which is a different question.
+
 ## 0.0.15 — 2026-09-28
 
 **Two fixes to 0.0.14's named OpenAPI schemas.** Both were reported by the

@@ -148,6 +148,58 @@ async fn a_failing_service_restarts_per_policy_and_then_settles() {
     assert_eq!(rt.ledger().gauges.snapshot().live_worlds, 0);
 }
 
+/// With diagnostics on, a handler that threw *and* left work behind carries
+/// both: its own error as the answer, and the violation in
+/// `x-usai-lifecycle` for whoever is reading the response in development.
+///
+/// The `http` suite checks the production shape, where the header is absent
+/// by design.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_thrown_error_still_reports_the_lifecycle_violation() {
+    let Some((rt, _)) = http_runtime().await else {
+        return;
+    };
+    let host = HttpHost::new(
+        Arc::clone(&rt),
+        HttpConfig {
+            addr: ([127, 0, 0, 1], 0).into(),
+            expose_diagnostics: true,
+            ..HttpConfig::default()
+        },
+    );
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let token = CancellationToken::new();
+    let t = token.clone();
+    tokio::spawn(async move {
+        serve(host, t, |addr| {
+            let _ = tx.send(addr);
+        })
+        .await
+        .unwrap()
+    });
+    let addr = rx.await.unwrap();
+    let r = reqwest::Client::new()
+        .post(format!("http://{addr}/detach-throw"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 503, "the handler's error decides the status");
+    let lifecycle = r
+        .headers()
+        .get("x-usai-lifecycle")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_owned();
+    assert!(
+        lifecycle.contains("detached_work"),
+        "the violation belongs in the header: {lifecycle:?}"
+    );
+    let body: Value = r.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "unavailable", "{body}");
+    token.cancel();
+    rt.shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn revision_replacement_under_load_loses_no_request() {
     let Some((rt, _)) = http_runtime().await else {

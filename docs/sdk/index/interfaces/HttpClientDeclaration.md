@@ -1,6 +1,6 @@
 [@sakaladev/usai](../../README.md) / [index](../README.md) / HttpClientDeclaration
 
-# Interface: HttpClientDeclaration\<Name *extends* `string` = `string`\>
+# Interface: HttpClientDeclaration\<Name *extends* `string` = `string`, Handle = [`HttpClientHandle`](HttpClientHandle.md)\>
 
 Outbound HTTP, declared: the runtime owns the client (pool, TLS roots,
 timeouts), every request is an operation owned by the world, and the
@@ -9,13 +9,14 @@ global `fetch` inside a world.
 
 ## Extends
 
-- [`ResourceDeclaration`](ResourceDeclaration.md)\<`Name`, [`HttpClientHandle`](HttpClientHandle.md)\>
+- [`ResourceDeclaration`](ResourceDeclaration.md)\<`Name`, `Handle`\>
 
 ## Type Parameters
 
 | Type Parameter | Default type |
 | ------ | ------ |
 | `Name` *extends* `string` | `string` |
+| `Handle` | [`HttpClientHandle`](HttpClientHandle.md) |
 
 ## Properties
 

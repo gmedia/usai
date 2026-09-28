@@ -4,7 +4,7 @@ exclude = ["fuzz"]
 resolver = "3"
 
 [workspace.package]
-version = "0.0.15"
+version = "0.0.16"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/gmedia/usai"
@@ -31,6 +31,10 @@ bytes = "1"
 matchit = "0.9"
 jsonschema = { version = "0.56", default-features = false }
 sha2 = "0.10"
+# Public-key signature verification for `crypto.subtle.verify` (RSA and
+# ECDSA P-256). Already in the tree through rustls; named here because the
+# runtime calls it directly.
+ring = "0.17"
 hex = "0.4"
 clap = { version = "4", features = ["derive", "env"] }
 notify = "9.0.0-rc.5"

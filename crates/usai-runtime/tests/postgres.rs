@@ -445,6 +445,65 @@ async fn raw_transaction_control_is_refused_and_names_the_transaction_helper() {
     f.baseline();
 }
 
+/// A handler can read its own queue: the backlog, what is running, and what
+/// gave up.
+///
+/// The numbers were only on the status listener and in `usai_queue`, so an
+/// operator page that belongs to the application had to query the runtime's
+/// table and couple itself to those columns. `ctx.queue.stats()` is the same
+/// data through an owned operation.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_handler_can_read_the_queue_it_publishes_to() {
+    let Some(f) = fixture_with(false).await else {
+        return;
+    };
+    // Consumers are off, so what is published stays `ready` and the backlog
+    // is a number this test decides rather than races.
+    // With no table yet — `usai test` runs consumers without one — an empty
+    // queue is an answer, not an error. This call also prepares the schema.
+    let (status, empty) = f.http("GET", "/queue-stats", json!({})).await;
+    assert_eq!(status, 200, "an empty queue must read as empty: {empty}");
+    assert_eq!(empty["orders"].as_array().map(Vec::len), Some(0), "{empty}");
+
+    let manager = f.manager();
+    manager
+        .call(
+            usai_runtime::resource::ResourceCall {
+                method: "execute".into(),
+                args: json!({
+                    "sql": "INSERT INTO usai_queue (topic, payload) SELECT 'orders', jsonb_build_object('orderId', g::text) FROM generate_series(1, 3) g",
+                    "params": [],
+                }),
+            },
+            CancellationToken::new(),
+        )
+        .await
+        .expect("three messages published");
+    let (status, body) = f.http("GET", "/queue-stats", json!({})).await;
+    assert_eq!(status, 200, "{body}");
+    let orders = body["orders"]
+        .as_array()
+        .and_then(|rows| rows.first())
+        .cloned()
+        .unwrap_or(Value::Null);
+    assert_eq!(orders["topic"], "orders", "{body}");
+    assert_eq!(orders["ready"], 3, "the backlog this test created: {body}");
+    assert_eq!(orders["processing"], 0, "{body}");
+    assert_eq!(orders["dead"], 0, "{body}");
+    assert!(
+        orders["oldestReadySeconds"].is_number(),
+        "the age an alert watches must be there: {body}"
+    );
+    assert!(orders["lastDeadError"].is_null(), "{body}");
+    // Without a topic: every topic that has messages, this one among them.
+    let all = body["all"].as_array().cloned().unwrap_or_default();
+    assert!(
+        all.iter().any(|r| r["topic"] == "orders"),
+        "the unfiltered call must list it: {body}"
+    );
+    f.baseline();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_queue_can_be_inspected_pruned_and_indexed_without_blocking_writers() {
     let Some(f) = fixture_with(true).await else {

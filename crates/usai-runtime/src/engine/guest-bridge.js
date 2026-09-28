@@ -518,22 +518,66 @@
     get usages() { return ["sign", "verify"]; }
     _sign(data) { return hmac(this.#hash, this.#raw, data); }
   };
+  // A public key someone else owns, held as the JWK components it arrived
+  // as. The signature check itself is neither a digest nor HMAC — it is
+  // arithmetic the core does not have — so it is an owned host operation,
+  // and nothing about the key is kept between calls.
+  const PUBLIC_ALGORITHMS = { "RSASSA-PKCS1-V1_5": "RSASSA-PKCS1-v1_5", "RSA-PSS": "RSA-PSS", ECDSA: "ECDSA" };
+  const PublicKey = class CryptoKey {
+    #jwk; #algorithm; #hash;
+    constructor(jwk, algorithm, hash) { this.#jwk = jwk; this.#algorithm = algorithm; this.#hash = hash; }
+    get type() { return "public"; }
+    get algorithm() { return { name: this.#algorithm, hash: { name: this.#hash } }; }
+    get extractable() { return false; }
+    get usages() { return ["verify"]; }
+    _request(signature, data) {
+      const jwk = this.#jwk;
+      return {
+        op: "verify-public",
+        algorithm: this.#algorithm,
+        hash: this.#hash,
+        kty: String(jwk.kty || ""),
+        n: String(jwk.n || ""), e: String(jwk.e || ""),
+        x: String(jwk.x || ""), y: String(jwk.y || ""), crv: String(jwk.crv || ""),
+        signature: base64(signature), data: base64(data),
+      };
+    }
+  };
+  function base64(bytes) {
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+  }
   const subtle = {
     async digest(algorithm, data) {
       return DIGESTS[digestName(algorithm)].fn(toBytes(data)).buffer;
     },
     async importKey(format, keyData, algorithm, _extractable, _usages) {
-      if (format !== "raw") throw bridgeError("unsupported_algorithm", "crypto.subtle.importKey: only raw keys are supported");
       const name = algorithm && String(algorithm.name || "").toUpperCase();
+      if (format === "jwk") {
+        const wanted = PUBLIC_ALGORITHMS[name];
+        if (!wanted) throw bridgeError("unsupported_algorithm", "crypto.subtle.importKey: a JWK key must be RSASSA-PKCS1-v1_5, RSA-PSS or ECDSA");
+        if (!keyData || typeof keyData !== "object") throw bridgeError("invalid_key", "crypto.subtle.importKey: a JWK must be an object");
+        const kty = String(keyData.kty || "");
+        if (kty === "RSA" ? !(keyData.n && keyData.e) : kty === "EC" ? !(keyData.x && keyData.y && keyData.crv) : true) {
+          throw bridgeError("invalid_key", "crypto.subtle.importKey: an RSA JWK needs n and e, an EC JWK needs crv, x and y");
+        }
+        return new PublicKey(keyData, wanted, digestName((algorithm && algorithm.hash) || "SHA-256"));
+      }
+      if (format !== "raw") throw bridgeError("unsupported_algorithm", "crypto.subtle.importKey: raw (HMAC) and jwk (public keys) are supported");
       if (name !== "HMAC") throw bridgeError("unsupported_algorithm", "crypto.subtle.importKey: only HMAC keys are supported");
       return new HmacKey(toBytes(keyData).slice(), digestName(algorithm.hash || "SHA-256"));
     },
     async sign(algorithm, key, data) {
-      if (!(key instanceof HmacKey)) throw bridgeError("unsupported_algorithm", "crypto.subtle.sign: only HMAC is supported");
+      if (!(key instanceof HmacKey)) throw bridgeError("unsupported_algorithm", "crypto.subtle.sign: only HMAC is supported (a private key is not the runtime's to hold)");
       return key._sign(toBytes(data)).buffer;
     },
     async verify(algorithm, key, signature, data) {
-      if (!(key instanceof HmacKey)) throw bridgeError("unsupported_algorithm", "crypto.subtle.verify: only HMAC is supported");
+      if (key instanceof PublicKey) {
+        const answer = await bridge.op("crypto", JSON.stringify(key._request(toBytes(signature), toBytes(data))));
+        return answer === true || answer === "true";
+      }
+      if (!(key instanceof HmacKey)) throw bridgeError("unsupported_algorithm", "crypto.subtle.verify: HMAC and public keys are supported");
       const a = key._sign(toBytes(data)), b = toBytes(signature);
       if (a.length !== b.length) return false;
       let diff = 0;

@@ -76,7 +76,11 @@ impl LifecycleViolation {
         let side_effects_lost = summary.keys().any(|k| {
             matches!(
                 *k,
-                "resource" | "queue.publish" | "task.invoke" | "postgres.transaction"
+                "resource"
+                    | "queue.publish"
+                    | "queue.stats"
+                    | "task.invoke"
+                    | "postgres.transaction"
             )
         });
         Self {

@@ -1210,7 +1210,14 @@ impl HttpHost {
                     )
                     .await;
             }
-            let input = json!({ "kind": "http", "env": env, "request": request });
+            let mut input = json!({ "kind": "http", "env": env, "request": request });
+            // Present only when this deployment left an optional resource
+            // unconfigured, so every other application's envelope is
+            // unchanged.
+            let unconfigured = compiled.revision.unconfigured();
+            if !unconfigured.is_empty() {
+                input["unconfigured"] = json!(*unconfigured);
+            }
             let cancel = CancellationToken::new();
             // Dropping the request future (client gone) cancels the world.
             let _guard = cancel.clone().drop_guard();
@@ -1736,16 +1743,28 @@ impl HttpHost {
                 return json_response(StatusCode::INTERNAL_SERVER_ERROR, &body);
             }
         }
-        // A handler that returned while a write (or another external side
+        // A handler that **returned** while a write (or another external side
         // effect) was still in flight produced an answer the runtime cannot
         // stand behind: the operation was cancelled with the world, so a
         // 200 here would report success over lost work. Timers and other
         // pure pending work still let the response commit (with the
         // diagnostic in the log and, in dev, the header).
-        if let Some(violation) = result
+        //
+        // A handler that **threw** is the other case, and answering
+        // `detached_work` there was wrong. There is no success to defend, and
+        // the handler's own error is the one the caller needs: with
+        // PostgreSQL down, `Promise.all` fails on the first refusal while its
+        // siblings are still in flight, and every request answered 500
+        // `detached_work` instead of the 503 the outage deserved — the
+        // `pool_error` appeared nowhere in the response. The violation is
+        // real either way and still reaches the log, the gauge and the
+        // `x-usai-lifecycle` header; it just no longer replaces the answer.
+        let detached = result
             .violations
             .iter()
-            .find(|v| v.code == "detached_work" && v.side_effects_lost)
+            .find(|v| v.code == "detached_work" && v.side_effects_lost);
+        if let Some(violation) = detached
+            && !matches!(result.outcome, Some(Err(_)))
         {
             let mut body = json!({ "error": { "code": "detached_work", "message": "the handler returned before an operation it started had completed; that operation was cancelled and its result is unknown" } });
             if self.config.expose_diagnostics {
@@ -1764,9 +1783,13 @@ impl HttpHost {
                     )
                 }
             },
-            Some(Err(error)) => {
-                self.application_error(workload, result.world, result.request_id.as_deref(), error)
-            }
+            Some(Err(error)) => self.application_error(
+                workload,
+                result.world,
+                result.request_id.as_deref(),
+                error,
+                &result.violations,
+            ),
             None => json_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 &json!({ "error": { "code": "no_outcome", "message": "the request produced no outcome" } }),
@@ -1779,14 +1802,7 @@ impl HttpHost {
         output: GuestHttpOutput,
         violations: &[crate::world::LifecycleViolation],
     ) -> HttpResponse {
-        let lifecycle = (self.config.expose_diagnostics && !violations.is_empty()).then(|| {
-            violations
-                .iter()
-                .map(|v| v.code)
-                .collect::<Vec<_>>()
-                .join(",")
-        });
-        render_output(output, lifecycle)
+        render_output(output, self.lifecycle_header(violations))
     }
 }
 
@@ -1902,6 +1918,7 @@ impl HttpHost {
         world: crate::ownership::WorldId,
         request_id: Option<&str>,
         error: GuestError,
+        violations: &[crate::world::LifecycleViolation],
     ) -> HttpResponse {
         if let Some(usai) = &error.usai {
             let status = usai
@@ -1996,7 +2013,7 @@ impl HttpHost {
                     body["error"]["message"] = Value::String("internal error".into());
                 }
             }
-            return json_response(status, &body);
+            return self.with_lifecycle(json_response(status, &body), violations);
         }
         tracing::error!(world = %world, workload, request_id, name = %error.name, error = %error.message, stack = error.stack.as_deref(), "unexpected handler failure");
         let mut body = json!({ "error": { "code": "internal", "message": "internal error" } });
@@ -2006,7 +2023,36 @@ impl HttpHost {
                 body["error"]["stack"] = Value::String(stack);
             }
         }
-        json_response(StatusCode::INTERNAL_SERVER_ERROR, &body)
+        self.with_lifecycle(
+            json_response(StatusCode::INTERNAL_SERVER_ERROR, &body),
+            violations,
+        )
+    }
+
+    /// Stamps `x-usai-lifecycle` on an error answer, so a handler that threw
+    /// *and* left work behind still says so: the error is the caller's
+    /// answer, the violation is the developer's.
+    fn with_lifecycle(
+        &self,
+        mut response: HttpResponse,
+        violations: &[crate::world::LifecycleViolation],
+    ) -> HttpResponse {
+        if let Some(codes) = self.lifecycle_header(violations)
+            && let Ok(value) = HeaderValue::from_str(&codes)
+        {
+            response.headers_mut().insert("x-usai-lifecycle", value);
+        }
+        response
+    }
+
+    fn lifecycle_header(&self, violations: &[crate::world::LifecycleViolation]) -> Option<String> {
+        (self.config.expose_diagnostics && !violations.is_empty()).then(|| {
+            violations
+                .iter()
+                .map(|v| v.code)
+                .collect::<Vec<_>>()
+                .join(",")
+        })
     }
 }
 

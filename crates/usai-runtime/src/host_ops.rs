@@ -241,6 +241,135 @@ enum CryptoRequest {
         password: String,
         hash: String,
     },
+    /// `crypto.subtle.verify` for a **public** key.
+    ///
+    /// Digests and HMAC are pure and live in the guest; a signature check
+    /// against an RSA or ECDSA key is neither, so it is an owned operation
+    /// like any other work the host does for a world. The key arrives as its
+    /// JWK components — which is the form a JWKS endpoint serves — so nothing
+    /// here has to write DER, and no key material is kept between calls.
+    ///
+    /// Verification only. Signing with a private key would be a key the
+    /// runtime holds, and that is a different question (where does it live,
+    /// who may use it) than reading someone else's signature.
+    VerifyPublic {
+        /// `RSASSA-PKCS1-v1_5`, `RSA-PSS` or `ECDSA`.
+        algorithm: String,
+        /// `SHA-256`, `SHA-384` or `SHA-512`.
+        hash: String,
+        /// JWK `kty`: `RSA` or `EC`.
+        kty: String,
+        /// RSA: base64url modulus and exponent.
+        #[serde(default)]
+        n: String,
+        #[serde(default)]
+        e: String,
+        /// EC: base64url coordinates and the curve.
+        #[serde(default)]
+        x: String,
+        #[serde(default)]
+        y: String,
+        #[serde(default)]
+        crv: String,
+        /// Base64 (standard) signature and signed bytes.
+        signature: String,
+        data: String,
+    },
+}
+
+/// Decodes the base64url a JWK uses (no padding).
+fn b64url(value: &str) -> Result<Vec<u8>, String> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(value.trim_end_matches('='))
+        .map_err(|e| format!("not base64url: {e}"))
+}
+
+fn b64(value: &str) -> Result<Vec<u8>, String> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD
+        .decode(value)
+        .map_err(|e| format!("not base64: {e}"))
+}
+
+/// The parts of one signature check, as they arrive from the guest.
+#[derive(Clone, Copy)]
+struct PublicKeyVerification<'a> {
+    algorithm: &'a str,
+    hash: &'a str,
+    kty: &'a str,
+    n: &'a str,
+    e: &'a str,
+    x: &'a str,
+    y: &'a str,
+    crv: &'a str,
+    signature: &'a str,
+    data: &'a str,
+}
+
+/// One signature check. `Ok(false)` is a signature that does not match, which
+/// is an answer; `Err` is a key or an algorithm this cannot read, which is a
+/// mistake in the call.
+fn verify_public(request: &PublicKeyVerification<'_>) -> Result<bool, String> {
+    use ring::signature;
+    let &PublicKeyVerification {
+        algorithm,
+        hash,
+        kty,
+        n,
+        e,
+        x,
+        y,
+        crv,
+        signature,
+        data,
+    } = request;
+    let signature = b64(signature)?;
+    let data = b64(data)?;
+    match (kty, algorithm) {
+        ("RSA", "RSASSA-PKCS1-v1_5" | "RSA-PSS") => {
+            let components = signature::RsaPublicKeyComponents {
+                n: b64url(n)?,
+                e: b64url(e)?,
+            };
+            let parameters: &signature::RsaParameters = match (algorithm, hash) {
+                ("RSASSA-PKCS1-v1_5", "SHA-256") => &signature::RSA_PKCS1_2048_8192_SHA256,
+                ("RSASSA-PKCS1-v1_5", "SHA-384") => &signature::RSA_PKCS1_2048_8192_SHA384,
+                ("RSASSA-PKCS1-v1_5", "SHA-512") => &signature::RSA_PKCS1_2048_8192_SHA512,
+                ("RSA-PSS", "SHA-256") => &signature::RSA_PSS_2048_8192_SHA256,
+                ("RSA-PSS", "SHA-384") => &signature::RSA_PSS_2048_8192_SHA384,
+                ("RSA-PSS", "SHA-512") => &signature::RSA_PSS_2048_8192_SHA512,
+                _ => return Err(format!("{algorithm} with {hash} is not supported")),
+            };
+            Ok(components.verify(parameters, &data, &signature).is_ok())
+        }
+        ("EC", "ECDSA") => {
+            let (algorithm, expected_curve) = match (crv, hash) {
+                ("P-256", "SHA-256") => (&signature::ECDSA_P256_SHA256_FIXED, 32),
+                ("P-384", "SHA-384") => (&signature::ECDSA_P384_SHA384_FIXED, 48),
+                _ => return Err(format!("ECDSA {crv} with {hash} is not supported")),
+            };
+            let (x, y) = (b64url(x)?, b64url(y)?);
+            if x.len() != expected_curve || y.len() != expected_curve {
+                return Err(format!(
+                    "{crv} coordinates are {} and {} bytes, expected {expected_curve}",
+                    x.len(),
+                    y.len()
+                ));
+            }
+            // Uncompressed point, which is what `*_FIXED` wants.
+            let mut point = Vec::with_capacity(1 + x.len() + y.len());
+            point.push(0x04);
+            point.extend_from_slice(&x);
+            point.extend_from_slice(&y);
+            Ok(signature::UnparsedPublicKey::new(algorithm, point)
+                .verify(&data, &signature)
+                .is_ok())
+        }
+        _ => Err(format!(
+            "a {kty} key with {algorithm} is not supported (RSA with RSASSA-PKCS1-v1_5 or RSA-PSS, EC with ECDSA)"
+        )),
+    }
 }
 
 async fn crypto(ctx: OpContext, payload: String) -> OpOutcome {
@@ -273,6 +402,30 @@ async fn crypto(ctx: OpContext, payload: String) -> OpOutcome {
                     argon.verify_password(password.as_bytes(), &parsed).is_ok()
                 ))
             }
+            CryptoRequest::VerifyPublic {
+                algorithm,
+                hash,
+                kty,
+                n,
+                e,
+                x,
+                y,
+                crv,
+                signature,
+                data,
+            } => verify_public(&PublicKeyVerification {
+                algorithm: &algorithm,
+                hash: &hash,
+                kty: &kty,
+                n: &n,
+                e: &e,
+                x: &x,
+                y: &y,
+                crv: &crv,
+                signature: &signature,
+                data: &data,
+            })
+            .map(|ok| json!(ok)),
         };
         // The 19 MiB each hash used is free now; give it back rather than
         // let a login burst read as +150 MiB of RSS for the process's life.

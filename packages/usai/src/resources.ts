@@ -273,6 +273,30 @@ export interface HttpClientOptions {
     clientKeyFile?: string;
     clientKeyFileEnv?: string;
   };
+  /** This deployment may not have the thing on the other end.
+   *
+   * A part can be absent — a lab without a collector, a site whose bridge is
+   * not up yet — and the application should then say "not configured", not
+   * refuse to start. Every variable a resource names is normally required at
+   * activation, which is right for a database and wrong for an integration
+   * that is genuinely optional.
+   *
+   * With `optional: true` and **none** of this client's variables set, the
+   * resource is not opened and `ctx.resources.<name>` is `undefined`. The
+   * type says so, so a handler has to decide what to do rather than find out
+   * at runtime. Set *some* of them and activation still fails: that is a
+   * half-configured integration, not an absent one.
+   *
+   * ```ts
+   * const collector = httpClient("collector", { baseUrlEnv: "COLLECTOR_URL", optional: true });
+   * export const system = http.get("/system", { resources: [collector] }, async (ctx) => {
+   *   if (!ctx.resources.collector) return { collector: "not configured" };
+   *   const res = await ctx.resources.collector.fetch("/metrics");
+   *   return { collector: res.ok ? "ok" : "unreachable" };
+   * });
+   * ```
+   */
+  optional?: boolean;
   /** Let a client **without** a `baseUrl` reach loopback, private,
    * link-local and unique-local addresses. Off by default.
    *
@@ -296,8 +320,8 @@ export interface HttpClientOptions {
  *
  * @category Resources
  */
-export interface HttpClientDeclaration<Name extends string = string>
-  extends ResourceDeclaration<Name, HttpClientHandle> {
+export interface HttpClientDeclaration<Name extends string = string, Handle = HttpClientHandle>
+  extends ResourceDeclaration<Name, Handle> {
   readonly kind: "http.client";
 }
 
@@ -323,10 +347,17 @@ export interface HttpClientDeclaration<Name extends string = string>
  *
  * @category Resources
  */
+export function httpClient<const N extends string, const O extends HttpClientOptions>(
+  name: N,
+  options?: O,
+): HttpClientDeclaration<
+  N,
+  O extends { optional: true } ? HttpClientHandle | undefined : HttpClientHandle
+>;
 export function httpClient<const N extends string>(
   name: N,
   options: HttpClientOptions = {},
-): HttpClientDeclaration<N> {
+): HttpClientDeclaration<N, HttpClientHandle | undefined> {
   const config: Record<string, unknown> = {};
   if (options.baseUrl !== undefined) config["baseUrl"] = options.baseUrl;
   if (options.baseUrlEnv !== undefined) config["baseUrlEnv"] = options.baseUrlEnv;
@@ -351,6 +382,14 @@ export function httpClient<const N extends string>(
   }
   if (options.allowPrivateNetwork !== undefined)
     config["allowPrivateNetwork"] = options.allowPrivateNetwork;
+  if (options.optional === true) {
+    if (options.baseUrlEnv === undefined) {
+      throw new Error(
+        `httpClient "${name}": optional needs baseUrlEnv — an absent destination is what makes it absent`,
+      );
+    }
+    config["optional"] = true;
+  }
   return {
     __usai: "resource",
     name,

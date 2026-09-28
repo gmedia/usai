@@ -105,6 +105,7 @@ export interface Manifest {
     values: string[];
     items?: string;
     separator?: string;
+    group?: string;
   }>;
   codeSha256: string;
   builtWith?: { sdk?: string; runtime?: string; abi?: number };
@@ -329,6 +330,7 @@ export function describe(app: AppDeclaration): Manifest {
         values: [...(f.values ?? [])],
         ...(f.items === undefined ? {} : { items: f.items }),
         ...(f.separator === undefined ? {} : { separator: f.separator }),
+        ...(f.group === undefined ? {} : { group: f.group }),
       }))
     : [];
   return {

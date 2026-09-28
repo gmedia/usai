@@ -597,6 +597,203 @@ async fn errors_are_contracts_and_unexpected_failures_are_sanitized() {
     s.shutdown.cancel();
 }
 
+/// A handler that throws while its own work is in flight answers with **its**
+/// error, not `detached_work`.
+///
+/// The violation is real and still reported — log, gauge, `x-usai-lifecycle`
+/// — but it is a note for the developer, not the answer to the caller. With
+/// PostgreSQL down, a handler using `Promise.all` fails on the first refusal
+/// while its siblings are still running, and every request used to answer 500
+/// `detached_work`: the `pool_error` that explained the outage appeared
+/// nowhere, so the status code said "your application is broken" where it
+/// should have said "a dependency is down, retry".
+/// An optional resource nobody configured is `undefined`, and activation
+/// still succeeds.
+///
+/// Every variable a resource names is otherwise required at activation,
+/// which is right for a database and wrong for an integration a deployment
+/// genuinely may not have: a lab without a collector could not start at all,
+/// over a client nothing calls. This server sets no `COLLECTOR_URL`.
+/// A signature from a real RSA key verifies, and a tampered one does not.
+///
+/// `crypto.subtle` had digests and HMAC only, so a token signed by an
+/// identity provider could not be checked at all: the alternative was
+/// trusting the transport and reading the claims. The key arrives as the JWK
+/// components a JWKS endpoint publishes, which is the form this has to accept.
+///
+/// The negative half is the point. A verifier that returns `true` for
+/// everything passes the first assertion on its own.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_public_key_signature_is_verified() {
+    let Some(s) = start().await else { return };
+    let Some(payload) = jwk_payload() else {
+        eprintln!("SKIPPED: openssl is not available to make a key");
+        return;
+    };
+
+    let (status, body) = s.post_json("/verify-jwk", payload.clone()).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        body["verified"], true,
+        "a real signature must verify: {body}"
+    );
+
+    // One byte of the signed data changed: the same signature must not verify.
+    use base64::Engine as _;
+    let mut tampered = payload.clone();
+    let data = payload["data"].as_str().unwrap();
+    let mut bytes = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .unwrap();
+    bytes[0] ^= 0xff;
+    tampered["data"] = json!(base64::engine::general_purpose::STANDARD.encode(&bytes));
+    let (status, body) = s.post_json("/verify-jwk", tampered).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        body["verified"], false,
+        "a signature over other bytes must not verify: {body}"
+    );
+
+    // A key that is not the signer's: same shape, wrong modulus.
+    let mut other = payload.clone();
+    let n = payload["jwk"]["n"].as_str().unwrap();
+    let flipped: String = n
+        .chars()
+        .enumerate()
+        .map(|(i, c)| if i == 4 && c != 'A' { 'A' } else { c })
+        .collect();
+    other["jwk"]["n"] = json!(flipped);
+    let (status, body) = s.post_json("/verify-jwk", other).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        body["verified"], false,
+        "another key must not verify this signature: {body}"
+    );
+
+    s.baseline().await;
+    s.shutdown.cancel();
+}
+
+/// An RSA key, a signature over known bytes, and the key as a JWK — made with
+/// openssl so the signature is not this runtime's own work checked against
+/// itself. `None` when openssl is missing.
+fn jwk_payload() -> Option<Value> {
+    use base64::Engine as _;
+    let dir = std::env::temp_dir().join(format!("usai-jwk-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).ok()?;
+    let key = dir.join("rsa.pem");
+    let data = dir.join("data.bin");
+    let sig = dir.join("sig.bin");
+    let run = |args: Vec<String>| -> Option<bool> {
+        Some(
+            std::process::Command::new("openssl")
+                .args(args)
+                .output()
+                .ok()?
+                .status
+                .success(),
+        )
+    };
+    let p = |path: &std::path::Path| path.to_str().unwrap().to_owned();
+    if !key.exists() && !run(vec!["genrsa".into(), "-out".into(), p(&key), "2048".into()])? {
+        return None;
+    }
+    std::fs::write(&data, b"the payload that was signed").ok()?;
+    if !run(vec![
+        "dgst".into(),
+        "-sha256".into(),
+        "-sign".into(),
+        p(&key),
+        "-out".into(),
+        p(&sig),
+        p(&data),
+    ])? {
+        return None;
+    }
+    // The modulus and exponent as a JWKS publishes them: base64url, no
+    // padding, leading zero byte stripped.
+    let text = String::from_utf8(
+        std::process::Command::new("openssl")
+            .args(["rsa", "-in", &p(&key), "-noout", "-text"])
+            .output()
+            .ok()?
+            .stdout,
+    )
+    .ok()?;
+    let modulus_hex: String = text
+        .split("modulus:")
+        .nth(1)?
+        .split("publicExponent:")
+        .next()?
+        .chars()
+        .filter(|c| c.is_ascii_hexdigit())
+        .collect();
+    let mut n = Vec::with_capacity(modulus_hex.len() / 2);
+    let bytes = modulus_hex.as_bytes();
+    for pair in bytes.chunks(2) {
+        n.push(u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?);
+    }
+    while n.first() == Some(&0) {
+        n.remove(0);
+    }
+    let url = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    Some(json!({
+        "jwk": { "kty": "RSA", "n": url.encode(&n), "e": url.encode([0x01u8, 0x00, 0x01]) },
+        "algorithm": "RSASSA-PKCS1-v1_5",
+        "hash": "SHA-256",
+        "signature": base64::engine::general_purpose::STANDARD.encode(std::fs::read(&sig).ok()?),
+        "data": base64::engine::general_purpose::STANDARD.encode(std::fs::read(&data).ok()?),
+    }))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_unconfigured_optional_resource_is_undefined() {
+    let Some(s) = start().await else { return };
+    let (status, body) = s.get("/optional-resource").await;
+    assert_eq!(status, 200, "the revision activated without it: {body}");
+    assert_eq!(
+        body["configured"], false,
+        "the handler must see `undefined`, not a handle: {body}"
+    );
+    s.baseline().await;
+    s.shutdown.cancel();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_handler_that_throws_with_work_in_flight_answers_its_own_error() {
+    let Some(s) = start().await else { return };
+    let before = s.runtime.ledger().gauges.snapshot().detached_work_detected;
+    let r = s
+        .client
+        .post(format!("{}/detach-throw", s.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        r.status(),
+        503,
+        "the handler's own error decides the status, not the violation"
+    );
+    // This server runs with diagnostics off, which is production's shape, so
+    // the header is deliberately absent here; `hardening.rs` covers the
+    // development shape where it is present.
+    assert!(r.headers().get("x-usai-lifecycle").is_none());
+    let body: Value = r.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "unavailable", "{body}");
+    assert_ne!(
+        body["error"]["code"], "detached_work",
+        "the violation must not replace the answer: {body}"
+    );
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(
+        s.runtime.ledger().gauges.snapshot().detached_work_detected,
+        before + 1,
+        "the violation is still counted"
+    );
+    s.baseline().await;
+    s.shutdown.cancel();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn detached_work_is_reported_and_the_response_still_commits() {
     let Some(s) = start().await else { return };

@@ -601,6 +601,7 @@ async fn failed_activation_leaves_the_active_revision_untouched() {
                 values: vec![],
                 items: None,
                 separator: None,
+                group: None,
             },
             EnvRequirement {
                 name: "SESSION_SECRET".into(),
@@ -609,6 +610,7 @@ async fn failed_activation_leaves_the_active_revision_untouched() {
                 values: vec![],
                 items: None,
                 separator: None,
+                group: None,
             },
         ],
         code_sha256: code.sha256.clone(),
@@ -626,6 +628,100 @@ async fn failed_activation_leaves_the_active_revision_untouched() {
     assert_eq!(rt.active().unwrap().id, a.id);
     assert_eq!(a.state(), RevisionState::Active);
     assert_eq!(b.state(), RevisionState::Installed);
+}
+
+/// Variables that go together are checked together, at activation.
+///
+/// An integration that needs several values at once is a mistake when it has
+/// only some of them, and no single field can say that. Without the rule the
+/// revision started and the first person who tried to use the integration
+/// found out.
+#[tokio::test]
+async fn a_half_configured_group_refuses_the_revision() {
+    let rt = runtime().await;
+    let a = rt.active().unwrap();
+    let grouped = |name: &str| EnvRequirement {
+        name: name.into(),
+        kind: "string".into(),
+        required: false,
+        values: vec![],
+        items: None,
+        separator: None,
+        group: Some("entra".into()),
+    };
+    let code = Code::new(FIXTURE);
+    let manifest = Manifest {
+        manifest_version: MANIFEST_VERSION,
+        built_with: None,
+        description: None,
+        headers: Default::default(),
+        name: "grouped-env".into(),
+        modules: vec![],
+        workloads: vec![task("task:count")],
+        resources: vec![],
+        auth: vec![],
+        env: vec![
+            grouped("ENTRA_TENANT_ID"),
+            grouped("ENTRA_CLIENT_ID"),
+            grouped("ENTRA_CLIENT_SECRET"),
+        ],
+        code_sha256: code.sha256.clone(),
+    };
+
+    // One of three: refused, and the message names both sides.
+    let rt_partial = Runtime::with_env(
+        usai_runtime::engine::from_env(64).unwrap(),
+        config(),
+        |name| (name == "ENTRA_TENANT_ID").then(|| "t".to_owned()),
+    );
+    let b = rt_partial
+        .install(ApplicationDefinition::new(manifest.clone(), code.clone()).unwrap())
+        .await
+        .unwrap();
+    let err = rt_partial.activate(b.id).await.unwrap_err();
+    let message = err.to_string();
+    assert!(
+        matches!(err, RuntimeError::InvalidEnv(_)),
+        "a half-configured group is invalid, not missing: {message}"
+    );
+    assert!(
+        message.contains("ENTRA_TENANT_ID")
+            && message.contains("ENTRA_CLIENT_ID")
+            && message.contains("ENTRA_CLIENT_SECRET"),
+        "the message must name what is set and what is not: {message}"
+    );
+
+    // None of three: a group nobody configured is not an error.
+    let rt_none = Runtime::with_env(
+        usai_runtime::engine::from_env(64).unwrap(),
+        config(),
+        |_| None,
+    );
+    let c = rt_none
+        .install(ApplicationDefinition::new(manifest.clone(), code.clone()).unwrap())
+        .await
+        .unwrap();
+    rt_none
+        .activate(c.id)
+        .await
+        .expect("none of the group is a valid answer");
+
+    // All three: activates.
+    let rt_all = Runtime::with_env(
+        usai_runtime::engine::from_env(64).unwrap(),
+        config(),
+        |name| name.starts_with("ENTRA_").then(|| "x".to_owned()),
+    );
+    let d = rt_all
+        .install(ApplicationDefinition::new(manifest, code).unwrap())
+        .await
+        .unwrap();
+    rt_all
+        .activate(d.id)
+        .await
+        .expect("a whole group activates");
+
+    assert_eq!(rt.active().unwrap().id, a.id);
 }
 
 #[tokio::test]

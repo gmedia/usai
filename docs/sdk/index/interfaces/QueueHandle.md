@@ -69,3 +69,43 @@ await ctx.resources.db.transaction(async (tx) => {
 `Promise`\<\{
   `id`: `string`;
 \}\>
+
+***
+
+### stats()
+
+```ts
+stats(topic?: string, options?: {
+  database?: PostgresDeclaration<string>;
+}): Promise<QueueStats[]>;
+```
+
+What the queue holds right now, one entry per topic: the backlog, what
+is being worked on, what finished, and what gave up.
+
+For an operator page that belongs to the application. The same numbers
+are on the status listener, but that surface is the operator's and not
+something a handler should proxy — so the alternative was querying
+`usai_queue` directly and coupling the application to a runtime table's
+columns.
+
+Without `topic`, every topic with at least one message. A topic whose
+table is empty (or does not exist yet, as under `usai test`) simply has
+no entry, which is the honest answer rather than an error.
+
+```ts
+const [deliver] = await ctx.queue.stats("webhook.deliver");
+return { backlog: deliver?.ready ?? 0, dead: deliver?.dead ?? 0 };
+```
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `topic?` | `string` |
+| `options?` | \{ `database?`: [`PostgresDeclaration`](PostgresDeclaration.md)\<`string`\>; \} |
+| `options.database?` | [`PostgresDeclaration`](PostgresDeclaration.md)\<`string`\> |
+
+#### Returns
+
+`Promise`\<[`QueueStats`](QueueStats.md)[]\>
