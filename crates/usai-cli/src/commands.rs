@@ -244,10 +244,17 @@ pub async fn run(
     no_queue: bool,
     no_services: bool,
     drain_timeout: u64,
+    queue_done_retention: &str,
     drain_grace: u64,
     diagnostics: bool,
     server_timing: bool,
 ) -> Result<()> {
+    // `0` keeps finished messages for ever — the only behaviour before 0.0.19.
+    let queue_done_retention =
+        match parse_duration_seconds(queue_done_retention).context("--queue-done-retention")? {
+            0 => None,
+            seconds => Some(Duration::from_secs(seconds as u64)),
+        };
     // Take the port first. Loading and compiling an application is seconds of
     // work, and finding out afterwards that the address was already in use is
     // seconds spent for nothing.
@@ -280,6 +287,7 @@ pub async fn run(
             queue_consumers: !no_queue,
             services: !no_services,
             drain_timeout: Duration::from_secs(drain_timeout.max(1)),
+            queue_done_retention,
             ..RuntimeConfig::default()
         },
     );

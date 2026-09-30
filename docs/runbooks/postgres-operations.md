@@ -100,8 +100,15 @@ rows deleted), against 73 checkpoints in the same window. Throughput over an
 hour is flat, but a few per cent of individual seconds serve noticeably
 fewer requests.
 
-None of that is the runtime — it never deletes a row by itself — but it is
-the cost of the retention policy, and it is worth choosing deliberately:
+Since 0.0.19 the runtime does delete one kind of row by itself: finished
+queue messages past `USAI_QUEUE_DONE_RETENTION` (24 hours), a thousand at a
+time, once a minute. At steady state that deletes one row per message
+processed — on a table whose state changes (`ready` → `processing` → `done`)
+already leave about three dead tuples per message — so it follows the
+table's existing autovacuum rhythm rather than starting a new one. The
+retention changes how *big* the table is, not how fast rows die. Everything
+else below is still the cost of your own retention policy, and it is worth
+choosing deliberately:
 
 - **Prune less often and in bigger batches** if the dips matter more than
   the table size. A nightly prune has one busy window instead of 1 440 small

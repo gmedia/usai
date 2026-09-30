@@ -86,7 +86,7 @@ update usai_queue set state = 'ready', attempts = 0, last_error = null
  where topic = 'invoice.issued' and state = 'dead' and last_error like '%502%';
 ```
 
-Then keep the table from growing forever — the runtime never prunes it (and pruning has a cost of its own: `postgres-operations.md` → Pruning is not free, measured at about one autovacuum a minute per table pruned every minute):
+Finished (`done`) messages look after themselves since 0.0.19: the runtime deletes them 24 hours after they were published (`USAI_QUEUE_DONE_RETENTION`). **`dead` it never touches**, so that part stays yours (and pruning has a cost of its own: `postgres-operations.md` → Pruning is not free):
 
 ```bash
 usai --root /srv/app queue prune --state done --older-than 30d --yes

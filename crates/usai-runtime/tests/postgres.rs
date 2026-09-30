@@ -419,6 +419,154 @@ async fn no_connection_state_leaks_across_worlds() {
     f.baseline();
 }
 
+/// Finished messages older than the retention are deleted; recent ones stay,
+/// and a message that gave up is never touched.
+///
+/// The runtime used to keep every finished message for ever. At a site that
+/// processes each detection through the queue that was 125 000 rows a day,
+/// and every statistic that touched the table got slower with each message
+/// ever handled.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn finished_messages_past_their_retention_are_removed_and_failures_are_kept() {
+    let Some(f) = fixture_with(false).await else {
+        return;
+    };
+    let manager = f.manager();
+    let exec = |sql: &'static str| {
+        let manager = Arc::clone(&manager);
+        async move {
+            manager
+                .call(
+                    usai_runtime::resource::ResourceCall {
+                        method: "execute".into(),
+                        args: json!({ "sql": sql, "params": [] }),
+                    },
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap()
+        }
+    };
+    // The table is created on first use; make sure it exists.
+    let _ = f.http("GET", "/queue-stats", json!({})).await;
+    exec("DELETE FROM usai_queue").await;
+    exec(
+        "INSERT INTO usai_queue (topic, payload, state, created_at) VALUES
+            ('orders', '{}'::jsonb, 'done', now() - interval '2 days'),
+            ('orders', '{}'::jsonb, 'done', now() - interval '2 days'),
+            ('orders', '{}'::jsonb, 'done', now() - interval '1 hour'),
+            ('orders', '{}'::jsonb, 'dead', now() - interval '2 days'),
+            ('orders', '{}'::jsonb, 'ready', now() - interval '2 days'),
+            ('other',  '{}'::jsonb, 'done', now() - interval '2 days')",
+    )
+    .await;
+
+    usai_runtime::workloads::queue::forget_finished(
+        manager.as_ref(),
+        "orders",
+        std::time::Duration::from_secs(24 * 60 * 60),
+    )
+    .await;
+
+    let rows = manager
+        .call(
+            usai_runtime::resource::ResourceCall {
+                method: "query".into(),
+                args: json!({
+                    "sql": "SELECT topic, state, count(*)::int AS n FROM usai_queue GROUP BY topic, state ORDER BY topic, state",
+                    "params": [],
+                }),
+            },
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        rows,
+        json!([
+            // Only the recent finished one stayed.
+            { "topic": "orders", "state": "dead", "n": 1 },
+            { "topic": "orders", "state": "done", "n": 1 },
+            { "topic": "orders", "state": "ready", "n": 1 },
+            // Another topic is its own sweeper's business.
+            { "topic": "other", "state": "done", "n": 1 },
+        ]),
+        "old `done` gone, recent `done`, `dead` and `ready` untouched"
+    );
+    f.baseline();
+}
+
+/// The statistics never read the whole table.
+///
+/// The property is not the numbers — the other test checks those — but that
+/// every part of the statement is served by a partial index, so its cost
+/// follows what is live, failed or recently finished rather than the
+/// site's whole history. The first version was a single `GROUP BY` that
+/// scanned every row: 210 ms on 125 000 rows, measured, 1.5 s under load.
+///
+/// With sequential scans disabled the planner uses an index whenever one can
+/// answer; a statement that *needs* the whole table still scans it. So "no
+/// `Seq Scan on usai_queue`" here means the indexes cover it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_queue_statistics_never_scan_the_whole_table() {
+    let Some(f) = fixture_with(false).await else {
+        return;
+    };
+    let manager = f.manager();
+    let _ = f.http("GET", "/queue-stats", json!({})).await;
+    for one_topic in [false, true] {
+        let statement = format!(
+            "EXPLAIN {}",
+            usai_runtime::workloads::queue::stats_sql(one_topic)
+        );
+        let params = if one_topic {
+            json!(["orders"])
+        } else {
+            json!([])
+        };
+        // `SET` is session state and the pool resets it on every checkout,
+        // so it has to share a connection with the `EXPLAIN`: a transaction
+        // pins one. Without that the setting silently went to a different
+        // connection and the plan was the planner's free choice — which
+        // proves nothing on a table this small.
+        let call = |method: &str, args: Value| {
+            let manager = Arc::clone(&manager);
+            let method = method.to_owned();
+            async move {
+                manager
+                    .call(
+                        usai_runtime::resource::ResourceCall { method, args },
+                        CancellationToken::new(),
+                    )
+                    .await
+                    .unwrap()
+            }
+        };
+        let lease = call("begin", json!({})).await["lease"].clone();
+        call(
+            "execute",
+            json!({ "sql": "SET LOCAL enable_seqscan = off", "params": [], "lease": lease }),
+        )
+        .await;
+        let text = call(
+            "query",
+            json!({ "sql": statement, "params": params, "lease": lease }),
+        )
+        .await
+        .to_string();
+        call("rollback", json!({ "lease": lease })).await;
+        assert!(
+            !text.contains("Seq Scan on usai_queue"),
+            "the statistics read the whole table (one topic: {one_topic}):\n{text}"
+        );
+        assert!(
+            text.contains("usai_queue_done") && text.contains("usai_queue_dead"),
+            "each state should be served by its partial index:\n{text}"
+        );
+    }
+    f.baseline();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn raw_transaction_control_is_refused_and_names_the_transaction_helper() {
     let Some(f) = fixture().await else { return };

@@ -52,6 +52,18 @@ pub struct RuntimeConfig {
     pub cron_scheduler: bool,
     /// Whether this instance runs queue consumers.
     pub queue_consumers: bool,
+    /// How long a **finished** (`done`) queue message is kept before the
+    /// runtime deletes it; `None` keeps them for ever, which was the only
+    /// behaviour before 0.0.19.
+    ///
+    /// A finished message is not evidence of anything — the application's
+    /// own tables hold what the work produced — and at a site that processes
+    /// every detection through the queue, keeping them all grew the table by
+    /// 125 000 rows a day and made every statistic that touched it slower
+    /// with each message ever handled. `dead` messages are never deleted by
+    /// this: they are the application's failures and only a person decides
+    /// when they stop mattering.
+    pub queue_done_retention: Option<Duration>,
     /// Whether this instance runs the application's services (persistent
     /// workloads). A one-shot command, a migration job or a test runner
     /// asks for one finite world and nothing else; N replicas mean N
@@ -81,6 +93,7 @@ impl Default for RuntimeConfig {
             task_queue_capacity: 10_000,
             cron_scheduler: true,
             queue_consumers: true,
+            queue_done_retention: Some(Duration::from_secs(24 * 60 * 60)),
             services: true,
             trusted_signers: Vec::new(),
             max_revisions: 8,

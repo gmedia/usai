@@ -8,6 +8,44 @@ runtime of that version and the next (`SUPPORTED.md` → Versioning). Within
 GitHub releases carry the auto-generated commit list as well; this file is
 the human summary.
 
+## 0.0.19 — 2026-09-30
+
+**One behaviour change, read before upgrading**: the runtime now deletes
+*finished* queue messages 24 hours after they were published. Before this it
+kept every one of them for ever, and the documents promised it would.
+`USAI_QUEUE_DONE_RETENTION=0` (or `usai run --queue-done-retention 0`) keeps
+the old behaviour. `dead` messages are never deleted automatically — that part
+of the promise stands.
+
+**Before upgrading a large queue table**, run `usai queue prepare`: two new
+indexes are added, and `prepare` builds them without blocking writes (it runs
+from inside the image since 0.0.17). Otherwise they are built on first use
+under a lock that holds writers for as long as the build takes.
+
+- **The queue no longer grows with everything the application has ever
+  done, and its statistics no longer read all of it.** A downstream site
+  processes every detection through the queue: one day after it started,
+  `usai_queue` held 125 816 rows, all finished, and `ctx.queue.stats()` read
+  every one of them — 210 ms on its own, measured, and 1.5 s while the
+  console's other queries ran. Both would have grown by about 3.8 million
+  rows a month.
+
+  Two changes. The statistics now read each state from its own partial
+  index — `ready`, `processing` and the new `dead` hold only what is live or
+  failed, and the new `done` index is kept small by the retention — so the
+  same one-day table answers in **15 ms instead of 210**. And the runtime
+  deletes `done` messages past `USAI_QUEUE_DONE_RETENTION` (24 hours by
+  default), measured from publish time, a thousand rows at a time, once a
+  minute per topic, with `SKIP LOCKED` so replicas share the work. On the
+  same table the backlog of 39 900 rows older than a day went in 40 batches
+  of about 20 ms each, and the statistics then answered in 12 ms.
+
+  A test now asserts the plan rather than the numbers: with sequential scans
+  disabled on a pinned connection, the statistics statement must not contain
+  `Seq Scan on usai_queue`. The first version of that test passed for the
+  wrong reason — the `SET` went to a different pooled connection — and was
+  caught by checking it failed against the old query.
+
 ## 0.0.18 — 2026-09-29
 
 Documentation only, released on its own because a downstream site syncs these

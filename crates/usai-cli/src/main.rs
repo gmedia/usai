@@ -125,6 +125,14 @@ enum Command {
         /// orchestrator's grace period above this
         #[arg(long, env = "USAI_DRAIN_TIMEOUT", default_value_t = 30)]
         drain_timeout: u64,
+        /// How long a finished queue message is kept before the runtime
+        /// deletes it (USAI_QUEUE_DONE_RETENTION): `24h`, `7d`, or `0` to keep
+        /// them for ever. Measured from when the message was published.
+        /// Messages that gave up (`dead`) are never deleted by this — they
+        /// are your application's failures, and `usai queue prune` is how a
+        /// person decides they no longer matter
+        #[arg(long, env = "USAI_QUEUE_DONE_RETENTION", default_value = "24h")]
+        queue_done_retention: String,
         /// On SIGTERM, keep serving for this many seconds while /_usai/ready
         /// answers 503 and responses carry `Connection: close`, so a load
         /// balancer stops routing here before the listener closes; then drain
@@ -369,7 +377,8 @@ enum QueueAction {
         #[arg(long)]
         database_url: Option<String>,
     },
-    /// Delete finished rows. The runtime never prunes by itself: a `dead`
+    /// Delete finished rows. The runtime removes `done` rows by itself after
+    /// `USAI_QUEUE_DONE_RETENTION` (24h), but never `dead` ones: a `dead`
     /// row is a message your application failed, and only you know whether
     /// it is still evidence. Counts by default and needs `--yes` to delete
     Prune {
@@ -612,6 +621,7 @@ async fn async_main() {
             no_queue,
             no_services,
             drain_timeout,
+            queue_done_retention,
             drain_grace,
             diagnostics,
             server_timing,
@@ -649,6 +659,7 @@ async fn async_main() {
                 no_queue,
                 no_services,
                 drain_timeout,
+                &queue_done_retention,
                 drain_grace,
                 diagnostics,
                 server_timing,
