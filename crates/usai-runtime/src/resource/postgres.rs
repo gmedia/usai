@@ -58,6 +58,17 @@ struct PostgresConfig {
     pool: PoolConfig,
     #[serde(default)]
     tls: TlsConfig,
+    /// `"string"`: every `int8` value comes back as a string, so its JS
+    /// type follows the column and not the value (`postgres(name, { bigint })`).
+    #[serde(default)]
+    bigint: Option<String>,
+}
+
+/// How result columns become JSON, per resource.
+#[derive(Clone, Copy, Default)]
+struct Decode {
+    /// `int8` always as a string, not only beyond ±2^53.
+    bigint_strings: bool,
 }
 
 /// TLS is selected by the URL's `sslmode` (`disable`, `prefer` — the
@@ -109,6 +120,18 @@ impl ResourceProvider for PostgresProvider {
     ) -> Result<Arc<dyn ResourceManager>, ResourceError> {
         let config: PostgresConfig =
             serde_json::from_value(spec.config.clone()).unwrap_or_default();
+        let decode = Decode {
+            bigint_strings: match config.bigint.as_deref() {
+                None | Some("number") => false,
+                Some("string") => true,
+                Some(other) => {
+                    return Err(ResourceError::Startup(
+                        spec.name.clone(),
+                        format!("bigint: {other:?} is not \"number\" or \"string\""),
+                    ));
+                }
+            },
+        };
         let url_env = config.url_env.unwrap_or_else(|| "DATABASE_URL".into());
         // Read the env before the first await: the closure is not `Sync`.
         let resolved = env(&url_env);
@@ -252,6 +275,7 @@ impl ResourceProvider for PostgresProvider {
             max: max as u32,
             counters: Arc::new(Counters::default()),
             tls,
+            decode,
             transactions: Arc::new(Mutex::new(HashMap::new())),
             next_transaction: AtomicU64::new(1),
         }))
@@ -306,6 +330,7 @@ pub struct Postgres {
     max: u32,
     counters: Arc<Counters>,
     tls: Tls,
+    decode: Decode,
     /// Open transactions by lease id: the channel to the holder task that
     /// owns the pinned connection.
     transactions: Arc<Mutex<HashMap<u64, mpsc::Sender<TxCommand>>>>,
@@ -878,7 +903,12 @@ impl<'a> tokio_postgres::types::FromSql<'a> for EnumLabelOut {
     }
 }
 
-fn column_to_json(row: &Row, index: usize, ty: &Type) -> Result<Value, tokio_postgres::Error> {
+fn column_to_json(
+    row: &Row,
+    index: usize,
+    ty: &Type,
+    decode: Decode,
+) -> Result<Value, tokio_postgres::Error> {
     macro_rules! get {
         ($t:ty) => {
             row.try_get::<_, Option<$t>>(index).map(|v| json!(v))
@@ -887,14 +917,14 @@ fn column_to_json(row: &Row, index: usize, ty: &Type) -> Result<Value, tokio_pos
     // A bigint beyond ±2^53 cannot survive a JSON number (the guest's Number
     // would round it): those travel as strings, like numeric does; ids and
     // counts in the safe range stay numbers.
-    fn safe_i64(n: i64) -> Value {
+    let safe_i64 = |n: i64| -> Value {
         const SAFE: i64 = 9_007_199_254_740_992;
-        if (-SAFE..=SAFE).contains(&n) {
+        if !decode.bigint_strings && (-SAFE..=SAFE).contains(&n) {
             json!(n)
         } else {
             json!(n.to_string())
         }
-    }
+    };
     match *ty {
         Type::INT2 => get!(i16),
         Type::INT4 => get!(i32),
@@ -941,12 +971,12 @@ fn column_to_json(row: &Row, index: usize, ty: &Type) -> Result<Value, tokio_pos
     }
 }
 
-fn row_to_json(row: &Row) -> Result<Value, tokio_postgres::Error> {
+fn row_to_json(row: &Row, decode: Decode) -> Result<Value, tokio_postgres::Error> {
     let mut object = serde_json::Map::new();
     for (i, column) in row.columns().iter().enumerate() {
         object.insert(
             column.name().to_owned(),
-            column_to_json(row, i, column.type_())?,
+            column_to_json(row, i, column.type_(), decode)?,
         );
     }
     Ok(Value::Object(object))
@@ -1162,7 +1192,7 @@ impl Postgres {
                     run_cancellable(client, &cancel, &self.counters, &self.tls, async {
                         let rows = client.query(&statement, &refs).await?;
                         rows.iter()
-                            .map(row_to_json)
+                            .map(|row| row_to_json(row, self.decode))
                             .collect::<Result<Vec<_>, _>>()
                             .map(Value::Array)
                     })
@@ -1183,7 +1213,7 @@ impl Postgres {
                         client.batch_execute("COMMIT").await?;
                         Ok(rows
                             .first()
-                            .map(row_to_json)
+                            .map(|row| row_to_json(row, self.decode))
                             .transpose()?
                             .unwrap_or(Value::Null))
                     })
@@ -1211,7 +1241,7 @@ impl Postgres {
                         let rows = client.query(&statement, &refs).await?;
                         Ok(rows
                             .first()
-                            .map(row_to_json)
+                            .map(|row| row_to_json(row, self.decode))
                             .transpose()?
                             .unwrap_or(Value::Null))
                     })
@@ -1342,6 +1372,7 @@ async fn transaction_statement(
     cancel: &CancellationToken,
     counters: &Counters,
     tls: &Tls,
+    decode: Decode,
     method: &str,
     request: &SqlRequest,
 ) -> Finished<Result<Value, ResourceError>> {
@@ -1358,7 +1389,7 @@ async fn transaction_statement(
             run_cancellable(client, cancel, counters, tls, async {
                 let rows = client.query(&statement, &refs).await?;
                 rows.iter()
-                    .map(row_to_json)
+                    .map(|row| row_to_json(row, decode))
                     .collect::<Result<Vec<_>, _>>()
                     .map(Value::Array)
             })
@@ -1369,7 +1400,7 @@ async fn transaction_statement(
                 let rows = client.query(&statement, &refs).await?;
                 Ok(rows
                     .first()
-                    .map(row_to_json)
+                    .map(|row| row_to_json(row, decode))
                     .transpose()?
                     .unwrap_or(Value::Null))
             })
@@ -1467,8 +1498,9 @@ impl Postgres {
         let transactions = Arc::clone(&self.transactions);
         let counters = Arc::clone(&self.counters);
         let tls = self.tls.clone();
+        let decode = self.decode;
         tokio::spawn(async move {
-            hold_transaction(lease, rx, cancel, &counters, &tls).await;
+            hold_transaction(lease, rx, cancel, &counters, &tls, decode).await;
             transactions
                 .lock()
                 .expect("transactions poisoned")
@@ -1777,6 +1809,7 @@ async fn hold_transaction(
     cancel: CancellationToken,
     counters: &Counters,
     tls: &Tls,
+    decode: Decode,
 ) {
     loop {
         let command = tokio::select! {
@@ -1812,6 +1845,7 @@ async fn hold_transaction(
                     &cancel,
                     counters,
                     tls,
+                    decode,
                     &method,
                     &request,
                 )

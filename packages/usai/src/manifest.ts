@@ -80,6 +80,8 @@ export interface Manifest {
   manifestVersion: 1;
   name: string;
   description?: string;
+  /** The API's version, for `info.version` of the OpenAPI document. */
+  version?: string;
   /** Response headers set on every application response. */
   headers?: Record<string, string>;
   modules: Array<{ name: string; migrations: string[]; seeders: string[]; sourceDir?: string }>;
@@ -337,6 +339,7 @@ export function describe(app: AppDeclaration): Manifest {
     manifestVersion: MANIFEST_VERSION,
     name: app.name,
     ...(app.description !== undefined ? { description: app.description } : {}),
+    ...(app.version !== undefined ? { version: app.version } : {}),
     ...(app.headers !== undefined ? { headers: { ...app.headers } } : {}),
     modules: modules.map((m) => ({
       name: m.name,

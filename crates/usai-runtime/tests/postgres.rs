@@ -271,6 +271,49 @@ async fn bigints_beyond_the_safe_range_travel_as_strings() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn bigint_string_makes_every_int8_a_string() {
+    // Reported downstream (2026-10-02): `one<{ token: number }>` is right
+    // until the value passes 2^53, then silently a string. With
+    // `bigint: "string"` the type follows the column, not the value.
+    let Some(url) = support::database_url() else {
+        return;
+    };
+    let url = support::fresh_database(&url).await;
+    let spec = |bigint: &str| usai_runtime::definition::ResourceSpec {
+        name: "main".into(),
+        kind: "postgres".into(),
+        module: None,
+        config: json!({ "urlEnv": "DATABASE_URL", "bigint": bigint }),
+        env: vec!["DATABASE_URL".into()],
+    };
+    let registry = usai_runtime::resource::ResourceRegistry::new();
+    let env = |name: &str| (name == "DATABASE_URL").then(|| url.clone());
+    let manager = registry.open(&spec("string"), &env).await.unwrap();
+    let call = |method: &str| usai_runtime::resource::ResourceCall {
+        method: method.into(),
+        args: json!({ "sql": "select 5::bigint as small, 9007199254740993::bigint as big, null::bigint as none, array[1::bigint] as arr, 7::int4 as int", "params": [] }),
+    };
+    let expected =
+        json!({ "small": "5", "big": "9007199254740993", "none": null, "arr": ["1"], "int": 7 });
+    let row = manager
+        .call(call("one"), CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(row, expected);
+    let rows = manager
+        .call(call("query"), CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(rows, json!([expected]));
+    let refused = registry.open(&spec("bigint"), &env).await.err().unwrap();
+    assert!(
+        refused.to_string().contains("\"number\" or \"string\""),
+        "{refused}"
+    );
+    registry.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sql_error_is_terminal_and_the_connection_is_reused() {
     let Some(f) = fixture().await else { return };
     let (status, body) = f.http("GET", "/fail", json!({})).await;

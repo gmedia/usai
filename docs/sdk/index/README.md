@@ -172,6 +172,8 @@ Vocabulary used throughout:
 | [EnvField](interfaces/EnvField.md) | One declared variable: kind, whether it is required, and its parser. |
 | [EnvDeclaration](interfaces/EnvDeclaration.md) | The application's environment contract (`defineApp({ env })`). |
 | [EnvValues](type-aliases/EnvValues.md) | The typed values of a declaration: `EnvValues<typeof spec>`, where `spec` is what `env({...})` returned (a bare field map works too). |
+| [Register](interfaces/Register.md) | Where an application registers the type of its environment, once, so `ctx.env` is typed in every handler and auth resolver without a cast: |
+| [AppEnv](type-aliases/AppEnv.md) | The type of `ctx.env`: the registered environment ([Register](interfaces/Register.md)), or `Record<string, EnvValue>` when none is registered. |
 | [env](functions/env.md) | Declare what the application needs from its environment. Values are read by the host when a revision **activates** — a missing required variable or an unparsable value fails activation, never the first request — and reach handlers as `ctx.env`, parsed. Variables a resource names (`DATABASE_URL`, `baseUrlEnv`) are required by that resource and need no declaration here. Everything else works the other way round: a variable **not** declared here is `undefined` in `ctx.env` even when it is set in the process environment — the contract is the whole of what a world can see. A module states its own with `defineModule({ env })`, which is merged into this one, so its consumers do not have to mirror it. `usai run` never reads `.env`; `usai dev` does. |
 | [resolveEnv](functions/resolveEnv.md) | Resolve declared values from a raw map (what the host does at activation). Throws on the first violation, naming the variable. |
 

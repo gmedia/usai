@@ -95,6 +95,14 @@ export interface PostgresOptions {
    * plus this PEM bundle (private CAs, managed-database roots). When unset,
    * the runtime also honours `PGSSLROOTCERT` in the environment. */
   tls?: { caFile?: string };
+  /** How `bigint` (`int8`) columns come back. `"number"` (default): a
+   * number within ±2^53 and a string beyond it, because a JSON number would
+   * round it — so the type depends on the **value**, and a row typed
+   * `{ id: number }` is right until the day it is not. `"string"`: always a
+   * string, so the type follows the column; type those fields `string` and
+   * convert where arithmetic needs it (`BigInt(row.id)`). Parameters are
+   * unaffected: an int8 parameter accepts a number or a string either way. */
+  bigint?: "number" | "string";
 }
 
 /** A PostgreSQL pool owned by the runtime. Each operation leases one
@@ -148,6 +156,7 @@ export function postgres<const N extends string>(
   if (options.pool?.recycling !== undefined) pool["recycling"] = options.pool.recycling;
   if (Object.keys(pool).length > 0) config["pool"] = pool;
   if (options.tls?.caFile !== undefined) config["tls"] = { caFile: options.tls.caFile };
+  if (options.bigint !== undefined) config["bigint"] = options.bigint;
   return {
     __usai: "resource",
     name,

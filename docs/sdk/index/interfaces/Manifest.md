@@ -14,6 +14,7 @@ the environment contract. Mirrors the runtime's `Manifest` exactly.
 | <a id="manifestversion"></a> `manifestVersion` | `1` | - |
 | <a id="name"></a> `name` | `string` | - |
 | <a id="description"></a> `description?` | `string` | - |
+| <a id="version"></a> `version?` | `string` | The API's version, for `info.version` of the OpenAPI document. |
 | <a id="headers"></a> `headers?` | `Record`\<`string`, `string`\> | Response headers set on every application response. |
 | <a id="modules"></a> `modules` | \{ `name`: `string`; `migrations`: `string`[]; `seeders`: `string`[]; `sourceDir?`: `string`; \}[] | - |
 | <a id="workloads"></a> `workloads` | `ManifestWorkload`[] | - |

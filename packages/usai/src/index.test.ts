@@ -62,6 +62,7 @@ test("describe flattens modules deterministically and extracts JSON Schema", () 
   const app = defineApp({
     name: "shop",
     description: "A shop.",
+    version: "1.2.0",
     modules: [users],
     workloads: [cleanup],
     env: env({ APP_ENV: env.enum(["dev", "prod"]) }),
@@ -69,6 +70,7 @@ test("describe flattens modules deterministically and extracts JSON Schema", () 
   const m = describe(app);
   assert.equal(m.name, "shop");
   assert.equal(m.description, "A shop.");
+  assert.equal(m.version, "1.2.0");
   assert.equal(
     "description" in describe(defineApp({ name: "bare" })),
     false,

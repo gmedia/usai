@@ -94,12 +94,51 @@ function ownVersion(): string {
   }
 }
 
+/** The templates this package ships, read from disk so the help text cannot
+ * fall behind the directory it describes. */
+function templates(): string[] {
+  try {
+    return readdirSync(resolve(here, "..", "templates")).sort();
+  } catch {
+    return ["hello"];
+  }
+}
+
+function usage(): string {
+  return [
+    `create-usai ${ownVersion()} — scaffold a Usai application`,
+    "",
+    "usage: create-usai <dir> [--template=<name>]",
+    "",
+    "  <dir>               where to create it (must not exist, or be empty)",
+    `  --template=<name>   ${templates().join(", ")} (default: hello)`,
+    "  -h, --help          print this and exit",
+    "",
+    "  npm create @sakaladev/usai@latest my-app",
+    "  pnpm dlx @sakaladev/create-usai@latest my-app",
+  ].join("\n");
+}
+
 function main(argv: string[]): void {
-  const args = argv.filter((a) => !a.startsWith("--"));
+  // Help wins wherever it appears and creates nothing. `--help` used to be
+  // filtered out with every other `--` argument, so `create-usai probe
+  // --help` scaffolded `probe` and printed no help at all.
+  if (argv.includes("--help") || argv.includes("-h")) {
+    console.log(usage());
+    return;
+  }
+  // An option this does not know is a typo or a misunderstanding, and
+  // ignoring it means scaffolding something other than what was asked for.
+  const unknown = argv.filter((a) => a.startsWith("-") && !a.startsWith("--template="));
+  if (unknown.length > 0) {
+    console.error(`error: unknown option ${unknown.join(", ")}\n\n${usage()}`);
+    process.exit(2);
+  }
+  const args = argv.filter((a) => !a.startsWith("-"));
   const templateFlag = argv.find((a) => a.startsWith("--template="))?.slice("--template=".length);
   const dir = args[0];
   if (!dir) {
-    console.error("usage: create-usai <dir> [--template=hello]");
+    console.error(usage());
     process.exit(2);
   }
   try {

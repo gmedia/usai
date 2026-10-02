@@ -11,7 +11,7 @@ import type {
   PostgresHandle,
   SqlExecutor,
 } from "../resources.ts";
-import type { EnvValue } from "../env.ts";
+import type { AppEnv, EnvValue } from "../env.ts";
 import { UsaiError } from "../errors.ts";
 import { bytes } from "../bytes.ts";
 
@@ -108,11 +108,10 @@ export interface BaseContext {
   readonly signal: UsaiAbortSignal;
   /** The declared environment, parsed: `env.int()` gives a number,
    * `env.bool()` a boolean, `env.list()` an array, `env.optional(...)` may
-   * be undefined. A module's declaration is resolved here too. The
-   * static type is the union of those; narrow per key, or type it once
-   * with `const e = ctx.env as EnvValues<typeof spec>` (the context does
-   * not carry the declaration's type). */
-  readonly env: Record<string, EnvValue>;
+   * be undefined. A module's declaration is resolved here too. Typed by
+   * the application's {@link Register} entry when it has one; otherwise
+   * `Record<string, EnvValue>`, to narrow per key. */
+  readonly env: AppEnv;
   /** Structured logging; lines carry the workload, world and request ids
    * and reach the runtime's log (`target: "app"`). A trailing plain object
    * is structured `fields` (`ctx.log.info("paid", { invoiceId })`), the rest
@@ -410,7 +409,8 @@ export function makeBase(
         }) as Promise<import("../queue.ts").QueueStats[]>,
     },
     signal: makeSignal(),
-    env,
+    // The application registers the parsed shape (`Register`); this is that object.
+    env: env as AppEnv,
     log: console,
     sleep: (duration) =>
       new Promise<void>((resolve) => setTimeout(() => resolve(), parseDurationMs(duration))),

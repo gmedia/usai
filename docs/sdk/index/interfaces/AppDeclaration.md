@@ -10,6 +10,7 @@ What [defineApp](../functions/defineApp.md) returns: the application's default e
 | ------ | ------ | ------ | ------ |
 | <a id="name"></a> `name` | `readonly` | `string` | - |
 | <a id="description"></a> `description?` | `readonly` | `string` | - |
+| <a id="version"></a> `version?` | `readonly` | `string` | The API's own version (`defineApp({ version })`). |
 | <a id="headers"></a> `headers?` | `readonly` | `Readonly`\<`Record`\<`string`, `string`\>\> | Response headers set on every application response (`defineApp({ headers })`). |
 | <a id="modules"></a> `modules` | `readonly` | readonly [`ModuleDeclaration`](ModuleDeclaration.md)[] | - |
 | <a id="workloads"></a> `workloads` | `readonly` | readonly [`Workload`](Workload.md)[] | - |

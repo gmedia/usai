@@ -1410,7 +1410,11 @@ async fn openapi_is_generated_from_the_definition() {
         "The HTTP test fixture: one of everything the pipeline can serve.",
         "defineApp({{ description }}) reaches the document"
     );
-    assert_eq!(doc["info"]["version"], rev.definition.identity());
+    // `defineApp({ version })` is the API's version; the identity, which
+    // changes with every build, has its own extension (reported downstream:
+    // clients read `info.version` as the contract's version).
+    assert_eq!(doc["info"]["version"], "1.4.0");
+    assert_eq!(doc["info"]["x-usai-identity"], rev.definition.identity());
     let get_user = &doc["paths"]["/users/{id}"]["get"];
     assert_eq!(get_user["tags"], json!(["users"]));
     assert_eq!(get_user["summary"], "One user");
@@ -1705,6 +1709,7 @@ async fn openapi_is_generated_from_the_definition() {
         assert!(public.get(key).is_none(), "public profile carries {key}");
     }
     assert!(public["info"].get("x-usai-identity").is_none());
+    assert_eq!(public["info"]["version"], "1.4.0");
     // The dev server serves the same document.
     let host = HttpHost::new(
         Arc::clone(&s.runtime),

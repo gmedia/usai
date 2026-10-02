@@ -8,6 +8,46 @@ runtime of that version and the next (`SUPPORTED.md` → Versioning). Within
 GitHub releases carry the auto-generated commit list as well; this file is
 the human summary.
 
+## 0.0.20 — 2026-10-02
+
+From a second downstream project's first milestone. No runtime bugs were
+reported; these are the gaps it hit in setting up and testing.
+
+- **`testApp({ database: "fresh" })`** runs a test against a new, empty
+  database made for that one `testApp`, on the server `DATABASE_URL` points
+  at, migrated (and seeded with `migrate: { seed: true }`) and dropped in
+  `close()`. Before this the only option was a script outside Usai that
+  dropped and recreated a database, and leftovers from a failed run reached
+  the next one. Parallel test files no longer share rows either. Only
+  databases named `usai_scratch_*` are ever dropped; the role needs
+  `CREATEDB`.
+- **`ctx.env` can be typed.** Register the declaration once —
+  `declare module "@sakaladev/usai" { interface Register { env:
+  EnvValues<typeof appEnv> } }` — and `ctx.env.API_TOKEN` is a `string` in
+  every handler and auth resolver, and a misspelt name is a compile error.
+  Without a registration nothing changes.
+- **`postgres(name, { bigint: "string" })`** returns every `int8` as a
+  string. The default still gives a number within ±2^53 and a string beyond
+  it, which makes the type depend on the value; the option makes it follow
+  the column.
+- **`defineApp({ version })`** is the OpenAPI document's `info.version`. It
+  used to be the artifact identity, which changes with every build; the
+  identity stays in `info["x-usai-identity"]` (internal profile), and an
+  application without a `version` gets the identity as before.
+- **`usai test --test-concurrency=1` runs the same files as `usai test`.**
+  Any argument used to drop the default `src|test|tests/**/*.test.ts`, and
+  Node's own pattern then ran every file under `test/` — helpers included,
+  with their import side effects. Now only a path or glob replaces the
+  defaults.
+- **`create-usai --help`** prints usage and the available templates, exits
+  0 and creates nothing. It used to scaffold a project named by the other
+  argument, or exit 2 with no argument. Unknown options are refused instead
+  of ignored.
+- Docs: on WSL2 the wall clock can step back by a second or two, which makes
+  `now()`-based expiries look younger than they are in tests (GUIDE §15).
+  The queue section no longer says the runtime never purges — `done`
+  messages have had a retention since 0.0.19.
+
 ## 0.0.19 — 2026-09-30
 
 **One behaviour change, read before upgrading**: the runtime now deletes

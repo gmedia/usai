@@ -220,6 +220,46 @@ test("the env cast the guide prints is the one that compiles", () => {
   assert.equal(out, "", out);
 });
 
+test("a registered environment types ctx.env in handlers and resolvers", () => {
+  // Reported downstream (2026-10-02): the values were validated at
+  // activation, but every read was `ctx.env.API_TOKEN as string` and a
+  // misspelt name compiled.
+  const source = (body: string) => `
+    import { env, http, auth, defineApp, type EnvValues } from "@sakaladev/usai";
+    import { z } from "zod";
+    export const appEnv = env({ API_TOKEN: env.secret(), LEASE_MS: env.optional(env.int()) });
+    declare module "@sakaladev/usai" {
+      interface Register { env: EnvValues<typeof appEnv> }
+    }
+    const bearer = auth.bearer({
+      name: "api",
+      resolve: async (ctx, token) => (token === ctx.env.API_TOKEN ? { ok: true } : null),
+    });
+    export const r = http.get("/e", { auth: bearer, response: z.object({ n: z.number() }) }, async (ctx) => {
+      ${body}
+    });
+    export default defineApp({ env: appEnv, workloads: [r] });
+  `;
+  assert.equal(
+    check(
+      source(`const token: string = ctx.env.API_TOKEN;
+      const lease: number | undefined = ctx.env.LEASE_MS;
+      return { n: token.length + (lease ?? 0) };`),
+    ),
+    "",
+  );
+  assert.match(
+    check(source(`return { n: String(ctx.env.API_TOKNE).length };`)),
+    /API_TOKNE/,
+    "an undeclared name is a compile error",
+  );
+  assert.match(
+    check(source(`const lease: number = ctx.env.LEASE_MS; return { n: lease };`)),
+    /undefined/,
+    "an optional variable may be undefined",
+  );
+});
+
 test("a raw endpoint's principal is on its context", () => {
   // `http.raw` accepted `auth:`, ran the resolver, refused with 401 — and
   // `RawContext` had no `auth`, so the principal a signed-webhook endpoint

@@ -30,6 +30,19 @@ export interface TestAppOptions {
    * configured database before starting — for tests on a throwaway
    * database. Migrations are never run at startup by the runtime itself. */
   migrate?: boolean | { seed?: boolean | string };
+  /** `"fresh"`: run against a brand-new, empty database made for this
+   * `testApp` alone, on the server the application's URL variable
+   * (`DATABASE_URL`, or a resource's `urlEnv`) points at. Migrations are
+   * applied to it (and seeders, with `migrate: { seed }`), and `close()`
+   * drops it. Nothing left over from an earlier run can reach a test, and
+   * test files running in parallel do not share rows.
+   *
+   * The database it names in the URL is never written to — it may even not
+   * exist yet; the new one is created next to it (`CREATE DATABASE`, so the
+   * role needs `CREATEDB`). Only databases named `usai_scratch_*` are ever
+   * dropped, and a run killed before `close()` leaves one behind that the
+   * next fresh run removes once it is a day old. */
+  database?: "fresh";
   /** Run the background schedulers: cron, queue consumers and services.
    *
    * **Off by default**, because a test run is supposed to be deterministic
@@ -325,7 +338,8 @@ export class UsaiTestError extends Error {
   }
 }
 
-function runCli(binary: string, args: string[], env: Record<string, string>): Promise<void> {
+/** Runs a `usai` subcommand; resolves with what it printed on stdout. */
+function runCli(binary: string, args: string[], env: Record<string, string>): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(binary, args, {
       env: { ...process.env, ...env },
@@ -338,15 +352,17 @@ function runCli(binary: string, args: string[], env: Record<string, string>): Pr
     child.stderr!.on("data", (chunk: Buffer) => {
       stderr += chunk.toString();
     });
+    let stdout = "";
     child.stdout!.on("data", (chunk: Buffer) => {
       stderr += chunk.toString();
+      stdout += chunk.toString();
     });
     child.once("error", (error) =>
       reject(new UsaiTestError(`could not spawn ${binary}: ${error.message}`)),
     );
     child.once("exit", (code) =>
       code === 0
-        ? resolve()
+        ? resolve(stdout)
         : reject(
             new UsaiTestError(
               `usai ${args.join(" ")} exited with code ${code}\n${
@@ -395,8 +411,40 @@ function runCli(binary: string, args: string[], env: Record<string, string>): Pr
 export async function testApp(options: TestAppOptions = {}): Promise<TestApp> {
   const binary = options.binary ?? process.env["USAI_BIN"] ?? "usai";
   const root = options.root ?? process.cwd();
-  if (options.migrate) {
-    const env = { RUST_LOG: process.env["RUST_LOG"] ?? "warn", ...(options.env ?? {}) };
+  const cliEnv = { RUST_LOG: process.env["RUST_LOG"] ?? "warn", ...(options.env ?? {}) };
+  // The fresh databases' URLs replace the variables they were made from, for
+  // the migrations and the runtime alike.
+  const scratch: Record<string, string> =
+    options.database === "fresh"
+      ? (JSON.parse(
+          (await runCli(binary, ["--root", root, "db", "scratch", "create"], cliEnv))
+            .trim()
+            .split("\n")
+            .pop() ?? "{}",
+        ) as Record<string, string>)
+      : {};
+  const dropScratch = async (): Promise<void> => {
+    const urls = Object.values(scratch);
+    if (urls.length > 0) await runCli(binary, ["db", "scratch", "drop", ...urls], cliEnv);
+  };
+  try {
+    return await start(binary, root, options, scratch, dropScratch);
+  } catch (error) {
+    await dropScratch().catch(() => {});
+    throw error;
+  }
+}
+
+async function start(
+  binary: string,
+  root: string,
+  options: TestAppOptions,
+  scratch: Record<string, string>,
+  dropScratch: () => Promise<void>,
+): Promise<TestApp> {
+  const appEnv = { ...(options.env ?? {}), ...scratch };
+  if (options.migrate || options.database === "fresh") {
+    const env = { RUST_LOG: process.env["RUST_LOG"] ?? "warn", ...appEnv };
     await runCli(binary, ["--root", root, "db", "migrate"], env);
     const seed = typeof options.migrate === "object" ? options.migrate.seed : undefined;
     if (seed)
@@ -449,7 +497,7 @@ export async function testApp(options: TestAppOptions = {}): Promise<TestApp> {
       // The runtime's own lines at WARN; the application's at INFO so
       // `app.logs()` sees what the handlers wrote.
       RUST_LOG: process.env["RUST_LOG"] ?? "warn,app=info",
-      ...(options.env ?? {}),
+      ...appEnv,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -667,6 +715,7 @@ export async function testApp(options: TestAppOptions = {}): Promise<TestApp> {
       const timer = setTimeout(() => child.kill("SIGKILL"), 15000);
       await exited;
       clearTimeout(timer);
+      await dropScratch();
     },
   };
 }

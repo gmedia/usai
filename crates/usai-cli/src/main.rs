@@ -4,6 +4,7 @@
 mod commands;
 mod display;
 mod logfmt;
+mod scratch;
 mod top;
 
 use std::path::PathBuf;
@@ -251,7 +252,8 @@ enum Command {
         /// project has a tsconfig.json and typescript installed
         #[arg(long)]
         no_typecheck: bool,
-        /// Arguments passed to `node --test` (default: the project's test files)
+        /// Arguments passed to `node --test`; the project's test files
+        /// (src|test|tests/**/*.test.ts) are kept unless a path or glob is given
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
@@ -313,6 +315,20 @@ enum DbAction {
     },
     /// Run seeders (all, or one by name)
     Seed { name: Option<String> },
+    /// Throwaway databases for `testApp({ database: "fresh" })`
+    #[command(hide = true)]
+    Scratch {
+        #[command(subcommand)]
+        action: ScratchAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ScratchAction {
+    /// Create one empty database per postgres URL variable; prints them as JSON
+    Create,
+    /// Drop scratch databases by URL (only `usai_scratch_*` names)
+    Drop { urls: Vec<String> },
 }
 
 #[derive(Subcommand)]
@@ -817,6 +833,17 @@ async fn async_main() {
         Command::Db {
             action: DbAction::Seed { name },
         } => commands::db_seed(&root, name.as_deref()).await,
+        Command::Db {
+            action: DbAction::Scratch {
+                action: ScratchAction::Create,
+            },
+        } => scratch::create(&root).await,
+        Command::Db {
+            action:
+                DbAction::Scratch {
+                    action: ScratchAction::Drop { urls },
+                },
+        } => scratch::drop(&urls).await,
         Command::Test { no_typecheck, args } => commands::test(&root, args, no_typecheck).await,
         Command::Bench {
             path,

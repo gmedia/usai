@@ -981,7 +981,10 @@ fn generate_internal(definition: &ApplicationDefinition, config: &crate::Runtime
         .collect();
     let mut info = json!({
         "title": manifest.name,
-        "version": definition.identity(),
+        // The API's version when the application declares one: clients read
+        // `info.version` as the contract's version, and the identity changes
+        // with every build. The identity stays in `x-usai-identity`.
+        "version": manifest.version.clone().unwrap_or_else(|| definition.identity()),
         "x-usai-identity": definition.identity(),
         "x-usai-modules": manifest.modules.iter().map(|m| m.name.clone()).collect::<Vec<_>>(),
     });
@@ -1208,5 +1211,31 @@ mod tests {
             timeout_ms: None,
         };
         assert_eq!(operation_id(&w), "getUsersId");
+    }
+
+    #[test]
+    fn info_version_is_the_identity_until_the_application_declares_one() {
+        let code = crate::definition::Code::new("export default {}");
+        let definition = |version: Option<&str>| {
+            let mut manifest = json!({
+                "manifestVersion": crate::definition::MANIFEST_VERSION,
+                "name": "v",
+                "workloads": [],
+                "codeSha256": code.sha256,
+            });
+            if let Some(v) = version {
+                manifest["version"] = json!(v);
+            }
+            ApplicationDefinition::new(serde_json::from_value(manifest).unwrap(), code.clone())
+                .unwrap()
+        };
+        let plain = definition(None);
+        let doc = generate(&plain);
+        assert_eq!(doc["info"]["version"], plain.identity());
+        assert_eq!(doc["info"]["x-usai-identity"], plain.identity());
+        let versioned = definition(Some("2.0.1"));
+        let doc = generate(&versioned);
+        assert_eq!(doc["info"]["version"], "2.0.1");
+        assert_eq!(doc["info"]["x-usai-identity"], versioned.identity());
     }
 }

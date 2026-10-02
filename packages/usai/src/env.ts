@@ -93,6 +93,35 @@ export type EnvValues<
   readonly [K in keyof EnvFieldsOf<S>]: EnvFieldsOf<S>[K] extends EnvField<infer T> ? T : never;
 };
 
+/** Where an application registers the type of its environment, once, so
+ * `ctx.env` is typed in every handler and auth resolver without a cast:
+ *
+ * ```ts
+ * export const appEnv = env({ API_TOKEN: env.secret(), LEASE_MS: env.optional(env.int()) });
+ * declare module "@sakaladev/usai" {
+ *   interface Register { env: EnvValues<typeof appEnv> }
+ * }
+ * ```
+ *
+ * After that `ctx.env.API_TOKEN` is a `string`, `ctx.env.LEASE_MS` a
+ * `number | undefined`, and a name nobody declared is a compile error.
+ * Modules with their own declarations add theirs to the same type
+ * (`EnvValues<typeof appEnv> & EnvValues<typeof billingEnv>`). Without a
+ * registration `ctx.env` stays `Record<string, EnvValue>`.
+ *
+ * Only the type is registered: what the runtime checks at activation is
+ * still the declaration passed to `defineApp`/`defineModule`, so register
+ * the same object you pass there.
+ *
+ * @category Environment */
+export interface Register {}
+
+/** The type of `ctx.env`: the registered environment ({@link Register}), or
+ * `Record<string, EnvValue>` when none is registered.
+ *
+ * @category Environment */
+export type AppEnv = Register extends { env: infer E } ? E : Record<string, EnvValue>;
+
 /**
  * Declare what the application needs from its environment. Values are
  * read by the host when a revision **activates** — a missing required

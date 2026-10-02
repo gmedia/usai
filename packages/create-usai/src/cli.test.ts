@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, existsSync, symlinkSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { scaffold } from "./cli.ts";
@@ -75,4 +75,30 @@ test("runs as an executable through a symlink, the way package managers link bin
   const pkg = JSON.parse(readFileSync(join(work, "my-app/package.json"), "utf8"));
   const own = JSON.parse(readFileSync(resolve(import.meta.dirname, "../package.json"), "utf8"));
   assert.equal(pkg.dependencies["@sakaladev/usai"], `^${own.sdkVersion}`);
+});
+
+test("--help prints usage with the templates, exits 0, and creates nothing", () => {
+  // Reported downstream (2026-10-02): `create-usai probe --help` scaffolded
+  // `probe` and printed no help, and `create-usai --help` printed usage with
+  // exit 2, which npm reports as an error.
+  const cli = resolve(import.meta.dirname, "../dist/cli.js");
+  const work = mkdtempSync(join(tmpdir(), "create-usai-help-"));
+  for (const argv of [["--help"], ["-h"], ["probe", "--help"]]) {
+    const out = execFileSync(process.execPath, [cli, ...argv], { cwd: work, encoding: "utf8" });
+    assert.match(out, /usage: create-usai <dir>/, out);
+    assert.match(out, /hello/, out);
+  }
+  assert.ok(!existsSync(join(work, "probe")), "help must not scaffold");
+});
+
+test("an unknown option is refused instead of ignored", () => {
+  const cli = resolve(import.meta.dirname, "../dist/cli.js");
+  const work = mkdtempSync(join(tmpdir(), "create-usai-unknown-"));
+  const run = spawnSync(process.execPath, [cli, "app", "--tempalte=hello"], {
+    cwd: work,
+    encoding: "utf8",
+  });
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /unknown option --tempalte=hello/);
+  assert.ok(!existsSync(join(work, "app")));
 });

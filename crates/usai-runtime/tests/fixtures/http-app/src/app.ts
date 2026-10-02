@@ -920,6 +920,7 @@ export default defineApp({
   // Set on every application response; a handler's own header wins.
   headers: { "X-Content-Type-Options": "nosniff", "x-frame-options": "DENY" },
   description: "The HTTP test fixture: one of everything the pipeline can serve.",
+  version: "1.4.0",
   modules: [
     defineModule({
       name: "users",

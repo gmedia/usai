@@ -11,7 +11,7 @@ use usai_runtime::*;
 
 use crate::display;
 
-fn engine() -> Arc<dyn usai_runtime::engine::Engine> {
+pub(crate) fn engine() -> Arc<dyn usai_runtime::engine::Engine> {
     engine_with(RuntimeConfig::default().max_worlds)
 }
 
@@ -2125,6 +2125,56 @@ pub async fn bench(root: &Path, path: &str, concurrency: usize, duration: Durati
 
 /// `usai test`: builds the project once (so the first `testApp` is fast),
 /// then runs `node --test` with USAI_BIN pointing at this binary.
+const DEFAULT_TEST_PATTERNS: [&str; 3] = [
+    "src/**/*.test.ts",
+    "test/**/*.test.ts",
+    "tests/**/*.test.ts",
+];
+
+/// Node options that take their value as the next argument, so that value is
+/// not a file. The `--flag=value` spelling needs no entry.
+const NODE_VALUE_FLAGS: &[&str] = &[
+    "--test-name-pattern",
+    "--test-skip-pattern",
+    "--test-reporter",
+    "--test-reporter-destination",
+    "--test-concurrency",
+    "--test-timeout",
+    "--test-shard",
+    "--test-isolation",
+    "--test-global-setup",
+    "--test-coverage-include",
+    "--test-coverage-exclude",
+    "--test-coverage-branches",
+    "--test-coverage-functions",
+    "--test-coverage-lines",
+    "--import",
+    "--require",
+    "-r",
+    "--conditions",
+    "-C",
+    "--env-file",
+    "--env-file-if-exists",
+    "--watch-path",
+    "--loader",
+    "--experimental-loader",
+];
+
+/// Whether the arguments passed through to `node --test` name test files.
+fn selects_files(args: &[String]) -> bool {
+    let mut takes_value = false;
+    for arg in args {
+        if takes_value {
+            takes_value = false;
+        } else if arg.starts_with('-') {
+            takes_value = NODE_VALUE_FLAGS.contains(&arg.as_str());
+        } else {
+            return true;
+        }
+    }
+    false
+}
+
 pub async fn test(root: &Path, args: Vec<String>, no_typecheck: bool) -> Result<()> {
     let engine = engine();
     let config = load_config(engine.as_ref(), root).await?;
@@ -2163,16 +2213,13 @@ pub async fn test(root: &Path, args: Vec<String>, no_typecheck: bool) -> Result<
         command.arg("--conditions=usai");
     }
     command.arg("--test");
-    if args.is_empty() {
-        for pattern in [
-            "src/**/*.test.ts",
-            "test/**/*.test.ts",
-            "tests/**/*.test.ts",
-        ] {
-            command.arg(pattern);
-        }
-    } else {
-        command.args(&args);
+    command.args(&args);
+    // Flags alone (`--test-concurrency=1`, which the guide recommends) used
+    // to drop the default patterns too, and `node --test` then fell back to
+    // its own: every file under `test/`, helpers included, each executed as
+    // a test. Only a path or glob of the caller's replaces the defaults.
+    if !selects_files(&args) {
+        command.args(DEFAULT_TEST_PATTERNS);
     }
     let status = command
         .current_dir(&config.root)
@@ -2184,4 +2231,35 @@ pub async fn test(root: &Path, args: Vec<String>, no_typecheck: bool) -> Result<
         anyhow::bail!("tests failed");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::selects_files;
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn flags_alone_keep_the_default_test_files() {
+        assert!(!selects_files(&args(&[])));
+        assert!(!selects_files(&args(&["--test-concurrency=1"])));
+        assert!(!selects_files(&args(&["--test-concurrency", "1"])));
+        assert!(!selects_files(&args(&[
+            "--test-name-pattern",
+            "auth",
+            "--test-only"
+        ])));
+        assert!(selects_files(&args(&["test/auth.test.ts"])));
+        assert!(selects_files(&args(&[
+            "--test-concurrency=1",
+            "test/**/*.test.ts"
+        ])));
+        assert!(selects_files(&args(&[
+            "--test-reporter",
+            "dot",
+            "src/a.test.ts"
+        ])));
+    }
 }

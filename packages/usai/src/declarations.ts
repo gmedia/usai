@@ -396,6 +396,8 @@ export interface AppDeclaration {
   readonly __usai: "app";
   readonly name: string;
   readonly description?: string;
+  /** The API's own version (`defineApp({ version })`). */
+  readonly version?: string;
   /** Response headers set on every application response (`defineApp({ headers })`). */
   readonly headers?: Readonly<Record<string, string>>;
   readonly modules: readonly ModuleDeclaration[];
@@ -484,6 +486,12 @@ export interface DefineAppOptions {
    * overview and as `info.description` of the generated OpenAPI document.
    * Plain text (no markup). Not part of the application identity. */
   description?: string;
+  /** The version of the API this application serves (`"1.4.0"`), written as
+   * `info.version` of the generated OpenAPI document — the field API clients
+   * read as the contract's version. Without it `info.version` is the
+   * application identity, which changes on every build. The identity is
+   * always in `info["x-usai-identity"]`. */
+  version?: string;
   /** Response headers set on every response of the application's routes
    * (not on `/_usai/*`): the security headers a proxy would otherwise add
    * (`strict-transport-security`, `x-content-type-options`,
@@ -536,6 +544,7 @@ export function defineApp(options: DefineAppOptions = {}): AppDeclaration {
     __usai: "app",
     name: options.name ?? "app",
     ...(options.description ? { description: options.description } : {}),
+    ...(options.version ? { version: options.version } : {}),
     ...(options.headers && Object.keys(options.headers).length
       ? {
           headers: Object.fromEntries(

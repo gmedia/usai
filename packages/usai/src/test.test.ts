@@ -182,3 +182,34 @@ test("the harness opens event streams and WebSockets the way a browser would", {
     await app.close();
   }
 });
+
+const todos = resolve(import.meta.dirname, "../../../examples/todos");
+const databaseUrl = process.env["USAI_TEST_DATABASE_URL"] ?? process.env["DATABASE_URL"];
+
+test('database: "fresh" gives each testApp its own empty, migrated database', {
+  skip: !existsSync(binary)
+    ? "usai binary not built"
+    : databaseUrl
+      ? false
+      : "set USAI_TEST_DATABASE_URL or DATABASE_URL",
+}, async () => {
+  // Reported downstream (2026-10-02): `migrate: true` only applies pending
+  // migrations, so a run that failed halfway left rows the next run's
+  // "oldest job" query picked up, and the workaround was a docker+psql
+  // script outside Usai.
+  const { testApp } = await import("./test.ts");
+  const env = { DATABASE_URL: databaseUrl!, APP_ENV: "development" };
+  const [a, b] = await Promise.all([
+    testApp({ root: todos, binary, env, database: "fresh", migrate: { seed: true } }),
+    testApp({ root: todos, binary, env, database: "fresh" }),
+  ]);
+  try {
+    assert.equal((await a.http.post("/todos", { body: { title: "only in a" } })).status, 201);
+    const inA = (await a.http.get("/todos")).body as Array<{ title: string }>;
+    assert.ok(inA.some((t) => t.title === "only in a"));
+    assert.ok(inA.length >= 4, "seeded rows plus ours");
+    assert.deepEqual((await b.http.get("/todos")).body, [], "b shares nothing with a");
+  } finally {
+    await Promise.all([a.close(), b.close()]);
+  }
+});
