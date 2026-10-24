@@ -7,7 +7,7 @@
 FROM rust:1.98-bookworm AS build
 WORKDIR /src
 COPY . .
-# The vendored Wasmtime (vendor/) and the guest core are part of the tree;
+# The guest core is part of the tree (Wasmtime comes from crates.io);
 # nothing is fetched from the research repository.
 # A release build uses the exact binary published on the GitHub release
 # (placed at prebuilt/usai by the workflow), so the image and the tarball

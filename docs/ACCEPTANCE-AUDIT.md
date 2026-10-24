@@ -11,7 +11,7 @@ this file when an item moves.
 |---|---|---|
 | clean clone builds | ✓ | CI `make check` on ubuntu-24.04 (`.github/workflows/ci.yml`) |
 | tests pass with documented commands | ✓ | `make test`; commands in `CLAUDE.md`/`AGENTS.md` |
-| no runtime/build dependency on the research repository | ✓ | `Cargo.toml`/`package.json` have none; `vendor/` is Wasmtime, not research code |
+| no runtime/build dependency on the research repository | ✓ | `Cargo.toml`/`package.json` have none; Wasmtime comes from crates.io (the vendored copy was dropped at 50.0.0) |
 | production-oriented, not experiment-oriented | ✓ | ADR-0001; `docs/RESEARCH-REFERENCE.md` maps contracts to evidence only |
 
 ## D1 — Lifecycle core

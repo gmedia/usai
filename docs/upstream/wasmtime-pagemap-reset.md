@@ -1,5 +1,7 @@
 # Upstreaming the Wasmtime pagemap reset patch
 
+> **Closed 2026-10-24.** Both patches are in the Wasmtime 50.0.0 release (checked by the file, not the date: `pagemap.rs` at `v50.0.0` matches the vendored production code exactly, and `Engine::release_idle_pool_memory` is public there). `vendor/` is deleted and the workspace depends on `wasmtime = "50"` from crates.io; `engine::wasm::tests::a_reused_slot_is_fresh_*` remain the check that the released crate has the behaviour. The text below is the history as it was written.
+
 Status (2026-09-23): **merged upstream.**
 <https://github.com/bytecodealliance/wasmtime/pull/14357> was merged into
 `bytecodealliance/wasmtime` `main` on 2026-09-23 00:35 UTC as `a2e2d86`, by

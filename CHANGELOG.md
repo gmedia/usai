@@ -8,6 +8,18 @@ runtime of that version and the next (`SUPPORTED.md` → Versioning). Within
 GitHub releases carry the auto-generated commit list as well; this file is
 the human summary.
 
+## Unreleased
+
+- **Wasmtime 50, from crates.io.** Both patches this repository carried on a
+  vendored Wasmtime 48.0.2 — the slot reset that keeps a reused world's
+  memory fresh without refaulting it, and `release_idle_pool_memory` — are in
+  the Wasmtime 50.0.0 release, so `vendor/` is gone. Nothing changes for an
+  application; a precompiled engine image (`cache/image.cwasm`) from an
+  earlier version is skipped and recompiled on install, as on every Wasmtime
+  change. Measured against the vendored build, alternately on one core: hello
+  0.298 vs 0.299 ms per request, a CPU-bound guest loop 254.4 vs 254.3 ms, 0
+  page faults per request on both (`docs/measurements/2026-10-24-wasmtime-50.md`).
+
 ## 0.0.20 — 2026-10-02
 
 From a second downstream project's first milestone. No runtime bugs were

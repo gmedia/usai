@@ -38,10 +38,11 @@ pub const CORE_SHA256: &str = "91f178dff664c187c0c8aa9d83ca1ab2a67bad6c78c946aa1
 
 const MAX_PAYLOAD: usize = 8 * 1024 * 1024;
 
-/// The vendored Wasmtime (`vendor/wasmtime/Cargo.toml`); part of the
-/// precompiled image's fingerprint. Wasmtime verifies its own header on
-/// deserialize as well; this only makes the mismatch a clean skip.
-const WASMTIME_VERSION: &str = "48.0.2";
+/// The Wasmtime this is built against (`Cargo.lock`, checked by
+/// `wasmtime_version_matches_the_lockfile`); part of the precompiled image's
+/// fingerprint. Wasmtime verifies its own header on deserialize as well;
+/// this only makes the mismatch a clean skip.
+const WASMTIME_VERSION: &str = "50.0.0";
 
 /// The core to run: the vendored one, or `USAI_WASM_CORE=<path>` for
 /// controlled comparisons (e.g. the research `-Oz` core). Profiling only.
@@ -70,7 +71,8 @@ pub struct WasmConfig {
     /// away. With the pagemap scan this is the *budget* of dirty pages reset
     /// in place (the rest is decommitted and refaults); it must cover a
     /// request's heap growth, which is why it is generous. See
-    /// `vendor/README.md` for the region-count patch that makes this work.
+    /// `docs/upstream/wasmtime-pagemap-reset.md` for the scan fix (upstream
+    /// since Wasmtime 50) that makes this work.
     pub linear_memory_keep_resident: usize,
     pub table_keep_resident: usize,
     /// Use the kernel's PAGEMAP_SCAN to reset only dirtied pages, when available.
@@ -1432,6 +1434,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn wasmtime_version_matches_the_lockfile() {
+        let lock = include_str!("../../../../Cargo.lock");
+        let entry = lock
+            .split("[[package]]")
+            .find(|p| p.contains("\nname = \"wasmtime\"\n"))
+            .expect("wasmtime in Cargo.lock");
+        assert!(
+            entry.contains(&format!("\nversion = \"{WASMTIME_VERSION}\"\n")),
+            "WASMTIME_VERSION is {WASMTIME_VERSION}, Cargo.lock has:{entry}"
+        );
+    }
+
+    #[test]
     fn the_vendored_core_matches_its_provenance() {
         use sha2::Digest as _;
         assert_eq!(hex::encode(sha2::Sha256::digest(CORE)), CORE_SHA256);
@@ -1562,7 +1577,7 @@ mod tests {
 
     /// Freshness across slot reuse when the previous world's dirty pages were
     /// paged out: the reset must not require a page to be resident to reset
-    /// it (`vendor/wasmtime-pagemap-reset.patch`).
+    /// it (wasmtime#14357, released in 50.0.0).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_reused_slot_is_fresh_even_after_its_pages_were_paged_out() {
         assert_slot_is_fresh_after(scribble_everything, true, true).await;

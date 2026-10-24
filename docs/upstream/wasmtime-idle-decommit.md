@@ -1,5 +1,7 @@
 # Releasing a pooling slot's kept-resident memory when it goes idle
 
+> **Closed 2026-10-24.** Both patches are in the Wasmtime 50.0.0 release (checked by the file, not the date: `pagemap.rs` at `v50.0.0` matches the vendored production code exactly, and `Engine::release_idle_pool_memory` is public there). `vendor/` is deleted and the workspace depends on `wasmtime = "50"` from crates.io; `engine::wasm::tests::a_reused_slot_is_fresh_*` remain the check that the released crate has the behaviour. The text below is the history as it was written.
+
 Status (2026-09-26): **merged upstream, built here, and measured.**
 [bytecodealliance/wasmtime#14419](https://github.com/bytecodealliance/wasmtime/pull/14419)
 was merged into `main` on 2026-09-26 (`65c5190`) by cfallin, closing
