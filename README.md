@@ -16,17 +16,18 @@ build, and run on Usai without requiring Sakala or another deployment platform.
 
 ## Status
 
-**Alpha (0.0.x) — production qualification in progress.** Everything that
+**Beta (0.1.x) — the contracts are the ones we intend to freeze at 1.0.** Everything that
 exists has acceptance tests and ships from one tag (binaries, npm, Docker);
 a production-shaped deployment has been broken eleven ways under load (P5)
 and campaigned for reliability (P6), **soaked for 72 hours (73.6 M requests,
 no 5xx, no runtime error, flat memory)**, and run as two replicas behind one
-proxy — with the findings fixed. Still open: developers outside the project
-building from the docs alone (`docs/P7-EXTERNAL-VALIDATION.md`) and frozen
-contracts. `docs/STATUS.md` ("Production readiness") says exactly where each
+proxy — with the findings fixed. Two downstream projects build on it and
+report what they hit. Still open: more developers outside the project building
+from the docs alone (`docs/P7-EXTERNAL-VALIDATION.md`), and the freeze itself,
+which follows a quiet release. `docs/STATUS.md` ("Production readiness") says exactly where each
 gate stands, and `docs/ROADMAP.md` how they close. Use it for development,
-evaluation and internal tools you can restart; put it in front of paying
-traffic knowing those two caveats.
+evaluation and internal tools; put it in front of paying traffic knowing
+that 1.0 has not been declared.
 
 **What it costs and what it buys**, measured against six comparators on one
 box (`docs/measurements/2026-09-23-sweep.md`): a request that touches
@@ -212,8 +213,9 @@ Three references, one per question:
 | What is *my* application and what happens when a request enters it? | `/_usai/docs` on a running application — the application reference, generated from the definition the runtime executes; `/_usai/openapi.json?profile=public` and `usai generate openapi --public` for the consumer contract |
 | How do I deploy and run it? | [`docs/deploy/compose.production.yaml`](docs/deploy/compose.production.yaml) (Docker), [`docs/runbooks/systemd.md`](docs/runbooks/systemd.md) (a plain VM), [`docs/deploy/k8s/`](docs/deploy/k8s/README.md) (Kubernetes) — and [`docs/runbooks/`](docs/runbooks/README.md) for what to do when something goes wrong, one page per incident |
 
-The developer surface is TypeScript; contracts may still change within
-`0.0.x` (`CHANGELOG.md` says what, `SUPPORTED.md` how upgrades work).
+The developer surface is TypeScript. Within `0.1.x` a breaking change is a
+bug fix, is marked as one in `CHANGELOG.md`, and keeps the old behaviour
+reachable for a release where it can (`SUPPORTED.md` → Versioning).
 
 ## Current implementation direction
 

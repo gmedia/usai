@@ -24,6 +24,6 @@ usai dev            # the usai binary: https://github.com/gmedia/usai/releases
 
 - Guide: https://github.com/gmedia/usai/blob/main/docs/GUIDE.md
 - Test harness: `import { testApp } from "@sakaladev/usai/test"` drives the real runtime.
-- Status: developer preview (`0.0.x`). The API will change before the first stable release.
+- Status: beta (`0.1.x`). The API is the one 1.0 will freeze; a breaking change is a marked bug fix (`CHANGELOG.md`).
 
 Apache-2.0.

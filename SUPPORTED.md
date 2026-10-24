@@ -70,8 +70,14 @@ the answer is a resource — an existing one, or a case for a new kind.
 
 ## Versioning and upgrades
 
-- `0.0.x` (now): contracts may change between versions; each release note
-  says what. Runtime and SDK are released together and must be at the same
+- **`0.1.x` (now, beta):** the contracts in `docs/CONTRACT-FREEZE.md` are the
+  ones 1.0 will freeze. Additions are allowed. A change that breaks an
+  application or a deployment is made only to fix a bug, is marked
+  **Breaking** in `CHANGELOG.md` with what to do, and — where the old
+  behaviour is safe to keep — stays reachable through a setting for at least
+  one release. 1.0 is declared after a release that changes no contract.
+  Before 0.1.0 (`0.0.x`) contracts moved freely; the CHANGELOG records how.
+- Runtime and SDK are released together and must be at the same
   version; the runtime refuses an artifact of another **manifest format or
   guest ABI** before serving, with a message that names both versions.
   **That check is on the format, not on the version stamp**: an artifact

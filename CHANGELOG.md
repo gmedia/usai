@@ -8,7 +8,18 @@ runtime of that version and the next (`SUPPORTED.md` → Versioning). Within
 GitHub releases carry the auto-generated commit list as well; this file is
 the human summary.
 
-## Unreleased
+## 0.1.0 — 2026-10-24 — beta
+
+**This is the beta.** The contracts in `docs/CONTRACT-FREEZE.md` are the ones
+1.0 will freeze. From here on, a change that breaks an application or a
+deployment is made only to fix a bug, is marked **Breaking** here with what to
+do, and keeps the old behaviour reachable for a release where that is safe.
+1.0 follows a release that changes no contract (`SUPPORTED.md` → Versioning).
+Nothing below breaks a 0.0.20 application; artifacts built by 0.0.20 serve on
+0.1.0 and the other way round, which CI checks.
+
+**Action for existing projects:** upgrade `zod` to 4.6.6 or later and rebuild
+(below) — Usai cannot do that for you.
 
 - **Wasmtime 50, from crates.io.** Both patches this repository carried on a
   vendored Wasmtime 48.0.2 — the slot reset that keeps a reused world's

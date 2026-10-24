@@ -1,4 +1,4 @@
-# Usai Developer Guide (0.0.x)
+# Usai Developer Guide (0.1.x)
 
 > Declare work. Declare resources. Write business logic. Run Usai.
 

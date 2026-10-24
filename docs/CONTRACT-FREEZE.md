@@ -9,6 +9,38 @@ surface, what freezing it would commit us to, and what is still moving.**
 Read it as a checklist, not as a plan. Nothing here is frozen until the
 maintainer says so and `SUPPORTED.md` changes.
 
+## Beta (0.1.0, 2026-10-24)
+
+The maintainer took **option 2** below: 0.1.0 is the beta. The surfaces on
+this page are the ones 1.0 will freeze; within `0.1.x` a change that breaks an
+application or a deployment is a bug fix, marked **Breaking** in the
+CHANGELOG, with the old behaviour kept reachable for a release where that is
+safe (`SUPPORTED.md` → Versioning). **1.0 is declared after a release that
+changes no contract.**
+
+Where the moving list stood when the beta was cut, ten releases (0.0.11 →
+0.0.20) after it was written:
+
+| # | Item | At 0.1.0 |
+|---|---|---|
+| 1 | JSON log line | unchanged since 0.0.9 — settled |
+| 2 | `performance.now()` | unchanged since 0.0.9 — settled |
+| 3 | queue schema | changed again in 0.0.19 (`_dead`/`_done` indexes, done-retention), through `usai queue prepare`, online — the upgrade *path* held; any later change must stay online the same way |
+| 4 | `crypto.subtle` | grew public-key **verify** (RSASSA-PKCS1-v1_5, RSA-PSS, ECDSA; 0.0.16). Signing and encryption stay out on purpose — a world holding a private key is a key the runtime holds. Settled as a subset |
+| 5 | `retry` on tasks and cron | still absent; additive, so it does not block |
+| 6 | multi-core | still "run replicas" |
+| 7 | readiness | settled 2026-09-24 (ADR-0022) |
+| 8 | `/_usai/` 404 on a listener without it | unchanged since 0.0.9 — settled |
+| 9 | declared `timeout:` on streams/sockets/services | unchanged since 0.0.10 — settled |
+| 10 | per-workload latency of a stream | unchanged since 0.0.10 — settled |
+| 11 | `maxBodyBytes` refusal | unchanged since 0.0.10 — settled |
+
+Two contract-visible behaviours changed during that window and are the shape
+later changes must follow: 0.0.19 began deleting finished queue messages
+(`USAI_QUEUE_DONE_RETENTION=0` restores the old behaviour) and 0.0.20 made
+`info.version` the application's own version when it declares one (without
+one, the old value). Both were announced, and both kept a way back.
+
 ## The rule a freeze would adopt
 
 Once 1.0 ships, within `1.x`:

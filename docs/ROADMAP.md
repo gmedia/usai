@@ -5,8 +5,10 @@
 > or an operator still has to distrust Usai. Features are added only when a
 > phase proves a real application cannot be built without them.
 
-Current phase: see `STATUS.md`. Versions stay `0.0.x` until RC; breaking
-changes are allowed and preferred over carrying a wrong abstraction.
+Current phase: see `STATUS.md`. **Beta since 0.1.0 (2026-10-24)**: breaking
+changes only as bug fixes, marked and with a way back (`SUPPORTED.md` →
+Versioning). Before that, `0.0.x` preferred a breaking change over carrying a
+wrong abstraction.
 
 | Phase | Focus | Exit criteria |
 |---|---|---|
