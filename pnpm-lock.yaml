@@ -122,8 +122,8 @@ importers:
         specifier: workspace:*
         version: link:../../../../../packages/usai
       zod:
-        specifier: ^4.0.0
-        version: 4.6.5
+        specifier: ^4.6.6
+        version: 4.6.7
     devDependencies:
       typescript:
         specifier: ^5.9.0
@@ -135,8 +135,8 @@ importers:
         specifier: workspace:*
         version: link:../../../../../packages/usai
       zod:
-        specifier: ^4.0.0
-        version: 4.6.5
+        specifier: ^4.6.6
+        version: 4.6.7
     devDependencies:
       typescript:
         specifier: ^5.9.0
@@ -148,8 +148,8 @@ importers:
         specifier: workspace:*
         version: link:../../../../../packages/usai
       zod:
-        specifier: ^4.0.0
-        version: 4.6.5
+        specifier: ^4.6.6
+        version: 4.6.7
     devDependencies:
       typescript:
         specifier: ^5.9.0
@@ -161,8 +161,8 @@ importers:
         specifier: workspace:*
         version: link:../../../../../packages/usai
       zod:
-        specifier: ^4.0.0
-        version: 4.6.5
+        specifier: ^4.6.6
+        version: 4.6.7
     devDependencies:
       typescript:
         specifier: ^5.9.0
@@ -174,8 +174,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/usai
       zod:
-        specifier: ^4.0.0
-        version: 4.6.5
+        specifier: ^4.6.6
+        version: 4.6.7
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
@@ -190,8 +190,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/usai
       zod:
-        specifier: ^4.0.0
-        version: 4.6.5
+        specifier: ^4.6.6
+        version: 4.6.7
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
@@ -206,8 +206,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/usai
       zod:
-        specifier: ^4.0.0
-        version: 4.6.5
+        specifier: ^4.6.6
+        version: 4.6.7
     devDependencies:
       typescript:
         specifier: ^5.9.0
@@ -219,8 +219,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/usai
       zod:
-        specifier: ^4.0.0
-        version: 4.6.5
+        specifier: ^4.6.6
+        version: 4.6.7
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
@@ -257,8 +257,8 @@ importers:
         specifier: ^5.9.0
         version: 5.9.3
       zod:
-        specifier: ^4.6.5
-        version: 4.6.5
+        specifier: ^4.6.7
+        version: 4.6.7
 
   scripts/qualification/bench/app:
     dependencies:
@@ -266,8 +266,8 @@ importers:
         specifier: workspace:*
         version: link:../../../../packages/usai
       zod:
-        specifier: ^4.0.0
-        version: 4.6.5
+        specifier: ^4.6.6
+        version: 4.6.7
     devDependencies:
       typescript:
         specifier: ^5.9.0
@@ -279,8 +279,8 @@ importers:
         specifier: workspace:*
         version: link:../../../../packages/usai
       zod:
-        specifier: ^4.0.0
-        version: 4.6.5
+        specifier: ^4.6.6
+        version: 4.6.7
     devDependencies:
       typescript:
         specifier: ^5.9.0
@@ -292,8 +292,8 @@ importers:
         specifier: workspace:*
         version: link:../../../../packages/usai
       zod:
-        specifier: ^4.0.0
-        version: 4.6.5
+        specifier: ^4.6.6
+        version: 4.6.7
     devDependencies:
       typescript:
         specifier: ^5.9.0
@@ -611,8 +611,8 @@ packages:
     engines: {node: '>= 14.6'}
     hasBin: true
 
-  zod@4.6.5:
-    resolution: {integrity: sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==}
+  zod@4.6.7:
+    resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
 
 snapshots:
 
@@ -850,4 +850,4 @@ snapshots:
 
   yaml@2.9.1: {}
 
-  zod@4.6.5: {}
+  zod@4.6.7: {}

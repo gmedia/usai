@@ -25,6 +25,13 @@ the human summary.
   `ctutils` 0.4.5, `tokio` 1.54.1. The runtime is a TLS *client* only, toward
   PostgreSQL and outbound HTTP; ECH and Brotli certificate compression, which
   two of the advisories need, are not enabled.
+- **Zod 4.6.6 or later in your application** (GHSA-mrhx-c7xc-m3w5: validating
+  an oversized collection under a size constraint can exhaust memory). Zod is
+  **your** dependency and is bundled into your artifact by `usai build`, so
+  upgrading Usai does not fix it: run `pnpm up zod` (or `npm i zod@latest`)
+  and rebuild. Inside Usai the damage is bounded by the world's 64 MiB memory
+  cap — that world faults and the runtime carries on — but the request fails. The
+  scaffold now asks for `^4.6.6`, and so does every example here.
 
 ## 0.0.20 — 2026-10-02
 
