@@ -19,6 +19,12 @@ the human summary.
   change. Measured against the vendored build, alternately on one core: hello
   0.298 vs 0.299 ms per request, a CPU-bound guest loop 254.4 vs 254.3 ms, 0
   page faults per request on both (`docs/measurements/2026-10-24-wasmtime-50.md`).
+- **Dependency advisories.** `rustls` 0.23.46, `rustls-webpki` 0.103.16 and
+  `webpki-roots` 1.0.11 (RUSTSEC-2026-0346…0349, -0381, -0382: among them a
+  distrusted certificate authority that verification still accepted), and
+  `ctutils` 0.4.5, `tokio` 1.54.1. The runtime is a TLS *client* only, toward
+  PostgreSQL and outbound HTTP; ECH and Brotli certificate compression, which
+  two of the advisories need, are not enabled.
 
 ## 0.0.20 — 2026-10-02
 
